@@ -101,9 +101,13 @@ def test_clock_step_walks_schedule(bag_factory, typestore):
     assert clock.now() == pytest.approx(2.0)
     io.tick()
     assert clock.now() == pytest.approx(3.0)
-    io.tick()  # exhausted -> stays put
-    assert clock.now() == pytest.approx(3.0)
-    assert clock.exhausted
+    assert clock.exhausted  # sitting on the last scheduled timestamp
+    assert not clock.end_of_data
+    io.tick()  # schedule exhausted -> free-run at the fixed dt (frozen world)
+    assert clock.now() == pytest.approx(3.0 + 0.2)
+    assert clock.end_of_data
+    io.tick()
+    assert clock.now() == pytest.approx(3.0 + 0.4)
 
 
 def test_publish_sinks(bag_factory, typestore):

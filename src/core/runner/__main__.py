@@ -56,7 +56,10 @@ def _print_result(question: str, r: RunResult, *, verbose: bool) -> None:
     print(f"qtype    : {r.qtype.value if r.qtype else '?'}")
     print(f"answer   : {_fmt_answer(r.answer)}")
     print(f"published: {r.published}")
+    print(f"floor    : {r.floor_used}")
     print(f"sim time : {r.elapsed_sim_s:.1f} s  ({r.ticks} ticks, wall {r.wall_s*1000:.0f} ms)")
+    if r.end_of_data_at_sim_s is not None:
+        print(f"eod at   : {r.end_of_data_at_sim_s:.1f} s (bag exhausted; frozen-world free-run after)")
     print(f"states   : {' -> '.join(r.states_visited)}")
     print(f"checkpt  : {r.checkpoint_calls} call(s)")
     if verbose:
@@ -81,6 +84,14 @@ def main(argv: list[str] | None = None) -> int:
         help="simulated tick rate (default 1 Hz — coarser than the 5 Hz pipeline for "
         "cockpit responsiveness; phase gates are time-based so structure is unchanged)",
     )
+    ap.add_argument(
+        "--budget-scale",
+        type=float,
+        default=1.0,
+        help="scale the FSM budget gates (explore budgets, 510 s forced-assembly, 570 s "
+        "watchdog) for replay against short bags; e.g. 0.2 puts the gates at ~102/114 s of "
+        "bag time. Replay only (needs the ReplayRobotIO budget-clock seam).",
+    )
     args = ap.parse_args(argv)
 
     if args.fixtures:
@@ -88,7 +99,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         io = _synthetic_io(args.question, args.seed)
 
-    result = run_question(args.question, io, tick_hz=args.tick_hz)
+    result = run_question(
+        args.question, io, tick_hz=args.tick_hz, budget_scale=args.budget_scale
+    )
     _print_result(args.question, result, verbose=args.verbose)
     return 0
 

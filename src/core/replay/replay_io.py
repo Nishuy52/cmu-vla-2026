@@ -106,16 +106,32 @@ class MessageStore:
         return store.finalize()
 
 
+FREE_RUN_DT_S: float = 0.2  # 5 Hz free-run cadence once the bag schedule is exhausted
+
+
 class ReplayClock:
-    """Clock that walks a fixed schedule of bag timestamps (implements Clock).
+    """Clock that walks a fixed schedule of bag timestamps, then free-runs (implements Clock).
 
     ``now()`` returns the current schedule time. :meth:`step` advances to the next
-    scheduled timestamp; :meth:`set` jumps to an arbitrary time.
+    scheduled timestamp; once the schedule is exhausted it keeps advancing by a fixed
+    ``free_run_dt`` (default 0.2 s = 5 Hz) so downstream budget/watchdog gates keep
+    firing against a frozen world exactly as they would in production (the vehicle
+    reaches end-of-bag long before the 510/570 s gates). :meth:`set` jumps to an
+    arbitrary time.
+
+    ``end_of_data`` reports whether the scheduled bag timestamps have been consumed
+    (i.e. subsequent ticks are free-running past the recorded data).
     """
 
-    def __init__(self, schedule: list[float], start: float | None = None) -> None:
+    def __init__(
+        self,
+        schedule: list[float],
+        start: float | None = None,
+        free_run_dt: float = FREE_RUN_DT_S,
+    ) -> None:
         self._schedule = list(schedule)
         self._idx = 0
+        self._free_run_dt = float(free_run_dt)
         if start is not None:
             self._t = float(start)
         elif self._schedule:
@@ -127,13 +143,20 @@ class ReplayClock:
         return self._t
 
     def step(self) -> float:
-        """Advance to the next scheduled timestamp. Returns the new time.
+        """Advance one tick. Returns the new time.
 
-        Stays put (returns current time) once the schedule is exhausted.
+        While scheduled timestamps remain, advances to the next one. Once the schedule
+        is exhausted, advances by ``free_run_dt`` (frozen-world free-run) so time keeps
+        moving toward the budget/watchdog gates instead of stalling at end-of-bag.
         """
         if self._idx + 1 < len(self._schedule):
             self._idx += 1
             self._t = float(self._schedule[self._idx])
+        elif self._schedule:
+            # Non-empty schedule exhausted: free-run at a fixed dt so gates eventually fire.
+            self._idx = len(self._schedule)
+            self._t += self._free_run_dt
+        # Empty schedule: nothing to advance through — stay put at the start time.
         return self._t
 
     def set(self, t: float) -> None:
@@ -141,7 +164,18 @@ class ReplayClock:
 
     @property
     def exhausted(self) -> bool:
+        """True once the last scheduled timestamp has been reached (free-run territory)."""
         return self._idx + 1 >= len(self._schedule)
+
+    @property
+    def end_of_data(self) -> bool:
+        """True once ticking has advanced past the final scheduled bag timestamp.
+
+        Distinct from :attr:`exhausted`: ``exhausted`` is True while sitting *on* the
+        last scheduled timestamp; ``end_of_data`` becomes True only once a further
+        :meth:`step` has pushed the clock into free-run beyond that timestamp.
+        """
+        return bool(self._schedule) and self._idx >= len(self._schedule)
 
 
 class ReplayRobotIO:
@@ -157,6 +191,10 @@ class ReplayRobotIO:
         self.waypoints: list[WaypointCmd] = []
         self.markers: list[MarkerBox] = []
         self.ints: list[IntAnswer] = []
+        # Optional override for what clock() hands to time-budget consumers (the FSM),
+        # leaving the message-lookup getters below on the true bag clock. Used by the
+        # runner's --budget-scale to compress the FSM's budget gates for short bags.
+        self._budget_clock: object | None = None
 
     @classmethod
     def from_bag(cls, path) -> "ReplayRobotIO":
@@ -165,8 +203,18 @@ class ReplayRobotIO:
     # ------------------------------------------------------------------ advance
 
     def tick(self) -> float:
-        """Advance the clock one bag timestamp. Returns the new time."""
+        """Advance the clock one tick. Returns the new time.
+
+        Walks bag timestamps until the schedule is exhausted, then free-runs at the
+        clock's fixed dt with all ``latest_*`` getters returning the final (frozen)
+        messages — so budget/watchdog gates keep firing past end-of-bag.
+        """
         return self._clock.step()
+
+    @property
+    def end_of_data(self) -> bool:
+        """True once ticking has advanced past the last recorded bag message (free-run)."""
+        return self._clock.end_of_data
 
     # ------------------------------------------------------------------ getters
 
@@ -197,5 +245,20 @@ class ReplayRobotIO:
     def publish_int(self, ans: IntAnswer) -> None:
         self.ints.append(ans)
 
-    def clock(self) -> ReplayClock:
+    def clock(self):
+        """Clock exposed to time-budget consumers (the FSM).
+
+        Normally the true bag :class:`ReplayClock`; when a budget-scale override is set
+        (see :meth:`set_budget_clock`) that wrapper is returned instead so the FSM's fixed
+        gates fire at scaled bag-time. The ``latest_*`` getters always use the true bag
+        clock (``self._clock``), so message lookups stay on real recorded time.
+        """
+        return self._budget_clock if self._budget_clock is not None else self._clock
+
+    def set_budget_clock(self, clock: object | None) -> None:
+        """Override (or clear, with None) the clock returned by :meth:`clock`."""
+        self._budget_clock = clock
+
+    def raw_clock(self) -> ReplayClock:
+        """The underlying true bag clock, regardless of any budget-clock override."""
         return self._clock
