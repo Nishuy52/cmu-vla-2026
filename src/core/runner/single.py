@@ -18,6 +18,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
+import bisect
+
 from core.fsm.controller import QuestionController, State
 from core.fsm.events import LogRecord
 from core.heads import build_callables
@@ -43,6 +45,11 @@ class RunResult:
                        that never exhaust their schedule).
     floor_used:        True iff the published answer came from the floor / watchdog path
                        rather than a head verify (wired to the flight-recorder events).
+    instances_tracked: number of 3D instances in the scene index at the end of the run.
+                       0 for synthetic runs and for replays without ``detections_path``
+                       (the heads then resolve against the io's own / an empty index);
+                       for a scripted-detection replay this is the count of real
+                       lidar-fused instances the PerceptionPipeline accumulated.
     """
 
     answer: Any | None
@@ -56,6 +63,7 @@ class RunResult:
     wall_s: float = 0.0
     end_of_data_at_sim_s: float | None = None
     floor_used: bool = False
+    instances_tracked: int = 0
 
 
 def _clock_advance(clock: Any, dt: float) -> None:
@@ -175,11 +183,76 @@ def _capture_published(io: Any, before: dict[str, int]) -> Any | None:
     return None
 
 
+class _ScriptedPerception:
+    """Drives a :class:`~core.perception.tracker.PerceptionPipeline` over a replay.
+
+    Owns a :class:`~core.perception.scripted.ScriptedPanoDetector` (loaded from a labels
+    JSON) and the pipeline it feeds. :meth:`maybe_process` is called every tick with the
+    io's current :class:`~core.interfaces.PanoFrame` + scan; it processes the frame only
+    when a *new* pano appears (``PanoFrame.t`` changed), mapping that pano timestamp to a
+    keyframe index by its position in the fixtures' sorted pano-time order (== index.json
+    keyframe order). The pipeline's :class:`BasicSceneIndex` is the one the heads resolve.
+    """
+
+    def __init__(self, io: Any, detections_path: str) -> None:
+        from core.perception.scripted import ScriptedPanoDetector
+        from core.perception.tracker import PerceptionPipeline
+        from core.replay.replay_io import CH_PANO, CH_SCAN
+
+        self._detector = ScriptedPanoDetector.from_json(detections_path)
+        self.index = BasicSceneIndex([])
+        self.pipeline = PerceptionPipeline(self._detector, index=self.index)
+        # Sorted pano timestamps == index.json keyframe order; a pano.t's bisect position
+        # in this list is its keyframe index (the labels JSON keys those indices).
+        store = getattr(io, "store", None)
+        self._pano_times: list[float] = store.times(CH_PANO) if store is not None else []
+        self._last_pano_t: float | None = None
+        # Startup fallback: the lidar stream can begin a few seconds after the first pano
+        # (the jingfan bag has no /registered_scan for its first ~9 s while the vehicle
+        # sits at the origin). A labelled keyframe in that window has no `latest_scan()`
+        # (strictly <= now), so fuse it against the earliest recorded scan instead of
+        # dropping it — the vehicle is stationary there, so the nearest scan is valid.
+        self._earliest_scan = None
+        if store is not None:
+            scan_times = store.times(CH_SCAN)
+            if scan_times:
+                self._earliest_scan = store.latest(CH_SCAN, scan_times[0])
+
+    def _keyframe_for(self, t: float) -> int:
+        idx = bisect.bisect_left(self._pano_times, t)
+        if idx < len(self._pano_times) and self._pano_times[idx] == t:
+            return idx
+        # tolerate float drift: nearest scheduled pano time
+        idx = min(idx, len(self._pano_times) - 1)
+        if idx > 0 and abs(self._pano_times[idx - 1] - t) < abs(self._pano_times[idx] - t):
+            idx -= 1
+        return idx
+
+    def maybe_process(self, io: Any) -> None:
+        pano = io.latest_pano()
+        if pano is None:
+            return
+        if self._last_pano_t is not None and pano.t == self._last_pano_t:
+            return
+        scan = io.latest_scan()
+        if scan is None:
+            # Pre-lidar startup window: fall back to the earliest recorded scan so a
+            # labelled keyframe there still grounds (vehicle stationary at the origin).
+            scan = self._earliest_scan
+        if scan is None:
+            return
+        self._last_pano_t = pano.t
+        kf = self._keyframe_for(pano.t)
+        self._detector.current_keyframe = kf
+        self.pipeline.process(pano, scan)
+
+
 def run_question(
     question_text: str,
     io: Any,
     *,
     scene_index: SceneIndex | None = None,
+    detections_path: str | None = None,
     chat_fns: dict[str, Callable] | None = None,
     max_wall_s: float = 600.0,
     tick_hz: float = 5.0,
@@ -194,6 +267,11 @@ def run_question(
     question_text: the challenge question to answer.
     io:            a RobotIO (MockRobotIO or ReplayRobotIO); its clock is advanced here.
     scene_index:   override the resolved scene index (else derived from ``io.scene``).
+    detections_path: path to a scripted-labels JSON (jingfan_labels.json schema). When set
+                   (replay io only), a PerceptionPipeline fed by a ScriptedPanoDetector
+                   grounds each new pano frame's boxes against the real lidar scan; its
+                   scene index — not ``io.scene`` — is what the heads resolve, and its final
+                   instance count is reported as ``RunResult.instances_tracked``.
     chat_fns:      optional injected LLM checkpoints ``{"llm_verify", "anchor_confirm"}``;
                    omitted / None keeps the deterministic offline path (regex parse only).
     max_wall_s:    hard wall-clock guard so a pathological loop can never hang the cockpit.
@@ -209,7 +287,22 @@ def run_question(
     dt = 1.0 / float(tick_hz)
 
     _inject_question(io, question_text)
-    idx = _derive_scene_index(io, scene_index)
+
+    # Scripted-detection grounding: build a PerceptionPipeline over the replay and let the
+    # heads resolve against its (live-mutated) scene index. Only valid with a replay io.
+    perception: _ScriptedPerception | None = None
+    if detections_path is not None:
+        if not hasattr(io, "latest_pano") or getattr(io, "store", None) is None:
+            raise ValueError(
+                "detections_path requires a replay io (ReplayRobotIO / --fixtures); "
+                "it has no pano/scan stream to ground against."
+            )
+        perception = _ScriptedPerception(io, detections_path)
+
+    if perception is not None:
+        idx: SceneIndex = perception.index
+    else:
+        idx = _derive_scene_index(io, scene_index)
 
     # The clock we ADVANCE each tick is always the io's real/underlying clock (so replay
     # message lookups and free-run stay correct). The clock the FSM READS may be a scaled
@@ -247,6 +340,8 @@ def run_question(
         if ctrl.state is not last_state:
             states_visited.append(ctrl.state.value)
             last_state = ctrl.state
+        if perception is not None:
+            perception.maybe_process(io)
         before = _sink_lengths(io)
         was_published = ctrl.answer_published
         ctrl.tick(io)
@@ -260,6 +355,8 @@ def run_question(
         if time.monotonic() - wall_start > max_wall_s:
             break
     # Finalize: one more tick to dump the flight recording and catch a same-tick publish.
+    if perception is not None:
+        perception.maybe_process(io)
     before = _sink_lengths(io)
     was_published = ctrl.answer_published
     ctrl.tick(io)
@@ -287,4 +384,5 @@ def run_question(
         wall_s=wall_s,
         end_of_data_at_sim_s=end_of_data_at_sim_s,
         floor_used=_floor_used(flight_log),
+        instances_tracked=len(idx.all_instances()) if perception is not None else 0,
     )

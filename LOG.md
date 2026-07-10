@@ -251,3 +251,13 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 2. USER: API keys (`VLA_LLM_*`) → live CP4/parse tiers; SoC cluster login (`sinfo`, `quota -s` → finish cluster guide)
 3. Battery re-run + report diff after seam widening
 4. Ubuntu: sim_verification Tier 2 + the three confirm-on-Ubuntu flags
+
+---
+
+## 2026-07-11 (session 8 finale) — First grounded real-data answers
+
+- Exported real panoramas to PNG (scene: a CMU student lounge), hand-labeled 29 detections across 2 keyframes → `data/fixtures/jingfan_labels.json`
+- `core/perception/scripted.py` + runner `--detections` flag: pano-space labels → tile-space detections → **real lidar frustum fusion** → tracked 3D instances feeding the heads
+- **"How many white stools are in the room?" → 2** (5 labeled; 3 fused with ~300 lidar pts each, 2 adjacent merged IoU>0.3, 2 rejected min_points — sensible dedup); **"Find the folding chair closest to the yellow door." → MarkerBox(2.74, 1.27, 'chair')**; both via real heads, floor_used=False, 9 instances tracked
+- Judgment call flagged: bag's first ~9 s has no registered scan → startup fallback fuses keyframe-0 against the earliest scan (vehicle stationary there — geometrically valid)
+- **642 tests green.** The architecture's full chain is now demonstrated on real data: panorama → detections → fusion → instance map → spatial toolbox → published answer.

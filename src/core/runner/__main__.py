@@ -57,6 +57,7 @@ def _print_result(question: str, r: RunResult, *, verbose: bool) -> None:
     print(f"answer   : {_fmt_answer(r.answer)}")
     print(f"published: {r.published}")
     print(f"floor    : {r.floor_used}")
+    print(f"instances: {r.instances_tracked}")
     print(f"sim time : {r.elapsed_sim_s:.1f} s  ({r.ticks} ticks, wall {r.wall_s*1000:.0f} ms)")
     if r.end_of_data_at_sim_s is not None:
         print(f"eod at   : {r.end_of_data_at_sim_s:.1f} s (bag exhausted; frozen-world free-run after)")
@@ -75,6 +76,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("question", help="the challenge question text")
     ap.add_argument("--fixtures", default=None, help="replay a fixture directory / bag instead of synthetic")
+    ap.add_argument(
+        "--detections",
+        default=None,
+        help="scripted-labels JSON (jingfan_labels.json schema) to ground via the "
+        "PerceptionPipeline; only valid with --fixtures. Real lidar fuses the scripted "
+        "2D boxes into 3D instances the heads resolve against.",
+    )
     ap.add_argument("--seed", type=int, default=0, help="synthetic-scene seed")
     ap.add_argument("--verbose", action="store_true", help="dump the flight log")
     ap.add_argument(
@@ -94,13 +102,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
+    if args.detections and not args.fixtures:
+        ap.error("--detections requires --fixtures (it grounds against a replay's pano/scan stream)")
+
     if args.fixtures:
         io = _replay_io(args.fixtures)
     else:
         io = _synthetic_io(args.question, args.seed)
 
     result = run_question(
-        args.question, io, tick_hz=args.tick_hz, budget_scale=args.budget_scale
+        args.question,
+        io,
+        detections_path=args.detections,
+        tick_hz=args.tick_hz,
+        budget_scale=args.budget_scale,
     )
     _print_result(args.question, result, verbose=args.verbose)
     return 0
