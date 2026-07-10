@@ -9,6 +9,7 @@ description = "Pure-Python core for the CMU VLA challenge (deterministic geometr
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.26",
+    "rosbags>=0.11",  # pure-Python ROS 2 bag read/write for the offline replay harness (no ROS)
 ]
 
 [project.optional-dependencies]

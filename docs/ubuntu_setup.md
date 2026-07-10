@@ -51,7 +51,7 @@ sudo apt install -y git git-lfs python3.12-venv
 git clone <your-remote-or-copy> ~/vla            # or rsync the Windows workspace over
 cd ~/vla
 python3 -m venv .venv && source .venv/bin/activate
-pip install numpy pytest
+pip install numpy pytest rosbags               # rosbags = pure-Python ROS 2 bag read/write for the offline replay harness (no ROS needed)
 cd src && pytest -q                              # the whole core suite must pass on Linux
 ```
 
@@ -102,6 +102,19 @@ python -m gdown --folder \
 
 (Real-robot sample bags; play back with `system_bagfile.sh` or parse offline with the `rosbags`
 pip package — no ROS needed for the latter.)
+
+The offline path is `core/replay/` (bag → core dataclasses → `ReplayRobotIO` → the full
+`QuestionController`). Because a full bag can be ~3 GB and may live on a remote Linux box, distil
+it to compact portable fixtures on the cluster and transfer only those:
+
+```bash
+python -m core.replay.fixtures extract ~/vla/data/sample_real_robot/<bag> ~/vla/data/fixtures/<name>
+# then load with core.replay.load_fixtures(dir) -> a store ReplayRobotIO drives
+```
+
+The distillation writes one compressed `.npz` per movement-gated keyframe (pano uint8 +
+decimated scan/terrain float32 + odom) plus a schema-versioned `index.json`, shrinking a
+multi-GB bag to a few hundred MB that move freely between machines.
 
 ## 7. Our ai_module into the challenge stack (integration milestone)
 
