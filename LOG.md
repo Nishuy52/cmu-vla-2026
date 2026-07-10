@@ -223,3 +223,31 @@ Orchestrated build: frozen contracts written in the main session; five modules i
   not exist yet.
 
 **Next step:** implement per the amended spec (unchanged step list, addendum binding).
+
+---
+
+## 2026-07-11 (session 8, overnight autonomous run) — Real data + checkpoints wired
+
+User asleep; ran autonomously per standing directive. **605 tests passed + 3 skipped** at close.
+
+**Real-data milestone:**
+- Sample download completed (3.16 GB) → unzipped → MCAP bag verified against the documented topic contract (123 s, 6 topics, expected rates)
+- Fixture extraction on first contact: **zero converter failures**, 246 keyframes, 3.16 GB → 569 MB (5.6×). Fixtures at `data/fixtures/jingfan/` (git-ignored)
+- Full controller replay against real data exposed a replay-only defect: bag (123 s) ends before answer gates (510/570 s) → runner surfaced an exploration waypoint as the "answer". Fixed: ReplayClock free-runs past end-of-data (frozen world) so gates fire; RunResult.answer now captures only the FSM's published answer; `--budget-scale` added for time-compressed replay. Repro now completes idle→…→answer→done with a correct MarkerBox (floor path — expected: no real detector on Windows).
+
+**Checkpoint protocol (architecture §3) designed and implemented:**
+- `docs/checkpoint_design.md` — full protocol: prompts, JSON schemas, fallbacks, ledger caps for CP2 (miss recovery), CP3 (anchor confirm), CP4 (pre-answer verification — highest value), CP5 (frontier select)
+- `core/checkpoints/` — all four modules + golden fixtures, offline-tested (79 tests)
+- Head seams widened to the full contracts (CP4 three-way verdict incl. missed-constraint re-resolve; CP3 demote-and-replan; CP2 provisional instances that can never satisfy the ≥3-obs gate; CP5 multi-room trigger) with backward compat via signature inspection (46 tests)
+
+**Phase-2 deployment drafts (untested until Ubuntu, flagged inline):**
+- `src/ros_adapter/` — complete rclpy node reusing the real-data-proven replay converters, ament package, launch file; `docker/ai_module/` — Dockerfile from the upstream base image + README with build/push/submission flow; ubuntu_setup.md §7a
+- Three "confirm on Ubuntu" items flagged in-file: ament+core coexistence, scene-index/perception wiring into the node, colcon workspace layout
+
+**Also:** qtype heuristic fixed (word-boundary regexes; "kitchen counter" no longer matches "count") + pinned against all 75 questions; `.gitignore` checkpoint-dir collision fixed.
+
+**Next session:**
+1. Wire PerceptionPipeline into the replay path with a scripted FakeDetector against the jingfan fixtures → first grounded real-data answers
+2. USER: API keys (`VLA_LLM_*`) → live CP4/parse tiers; SoC cluster login (`sinfo`, `quota -s` → finish cluster guide)
+3. Battery re-run + report diff after seam widening
+4. Ubuntu: sim_verification Tier 2 + the three confirm-on-Ubuntu flags
