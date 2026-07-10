@@ -64,3 +64,27 @@ Work fanned out to role agents; results independently verified where fact-heavy.
 - Documentation and commits carry no tooling attribution (user rule, applies from session 3 onward).
 
 **Next step:** independent architecture proposals by parallel frontier-model agents → structured critique → merged architecture v1.0 with full citations (plagiarism-safe: no unlicensed code reuse, concepts attributed).
+
+---
+
+## 2026-07-10 (session 4) — Architecture debate & merge
+
+**Done:**
+- Three independent architecture proposals written by parallel frontier-model agents, each from an opposed stance, none allowed to read the prior draft: `proposal_A` (deterministic-first), `proposal_B` (VLM-agentic), `proposal_C` (expected-score-first). Committed `c36ad8a`.
+- Structured cross-critique round: each author attacked the rivals' best versions, listed steals, non-negotiables, concessions (`critique_{A,B,C}.md`).
+- **Merged into `docs/architecture.md` v1.0** with an explicit adjudication table (10 contested points, resolution + rationale each).
+
+**Key merge decisions:**
+- Checkpointed reasoning: LLM at ~3–6 event-triggered checkpoints per question (parse, detector-miss recovery, IF anchor confirmation, pre-answer verification) — never in the actuation loop. Resolves A's no-recovery weakness without B's per-step API variance.
+- Corridor/avoid geometry lives inside the MVS (unanimous post-debate); A's capsule-shrink recovery rejected as self-defeating.
+- Lidar-only Marker extents (trimmed percentile AABB + dimension sanity table); camera is semantics-only.
+- Answer path survives a dark network: dual-API → local quantised VLM in the image → regex tier; watchdog floor answer at T−30 s on every type ("silence is the only unforgivable failure").
+- C's expected-points ledger + Aug 3 MVS gate govern the build; named cut order (never cut: watchdog, toolbox, corridor geometry, parse ladder).
+
+**Attribution hygiene:** all borrowed concepts cited inline in every proposal + §9 of architecture.md; SORT3D repo is unlicensed → zero code reuse, clean-room implementations only; documents carry no tooling attribution.
+
+**Next step (Phase 0 wrap / Phase 1 start):**
+1. USER: register (by 15 Jul!) — last reminder before it's overdue
+2. Scaffold `src/core/` to the v1.0 module map (interfaces + tests first)
+3. Download training scenes + sample bags for the Windows replay harness
+4. Set up SoC cluster access (optional now — fine-tuning was demoted)
