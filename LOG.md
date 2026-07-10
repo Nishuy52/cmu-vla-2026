@@ -165,3 +165,29 @@ Orchestrated build: frozen contracts written in the main session; five modules i
 2. Replay harness: parse sample bags (`rosbags`) → feed PanoFrame/LidarScan/TerrainPatch into the core; then real perception (open-vocab detector) behind SceneIndex — the last big Windows-doable pieces
 3. Calibration pass over the geometry/nav tunables against training scenes (Phase 2)
 4. Ubuntu reinstall → sim_verification.md Tier 2
+
+---
+
+## 2026-07-11 (session 7, continued) — Design discussion: colored 3D reconstruction (debug tool)
+
+**Done:**
+- Extended Q&A walkthrough of the perception/nav architecture (lidar-vs-camera roles, how
+  detection bboxes become 3D positions via `tiling.py` + `fusion.py`, occupancy vs instance-map
+  distinction, why no dense 3D voxel map exists today).
+- Evaluated and rejected: feeding raw/uncolored lidar voxel screenshots to a VLM for object ID
+  (no color/texture — worse signal than the existing camera crop); building a live 3D voxel map
+  for the real answer pipeline (sparse instance map + 2D costmap already cover it).
+- Landed on a genuinely new, in-scope idea: an **offline colored point-cloud reconstruction
+  tool** (forward-project accumulated lidar points onto the panorama to pick up RGB, voxel-
+  downsample, export `.ply` for viewing in Open3D/CloudCompare) — pure dev/debug tooling, not
+  part of the scored pipeline, so it should live outside `core/`/`ai_module` (proposed:
+  top-level `tools/`).
+- Task spec written to `docs/next_task_colored_reconstruction.md` for the next session to pick
+  up (technique, plumbing over the existing replay harness, occlusion/volume caveats, resume
+  checklist).
+
+**Next step:**
+1. Implement `docs/next_task_colored_reconstruction.md` (forward-projection function, voxel
+   downsample, ASCII PLY writer, CLI over the replay harness, unit tests)
+2. Otherwise continue the standing next-step list above (sample-data download, replay harness
+   real-data run, calibration pass, Ubuntu reinstall)
