@@ -141,6 +141,35 @@ multi-GB bag to a few hundred MB that move freely between machines.
 4. Verify against a full training scene with the 10-minute clock before any submission
    (`docs/master_plan.md` Phase 2/3).
 
+## 7a. Build & run OUR ai_module (Phase-2 adapter artifacts)
+
+*These artifacts (`src/ros_adapter/`, `docker/ai_module/`) were written on Windows and are
+**untested drafts** — expect to fix small things on first Ubuntu build; anything surprising is
+flagged "confirm on Ubuntu" in the files.*
+
+```bash
+cd ~/vla
+# Build our image (context = repo root so COPY src/ resolves):
+docker build -t iros2026/ai_module:latest -f docker/ai_module/Dockerfile .
+```
+
+Then run the compose stack with our node instead of the dummy — edit the upstream
+`docker/compose.yml` `ai_module` service to build from `docker/ai_module/Dockerfile` (context
+`..`) and `command: ros2 launch vla_ai_module ai_module.launch.py`, add
+`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` and an optional `env_file` for `VLA_LLM_*` keys. Full
+recipe (build/tag/push + the exact compose snippet + key pass-through) is in
+`docker/ai_module/README.md`.
+
+```bash
+xhost +
+cd ~/vla/upstream/CMU-VLN-Challenge-2026/docker && docker compose -f compose.yml up --build -d
+```
+
+**First smoke test:** run the ordered Tier-2 checks in `docs/sim_verification.md`, especially
+**Tier 2.7** (our-module round-trip — publish a challenge question, confirm the adapter latches
+it and emits a legal answer on the matching topic). Keys unset ⇒ the parse ladder runs
+local/regex only (offline).
+
 ## 8. GPU sizing note
 
 Evaluation (sim round) runs our container on the organisers' machine — plan VRAM for the RTX 4090

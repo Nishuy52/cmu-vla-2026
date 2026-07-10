@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>vla_ai_module</name>
+  <version>0.0.1</version>
+  <description>
+    VLA ai_module: rclpy adapter wrapping the pure-Python core QuestionController.
+    Replaces the upstream dummy_vlm node in the challenge compose stack.
+    UNTESTED DRAFT written on Windows (no ROS) — validate on Ubuntu (docs/ubuntu_setup.md §7a).
+  </description>
+  <maintainer email="jyuc1109uni@gmail.com">VLA team</maintainer>
+  <license>BSD</license>
+
+  <!-- ament_python build (rclpy node), unlike the C++ dummy's ament_cmake. -->
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <!-- The pure-Python core (numpy, rosbags, our src/core) is provided via pip in the image,
+       not as a ROS package dependency. -->
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
