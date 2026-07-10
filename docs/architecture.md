@@ -1,6 +1,8 @@
-# System Architecture — DRAFT v0.1
+# System Architecture — DRAFT v0.2
 
 *10 Jul 2026. First-pass design to be hardened during the Fable window after the upstream deep-dive and question analysis land. Everything here is provisional.*
+
+**v0.2 note:** the prior-art pass (`docs/prior_art.md`) confirmed this design — it is essentially [SORT3D](https://github.com/nzantout/SORT3D), published by the challenge organisers and already integrated with the mecanum autonomy stack + Unity sim. Adopt its proven choices (Grounded-SAM-2 + GroundingDINO + ByteTrack perception, Qwen2.5-VL captions, deterministic spatial toolbox called by the LLM, free-space anchoring for view-dependent relations) and differentiate on: time-budgeted exploration (VLFM-style question-conditioned frontier scoring), deterministic count-filter codegen for numericals (Transcrib3D trick), multi-constraint verification pass, and self-consistency voting on 6-point questions. ⚠️ SORT3D repo has no explicit license — reuse concepts freely, verify before copying code.
 
 ## Overview
 
