@@ -191,3 +191,35 @@ Orchestrated build: frozen contracts written in the main session; five modules i
    downsample, ASCII PLY writer, CLI over the replay harness, unit tests)
 2. Otherwise continue the standing next-step list above (sample-data download, replay harness
    real-data run, calibration pass, Ubuntu reinstall)
+
+---
+
+## 2026-07-11 (session 8) — Colored-reconstruction research pass (3-agent fan-out)
+
+**Done:**
+- Pre-implementation research for the colored point-cloud tool: one codebase-recon agent +
+  two web-research agents (colorization techniques; occlusion/voxel/format choices). Findings
+  folded into `docs/next_task_colored_reconstruction.md` as a binding research addendum.
+
+**Key outcomes (spec amendments):**
+- Plan survives review; forward projection confirmed as pure composition of existing
+  calibrated `tiling.py` functions; `LidarScan.points` already map-frame → apex subtraction
+  only.
+- **VFOV gate added** (spec omission): pano covers ±60° elevation only — out-of-band points
+  must be dropped/flagged, never clamped.
+- **Binary PLY** replaces ASCII (still zero-dep via numpy structured arrays; 3–5× smaller;
+  `red/green/blue` as `uchar` — float color is a known viewer-breaking trap).
+- **No color blending**: nearest-in-time pano, nearest-neighbor pixel; misregistration should
+  stay visible (it's the diagnostic signal). Min-range cutoff ~0.75 m kills the near-field
+  parallax tail (~30 px error at 1 m vs ~3–6 px past 5 m).
+- **HPR rejected / z-buffer confirmed** as the eventual occlusion primitive; skipping occlusion
+  first-pass stays OK (errors localized to silhouette edges; multi-view accumulation
+  self-corrects). Depth-discontinuity skip is the best cheap mitigation.
+- **Packed-int64 numpy voxel reduce** (min-offset before floor; `np.unique` + `bincount`)
+  replaces the dict sketch; mean color first, median as follow-up.
+- Closest prior art identified: **OmniColor** (arXiv:2404.04693) — same pipeline shape.
+- Recon confirmed: `data/sample_real_robot/` still only a partial zip (validate on synthetic
+  fixtures); tool tunables are CLI flags, not calibration-ledger entries; `tools/` dir does
+  not exist yet.
+
+**Next step:** implement per the amended spec (unchanged step list, addendum binding).

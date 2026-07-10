@@ -124,3 +124,90 @@ Per point: sample `PanoFrame.image[row, col]` (nearest or bilinear) for its RGB,
    automated correctness oracle for "does this look right").
 6. Delete this spec file, fold a short summary into `LOG.md`, commit, push — per standing
    session protocol in the root `CLAUDE.md`.
+
+---
+
+## Research addendum (2026-07-11, session 8) — technique survey + codebase recon
+
+Three-agent pass (codebase recon + two deep literature surveys) before implementation.
+The plan above **holds**; the following amendments and confirmations are binding on the
+implementing session.
+
+### Codebase facts the implementation relies on (verified)
+
+- `LidarScan.points` is **(N, 3) float32 already in the map frame** (`registered_scan`) —
+  no per-scan transform; apex subtraction only, exactly the `_points_in_frustum` pattern
+  (`fusion.py:98-128`: `bearing = arctan2(dy, dx)`, `elevation = arctan2(dz, hypot(dx, dy))`,
+  apex `= [odom.x, odom.y, odom.z]`).
+- The forward mapping is a pure composition of existing calibrated functions:
+  arctan2 from apex → `map_ray_to_camera(bearing, el, yaw)` (`tiling.py:126`) →
+  `azimuth_to_column` / `elevation_to_row` (`tiling.py:95-107`). Column convention: column 0
+  at yaw + π, azimuth decreases left→right (`AZIMUTH_SIGN = -1.0`, `COLUMN0_YAW_OFFSET = π`,
+  `ELEVATION_SIGN = -1.0`); row 0 = +60° elevation. Use fractional pixel → `floor`, then
+  `col % 1920` (azimuth wraps; rows do NOT — see VFOV gate below).
+- **VFOV gate (spec omission, mandatory):** the panorama covers **±60° elevation only**
+  (`PANO_VFOV = 120°`, 1920×640 is 3:1, not 2:1). Points projecting outside rows [0, 640)
+  get *no* color — drop or flag, never clamp.
+- Replay plumbing: `ReplayRobotIO.from_bag(path)` / `load_fixtures(dir)` →
+  `MessageStore`; iterate via `store.all_times()` + `latest(...)`, or walk
+  `BagSource.frames()` directly. Mirror the `fixtures.py` argparse layout
+  (`extract`/`info` subcommands) for the CLI.
+- Optional-dep guard precedent: lazy import inside the call with a pip-install message
+  (`detector.py:163-177`) — copy for any `open3d` preview nicety.
+- `data/sample_real_robot/` still has only an RViz config + a **partial zip** — validate on
+  synthetic fixtures first; real-bag run remains blocked on the manual download.
+- Tool tunables (voxel size, depth tolerance, min range) are **CLI flags, not calibration
+  ledger entries** — the ledger (`core/calibration.py`) governs the scored `core/` path only.
+
+### Amendments to the plan (research-driven)
+
+1. **Output: binary_little_endian PLY, not ASCII.** Equally zero-dependency (numpy
+   structured dtype `<f4 ×3 + u1 ×3` + hand-written header + `.tobytes()`, ~20 lines),
+   3–5× smaller and ~an order of magnitude faster to write/parse (≈15 B/pt vs 45–60 B/pt;
+   at 10 M pts: ~150 MB vs ~500 MB). Property names **`red/green/blue` as `uchar`** —
+   float 0–1 color is the classic "cloud renders black/red" interop bug. Optionally keep
+   `--ascii` for eyeball-the-file debugging.
+2. **Color assignment: nearest-in-time panorama, single source, no blending.** Our dominant
+   errors are systematic geometric misregistration (parallax, no deskew), and averaging
+   misregistered colors yields a blurrier wrong answer. For a *debug* tool, crisp
+   single-source coloring makes misregistration visible as ghosting — that is the
+   diagnostic signal. **Nearest-neighbor pixel sampling, not bilinear** (geometric error
+   budget is tens of pixels near-field; bilinear also needs wrap-aware interpolation at the
+   seam for no visible gain).
+3. **Cheap error gates (add in this order of value):**
+   - *min-range cutoff* (~0.75 m): parallax/apex error is ~30 px at 1 m but ~3–6 px past
+     5 m — excluding the near-field tail removes the worst miscoloring for one `if`.
+   - *VFOV gate* (mandatory, above).
+   - *depth-discontinuity skip* (optional second pass): points whose angular neighbors in
+     the same scan differ in range by > ~0.5 m sit on silhouette edges and produce the
+     color-bleed "halo"; skipping them is the highest-value occlusion mitigation short of
+     a z-buffer.
+4. **Occlusion: per-scan z-buffer confirmed as the right primitive *if/when* added; Hidden
+   Point Removal (Katz et al. 2007 / Open3D) explicitly rejected** — per-viewpoint convex
+   hull, noise-sensitive, opaque radius tuning, built for unposed clouds; we have known
+   poses and a natural pixel raster, so binning ranges per pixel (`np.minimum.at`) with a
+   few-cm tolerance is O(n) and interpretable. Skipping occlusion entirely in the first
+   pass stays acceptable: errors are localized to occlusion boundaries, and 10 min of
+   multi-view accumulation self-corrects much of it (a point occluded in one pano is seen
+   directly in another).
+5. **Voxel reduction: packed-key numpy, not a Python dict.** Subtract the global min before
+   `floor` (negative-coordinate truncation bug), pack `(ix, iy, iz)` into **int64** at
+   21 bits/axis, reduce via `np.unique(..., return_inverse/counts)` + `np.bincount`
+   weighted sums. Mean position + mean color per voxel for the first pass (matches
+   Open3D/PCL semantics); per-channel **median color** is the cheap follow-up if occlusion
+   speckle smears visibly — do not average across frames (see 2).
+6. **Uncolored points** (out of VFOV / range-gated): keep the geometry, tint a fixed gray —
+   coverage gaps are themselves diagnostic; add `--drop-uncolored` if noise dominates.
+
+### Reference reading (closest prior art)
+
+- **OmniColor** (arXiv:2404.04693) — lidar cloud + 360° pano sequence + coarse poses →
+  colorized cloud; the published system closest to this exact pipeline. Uses per-keyframe
+  co-visibility (voxelized HPR) + unweighted averaging because its goal is *pose
+  refinement*; deliberately more machinery than a debug tool needs.
+- RealSense projection/occlusion whitepaper — the halo/color-bleed mechanism and the cheap
+  UV-monotonicity-style occlusion detection our depth-discontinuity skip approximates.
+- plyfile docs / CloudCompare forum "colored ply appearing red" — the uchar-vs-float PLY
+  color interop trap.
+- KITTI-360 tooling, PDAL `filters.colorization` (orthophoto-only — conceptual cousin,
+  not applicable directly).
