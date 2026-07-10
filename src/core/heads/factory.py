@@ -36,10 +36,17 @@ from core.interfaces import IntAnswer, MarkerBox, QType, Question, RobotIO, Scen
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.plan_schema import Plan
 
-from core.heads.explore_step import AffinityFactory, ExploreHead, uniform_affinity
+from core.heads.explore_step import (
+    AffinityFactory,
+    ExploreHead,
+    FrontierSelectFn,
+    FuseHintFn,
+    MissRecoveryFn,
+    uniform_affinity,
+)
 from core.heads.instruction import AnchorConfirmFn, InstructionHead
 from core.heads.numerical import NumericalHead
-from core.heads.object_ref import LlmVerifyFn, ObjectRefHead
+from core.heads.object_ref import LlmVerifyFn, ObjectRefHead, VerifierFn
 
 
 @dataclass
@@ -51,6 +58,15 @@ class HeadState:
     affinity_fn: AffinityFactory = uniform_affinity
     llm_verify: LlmVerifyFn | None = None
     anchor_confirm: AnchorConfirmFn | None = None
+    #: rich checkpoint seams (design doc wiring map); all None == today's behaviour.
+    verifier: VerifierFn | None = None
+    miss_recoverer: MissRecoveryFn | None = None
+    frontier_selector: FrontierSelectFn | None = None
+    #: CP-support hooks the seams need (all optional).
+    remaining_s: Callable[[], float] | None = None  # CP4 90 s re-resolve rule
+    budget_frac: Callable[[], float] | None = None  # CP2 >=60% coverage trigger
+    tiles_fn: Callable[[], object] | None = None  # CP2 tile supplier
+    fuse_hint: FuseHintFn | None = None  # CP2 provisional-instance fusion
 
     plan: Plan | None = None
     numerical: NumericalHead | None = None
@@ -67,7 +83,11 @@ class HeadState:
             self.numerical = NumericalHead(plan=plan, thresholds=self.thresholds)
         elif plan.qtype is QType.OBJECT_REFERENCE:
             self.object_ref = ObjectRefHead(
-                plan=plan, thresholds=self.thresholds, llm_verify=self.llm_verify
+                plan=plan,
+                thresholds=self.thresholds,
+                llm_verify=self.llm_verify,
+                verifier=self.verifier,
+                remaining_s=self.remaining_s,
             )
         elif plan.qtype is QType.INSTRUCTION_FOLLOWING:
             self.instruction = InstructionHead(
@@ -75,7 +95,14 @@ class HeadState:
             )
         # The explore head is always built (it may delegate to the IF head).
         self.explore = ExploreHead(
-            plan=plan, affinity_fn=self.affinity_fn, instruction=self.instruction
+            plan=plan,
+            affinity_fn=self.affinity_fn,
+            instruction=self.instruction,
+            miss_recoverer=self.miss_recoverer,
+            fuse_hint=self.fuse_hint,
+            budget_frac=self.budget_frac,
+            tiles_fn=self.tiles_fn,
+            frontier_selector=self.frontier_selector,
         )
 
 
@@ -86,6 +113,14 @@ def build_callables(
     affinity_fn: AffinityFactory | None = None,
     llm_verify: LlmVerifyFn | None = None,
     anchor_confirm: AnchorConfirmFn | None = None,
+    verifier: VerifierFn | None = None,
+    anchor_confirmer: AnchorConfirmFn | None = None,
+    miss_recoverer: MissRecoveryFn | None = None,
+    frontier_selector: FrontierSelectFn | None = None,
+    remaining_s: Callable[[], float] | None = None,
+    budget_frac: Callable[[], float] | None = None,
+    tiles_fn: Callable[[], object] | None = None,
+    fuse_hint: FuseHintFn | None = None,
     thresholds: Thresholds = DEFAULT_THRESHOLDS,
 ) -> dict:
     """Build the {parse, explore, verify, probe} callables for a QuestionController.
@@ -93,15 +128,31 @@ def build_callables(
     scene_index: the live SceneIndex the heads resolve/count against.
     parse:       checkpoint-1 parse fn; default = the offline regex tier.
     affinity_fn: nouns -> ((x,y)->float) frontier bias; default uniform.
-    llm_verify:  OR per-clause verification checkpoint (stub); None == deterministic.
-    anchor_confirm: IF arrival confirmation checkpoint (stub); None == trust the map.
+
+    Checkpoint seams (design doc wiring map; all default None == today's behaviour):
+    * ``verifier``          — rich CP4 pre-answer verification (full contract). Falls back
+      to the legacy ``llm_verify`` bool seam when None.
+    * ``anchor_confirmer``  — rich CP3 anchor confirmation (vision contract). Accepted as an
+      alias of ``anchor_confirm`` (the head auto-detects the legacy bool seam by signature).
+    * ``miss_recoverer``    — CP2 detector-miss recovery (explore path).
+    * ``frontier_selector`` — CP5 frontier selection (multi-room scenes).
+
+    CP-support hooks: ``remaining_s`` (CP4 90 s re-resolve rule), ``budget_frac`` (CP2
+    >=60% coverage trigger), ``tiles_fn`` (CP2 tile supplier), ``fuse_hint`` (CP2 fusion).
     """
     state = HeadState(
         scene=scene_index,
         thresholds=thresholds,
         affinity_fn=affinity_fn if affinity_fn is not None else uniform_affinity,
         llm_verify=llm_verify,
-        anchor_confirm=anchor_confirm,
+        anchor_confirm=anchor_confirmer if anchor_confirmer is not None else anchor_confirm,
+        verifier=verifier,
+        miss_recoverer=miss_recoverer,
+        frontier_selector=frontier_selector,
+        remaining_s=remaining_s,
+        budget_frac=budget_frac,
+        tiles_fn=tiles_fn,
+        fuse_hint=fuse_hint,
     )
     parse_fn = parse if parse is not None else _default_parse
 

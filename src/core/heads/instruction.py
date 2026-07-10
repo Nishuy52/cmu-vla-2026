@@ -27,6 +27,7 @@ Units: `map` frame, metres. Deterministic: all timing via the odom timestamp pas
 """
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass, field
 
@@ -50,11 +51,18 @@ ARRIVAL_TOL_M: float = 0.8  # within this of a leg goal -> arrived (mark progres
 MIN_GROUND_OBS: int = 3  # per architecture: grounded == confirmed with >= 3 obs
 
 
-# anchor-confirmation checkpoint (checkpoint 3): (plan, leg_index, anchor_summary) -> bool
-# stubbed in tests; True == "confirmed on arrival".
-from typing import Callable
+from typing import Any, Callable
 
-AnchorConfirmFn = Callable[[Plan, int, str], bool]
+# Legacy anchor-confirmation seam (checkpoint 3): (plan, leg_index, anchor_summary) -> bool
+# stubbed in tests; True == "confirmed on arrival". Preserved for backward compatibility.
+LegacyAnchorConfirmFn = Callable[[Plan, int, str], bool]
+
+# Rich CP3 seam (design doc §CP3, vision contract). Called with the anchor's description
+# string and a zero-arg projected-crop supplier; returns an AnchorConfirmOutcome-shaped
+# object (duck-typed: ``.action`` in {"confirm","demote"}, plus ``.confidence``). On
+# ``demote`` the head demotes the leg's grounding and re-plans it to the runner-up.
+#     run(anchor_desc: str, crop: Any) -> AnchorConfirmOutcome
+AnchorConfirmFn = Callable[..., Any]
 
 
 @dataclass
@@ -65,6 +73,8 @@ class _GroundedLeg:
     grounded: bool
     geom: object | None  # (x,y) for goto/via_near; ((x0,y0),(x1,y1)) for corridor
     nouns: tuple[str, ...]
+    record: object | None = None  # best InstanceRecord for the primary anchor (CP3)
+    runner_up: object | None = None  # runner-up InstanceRecord for demote-and-replan (CP3)
 
 
 @dataclass
@@ -83,6 +93,15 @@ class InstructionHead:
     _confirmed: set[int] = field(default_factory=set)
     _terminal_xy: tuple[float, float] | None = None
     _last_wp: WaypointCmd | None = None
+    _demoted: set[int] = field(default_factory=set)  # anchors CP3 confidently rejected
+    _legacy_confirm: bool = False  # anchor_confirm matches the old bool seam
+    _scene: object | None = None  # live scene retained for CP3 re-resolve
+
+    def __post_init__(self) -> None:
+        # Backward compat: the old ``(plan, leg_index, summary) -> bool`` seam is detected
+        # by signature and called the legacy way in _confirm_leg.
+        if self.anchor_confirm is not None and _is_legacy_anchor_seam(self.anchor_confirm):
+            self._legacy_confirm = True
 
     # ------------------------------------------------------------------ per-tick
     def advance(self, io: RobotIO, scene) -> None:
@@ -93,6 +112,7 @@ class InstructionHead:
         """
         if self.plan is None or not self.plan.route:
             return
+        self._scene = scene
         odom = io.latest_odom()
         pose = (float(odom.x), float(odom.y)) if odom is not None else (0.0, 0.0)
         t = float(odom.t) if odom is not None else 0.0
@@ -121,7 +141,8 @@ class InstructionHead:
         nouns = tuple(a.noun for a in leg.anchors)
         if scene is None:
             return _GroundedLeg(leg.kind, False, None, nouns)
-        recs = [self._resolve_anchor(a, scene) for a in leg.anchors]
+        resolved = [self._resolve_anchor(a, scene) for a in leg.anchors]
+        recs = [r[0] for r in resolved]
         if any(r is None for r in recs):
             return _GroundedLeg(leg.kind, False, None, nouns)
         grounded = all(r.n_obs >= MIN_GROUND_OBS for r in recs)
@@ -135,13 +156,23 @@ class InstructionHead:
             geom = self._via_point(recs[0])
         else:  # GOTO
             geom = self._goto_point(recs[0])
-        return _GroundedLeg(leg.kind, grounded, geom, nouns)
+        return _GroundedLeg(
+            leg.kind, grounded, geom, nouns, record=recs[0], runner_up=resolved[0][1]
+        )
 
     def _resolve_anchor(self, anchor: Anchor, scene):
-        """Resolve one anchor to its best InstanceRecord, honouring attributes."""
+        """Resolve one anchor to (best, runner_up) InstanceRecords, honouring attributes.
+
+        The runner-up is used by the CP3 demote-and-replan path. Demoted anchors (CP3
+        confidently rejected on arrival) are skipped so re-resolution lands on the
+        runner-up.
+        """
         spec = TargetSpec(noun=anchor.noun, raw=anchor.raw, attributes=list(anchor.attributes))
         res = TB.resolve(spec, scene, self.thresholds)
-        return res.candidates_ranked[0] if res.candidates_ranked else None
+        ranked = [c for c in res.candidates_ranked if c.instance_id not in self._demoted]
+        if not ranked:
+            return (None, None)
+        return (ranked[0], ranked[1] if len(ranked) > 1 else None)
 
     def _goto_point(self, rec) -> tuple[float, float]:
         """Anchor centroid projected to the nearest free cell (drivable goal)."""
@@ -276,11 +307,56 @@ class InstructionHead:
     def _confirm_leg(self, i: int, leg: _GroundedLeg) -> None:
         self._confirmed.add(i)
         self._leg_progress = max(self._leg_progress, i + 1)
-        if self.anchor_confirm is not None:
+        if self.anchor_confirm is None:
+            return
+        if self._legacy_confirm:
             try:
                 self.anchor_confirm(self.plan, i, f"leg {i} nouns={leg.nouns}")
             except Exception:
                 pass
+            return
+        self._rich_confirm_leg(i, leg)
+
+    def _rich_confirm_leg(self, i: int, leg: _GroundedLeg) -> None:
+        """CP3 vision confirmation: on a confident mismatch, demote the anchor instance
+        and re-plan this leg to the runner-up (design doc §CP3). Never blocks the drive —
+        a demote with no runner-up leaves the map's belief standing.
+        """
+        anchor_desc = leg.nouns[0] if leg.nouns else "object"
+        try:
+            outcome = self.anchor_confirm(anchor_desc, self._project_crop(leg))
+        except Exception:  # noqa: BLE001 — a dark/broken checkpoint trusts the map
+            return
+        action = getattr(outcome, "action", "confirm")
+        if action != "demote":
+            return
+        # Confident mismatch: demote this anchor instance and re-plan to the runner-up.
+        rec = leg.record
+        runner_up = leg.runner_up
+        if rec is not None:
+            self._demoted.add(getattr(rec, "instance_id", -1))
+        _LOG.info(
+            "CP3 anchor mismatch on leg %d (%s); demoting instance %s -> runner-up %s.",
+            i,
+            anchor_desc,
+            getattr(rec, "instance_id", None),
+            getattr(runner_up, "instance_id", None),
+        )
+        if runner_up is not None and self._scene is not None:
+            # Re-ground + re-route so the drive continues toward the corrected anchor.
+            self._confirmed.discard(i)
+            self._leg_progress = min(self._leg_progress, i)
+            self._follower = None
+            self._ground_legs(self._scene)
+
+    def _project_crop(self, leg: _GroundedLeg):
+        """Supply the anchor's projected image crop for CP3.
+
+        Real projection (project the anchor centroid to the tile via
+        ``tiling.map_ray_to_camera`` inverse) is integration wiring; here we hand the seam
+        the anchor's InstanceRecord as a stand-in crop token so stubs can key off it.
+        """
+        return leg.record
 
     # ------------------------------------------------------------------ read-out
     def ungrounded_subgoals(self) -> int:
@@ -314,3 +390,26 @@ class InstructionHead:
 
 def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def _is_legacy_anchor_seam(fn: Callable) -> bool:
+    """True if ``fn`` matches the legacy ``(plan, leg_index, summary) -> bool`` seam.
+
+    Heuristic (design: "inspect.signature"): exactly 3 positional-capable params and none
+    named ``crop`` / ``anchor_desc`` (the rich vision seam's keywords). Unintrospectable
+    or ``*args`` callables are treated as rich (safer to pass the vision contract).
+    """
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    params = list(sig.parameters.values())
+    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
+        return False
+    if any(p.name in ("crop", "anchor_desc") for p in params):
+        return False
+    positional = [
+        p for p in params
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    return len(positional) == 3

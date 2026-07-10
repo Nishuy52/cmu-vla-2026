@@ -22,10 +22,11 @@ Units: `map` frame, metres. Deterministic: timing from the odom timestamp.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 from core.interfaces import QType, RobotIO, WaypointCmd
 from core.nav.exploration import ExplorationPolicy, ExplorationStatus
+from core.nav.frontiers import detect_frontiers
 from core.nav.occupancy import OccupancyGrid
 from core.plan_schema import Plan
 
@@ -33,6 +34,38 @@ from core.heads.instruction import InstructionHead
 
 # noun-list -> ((x, y) -> affinity float); default uniform (constant 0).
 AffinityFactory = Callable[[Sequence[str]], Callable[[tuple[float, float]], float]]
+
+# CP2 detector-miss recovery seam (design doc §CP2). Called when a plan-critical noun has 0
+# instances after >=60% of the explore budget is spent (once per question; the checkpoint
+# module's ledger enforces the hard cap). Returns a MissRecoveryOutcome-shaped object
+# (duck-typed: ``.action`` in {"provisional","absent"}, ``.tile``, ``.bbox_hint``,
+# ``.confidence``, ``.n_obs``, ``.score``).
+#     run(noun: str, raw: str, tiles: Sequence) -> MissRecoveryOutcome
+MissRecoveryFn = Callable[..., Any]
+
+# CP2 fusion hook: cast a recovery outcome into a provisional instance placed in the world.
+# Default places it at the frontier-direction centroid with n_obs=1, score=confidence*0.5.
+#     fuse_hint(noun, xy, outcome) -> provisional-instance token (opaque to the head)
+FuseHintFn = Callable[..., Any]
+
+# CP5 frontier-selection seam (design doc §CP5). Fires only when the scene proves
+# multi-room (>=2 disconnected explored regions OR explored area over threshold) and the
+# seam is non-None; called with the question + the top-5 geometric frontier candidates.
+# Returns a FrontierOutcome-shaped object (duck-typed: ``.action`` in {"choice","fallback"}
+# and ``.index`` a 0-indexed position into the frontier list). Fallback == the geometric
+# top frontier.
+#     frontier_selector(question: str, frontiers: list[Frontier]) -> FrontierOutcome
+FrontierSelectFn = Callable[..., Any]
+
+#: CP5 scene-scale triggers (design §CP5): multi-room evidence.
+MULTI_REGION_TRIGGER: int = 2  # >= this many disconnected explored regions
+EXPLORED_AREA_TRIGGER_M2: float = 60.0  # OR explored FREE area over this (m^2)
+CP5_TOP_FRONTIERS: int = 5
+
+#: Design "Risk note" default provisional score factor (mirrors miss_recovery module).
+PROVISIONAL_SCORE_FACTOR: float = 0.5
+#: Fraction of the explore budget that must be spent before CP2 may fire (design §CP2).
+COVERAGE_TRIGGER_FRAC: float = 0.60
 
 
 def uniform_affinity(_nouns: Sequence[str]):
@@ -48,9 +81,27 @@ class ExploreHead:
     affinity_fn: AffinityFactory = uniform_affinity
     instruction: InstructionHead | None = None
 
+    #: CP2 detector-miss recovery seam; None == today's behaviour (no recovery).
+    miss_recoverer: MissRecoveryFn | None = None
+    #: fusion hook for CP2 provisional instances; None == the default centroid placement.
+    fuse_hint: FuseHintFn | None = None
+    #: zero-arg callable -> explored-budget fraction [0,1]; feeds the >=60% CP2 trigger.
+    #: None == 0.0 (CP2 never fires — safe default).
+    budget_frac: Callable[[], float] | None = None
+    #: tile supplier for CP2 (zero-arg -> list of tiles); None == an empty tile list.
+    tiles_fn: Callable[[], Sequence[Any]] | None = None
+
+    #: CP5 frontier-selection seam; None == today's behaviour (geometric top frontier).
+    frontier_selector: FrontierSelectFn | None = None
+    #: explored-area trigger for CP5 (m^2); overridable per config.
+    explored_area_trigger_m2: float = EXPLORED_AREA_TRIGGER_M2
+
     grid: OccupancyGrid = field(default_factory=OccupancyGrid)
     _policy: ExplorationPolicy | None = None
     last_status: ExplorationStatus | None = None
+    _cp2_fired: bool = False  # once-per-question head guard (ledger caps the hard limit)
+    provisional: Any | None = None  # last CP2 provisional instance (navigation bias target)
+    provisional_xy: tuple[float, float] | None = None
 
     # ------------------------------------------------------------------ per-tick
     def advance(self, io: RobotIO, scene) -> None:
@@ -59,9 +110,9 @@ class ExploreHead:
             if self.instruction is not None:
                 self.instruction.advance(io, scene)
             return
-        self._explore(io)
+        self._explore(io, scene)
 
-    def _explore(self, io: RobotIO) -> None:
+    def _explore(self, io: RobotIO, scene=None) -> None:
         odom = io.latest_odom()
         pose = (float(odom.x), float(odom.y)) if odom is not None else (0.0, 0.0)
         t = float(odom.t) if odom is not None else 0.0
@@ -70,12 +121,123 @@ class ExploreHead:
             self.grid.integrate_patch(patch)
         self.grid.mark_pose(pose[0], pose[1])
 
+        self._maybe_recover_miss(io, scene, pose)
+
         if self._policy is None:
             self._policy = ExplorationPolicy(start_xy=pose, affinity=self._affinity())
         decision = self._policy.step(self.grid, pose, t)
         self.last_status = decision.status
-        if decision.waypoint is not None:
+        # A live CP2 provisional biases navigation: prefer driving toward it over the
+        # geometric frontier while it stands.
+        if self.provisional_xy is not None:
+            io.publish_waypoint(WaypointCmd(self.provisional_xy[0], self.provisional_xy[1]))
+            return
+        # CP5: on a frontier decision in a multi-room scene, let the seam pick among the
+        # top-5 frontiers (fallback = the geometric top the policy already chose).
+        cp5_wp = self._maybe_cp5_frontier(pose, decision)
+        if cp5_wp is not None:
+            io.publish_waypoint(cp5_wp)
+        elif decision.waypoint is not None:
             io.publish_waypoint(decision.waypoint)
+
+    # ------------------------------------------------------------------ CP5
+    def _maybe_cp5_frontier(self, pose: tuple[float, float], decision) -> WaypointCmd | None:
+        """CP5 frontier selection. Returns the chosen frontier waypoint, or None to defer
+        to the policy's geometric choice (fallback / not triggered)."""
+        if self.frontier_selector is None:
+            return None
+        if decision.status is not ExplorationStatus.FRONTIER:
+            return None
+        if not self._scene_is_multi_room(pose):
+            return None
+        frontiers = detect_frontiers(self.grid, pose, self._affinity())[:CP5_TOP_FRONTIERS]
+        if not frontiers:
+            return None
+        question = getattr(self.plan, "question_raw", "") or ""
+        try:
+            outcome = self.frontier_selector(question, frontiers)
+        except Exception:  # noqa: BLE001 — a dark checkpoint falls back to the geometric top
+            return None
+        if getattr(outcome, "action", "fallback") != "choice":
+            return None
+        idx = getattr(outcome, "index", None)
+        if not isinstance(idx, int) or not (0 <= idx < len(frontiers)):
+            return None
+        f = frontiers[idx]
+        return WaypointCmd(f.xy[0], f.xy[1])
+
+    def _scene_is_multi_room(self, pose: tuple[float, float]) -> bool:
+        """Scene-scale trigger: >=2 disconnected explored regions OR explored area over
+        the configured threshold (design §CP5)."""
+        regions = _explored_regions(self.grid)
+        if regions >= MULTI_REGION_TRIGGER:
+            return True
+        return _explored_area_m2(self.grid) > self.explored_area_trigger_m2
+
+    # ------------------------------------------------------------------ CP2
+    def _maybe_recover_miss(self, io: RobotIO, scene, pose: tuple[float, float]) -> None:
+        """Fire CP2 once when a plan-critical noun has 0 instances past the coverage gate."""
+        if self.miss_recoverer is None or self._cp2_fired or scene is None:
+            return
+        if self._explored_frac() < COVERAGE_TRIGGER_FRAC:
+            return
+        noun, raw = self._missing_noun(scene)
+        if noun is None:
+            return
+        self._cp2_fired = True  # head guard: attempt once (the ledger caps the hard limit)
+        tiles = list(self.tiles_fn()) if self.tiles_fn is not None else []
+        try:
+            outcome = self.miss_recoverer(noun, raw, tiles)
+        except Exception:  # noqa: BLE001 — a dark checkpoint falls through to resolve ladder
+            return
+        if getattr(outcome, "action", "absent") != "provisional":
+            return
+        xy = self._frontier_centroid(pose)
+        self.provisional = self._fuse(noun, xy, outcome)
+        self.provisional_xy = xy
+
+    def _missing_noun(self, scene) -> tuple[str | None, str]:
+        """The first plan-critical noun with 0 instances in the scene (else (None, ''))."""
+        for noun in _plan_nouns(self.plan):
+            try:
+                found = scene.by_label(noun)
+            except Exception:  # noqa: BLE001
+                found = None
+            if not found:
+                raw = ""
+                if self.plan is not None and self.plan.target is not None:
+                    raw = self.plan.target.raw or ""
+                return noun, raw or noun
+        return None, ""
+
+    def _explored_frac(self) -> float:
+        if self.budget_frac is None:
+            return 0.0
+        try:
+            return float(self.budget_frac())
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def _frontier_centroid(self, pose: tuple[float, float]) -> tuple[float, float]:
+        """The top geometric frontier direction's centroid (CP2 provisional placement)."""
+        frontiers = detect_frontiers(self.grid, pose, self._affinity())
+        if frontiers:
+            return frontiers[0].xy
+        return pose
+
+    def _fuse(self, noun: str, xy: tuple[float, float], outcome: Any) -> Any:
+        """Cast a CP2 outcome into a provisional instance via the injected fuse hook.
+
+        Default: a lightweight :class:`_ProvisionalInstance` at ``xy`` with n_obs=1 and
+        score=confidence*0.5 (documented: real fusion binding — casting bbox_hint through
+        the detection fusion path — is integration work).
+        """
+        if self.fuse_hint is not None:
+            return self.fuse_hint(noun, xy, outcome)
+        conf = float(getattr(outcome, "confidence", 0.0))
+        score = float(getattr(outcome, "score", conf * PROVISIONAL_SCORE_FACTOR))
+        n_obs = int(getattr(outcome, "n_obs", 1))
+        return _ProvisionalInstance(noun=noun, xy=xy, n_obs=n_obs, score=score)
 
     def _affinity(self):
         nouns = _plan_nouns(self.plan)
@@ -83,6 +245,70 @@ class ExploreHead:
             return self.affinity_fn(nouns)
         except Exception:
             return uniform_affinity(nouns)
+
+
+def _explored_area_m2(grid: OccupancyGrid) -> float:
+    """Total FREE explored area in square metres."""
+    from core.nav.occupancy import FREE
+
+    state = grid.state
+    if state is None:
+        return 0.0
+    n_free = int((state == FREE).sum())
+    return n_free * (grid.cell_m * grid.cell_m)
+
+
+def _explored_regions(grid: OccupancyGrid) -> int:
+    """Count of disconnected FREE explored regions (8-connected components).
+
+    A multi-room scene shows up as >=2 FREE blobs separated by UNKNOWN/OBSTACLE (design
+    §CP5). Deterministic BFS over the FREE mask.
+    """
+    from collections import deque
+
+    from core.nav.occupancy import FREE
+
+    import numpy as np
+
+    state = grid.state
+    if state is None:
+        return 0
+    free = state == FREE
+    h, w = free.shape
+    seen = np.zeros_like(free)
+    neigh = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
+    regions = 0
+    for r0 in range(h):
+        for c0 in range(w):
+            if not free[r0, c0] or seen[r0, c0]:
+                continue
+            regions += 1
+            dq = deque([(r0, c0)])
+            seen[r0, c0] = True
+            while dq:
+                r, c = dq.popleft()
+                for dr, dc in neigh:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < h and 0 <= nc < w and free[nr, nc] and not seen[nr, nc]:
+                        seen[nr, nc] = True
+                        dq.append((nr, nc))
+    return regions
+
+
+@dataclass(frozen=True)
+class _ProvisionalInstance:
+    """A CP2 provisional instance: a low-confidence, single-observation navigation target.
+
+    Deliberately carries ``n_obs=1`` so it can NEVER on its own satisfy the >=3-obs
+    early-answer gate (design §CP2 "Risk note"). Real fusion binding (casting the VLM's
+    bbox_hint through the detection fusion path into a tracked InstanceRecord) is
+    integration work — this stand-in only biases navigation.
+    """
+
+    noun: str
+    xy: tuple[float, float]
+    n_obs: int = 1
+    score: float = 0.0
 
 
 def _plan_nouns(plan: Plan | None) -> list[str]:

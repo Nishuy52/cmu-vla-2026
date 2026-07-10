@@ -18,8 +18,9 @@ Units: `map` frame, metres (inherited from the toolbox).
 """
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from core.interfaces import InstanceRecord, MarkerBox, QType, SceneIndex
 from core.fsm.floors import PartialResults
@@ -30,29 +31,69 @@ from core.geometry.toolbox import (
     Thresholds,
     resolve,
 )
-from core.plan_schema import Plan
+from core.plan_schema import Plan, TargetSpec
 
-# per-clause verifier: (plan, candidate_summary, pass_matrix_text) -> keep-winner bool
+# Legacy narrow per-clause verifier (backward compat):
+#     (plan, candidate_summary, pass_matrix_text) -> keep-winner bool
 LlmVerifyFn = Callable[[Plan, str, str], bool]
+
+# Rich CP4 verifier (design doc §CP4 full contract). Consumes the whole context and
+# returns a VerificationOutcome-shaped object (duck-typed: ``.action`` in
+# {"keep","runner_up","re_resolve"} and ``.winner``). Called with keyword args so the
+# checkpoint module's ``run(question, winner, runner_up, winner_facts, notes,
+# resolve_again=None)`` signature binds directly.
+#     run(question, winner, runner_up, winner_facts, notes, remaining_s, resolve_again)
+#       -> VerificationOutcome
+VerifierFn = Callable[..., Any]
 
 
 @dataclass
 class ObjectRefHead:
-    """Ranks object-reference candidates and maintains the best marker each tick."""
+    """Ranks object-reference candidates and maintains the best marker each tick.
+
+    Two verification seams are supported (checkpoint 4):
+
+    * ``verifier`` — the rich CP4 seam (design doc §CP4 full contract). If set, it is
+      consulted once per :meth:`verify` call with the winner, runner-up, the winner's
+      per-clause pass matrix, ``plan.notes``, the remaining question-budget seconds, and a
+      ``resolve_again`` re-resolve hook; it returns a VerificationOutcome-shaped object
+      whose ``.action`` ("keep"/"runner_up"/"re_resolve") + ``.winner`` we apply.
+    * ``llm_verify`` — the legacy narrow bool seam ``(plan, summary, matrix) -> bool``,
+      preserved for backward compatibility. Used when no rich ``verifier`` is set (or when
+      a callable that matches the old 3-arg bool signature is injected as ``verifier``).
+
+    When both are None the head is deterministic (trust the toolbox rank).
+    """
 
     plan: Plan | None = None
     thresholds: Thresholds = DEFAULT_THRESHOLDS
     llm_verify: LlmVerifyFn | None = None
+    verifier: VerifierFn | None = None
+    #: zero-arg callable -> remaining question-budget seconds (feeds the CP4 re-resolve
+    #: 90 s rule). Defaults to +inf (always eligible) when None.
+    remaining_s: Callable[[], float] | None = None
+    #: live scene retained so the re-resolve hook can re-run resolve on demand.
+    _scene: SceneIndex | None = None
 
     _result: ResolveResult | None = None
     best_candidate: InstanceRecord | None = None
     best_marker: MarkerBox | None = None
+
+    def __post_init__(self) -> None:
+        # Backward compat: a callable injected as ``verifier`` that actually matches the
+        # legacy narrow bool seam (3 positional params, none named ``winner``) is treated
+        # as an ``llm_verify`` so old callers/tests keep working through the rich kwarg.
+        if self.verifier is not None and _is_legacy_bool_seam(self.verifier):
+            if self.llm_verify is None:
+                self.llm_verify = self.verifier  # type: ignore[assignment]
+            self.verifier = None
 
     # ------------------------------------------------------------------ update
     def advance(self, scene: SceneIndex | None) -> None:
         """Re-rank against the live scene; refresh best_candidate / best_marker."""
         if scene is None or self.plan is None or self.plan.target is None:
             return
+        self._scene = scene
         res = resolve(self.plan.target, scene, self.thresholds)
         self._result = res
         if res.candidates_ranked:
@@ -77,11 +118,95 @@ class ObjectRefHead:
         res = self._result
         if res is None or not res.candidates_ranked:
             return self.best_marker
-        winner = self._verified_winner(res)
+        if self.verifier is not None:
+            winner = self._cp4_winner(res)
+        else:
+            winner = self._verified_winner(res)
         self.best_candidate = winner
         self.best_marker = winner.to_marker()
         return self.best_marker
 
+    # -------------------------------------------------------------- rich CP4 seam
+    def _cp4_winner(self, res: ResolveResult) -> InstanceRecord:
+        """Apply the rich CP4 verifier's three-way verdict (design doc §CP4).
+
+        confirm -> keep winner; runner_up -> the runner-up (swap once); re_resolve ->
+        the outcome's re-resolved winner. Any failure/degenerate reply keeps the
+        deterministic top rank (CP4 only ever improves on clause-slip).
+        """
+        winner = res.candidates_ranked[0]
+        runner_up = res.candidates_ranked[1] if len(res.candidates_ranked) > 1 else None
+        winner_facts = res.pass_matrix.get(winner.instance_id, [])
+        notes = getattr(self.plan, "notes", "") or ""
+        question = getattr(self.plan, "question_raw", "") or ""
+        try:
+            outcome = self.verifier(
+                question=question,
+                winner=winner,
+                runner_up=runner_up,
+                winner_facts=winner_facts,
+                notes=notes,
+                resolve_again=self._make_resolve_again(),
+            )
+        except TypeError:
+            # A verifier that doesn't accept the full kwarg contract (e.g. a bare
+            # positional callable) is retried positionally; still failing -> keep winner.
+            try:
+                outcome = self.verifier(
+                    question, winner, runner_up, winner_facts, notes,
+                    self._make_resolve_again(),
+                )
+            except Exception:
+                return winner
+        except Exception:
+            return winner  # a dark/broken checkpoint trusts the deterministic rank
+
+        new_winner = getattr(outcome, "winner", None)
+        action = getattr(outcome, "action", "keep")
+        if action in ("runner_up", "re_resolve") and isinstance(new_winner, InstanceRecord):
+            return new_winner
+        return winner
+
+    def _make_resolve_again(self) -> Callable[[str], InstanceRecord | None]:
+        """Build the CP4 re-resolve hook: append the missed constraint as a text-note
+        clause, re-run resolve, and prefer a survivor whose per-clause explanations do not
+        contradict the constraint (design: "text-matched clause"; deterministic).
+
+        The constraint string is recorded on the plan's notes for the audit trail. Real
+        clause synthesis is integration work; here we re-resolve the same target and, when
+        the constraint text names a survivor's clause explanation as failing, skip it in
+        favour of the next non-contradicting candidate.
+        """
+        scene = self._scene
+        base_target = self.plan.target if self.plan is not None else None
+
+        def resolve_again(missed: str) -> InstanceRecord | None:
+            if scene is None or base_target is None:
+                return None
+            # Audit trail: record the text-matched clause the verifier surfaced.
+            if self.plan is not None:
+                add = f"[cp4 re-resolve] missed_constraint: {missed}"
+                self.plan.notes = (self.plan.notes + " " + add).strip() if self.plan.notes else add
+            spec = TargetSpec(
+                noun=base_target.noun,
+                raw=base_target.raw,
+                attributes=list(base_target.attributes),
+                clauses=list(base_target.clauses),
+            )
+            res = resolve(spec, scene, self.thresholds)
+            if not res.candidates_ranked:
+                return None
+            token = (missed or "").strip().lower()
+            if token:
+                for cand in res.candidates_ranked:
+                    rows = res.pass_matrix.get(cand.instance_id, [])
+                    if not _contradicts_constraint(rows, token):
+                        return cand
+            return res.candidates_ranked[0]
+
+        return resolve_again
+
+    # ------------------------------------------------------------ legacy bool seam
     def _verified_winner(self, res: ResolveResult) -> InstanceRecord:
         if self.llm_verify is None:
             return res.candidates_ranked[0]
@@ -97,6 +222,42 @@ class ObjectRefHead:
                 return cand
         # every candidate demoted: fall back to the deterministic top rank.
         return res.candidates_ranked[0]
+
+
+def _is_legacy_bool_seam(fn: Callable) -> bool:
+    """True if ``fn`` matches the legacy ``(plan, summary, matrix) -> bool`` bool seam.
+
+    Heuristic (design: "inspect.signature"): exactly 3 positional-capable params and none
+    named ``winner`` (the rich seam's marker keyword). A ``*args`` callable or an
+    unintrospectable one is treated as rich (safer to pass full context).
+    """
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    params = list(sig.parameters.values())
+    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
+        return False
+    if any(p.name in ("winner", "winner_facts", "runner_up") for p in params):
+        return False
+    positional = [
+        p for p in params
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    return len(positional) == 3
+
+
+def _contradicts_constraint(rows: list[PredResult], token: str) -> bool:
+    """True if any FAILing clause explanation mentions the missed-constraint token.
+
+    Deterministic text match: a candidate "contradicts" the surfaced constraint when a
+    clause it FAILS names the constraint word. Candidates with no contradicting failure
+    are preferred by the re-resolve hook.
+    """
+    for r in rows:
+        if not r.passed and token in (r.explanation or "").lower():
+            return True
+    return False
 
 
 def _candidate_summary(cand: InstanceRecord) -> str:
