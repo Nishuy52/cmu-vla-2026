@@ -127,6 +127,21 @@ Orchestrated build: frozen contracts written in the main session; five modules i
 
 **Known inert wart:** `BreadcrumbFollower.replan_flag` is write-only (never read) and the new no-LOS branch sets it eagerly — harmless today; revisit when wiring replanning at integration.
 
+---
+
+## 2026-07-10 (session 6, continued) — LLM layer; quota wall
+
+**Done:**
+- `core/llm/` — provider adapters (OpenAI-compat covers OpenAI/Gemini-compat/local servers; Anthropic Messages; LocalStub), env-driven failover config (`VLA_LLM_*` vars, keys indirected — see `core/llm/config.py` docstring), Windows-safe thread-based call timeout. 30 tests, SDK-free suite. **347 total green.** Committed `ecc5738`.
+- **Session usage limit hit** (resets 11:10 PM SGT) mid-dispatch of the perception scaffold. Task spec preserved in `docs/next_task_perception.md` — next session: check whether the re-dispatched agent completed it (look for `core/perception/tiling.py` etc. + run suite); if absent, re-run the spec verbatim as an executor delegation, then delete the spec file and commit.
+
+**Resume checklist for next session (in order):**
+1. `git status` + full `pytest` (~7 min) — confirm 347+ green baseline
+2. Perception scaffold per `docs/next_task_perception.md` (if not landed)
+3. Replay harness once the USER's manual sample-data download exists in `data/sample_real_robot/`
+4. Then: CLI question-runner utility, calibration prep, and Phase 2 per `master_plan.md`
+5. Standing rules: frontier model orchestrates only; no tooling attribution; install-affecting changes update `ubuntu_setup.md`
+
 **Next step:**
 1. USER: register (15 Jul!), manual sample-data download (browser)
 2. Replay harness: parse sample bags (`rosbags`) → feed PanoFrame/LidarScan/TerrainPatch into the core; then real perception (open-vocab detector) behind SceneIndex — the last big Windows-doable pieces
