@@ -1,0 +1,53 @@
+# Master Plan — CMU VLA Challenge 2026
+
+*Created 10 Jul 2026. Submission deadline 15 Aug 2026 (36 days). Update the checkboxes and Phase status as work lands; log every session in `LOG.md`.*
+
+## Constraints driving the plan
+
+1. **Fable 5 leaves Claude subscriptions 12 Jul 2026** → front-load all deep design/research work into the next 48h (see `claude_budget.md`).
+2. **Registration closes 15 Jul** → user must register immediately.
+3. **Stuck on Windows** until home → no native Ubuntu 24.04/ROS Jazzy; sim can't run locally yet (WSL2 attempt is a stretch goal). Maximise sim-independent work now (see `windows_workplan.md`).
+4. **NUS SoC cluster** available for GPU training via SSH from Windows (see `soc_cluster_guide.md`).
+5. 10-min-per-scene budget at eval → architecture must balance exploration time vs answering time.
+
+## Phase 0 — Fable window (10–12 Jul) ★ CURRENT
+
+Highest-leverage thinking while Fable is cheap. All outputs are docs/code in this repo.
+
+- [x] Workspace + git init + docs skeleton (this commit)
+- [ ] **USER ACTION: register for the challenge** (form on challenge site) — before 15 Jul
+- [ ] Deep-dive the cloned upstream repo (`upstream/CMU-VLN-Challenge-2026`): dummy `ai_module` node, message flow, launch files, Docker setup → write `docs/upstream_notes.md`
+- [ ] Study `questions/` JSON for all 15 training scenes → question taxonomy + answer-format stats → `docs/question_analysis.md`
+- [ ] Research prior art (SORT3D paper, 2025 leaderboard winners, OpenEQA baselines) → `docs/prior_art.md`
+- [ ] Write full system architecture → `docs/architecture.md` (draft exists; harden it with Fable)
+- [ ] Scaffold `ai_module` core as OS-independent Python (mocked ROS interfaces) + unit tests
+
+## Phase 1 — Windows development (12 Jul – Ubuntu reinstall)
+
+- [ ] Build the pure-Python core pipeline: perception → 3D object map → scene graph → LLM reasoning → 3 answer heads. Test against recorded/mock data on Windows.
+- [ ] Question-type classifier + per-type answering strategies
+- [ ] Exploration policy design (frontier-based, using terrain map + odometry)
+- [ ] Mock evaluation harness: feed training-scene questions to the core, score offline
+- [ ] Stretch: WSL2 + Docker Desktop + GPU → try running the ROS Jazzy container headless; Unity sim rendering under WSLg is unproven
+- [ ] Set up SoC cluster access (account, VPN, SSH, conda env) — works from Windows
+- [ ] If fine-tuning is needed (e.g. grounding model on VLA-3D): prepare data + training scripts, run on cluster
+
+## Phase 2 — Full sim loop (Ubuntu reinstall → ~5 Aug)
+
+- [ ] Native Ubuntu 24.04 install, Docker + repo setup, run sim end-to-end
+- [ ] Port the Windows-developed core into the real `ai_module` ROS node (thin adapter — designed for this from day one)
+- [ ] Iterate on all 15 training scenes; measure score + wall-clock per question type
+- [ ] Tune the 10-minute budget: exploration cutoff, early-answer bonus strategy
+
+## Phase 3 — Hardening + submission (5–15 Aug)
+
+- [ ] Build + push Docker image; verify it runs exactly as eval will
+- [ ] **Submit an early working version ASAP** (multiple submissions allowed, highest counts)
+- [ ] Failure-mode sweep: ambiguous references, zero-count answers, unreachable waypoints
+- [ ] Final submission before 15 Aug AoE
+
+## Success criteria
+
+- Minimum: a submitted, scoring system (beats the dummy)
+- Target: competitive on instruction-following (6-point questions) — that's where ranking is won
+- Stretch: top-tier → phase-2 real-robot invite

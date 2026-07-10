@@ -1,0 +1,11 @@
+upstream/
+.venv/
+__pycache__/
+*.pyc
+data/
+datasets/
+*.bag
+*.db3
+checkpoints/
+logs/
+.pytest_cache/
