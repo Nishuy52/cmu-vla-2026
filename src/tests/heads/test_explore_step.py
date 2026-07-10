@@ -1,0 +1,96 @@
+"""ExploreHead: orientation sweep, frontier pursuit, affinity injection, IF delegation."""
+from __future__ import annotations
+
+from core.heads.explore_step import ExploreHead, _plan_nouns, uniform_affinity
+from core.heads.instruction import InstructionHead
+from core.interfaces import OdomState, WaypointCmd
+from core.mocks.synthetic_scene import SyntheticScene
+from core.perception.scene_index import BasicSceneIndex
+from core.nav.exploration import ExplorationStatus
+from core.plan_schema import Anchor, LegKind, RouteLeg
+from tests.heads._helpers import instruction_plan, numerical_plan, object_plan
+
+
+class _ExploreIO:
+    def __init__(self, sc: SyntheticScene, start=(2.5, 2.5)):
+        self._sc = sc
+        self._x, self._y, self._t = start[0], start[1], 0.0
+        self.waypoints: list[WaypointCmd] = []
+
+    def latest_terrain(self, extended: bool = False):
+        return self._sc.terrain_patch(extended=extended, t=self._t)
+
+    def latest_odom(self):
+        return OdomState(t=self._t, x=self._x, y=self._y, z=0.0, yaw=0.0)
+
+    def publish_waypoint(self, wp: WaypointCmd):
+        self.waypoints.append(wp)
+
+    def advance_time(self, dt):
+        self._t += dt
+
+
+def test_sweep_first():
+    sc = SyntheticScene(0)
+    sc.populate_default(3)
+    head = ExploreHead(plan=numerical_plan("chair"))
+    io = _ExploreIO(sc)
+    head.advance(io, BasicSceneIndex(sc.instances()))
+    assert head.last_status is ExplorationStatus.SWEEPING
+    assert io.waypoints  # the sweep emits a diamond waypoint
+
+
+def test_frontier_after_sweep_window():
+    sc = SyntheticScene(0)
+    sc.populate_default(3)
+    head = ExploreHead(plan=numerical_plan("chair"))
+    io = _ExploreIO(sc)
+    head.advance(io, BasicSceneIndex(sc.instances()))  # anchor sweep clock at t=0
+    io.advance_time(70.0)  # past the 60 s sweep window
+    head.advance(io, BasicSceneIndex(sc.instances()))
+    assert head.last_status in (ExplorationStatus.FRONTIER, ExplorationStatus.COMPLETE)
+
+
+def test_affinity_factory_invoked_with_plan_nouns():
+    sc = SyntheticScene(0)
+    sc.populate_default(2)
+    captured = {}
+
+    def factory(nouns):
+        captured["nouns"] = list(nouns)
+        return lambda xy: 1.0
+
+    head = ExploreHead(plan=object_plan("chair"), affinity_fn=factory)
+    io = _ExploreIO(sc)
+    head.advance(io, BasicSceneIndex(sc.instances()))
+    assert captured["nouns"] == ["chair"]
+
+
+def test_if_delegates_to_instruction_head():
+    sc = SyntheticScene(0)
+    sc.place_box("sofa", 2.5, 2.5, 0.4, 0.4, 0.5)
+    idx = BasicSceneIndex(sc.instances())
+    inst_head = InstructionHead(
+        plan=instruction_plan([RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="sofa")])])
+    )
+    head = ExploreHead(
+        plan=instruction_plan([RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="sofa")])]),
+        instruction=inst_head,
+    )
+    io = _ExploreIO(sc, start=(0.7, 2.5))
+    head.advance(io, idx)
+    # delegation drove the IF head: it grounded the leg (no separate sweep waypoint owner)
+    assert inst_head.ungrounded_subgoals() == 0
+
+
+def test_plan_nouns_extraction():
+    from core.plan_schema import Clause, Pred, TargetSpec
+
+    p = object_plan("table")
+    p.target = TargetSpec(noun="table", clauses=[Clause(pred=Pred.NEAR, anchors=[Anchor(noun="lamp")])])
+    assert set(_plan_nouns(p)) == {"table", "lamp"}
+
+
+def test_uniform_affinity_is_zero():
+    aff = uniform_affinity(["chair"])
+    assert aff((1.0, 2.0)) == 0.0

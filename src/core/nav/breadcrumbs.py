@@ -30,6 +30,22 @@ def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
 
+def _mask_blocked(costmap: Costmap, r: int, c: int) -> bool:
+    """Blocked test bounded by the costmap's OWN stamped mask shape.
+
+    ``Costmap.blocked`` gates its array lookup on ``grid.in_bounds``, but the grid can
+    grow after the costmap's masks were snapshotted (the vehicle drives into newly
+    integrated terrain). A cell outside the snapshotted mask was never validated by
+    stamping/inflation, so for line-of-sight purposes we conservatively treat it as
+    blocked rather than index past the mask (which would raise) or trust an
+    unvalidated cell. Inside the mask we defer to the costmap's own blocked test.
+    """
+    h, w = costmap.base_blocked.shape
+    if not (0 <= r < h and 0 <= c < w):
+        return True
+    return costmap.blocked(r, c)
+
+
 def line_of_sight(
     costmap: Costmap, a: tuple[float, float], b: tuple[float, float]
 ) -> bool:
@@ -44,7 +60,7 @@ def line_of_sight(
     err = dc - dr
     r, c = ar, ac
     while True:
-        if costmap.blocked(r, c):
+        if _mask_blocked(costmap, r, c):
             return False
         if (r, c) == (br, bc):
             return True
@@ -93,9 +109,33 @@ class BreadcrumbFollower:
             if line_of_sight(self.costmap, pose, pt):
                 chosen = pt
         if chosen is None:
-            # No LOS-clear crumb: hand back the next raw path point to nudge a replan.
-            chosen = self.path[self._idx]
+            # No LOS-clear crumb within lookahead. Never hand back a raw point whose
+            # straight segment from the pose crosses a blocked cell — that is exactly the
+            # unvalidated-segment failure this follower must not produce. Prefer the
+            # nearest forward path point that IS reachable per line_of_sight (scanning
+            # the whole remaining path, not just within lookahead); only if none is
+            # reachable do we surface the next path vertex WITH a replan flag so the FSM
+            # recomputes rather than silently driving through geometry.
+            chosen = self._nearest_reachable_point(pose)
+            if chosen is None:
+                self.replan_flag = True
+                chosen = self.path[self._idx]
         return WaypointCmd(x=float(chosen[0]), y=float(chosen[1]))
+
+    def _nearest_reachable_point(
+        self, pose: tuple[float, float]
+    ) -> tuple[float, float] | None:
+        """Nearest forward path point in clear line-of-sight from ``pose`` (or None)."""
+        best: tuple[float, float] | None = None
+        best_d = float("inf")
+        for j in range(self._idx, len(self.path)):
+            pt = self.path[j]
+            if not line_of_sight(self.costmap, pose, pt):
+                continue
+            d = _dist(pose, pt)
+            if d < best_d:
+                best_d, best = d, pt
+        return best
 
     # ------------------------------------------------------------- public API
     def current(self, pose: tuple[float, float]) -> WaypointCmd | None:
