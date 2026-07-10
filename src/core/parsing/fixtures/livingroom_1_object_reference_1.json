@@ -1,0 +1,42 @@
+{
+ "scene": "livingroom_1",
+ "question": "Find the vase on the cabinet below the picture.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the vase on the cabinet below the picture.",
+  "target": {
+   "noun": "vase",
+   "raw": "vase",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "cabinet",
+       "raw": "cabinet",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "under",
+        "anchors": [
+         {
+          "noun": "picture",
+          "raw": "picture",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

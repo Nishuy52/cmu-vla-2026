@@ -1,0 +1,31 @@
+{
+ "scene": "livingroom_3",
+ "question": "How many photos are on the TV cabinet?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many photos are on the TV cabinet?",
+  "target": {
+   "noun": "photo",
+   "raw": "photos",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "tv cabinet",
+       "raw": "tv cabinet",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

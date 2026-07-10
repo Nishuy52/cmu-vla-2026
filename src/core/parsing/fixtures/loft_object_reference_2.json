@@ -1,0 +1,48 @@
+{
+ "scene": "loft",
+ "question": "Find the potted plant between a vase and the cabinet with a TV on it.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the potted plant between a vase and the cabinet with a TV on it.",
+  "target": {
+   "noun": "potted plant",
+   "raw": "potted plant",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "between",
+     "anchors": [
+      {
+       "noun": "vase",
+       "raw": "vase",
+       "attributes": [],
+       "disambiguator": null
+      },
+      {
+       "noun": "cabinet",
+       "raw": "cabinet",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "with",
+        "anchors": [
+         {
+          "noun": "tv",
+          "raw": "tv",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "indefinite article on 'vase'",
+  "parse_tier": "golden"
+ }
+}

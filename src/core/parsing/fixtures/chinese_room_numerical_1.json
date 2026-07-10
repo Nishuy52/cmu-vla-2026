@@ -1,0 +1,31 @@
+{
+ "scene": "chinese_room",
+ "question": "Count the number of chairs with pillows on them.",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "Count the number of chairs with pillows on them.",
+  "target": {
+   "noun": "chair",
+   "raw": "chairs",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "with",
+     "anchors": [
+      {
+       "noun": "pillow",
+       "raw": "pillows",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

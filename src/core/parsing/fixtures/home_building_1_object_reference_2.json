@@ -1,0 +1,42 @@
+{
+ "scene": "home_building_1",
+ "question": "Find the bowl closest to the knife rack near the trash can.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the bowl closest to the knife rack near the trash can.",
+  "target": {
+   "noun": "bowl",
+   "raw": "bowl",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "closest_to",
+     "anchors": [
+      {
+       "noun": "knife rack",
+       "raw": "knife rack",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "near",
+        "anchors": [
+         {
+          "noun": "trash can",
+          "raw": "trash can",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

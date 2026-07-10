@@ -1,0 +1,42 @@
+{
+ "scene": "home_building_1",
+ "question": "How many pillows are on the sofa under the pictures?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many pillows are on the sofa under the pictures?",
+  "target": {
+   "noun": "pillow",
+   "raw": "pillows",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "sofa",
+       "raw": "sofa",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "under",
+        "anchors": [
+         {
+          "noun": "picture",
+          "raw": "pictures",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

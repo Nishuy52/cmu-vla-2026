@@ -1,0 +1,79 @@
+{
+ "scene": "livingroom_1",
+ "question": "First, go near the lamp closest to the black chair, then take the path between the sofa and the round tables, and stop at the cabinet with a picture above it.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "First, go near the lamp closest to the black chair, then take the path between the sofa and the round tables, and stop at the cabinet with a picture above it.",
+  "target": null,
+  "route": [
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "lamp",
+      "raw": "lamp",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "closest_to",
+       "anchors": [
+        {
+         "noun": "chair",
+         "raw": "chair",
+         "attributes": [
+          "black"
+         ],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   },
+   {
+    "kind": "corridor_between",
+    "anchors": [
+     {
+      "noun": "sofa",
+      "raw": "sofa",
+      "attributes": [],
+      "disambiguator": null
+     },
+     {
+      "noun": "table",
+      "raw": "tables",
+      "attributes": [
+       "round"
+      ],
+      "disambiguator": null
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "cabinet",
+      "raw": "cabinet",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "under",
+       "anchors": [
+        {
+         "noun": "picture",
+         "raw": "picture",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "'with a picture above it' encoded as UNDER(picture): the cabinet sits under the picture; corridor second anchor is the round-table group",
+  "parse_tier": "golden"
+ }
+}

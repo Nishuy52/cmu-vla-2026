@@ -1,0 +1,54 @@
+{
+ "scene": "home_building_2",
+ "question": "Find the speaker on the TV cabinet closest to the potted plant on the TV cabinet.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the speaker on the TV cabinet closest to the potted plant on the TV cabinet.",
+  "target": {
+   "noun": "speaker",
+   "raw": "speaker",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "tv cabinet",
+       "raw": "tv cabinet",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    },
+    {
+     "pred": "closest_to",
+     "anchors": [
+      {
+       "noun": "potted plant",
+       "raw": "potted plant",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "on",
+        "anchors": [
+         {
+          "noun": "tv cabinet",
+          "raw": "tv cabinet",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "two top-level clauses: 'closest to' ranks the SPEAKERS on the cabinet by distance to the potted plant (one cabinet, several speakers) \u2014 not the cabinets; a right-branching parse would nest closest_to under tv cabinet",
+  "parse_tier": "golden"
+ }
+}

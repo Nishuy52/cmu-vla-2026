@@ -1,0 +1,31 @@
+{
+ "scene": "japanese_room",
+ "question": "How many calligraphy paintings are above the display ledge?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many calligraphy paintings are above the display ledge?",
+  "target": {
+   "noun": "calligraphy painting",
+   "raw": "calligraphy paintings",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "above",
+     "anchors": [
+      {
+       "noun": "display ledge",
+       "raw": "display ledge",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

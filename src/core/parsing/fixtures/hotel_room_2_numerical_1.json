@@ -1,0 +1,31 @@
+{
+ "scene": "hotel_room_2",
+ "question": "How many pictures are above the bed?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many pictures are above the bed?",
+  "target": {
+   "noun": "picture",
+   "raw": "pictures",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "above",
+     "anchors": [
+      {
+       "noun": "bed",
+       "raw": "bed",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

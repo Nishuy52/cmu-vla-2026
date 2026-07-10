@@ -1,0 +1,47 @@
+{
+ "scene": "livingroom_3",
+ "question": "Take the path near the TV and go to the pillow farthest from the lamp.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "Take the path near the TV and go to the pillow farthest from the lamp.",
+  "target": null,
+  "route": [
+   {
+    "kind": "via_near",
+    "anchors": [
+     {
+      "noun": "tv",
+      "raw": "tv",
+      "attributes": [],
+      "disambiguator": null
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "pillow",
+      "raw": "pillow",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "farthest_from",
+       "anchors": [
+        {
+         "noun": "lamp",
+         "raw": "lamp",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

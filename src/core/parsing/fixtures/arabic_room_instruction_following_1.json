@@ -1,0 +1,60 @@
+{
+ "scene": "arabic_room",
+ "question": "Go near the stool under the picture and stop at the small table farthest from the columns.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "Go near the stool under the picture and stop at the small table farthest from the columns.",
+  "target": null,
+  "route": [
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "stool",
+      "raw": "stool",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "under",
+       "anchors": [
+        {
+         "noun": "picture",
+         "raw": "picture",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "table",
+      "raw": "table",
+      "attributes": [
+       "small"
+      ],
+      "disambiguator": {
+       "pred": "farthest_from",
+       "anchors": [
+        {
+         "noun": "column",
+         "raw": "columns",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

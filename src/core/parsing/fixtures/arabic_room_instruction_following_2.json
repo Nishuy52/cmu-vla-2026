@@ -1,0 +1,75 @@
+{
+ "scene": "arabic_room",
+ "question": "First, go to the potted plant furthest from the hookah, then take the path between the two columns, and stop at the tray on the table.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "First, go to the potted plant furthest from the hookah, then take the path between the two columns, and stop at the tray on the table.",
+  "target": null,
+  "route": [
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "potted plant",
+      "raw": "potted plant",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "farthest_from",
+       "anchors": [
+        {
+         "noun": "hookah",
+         "raw": "hookah",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   },
+   {
+    "kind": "corridor_between",
+    "anchors": [
+     {
+      "noun": "column",
+      "raw": "columns",
+      "attributes": [],
+      "disambiguator": null
+     },
+     {
+      "noun": "column",
+      "raw": "columns",
+      "attributes": [],
+      "disambiguator": null
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "tray",
+      "raw": "tray",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "on",
+       "anchors": [
+        {
+         "noun": "table",
+         "raw": "table",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "'the two columns' -> corridor between the column pair",
+  "parse_tier": "golden"
+ }
+}

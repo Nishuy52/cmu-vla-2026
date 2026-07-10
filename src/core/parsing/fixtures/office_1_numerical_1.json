@@ -1,0 +1,42 @@
+{
+ "scene": "office_1",
+ "question": "How many computer monitors are on the table closest to the map wall decal?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many computer monitors are on the table closest to the map wall decal?",
+  "target": {
+   "noun": "computer monitor",
+   "raw": "computer monitors",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "table",
+       "raw": "table",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "closest_to",
+        "anchors": [
+         {
+          "noun": "map wall decal",
+          "raw": "map wall decal",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

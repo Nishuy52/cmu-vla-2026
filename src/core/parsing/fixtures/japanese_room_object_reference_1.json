@@ -1,0 +1,48 @@
+{
+ "scene": "japanese_room",
+ "question": "The lantern between the vase and the stone decoration that is closest to the vase.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "The lantern between the vase and the stone decoration that is closest to the vase.",
+  "target": {
+   "noun": "lantern",
+   "raw": "lantern",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "between",
+     "anchors": [
+      {
+       "noun": "vase",
+       "raw": "vase",
+       "attributes": [],
+       "disambiguator": null
+      },
+      {
+       "noun": "stone decoration",
+       "raw": "stone decoration",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "closest_to",
+        "anchors": [
+         {
+          "noun": "vase",
+          "raw": "vase",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "attachment: 'that is closest to the vase' read as disambiguating the stone decoration (nearest-NP attachment); alternative reading disambiguates the lantern \u2014 verification checkpoint should re-check if multiple lanterns fit",
+  "parse_tier": "golden"
+ }
+}

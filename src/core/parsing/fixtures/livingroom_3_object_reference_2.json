@@ -1,0 +1,37 @@
+{
+ "scene": "livingroom_3",
+ "question": "Find the vase between the cabinet and the stool.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the vase between the cabinet and the stool.",
+  "target": {
+   "noun": "vase",
+   "raw": "vase",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "between",
+     "anchors": [
+      {
+       "noun": "cabinet",
+       "raw": "cabinet",
+       "attributes": [],
+       "disambiguator": null
+      },
+      {
+       "noun": "stool",
+       "raw": "stool",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

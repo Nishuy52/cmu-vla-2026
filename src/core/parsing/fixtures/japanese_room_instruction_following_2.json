@@ -1,0 +1,69 @@
+{
+ "scene": "japanese_room",
+ "question": "Go to the lantern closest to the fan decoration, then take the path near the wardrobe doors to the flowers on the display ledge.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "Go to the lantern closest to the fan decoration, then take the path near the wardrobe doors to the flowers on the display ledge.",
+  "target": null,
+  "route": [
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "lantern",
+      "raw": "lantern",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "closest_to",
+       "anchors": [
+        {
+         "noun": "fan decoration",
+         "raw": "fan decoration",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   },
+   {
+    "kind": "via_near",
+    "anchors": [
+     {
+      "noun": "wardrobe door",
+      "raw": "wardrobe doors",
+      "attributes": [],
+      "disambiguator": null
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "flower",
+      "raw": "flowers",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "on",
+       "anchors": [
+        {
+         "noun": "display ledge",
+         "raw": "display ledge",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "'take the path near X to Y' = via_near(X) then goto(Y)",
+  "parse_tier": "golden"
+ }
+}

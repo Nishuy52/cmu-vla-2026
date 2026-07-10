@@ -1,0 +1,81 @@
+{
+ "scene": "home_building_2",
+ "question": "Take the path between the sofa and the coffee table and go to the kettle on the dining table, then go to the potted plant between the curtain and the TV.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "Take the path between the sofa and the coffee table and go to the kettle on the dining table, then go to the potted plant between the curtain and the TV.",
+  "target": null,
+  "route": [
+   {
+    "kind": "corridor_between",
+    "anchors": [
+     {
+      "noun": "sofa",
+      "raw": "sofa",
+      "attributes": [],
+      "disambiguator": null
+     },
+     {
+      "noun": "coffee table",
+      "raw": "coffee table",
+      "attributes": [],
+      "disambiguator": null
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "kettle",
+      "raw": "kettle",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "on",
+       "anchors": [
+        {
+         "noun": "dining table",
+         "raw": "dining table",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "potted plant",
+      "raw": "potted plant",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "between",
+       "anchors": [
+        {
+         "noun": "curtain",
+         "raw": "curtain",
+         "attributes": [],
+         "disambiguator": null
+        },
+        {
+         "noun": "tv",
+         "raw": "tv",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "final 'between' is a location disambiguator of the potted plant, not a corridor",
+  "parse_tier": "golden"
+ }
+}

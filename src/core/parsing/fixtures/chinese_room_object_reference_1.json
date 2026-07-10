@@ -1,0 +1,42 @@
+{
+ "scene": "chinese_room",
+ "question": "Find the bowl on the table closest to the folding screen.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the bowl on the table closest to the folding screen.",
+  "target": {
+   "noun": "bowl",
+   "raw": "bowl",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "table",
+       "raw": "table",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "closest_to",
+        "anchors": [
+         {
+          "noun": "folding screen",
+          "raw": "folding screen",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "'closest to' selects WHICH table (candidate set of tables, rank by distance to folding screen), then find the bowl on it",
+  "parse_tier": "golden"
+ }
+}

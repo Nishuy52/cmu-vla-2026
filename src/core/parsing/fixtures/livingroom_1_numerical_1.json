@@ -1,0 +1,42 @@
+{
+ "scene": "livingroom_1",
+ "question": "How many chairs are near the table with a vase on it?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many chairs are near the table with a vase on it?",
+  "target": {
+   "noun": "chair",
+   "raw": "chairs",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "near",
+     "anchors": [
+      {
+       "noun": "table",
+       "raw": "table",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "with",
+        "anchors": [
+         {
+          "noun": "vase",
+          "raw": "vase",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "indefinite article on 'vase'",
+  "parse_tier": "golden"
+ }
+}

@@ -1,0 +1,33 @@
+{
+ "scene": "loft",
+ "question": "How many black pillows are on the sofa?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many black pillows are on the sofa?",
+  "target": {
+   "noun": "pillow",
+   "raw": "pillows",
+   "attributes": [
+    "black"
+   ],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "sofa",
+       "raw": "sofa",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

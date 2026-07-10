@@ -1,0 +1,53 @@
+{
+ "scene": "hotel_room_2",
+ "question": "Go between the bench and the bed and stop at the lamp closest to the fireplace.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "Go between the bench and the bed and stop at the lamp closest to the fireplace.",
+  "target": null,
+  "route": [
+   {
+    "kind": "corridor_between",
+    "anchors": [
+     {
+      "noun": "bench",
+      "raw": "bench",
+      "attributes": [],
+      "disambiguator": null
+     },
+     {
+      "noun": "bed",
+      "raw": "bed",
+      "attributes": [],
+      "disambiguator": null
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "lamp",
+      "raw": "lamp",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "closest_to",
+       "anchors": [
+        {
+         "noun": "fireplace",
+         "raw": "fireplace",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "'go between X and Y' is a corridor traversal, not a goto",
+  "parse_tier": "golden"
+ }
+}

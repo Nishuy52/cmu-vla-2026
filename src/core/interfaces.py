@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol, Sequence
+from typing import Protocol, Sequence, runtime_checkable
 
 import numpy as np
 
@@ -148,10 +148,12 @@ class SceneIndex(Protocol):
 # --------------------------------------------------------------------------- robot I/O
 
 
+@runtime_checkable
 class Clock(Protocol):
     def now(self) -> float: ...
 
 
+@runtime_checkable
 class RobotIO(Protocol):
     """The single seam between core logic and the outside world (ROS adapter or mocks).
 

@@ -1,0 +1,33 @@
+{
+ "scene": "home_building_2",
+ "question": "How many red pillows are on the sofa?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many red pillows are on the sofa?",
+  "target": {
+   "noun": "pillow",
+   "raw": "pillows",
+   "attributes": [
+    "red"
+   ],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "sofa",
+       "raw": "sofa",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

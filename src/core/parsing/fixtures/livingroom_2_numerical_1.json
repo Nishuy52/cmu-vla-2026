@@ -1,0 +1,31 @@
+{
+ "scene": "livingroom_2",
+ "question": "How many cups are on the coffee table?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many cups are on the coffee table?",
+  "target": {
+   "noun": "cup",
+   "raw": "cups",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "coffee table",
+       "raw": "coffee table",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

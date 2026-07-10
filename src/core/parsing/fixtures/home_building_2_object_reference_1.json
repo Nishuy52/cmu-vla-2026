@@ -1,0 +1,42 @@
+{
+ "scene": "home_building_2",
+ "question": "Find the lamp on the nightstand that has the photo on it.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the lamp on the nightstand that has the photo on it.",
+  "target": {
+   "noun": "lamp",
+   "raw": "lamp",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "nightstand",
+       "raw": "nightstand",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "with",
+        "anchors": [
+         {
+          "noun": "photo",
+          "raw": "photo",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

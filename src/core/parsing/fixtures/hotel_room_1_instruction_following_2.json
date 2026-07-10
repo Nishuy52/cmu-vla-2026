@@ -1,0 +1,75 @@
+{
+ "scene": "hotel_room_1",
+ "question": "First, go near the bedside table closest to the bench, then take the path between the TV and the bed to the picture closest to the TV.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "First, go near the bedside table closest to the bench, then take the path between the TV and the bed to the picture closest to the TV.",
+  "target": null,
+  "route": [
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "bedside table",
+      "raw": "bedside table",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "closest_to",
+       "anchors": [
+        {
+         "noun": "bench",
+         "raw": "bench",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   },
+   {
+    "kind": "corridor_between",
+    "anchors": [
+     {
+      "noun": "tv",
+      "raw": "tv",
+      "attributes": [],
+      "disambiguator": null
+     },
+     {
+      "noun": "bed",
+      "raw": "bed",
+      "attributes": [],
+      "disambiguator": null
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "picture",
+      "raw": "picture",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "closest_to",
+       "anchors": [
+        {
+         "noun": "tv",
+         "raw": "tv",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "corridor phrase carries its own terminal goal ('...to the picture...')",
+  "parse_tier": "golden"
+ }
+}

@@ -1,0 +1,46 @@
+{
+ "scene": "loft",
+ "question": "Go to the cup near the TV remote and avoid the path near the cabinet.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "Go to the cup near the TV remote and avoid the path near the cabinet.",
+  "target": null,
+  "route": [
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "cup",
+      "raw": "cup",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "near",
+       "anchors": [
+        {
+         "noun": "tv remote",
+         "raw": "tv remote",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [
+   {
+    "between": null,
+    "near": {
+     "noun": "cabinet",
+     "raw": "cabinet",
+     "attributes": [],
+     "disambiguator": null
+    }
+   }
+  ],
+  "notes": "single-goal route with a forbidden disc near the cabinet",
+  "parse_tier": "golden"
+ }
+}

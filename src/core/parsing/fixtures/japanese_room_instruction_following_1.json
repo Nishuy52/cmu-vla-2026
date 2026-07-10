@@ -1,0 +1,60 @@
+{
+ "scene": "japanese_room",
+ "question": "Go near the small table with a vase on it and then to the flowers near the jar.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "Go near the small table with a vase on it and then to the flowers near the jar.",
+  "target": null,
+  "route": [
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "table",
+      "raw": "table",
+      "attributes": [
+       "small"
+      ],
+      "disambiguator": {
+       "pred": "with",
+       "anchors": [
+        {
+         "noun": "vase",
+         "raw": "vase",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "flower",
+      "raw": "flowers",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "near",
+       "anchors": [
+        {
+         "noun": "jar",
+         "raw": "jar",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "indefinite article on 'vase'",
+  "parse_tier": "golden"
+ }
+}

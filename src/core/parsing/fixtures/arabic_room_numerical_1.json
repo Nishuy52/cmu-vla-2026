@@ -1,0 +1,31 @@
+{
+ "scene": "arabic_room",
+ "question": "How many sofas are below a window?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many sofas are below a window?",
+  "target": {
+   "noun": "sofa",
+   "raw": "sofas",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "under",
+     "anchors": [
+      {
+       "noun": "window",
+       "raw": "window",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "indefinite article on 'window': count sofas below any window",
+  "parse_tier": "golden"
+ }
+}

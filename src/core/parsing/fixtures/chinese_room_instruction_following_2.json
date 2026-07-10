@@ -1,0 +1,76 @@
+{
+ "scene": "chinese_room",
+ "question": "First, go near the tea table with the elephant figurine on it, then stop at the table with the horse figurine on it, avoiding the path between the chair and the folding screen.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "First, go near the tea table with the elephant figurine on it, then stop at the table with the horse figurine on it, avoiding the path between the chair and the folding screen.",
+  "target": null,
+  "route": [
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "tea table",
+      "raw": "tea table",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "with",
+       "anchors": [
+        {
+         "noun": "elephant figurine",
+         "raw": "elephant figurine",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "table",
+      "raw": "table",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "with",
+       "anchors": [
+        {
+         "noun": "horse figurine",
+         "raw": "horse figurine",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [
+   {
+    "between": [
+     {
+      "noun": "chair",
+      "raw": "chair",
+      "attributes": [],
+      "disambiguator": null
+     },
+     {
+      "noun": "folding screen",
+      "raw": "folding screen",
+      "attributes": [],
+      "disambiguator": null
+     }
+    ],
+    "near": null
+   }
+  ],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

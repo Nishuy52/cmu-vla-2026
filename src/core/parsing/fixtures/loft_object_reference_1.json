@@ -1,0 +1,33 @@
+{
+ "scene": "loft",
+ "question": "The blue chair that is closest to the cup of coffee.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "The blue chair that is closest to the cup of coffee.",
+  "target": {
+   "noun": "chair",
+   "raw": "chair",
+   "attributes": [
+    "blue"
+   ],
+   "clauses": [
+    {
+     "pred": "closest_to",
+     "anchors": [
+      {
+       "noun": "coffee cup",
+       "raw": "cup of coffee",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

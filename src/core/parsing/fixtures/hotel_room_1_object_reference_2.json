@@ -1,0 +1,42 @@
+{
+ "scene": "hotel_room_1",
+ "question": "Find the picture above the suitcase furthest from the floor.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the picture above the suitcase furthest from the floor.",
+  "target": {
+   "noun": "picture",
+   "raw": "picture",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "above",
+     "anchors": [
+      {
+       "noun": "suitcase",
+       "raw": "suitcase",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "farthest_from",
+        "anchors": [
+         {
+          "noun": "floor",
+          "raw": "floor",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "'furthest from the floor' = the elevated suitcase (vertical superlative)",
+  "parse_tier": "golden"
+ }
+}

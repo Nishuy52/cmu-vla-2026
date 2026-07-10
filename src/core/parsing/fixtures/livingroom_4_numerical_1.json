@@ -1,0 +1,31 @@
+{
+ "scene": "livingroom_4",
+ "question": "How many pillows are on a sofa?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many pillows are on a sofa?",
+  "target": {
+   "noun": "pillow",
+   "raw": "pillows",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "sofa",
+       "raw": "sofa",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "indefinite article on 'sofa': sum the count over ALL sofas",
+  "parse_tier": "golden"
+ }
+}

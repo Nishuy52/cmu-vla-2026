@@ -1,0 +1,31 @@
+{
+ "scene": "office_2",
+ "question": "How many potted plants are on a table?",
+ "plan": {
+  "qtype": "numerical",
+  "question_raw": "How many potted plants are on a table?",
+  "target": {
+   "noun": "potted plant",
+   "raw": "potted plants",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "table",
+       "raw": "table",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "indefinite article on 'table': sum the count over ALL tables",
+  "parse_tier": "golden"
+ }
+}

@@ -1,0 +1,42 @@
+{
+ "scene": "chinese_room",
+ "question": "Find the pillow on the chair that is closest to the TV.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the pillow on the chair that is closest to the TV.",
+  "target": {
+   "noun": "pillow",
+   "raw": "pillow",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "on",
+     "anchors": [
+      {
+       "noun": "chair",
+       "raw": "chair",
+       "attributes": [],
+       "disambiguator": {
+        "pred": "closest_to",
+        "anchors": [
+         {
+          "noun": "tv",
+          "raw": "tv",
+          "attributes": [],
+          "disambiguator": null
+         }
+        ],
+        "negated": false
+       }
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "",
+  "parse_tier": "golden"
+ }
+}

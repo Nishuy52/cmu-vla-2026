@@ -20,14 +20,15 @@ Highest-leverage thinking while Fable is cheap. All outputs are docs/code in thi
 - [x] Study `questions/` JSON for all 15 training scenes → question taxonomy + answer-format stats → `docs/question_analysis.md` *(done 10 Jul, independently verified: 75 Q / 255 pts, instruction-following = 70.6% of points, all-allocentric relations, ~zero attributes)*
 - [x] Research prior art (SORT3D paper, 2025 leaderboard winners, OpenEQA baselines) → `docs/prior_art.md` *(done 10 Jul — SORT3D is the organisers' own system and integrates with our exact stack; zero-shot is competitive, fine-tuning demoted to optional)*
 - [x] Write full system architecture → `docs/architecture.md` *(v1.0 merged 10 Jul from 3 independent proposals + cross-critique; full debate record in `docs/proposals/`)*
-- [ ] Scaffold `ai_module` core as OS-independent Python (mocked ROS interfaces) + unit tests
+- [x] Scaffold `ai_module` core as OS-independent Python (mocked ROS interfaces) + unit tests *(done 10 Jul: full `src/core/` — contracts, mocks+synthetic scenes, geometry toolbox, nav/frontier planner, FSM/watchdog, parse ladder + 46 goldens; 263 tests green; adversarially verified, 2 defects found+fixed)*
 
 ## Phase 1 — Windows development (12 Jul – Ubuntu reinstall)
 
 - [ ] Build the pure-Python core pipeline: perception → 3D object map → scene graph → LLM reasoning → 3 answer heads. Test against recorded/mock data on Windows.
-- [ ] Question-type classifier + per-type answering strategies
-- [ ] Exploration policy design (frontier-based, using terrain map + odometry)
+- [x] Question-type classifier + parse ladder *(regex tier: 100% qtype on all 75 training questions; API/local tiers prompt-ready)* — per-type answer heads still to wire (resolve→verify→publish glue)
+- [x] Exploration policy design (frontier-based, using terrain map + odometry) *(implemented in `core/nav/`: occupancy, frontier scoring w/ affinity hook, A* costmap with hard avoid-capsules, corridor pinch-threading, breadcrumbs, orientation sweep)*
 - [ ] Mock evaluation harness: feed training-scene questions to the core, score offline
+- [ ] **USER ACTION: manually download sample data** (browser: [Drive folder](https://drive.google.com/drive/folders/1xaatyLeIKLTh_oRzkyd7F1G6tkRPbFtm) → `data/sample_real_robot/`; `system_ros2.zip` + `data_view.rviz2`). Automated download fails (gdown 0-byte on all modes, 10 Jul) — needed for the replay harness, not blocking module development
 - [ ] Stretch: WSL2 + Docker Desktop + GPU → try running the ROS Jazzy container headless; Unity sim rendering under WSLg is unproven
 - [ ] Set up SoC cluster access (account, VPN, SSH, conda env) — works from Windows
 - [ ] If fine-tuning is needed (e.g. grounding model on VLA-3D): prepare data + training scripts, run on cluster

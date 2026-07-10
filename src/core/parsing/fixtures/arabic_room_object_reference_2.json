@@ -1,0 +1,37 @@
+{
+ "scene": "arabic_room",
+ "question": "Find the wall lamp that is between a door frame and a window.",
+ "plan": {
+  "qtype": "object_reference",
+  "question_raw": "Find the wall lamp that is between a door frame and a window.",
+  "target": {
+   "noun": "wall lamp",
+   "raw": "wall lamp",
+   "attributes": [],
+   "clauses": [
+    {
+     "pred": "between",
+     "anchors": [
+      {
+       "noun": "door frame",
+       "raw": "door frame",
+       "attributes": [],
+       "disambiguator": null
+      },
+      {
+       "noun": "window",
+       "raw": "window",
+       "attributes": [],
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    }
+   ]
+  },
+  "route": [],
+  "avoid": [],
+  "notes": "indefinite articles: any door-frame/window pair brackets the lamp",
+  "parse_tier": "golden"
+ }
+}

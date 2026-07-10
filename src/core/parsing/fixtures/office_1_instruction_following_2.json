@@ -1,0 +1,75 @@
+{
+ "scene": "office_1",
+ "question": "First, go near the potted plant on the shelf, then take the path between the two tables, and stop at the bench closest to the map wall decal.",
+ "plan": {
+  "qtype": "instruction_following",
+  "question_raw": "First, go near the potted plant on the shelf, then take the path between the two tables, and stop at the bench closest to the map wall decal.",
+  "target": null,
+  "route": [
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "potted plant",
+      "raw": "potted plant",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "on",
+       "anchors": [
+        {
+         "noun": "shelf",
+         "raw": "shelf",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   },
+   {
+    "kind": "corridor_between",
+    "anchors": [
+     {
+      "noun": "table",
+      "raw": "tables",
+      "attributes": [],
+      "disambiguator": null
+     },
+     {
+      "noun": "table",
+      "raw": "tables",
+      "attributes": [],
+      "disambiguator": null
+     }
+    ]
+   },
+   {
+    "kind": "goto",
+    "anchors": [
+     {
+      "noun": "bench",
+      "raw": "bench",
+      "attributes": [],
+      "disambiguator": {
+       "pred": "closest_to",
+       "anchors": [
+        {
+         "noun": "map wall decal",
+         "raw": "map wall decal",
+         "attributes": [],
+         "disambiguator": null
+        }
+       ],
+       "negated": false
+      }
+     }
+    ]
+   }
+  ],
+  "avoid": [],
+  "notes": "'the two tables' -> corridor between the table pair",
+  "parse_tier": "golden"
+ }
+}

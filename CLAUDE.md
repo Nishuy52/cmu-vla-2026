@@ -5,8 +5,9 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 ## Session protocol (every session)
 
 1. Read `LOG.md` (last entry = where we stopped) and `docs/master_plan.md` (current phase + checkboxes).
-2. Do the work. Prefer delegating volume work to subagents; keep frontier-model tokens for design and review (see `docs/claude_budget.md`).
-3. Before ending: append a dated entry to `LOG.md` (what was done, decisions made, next step), tick any completed checkboxes in `master_plan.md`, and commit.
+2. Do the work. Delegate execution to role subagents per the global orchestration policy. **Frontier-model (Fable-class) usage is restricted to planning, architecture, adjudication, and orchestration — never implementation.** All code/doc execution runs on standard executor/mech-executor tiers; verification on the verifier role. Never pass a frontier model override to an implementation agent (see `docs/claude_budget.md`).
+3. Before ending: append a dated entry to `LOG.md` (what was done, decisions made, next step), tick any completed checkboxes in `master_plan.md`, **update `docs/ubuntu_setup.md` if anything changed that affects installing/running on the Ubuntu machine**, and commit.
+4. Documents and commits carry no AI/tooling attribution.
 
 ## Layout
 
@@ -17,13 +18,17 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 | `docs/claude_budget.md` | Subscription/model-mix strategy (Fable window ends 12 Jul!) |
 | `docs/windows_workplan.md` | What's doable on Windows now; core/adapter split design |
 | `docs/soc_cluster_guide.md` | NUS SoC cluster: access, Slurm, GPUs, TODOs to verify |
-| `docs/architecture.md` | System design (draft — harden before coding) |
-| `docs/upstream_notes.md` | (to be written) distilled upstream repo internals |
-| `docs/question_analysis.md` | (to be written) training-question taxonomy |
-| `docs/prior_art.md` | (to be written) SORT3D / 2025 winners / OpenEQA |
+| `docs/architecture.md` | System design v1.0 — merged from the 3-proposal debate (`docs/proposals/`), adjudication table + citations |
+| `docs/ubuntu_setup.md` | **Ordered install guide for the Phase-2 Ubuntu machine** — OS → NVIDIA → Docker → challenge stack → our module. MUST be updated whenever any change affects installation/deployment (new dependency, model weight, env var, container change) |
+| `docs/upstream_notes.md` | Distilled upstream repo internals (topic contract, launch mechanics, gotchas) |
+| `docs/sim_verification.md` | "Is everything working?" runbook — three-tier ladder (Windows-now → WSL2 → native Ubuntu sim) with exact command + PASS/FAIL fix per step, and a known-good-state checklist |
+| `docs/question_analysis.md` | Training-question taxonomy — verified stats (75 Q / 255 pts; IF = 70.6%) |
+| `docs/prior_art.md` | Published-work survey: SORT3D blueprint, VLN/EQA literature, reading list |
+| `docs/organizer_playbook.md` | Organiser theses distilled + 2025 winner intel |
+| `docs/proposals/` | Architecture debate record: 3 proposals + 3 critiques |
 | `LOG.md` | Running session log — append, never rewrite history |
 | `upstream/` | Clone of the official challenge repo — **read-only reference, git-ignored**; never edit; `git pull` to refresh |
-| `src/` | (to be created) our `ai_module` core + ros_adapter |
+| `src/` | Our `ai_module`: pure-Python `core/` (geometry, nav, fsm, parsing, perception, mocks — see `src/README.md`) + `ros_adapter/` (Phase 2). Run tests: `python -m pytest` from `src/` |
 
 ## Hard constraints
 
