@@ -113,6 +113,9 @@ pip package — no ROS needed for the latter.)
 3. Perception model weights (detector, local VLM fallback) are baked into the image at build time
    — the eval host must be assumed offline-capable (architecture §1 row 7). Keep the image under
    the size the eval machine tolerates (upstream README notes a Simply NUC i9 host).
+   Before the Docker build, set the parse-provider env vars (`VLA_LLM_PRIMARY_*` / `_SECONDARY_*` /
+   `_LOCAL_*` and the key vars they name, e.g. `OPENAI_API_KEY`) or place a keyless `llm_config.json`
+   at the repo root — see `core/llm/config.py` for the full var list. Unset = ladder runs local/regex only.
 4. Verify against a full training scene with the 10-minute clock before any submission
    (`docs/master_plan.md` Phase 2/3).
 
