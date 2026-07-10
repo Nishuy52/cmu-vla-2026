@@ -1,0 +1,94 @@
+[
+  {
+    "name": "confirm_keeps_winner",
+    "input": {
+      "question": "the mug on the left table",
+      "winner_summary": "#7 (mug) at (1.20,0.40,0.80)",
+      "fact_table": "  clause 0: PASS | on: bottom 0.79 vs top 0.78 (ok)",
+      "runner_up_summary": "#9 (mug) at (3.10,0.40,0.80)",
+      "notes": "definite article 'the'"
+    },
+    "stub_replies": ["{\"verdict\": \"confirm\", \"missed_constraint\": null, \"reason\": \"all clauses pass\"}"],
+    "expected": {"action": "keep", "verdict": "confirm", "winner_id": 7}
+  },
+  {
+    "name": "runner_up_swaps_when_present",
+    "input": {
+      "question": "the chair closest to the table",
+      "winner_summary": "#1 (chair) at (0.00,0.00,0.00)",
+      "fact_table": "  clause 0: FAIL | closest_to: not nearest by 0.4m",
+      "runner_up_summary": "#2 (chair) at (0.50,0.00,0.00)",
+      "notes": ""
+    },
+    "stub_replies": ["{\"verdict\": \"runner_up\", \"missed_constraint\": null, \"reason\": \"runner-up is the true closest\"}"],
+    "expected": {"action": "runner_up", "verdict": "runner_up", "winner_id": 2}
+  },
+  {
+    "name": "runner_up_keeps_when_absent",
+    "input": {
+      "question": "the lamp",
+      "winner_summary": "#5 (lamp) at (2.00,1.00,1.10)",
+      "fact_table": "  clause 0: PASS | category match",
+      "runner_up_summary": "(none)",
+      "notes": ""
+    },
+    "stub_replies": ["{\"verdict\": \"runner_up\", \"missed_constraint\": null, \"reason\": \"prefer alternative\"}"],
+    "expected": {"action": "keep", "verdict": "runner_up", "winner_id": 5}
+  },
+  {
+    "name": "neither_reresolve_when_time",
+    "input": {
+      "question": "the red mug on the shelf",
+      "winner_summary": "#7 (mug) at (1.20,0.40,0.80)",
+      "fact_table": "  clause 0: PASS | on: shelf ok",
+      "runner_up_summary": "#9 (mug) at (3.10,0.40,0.80)",
+      "notes": "colour attribute 'red' may be unencoded"
+    },
+    "stub_replies": ["{\"verdict\": \"neither\", \"missed_constraint\": \"red\", \"reason\": \"colour not verified\"}"],
+    "remaining_s": 200.0,
+    "reresolve_id": 42,
+    "expected": {"action": "re_resolve", "verdict": "neither", "missed_constraint": "red", "winner_id": 42}
+  },
+  {
+    "name": "neither_keeps_when_low_time",
+    "input": {
+      "question": "the red mug on the shelf",
+      "winner_summary": "#7 (mug) at (1.20,0.40,0.80)",
+      "fact_table": "  clause 0: PASS | on: shelf ok",
+      "runner_up_summary": "#9 (mug) at (3.10,0.40,0.80)",
+      "notes": "colour attribute 'red' may be unencoded"
+    },
+    "stub_replies": ["{\"verdict\": \"neither\", \"missed_constraint\": \"red\", \"reason\": \"colour not verified\"}"],
+    "remaining_s": 30.0,
+    "reresolve_id": 42,
+    "expected": {"action": "keep", "verdict": "neither", "missed_constraint": "red", "winner_id": 7}
+  },
+  {
+    "name": "malformed_then_repair_confirms",
+    "input": {
+      "question": "the sofa near the window",
+      "winner_summary": "#3 (sofa) at (4.00,2.00,0.50)",
+      "fact_table": "  clause 0: PASS | near: 0.9m within tol",
+      "runner_up_summary": "#8 (sofa) at (9.00,2.00,0.50)",
+      "notes": ""
+    },
+    "stub_replies": [
+      "sure! {verdict: confirm, missed_constraint: null}",
+      "{\"verdict\": \"confirm\", \"missed_constraint\": null, \"reason\": \"repaired\"}"
+    ],
+    "expected": {"action": "keep", "verdict": "confirm", "winner_id": 3}
+  },
+  {
+    "name": "timeout_keeps_winner",
+    "input": {
+      "question": "the plant on the desk",
+      "winner_summary": "#4 (plant) at (0.50,0.50,0.90)",
+      "fact_table": "  clause 0: PASS | on: desk ok",
+      "runner_up_summary": "(none)",
+      "notes": ""
+    },
+    "stub_replies": ["{\"verdict\": \"confirm\", \"missed_constraint\": null, \"reason\": \"ignored\"}"],
+    "timeout": true,
+    "expected": {"action": "keep", "verdict": "fallback", "winner_id": 4}
+  }
+]

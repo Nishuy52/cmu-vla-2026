@@ -1,0 +1,36 @@
+[
+  {
+    "name": "match_confirms",
+    "input": {"anchor_desc": "wooden dining table"},
+    "stub_replies": ["{\"match\": true, \"actual_label\": \"table\", \"confidence\": 0.95}"],
+    "expected": {"action": "confirm", "match": true, "confidence": 0.95}
+  },
+  {
+    "name": "mismatch_high_conf_demotes",
+    "input": {"anchor_desc": "office chair"},
+    "stub_replies": ["{\"match\": false, \"actual_label\": \"stool\", \"confidence\": 0.85}"],
+    "expected": {"action": "demote", "match": false, "actual_label": "stool", "confidence": 0.85}
+  },
+  {
+    "name": "mismatch_low_conf_confirms",
+    "input": {"anchor_desc": "floor lamp"},
+    "stub_replies": ["{\"match\": false, \"actual_label\": \"lamp\", \"confidence\": 0.4}"],
+    "expected": {"action": "confirm", "match": false, "confidence": 0.4}
+  },
+  {
+    "name": "malformed_then_repair_match",
+    "input": {"anchor_desc": "red sofa"},
+    "stub_replies": [
+      "it matches, high confidence",
+      "{\"match\": true, \"actual_label\": \"sofa\", \"confidence\": 0.9}"
+    ],
+    "expected": {"action": "confirm", "match": true, "confidence": 0.9}
+  },
+  {
+    "name": "timeout_confirms",
+    "input": {"anchor_desc": "bookshelf"},
+    "stub_replies": ["{\"match\": false, \"actual_label\": \"wardrobe\", \"confidence\": 0.95}"],
+    "timeout": true,
+    "expected": {"action": "confirm", "match": null}
+  }
+]

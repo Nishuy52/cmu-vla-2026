@@ -6,6 +6,6 @@ data/
 datasets/
 *.bag
 *.db3
-checkpoints/
+/checkpoints/
 logs/
 .pytest_cache/

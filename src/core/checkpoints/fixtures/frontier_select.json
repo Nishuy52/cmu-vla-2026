@@ -1,0 +1,36 @@
+[
+  {
+    "name": "choice_two",
+    "input": {"question": "how many chairs are in the kitchen", "n_frontiers": 5},
+    "stub_replies": ["{\"choice\": 2, \"reason\": \"doorway toward kitchen\"}"],
+    "expected": {"action": "choice", "choice": 2, "index": 1}
+  },
+  {
+    "name": "choice_five_boundary",
+    "input": {"question": "find the sofa", "n_frontiers": 5},
+    "stub_replies": ["{\"choice\": 5, \"reason\": \"unexplored far room\"}"],
+    "expected": {"action": "choice", "choice": 5, "index": 4}
+  },
+  {
+    "name": "out_of_range_fallback",
+    "input": {"question": "find the plant", "n_frontiers": 5},
+    "stub_replies": ["{\"choice\": 9, \"reason\": \"invalid\"}"],
+    "expected": {"action": "fallback"}
+  },
+  {
+    "name": "malformed_then_repair_choice",
+    "input": {"question": "which room has the tv", "n_frontiers": 5},
+    "stub_replies": [
+      "I would go with door number one",
+      "{\"choice\": 1, \"reason\": \"repaired\"}"
+    ],
+    "expected": {"action": "choice", "choice": 1, "index": 0}
+  },
+  {
+    "name": "timeout_fallback",
+    "input": {"question": "find the exit", "n_frontiers": 5},
+    "stub_replies": ["{\"choice\": 3, \"reason\": \"ignored\"}"],
+    "timeout": true,
+    "expected": {"action": "fallback"}
+  }
+]

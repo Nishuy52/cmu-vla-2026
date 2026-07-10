@@ -1,0 +1,42 @@
+[
+  {
+    "name": "present_provisional",
+    "input": {"noun": "extinguisher", "raw": "fire extinguisher", "n_tiles": 4},
+    "stub_replies": ["{\"present\": true, \"tile\": 2, \"bbox_hint\": [10, 20, 60, 120], \"confidence\": 0.8}"],
+    "expected": {"action": "provisional", "tile": 2, "confidence": 0.8, "score": 0.4, "n_obs": 1, "min_points": 3}
+  },
+  {
+    "name": "absent_proceeds",
+    "input": {"noun": "ladder", "raw": "ladder", "n_tiles": 4},
+    "stub_replies": ["{\"present\": false, \"tile\": null, \"bbox_hint\": null, \"confidence\": 0.9}"],
+    "expected": {"action": "absent", "confidence": 0.9}
+  },
+  {
+    "name": "present_no_bbox_treated_absent",
+    "input": {"noun": "clock", "raw": "wall clock", "n_tiles": 4},
+    "stub_replies": ["{\"present\": true, \"tile\": 1, \"bbox_hint\": null, \"confidence\": 0.5}"],
+    "expected": {"action": "absent", "confidence": 0.5}
+  },
+  {
+    "name": "hallucination_cap_score_below_gate",
+    "input": {"noun": "vase", "raw": "vase", "n_tiles": 4},
+    "stub_replies": ["{\"present\": true, \"tile\": 0, \"bbox_hint\": [0, 0, 40, 40], \"confidence\": 1.0}"],
+    "expected": {"action": "provisional", "tile": 0, "confidence": 1.0, "score": 0.5, "n_obs": 1, "min_points": 3}
+  },
+  {
+    "name": "malformed_then_repair_present",
+    "input": {"noun": "cabinet", "raw": "cabinet", "n_tiles": 4},
+    "stub_replies": [
+      "present yes tile 3 bbox 5 5 50 90",
+      "{\"present\": true, \"tile\": 3, \"bbox_hint\": [5, 5, 50, 90], \"confidence\": 0.7}"
+    ],
+    "expected": {"action": "provisional", "tile": 3, "confidence": 0.7, "score": 0.35, "n_obs": 1, "min_points": 3}
+  },
+  {
+    "name": "timeout_absent",
+    "input": {"noun": "printer", "raw": "printer", "n_tiles": 4},
+    "stub_replies": ["{\"present\": true, \"tile\": 0, \"bbox_hint\": [1, 1, 2, 2], \"confidence\": 0.9}"],
+    "timeout": true,
+    "expected": {"action": "absent"}
+  }
+]
