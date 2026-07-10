@@ -47,3 +47,20 @@ Append-only. Newest entry last. Format: date (SGT), what was done, decisions, ne
 3. Upstream deep-dive → `docs/upstream_notes.md` (clone is now local)
 4. Question JSON analysis → `docs/question_analysis.md`
 5. Then scaffold `src/core/`
+
+---
+
+## 2026-07-10 (session 3) — Delegated deep-dives, verified
+
+Work fanned out to role agents; results independently verified where fact-heavy.
+
+**Done:**
+- `docs/upstream_notes.md` — full upstream distillation incl. autonomy-stack submodule (fetched at pinned `81035e9` after fixing a broken shallow checkout). Highlights: relaunch-per-question, 1 Hz question republish, Marker scored by GT overlap + its center used as nav goal, Pose2D heading ignored (radians if ever enabled), terrain map = XYZI cloud with intensity = obstacle height (m), traversable < ~0.1–0.2 m, waypointConverter snaps infeasible waypoints, **TARE/FAR planners NOT launched at test time and their triggers aren't allowed topics → we implement our own exploration**, CycloneDDS + Unity TCP bridge on :10000, keep waypoints near the vehicle.
+- `docs/question_analysis.md` — 75 Q / 255 pts; instruction-following **70.6% of points**; relations: on(48), closest-to(37), near(33), between(17); zero egocentric phrasing; only 10 attribute mentions; no GT answers in JSON (only trajectory PLYs); "refridgerator" typo. **All claims independently re-computed and CONFIRMED by a fresh-context verification pass.**
+- `docs/organizer_playbook.md` — organiser theses distilled (toolbox-over-raw-LLM-geometry, +11.6-pt captioning gain, fisheye-VO failure warning → lidar for geometry / camera for semantics). 2025 3rd place: CMU MRSD "CopyPasta" (Gemini 2.5 Pro + ROS state machine); no public leaderboard/scores found (challenge site 404s, IROS-25 workshop not archived).
+
+**Decisions:**
+- Exploration is on us (built-in planners off at test time) — actuate only via `/way_point_with_heading`.
+- Documentation and commits carry no tooling attribution (user rule, applies from session 3 onward).
+
+**Next step:** independent architecture proposals by parallel frontier-model agents → structured critique → merged architecture v1.0 with full citations (plagiarism-safe: no unlicensed code reuse, concepts attributed).

@@ -16,8 +16,8 @@ Highest-leverage thinking while Fable is cheap. All outputs are docs/code in thi
 
 - [x] Workspace + git init + docs skeleton (this commit)
 - [ ] **USER ACTION: register for the challenge** (form on challenge site) — before 15 Jul
-- [ ] Deep-dive the cloned upstream repo (`upstream/CMU-VLN-Challenge-2026`): dummy `ai_module` node, message flow, launch files, Docker setup → write `docs/upstream_notes.md`
-- [ ] Study `questions/` JSON for all 15 training scenes → question taxonomy + answer-format stats → `docs/question_analysis.md`
+- [x] Deep-dive the cloned upstream repo (`upstream/CMU-VLN-Challenge-2026`): dummy `ai_module` node, message flow, launch files, Docker setup → write `docs/upstream_notes.md` *(done 10 Jul incl. submodule: full topic contract, terrain XYZI semantics, TARE/FAR are OFF at test time → own exploration required, 14 implementer gotchas)*
+- [x] Study `questions/` JSON for all 15 training scenes → question taxonomy + answer-format stats → `docs/question_analysis.md` *(done 10 Jul, independently verified: 75 Q / 255 pts, instruction-following = 70.6% of points, all-allocentric relations, ~zero attributes)*
 - [x] Research prior art (SORT3D paper, 2025 leaderboard winners, OpenEQA baselines) → `docs/prior_art.md` *(done 10 Jul — SORT3D is the organisers' own system and integrates with our exact stack; zero-shot is competitive, fine-tuning demoted to optional)*
 - [ ] Write full system architecture → `docs/architecture.md` (draft exists; harden it with Fable)
 - [ ] Scaffold `ai_module` core as OS-independent Python (mocked ROS interfaces) + unit tests
