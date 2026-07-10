@@ -113,6 +113,15 @@ pip package — no ROS needed for the latter.)
 3. Perception model weights (detector, local VLM fallback) are baked into the image at build time
    — the eval host must be assumed offline-capable (architecture §1 row 7). Keep the image under
    the size the eval machine tolerates (upstream README notes a Simply NUC i9 host).
+   The open-vocab detector is a GroundingDINO-class model (`core/perception/detector.py`
+   `GroundingDinoDetector`, lazy-imported); install its deps into the image and pre-download the
+   weights so nothing is fetched at run time:
+   ```bash
+   pip install torch torchvision groundingdino-py     # CUDA wheels for the 4090 eval box
+   # pre-fetch GroundingDINO weights for model 'IDEA-Research/grounding-dino-base'
+   ```
+   Until these are present the detector raises a clear ImportError and the offline path falls back
+   to the scripted `FakeDetector` (tests only).
    Before the Docker build, set the parse-provider env vars (`VLA_LLM_PRIMARY_*` / `_SECONDARY_*` /
    `_LOCAL_*` and the key vars they name, e.g. `OPENAI_API_KEY`) or place a keyless `llm_config.json`
    at the repo root — see `core/llm/config.py` for the full var list. Unset = ladder runs local/regex only.

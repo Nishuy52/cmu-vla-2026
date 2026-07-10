@@ -125,6 +125,14 @@ class BasicSceneIndex:
     def all_instances(self):
         return list(self._instances)
 
+    def next_id(self) -> int:
+        """The instance_id the next fresh (non-merged) instance would receive.
+
+        Read-only peek used by the tracker to mint ids for unmatched detections;
+        ``add`` still owns id assignment and will reassign on collision.
+        """
+        return self._next_id
+
     def by_label(self, noun: str):
         """Typo/plural/synonym-tolerant lookup; returns matching instances."""
         query = normalize_label(noun)
