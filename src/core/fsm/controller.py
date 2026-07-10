@@ -300,6 +300,27 @@ class QuestionController:
 # --------------------------------------------------------------------------- module helpers
 
 
+import re
+
+_NUMERICAL_PHRASES = ("how many", "number of", "count the", "count of")
+_NUMERICAL_WORD_RE = re.compile(r"\bcount\b")
+
+# Movement/instruction verbs that open (or open a clause of) an instruction-following
+# question, per the upstream questions.json phrasing (e.g. "Go near the X and stop at
+# the Y", "First, go to...", "Take the path...", "Head...", "Navigate...", "Move...",
+# "Walk...", "Drive...", "Stop at...", "Pass by...", "Avoid...").
+_INSTRUCTION_VERBS_RE = re.compile(
+    r"\b("
+    r"go|goes|going|go near|go to|go between|go past|"
+    r"take the path|take a path|"
+    r"head|navigate|move|walk|drive|"
+    r"stop at|stop by|"
+    r"pass by|pass|"
+    r"avoid"
+    r")\b"
+)
+
+
 def _infer_qtype(q: Question) -> QType:
     """Cheap qtype heuristic used until the parse settles it; total, defaults NUMERICAL-safe.
 
@@ -309,9 +330,9 @@ def _infer_qtype(q: Question) -> QType:
     qtype = getattr(q, "qtype", None)
     if isinstance(qtype, QType):
         return qtype
-    if any(w in text for w in ("how many", "number of", "count")):
+    if any(w in text for w in _NUMERICAL_PHRASES) or _NUMERICAL_WORD_RE.search(text):
         return QType.NUMERICAL
-    if any(w in text for w in ("go to", "navigate", "take the path", "avoid", "drive")):
+    if _INSTRUCTION_VERBS_RE.search(text):
         return QType.INSTRUCTION_FOLLOWING
     return QType.OBJECT_REFERENCE
 
