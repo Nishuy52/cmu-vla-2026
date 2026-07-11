@@ -307,7 +307,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=None, help="output dir (default reports/battery_<date>/)")
     ap.add_argument("--scenes", default=None, help="comma-separated scene subset")
     ap.add_argument("--seed", type=int, default=0, help="scene-synthesis seed")
+    ap.add_argument(
+        "--groundtruth",
+        default=None,
+        help="Unity root dir of GT scene folders; switches to battery v2 REAL accuracy "
+        "scoring (delegates to core.runner.gt_battery) instead of structural health.",
+    )
     args = ap.parse_args(argv)
+
+    # Battery v2: REAL accuracy against ground-truth scenes.
+    if args.groundtruth is not None:
+        from core.runner import gt_battery
+
+        gt_argv = ["--groundtruth", args.groundtruth, "--questions", args.questions]
+        if args.out is not None:
+            gt_argv += ["--out", args.out]
+        if args.scenes is not None:
+            gt_argv += ["--scenes", args.scenes]
+        return gt_battery.main(gt_argv)
 
     scenes = [s.strip() for s in args.scenes.split(",")] if args.scenes else None
     out_dir = args.out or (DEFAULT_OUT_ROOT / f"battery_{date.today().isoformat()}")

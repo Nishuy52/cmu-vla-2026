@@ -1,0 +1,125 @@
+{
+  "date": "2026-07-11",
+  "n_questions": 5,
+  "scenes": [
+    "loft"
+  ],
+  "missing_scenes": [],
+  "aggregate": {
+    "numerical": {
+      "n": 1,
+      "exact_match_rate_pipeline": 1.0,
+      "n_with_independent": 1,
+      "independent_agreement_rate": 0.0
+    },
+    "object_reference": {
+      "n": 2,
+      "n_scored": 0,
+      "mean_iou": null,
+      "iou_at_0p25": null,
+      "iou_at_0p5": null
+    },
+    "instruction_following": {
+      "n": 2,
+      "mean_frechet_m": 6.0206,
+      "mean_coverage_1m": 0.0
+    }
+  },
+  "scores": [
+    {
+      "scene": "loft",
+      "qtype": "numerical",
+      "question": "How many black pillows are on the sofa?",
+      "our_count": 11,
+      "gt_count_pipeline": 11,
+      "exact_match": true,
+      "gt_count_independent": 9,
+      "independent_source": "referential_class_only",
+      "iou": null,
+      "gt_target_id": null,
+      "target_source": "",
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "note": "pipeline=11 vs independent=9 (disagreement)"
+    },
+    {
+      "scene": "loft",
+      "qtype": "object_reference",
+      "question": "The blue chair that is closest to the cup of coffee.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "target_source": "none",
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "loft",
+      "qtype": "object_reference",
+      "question": "Find the potted plant between a vase and the cabinet with a TV on it.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "target_source": "ambiguous",
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "loft",
+      "qtype": "instruction_following",
+      "question": "Go to the cup near the TV remote and avoid the path near the cabinet.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "target_source": "",
+      "frechet_m": 6.5703,
+      "coverage_1m": 0.0,
+      "our_n_waypoints": 128,
+      "gt_n_waypoints": 739,
+      "frame_aligned": false,
+      "note": "probable frame offset: our-path vs GT-path centroids far apart; VLA-3D object frame and challenge trajectory frame are not aligned (no transform shipped) \u2014 read Frechet/coverage as diagnostic only"
+    },
+    {
+      "scene": "loft",
+      "qtype": "instruction_following",
+      "question": "Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "target_source": "",
+      "frechet_m": 5.471,
+      "coverage_1m": 0.0,
+      "our_n_waypoints": 280,
+      "gt_n_waypoints": 771,
+      "frame_aligned": false,
+      "note": "probable frame offset: our-path vs GT-path centroids far apart; VLA-3D object frame and challenge trajectory frame are not aligned (no transform shipped) \u2014 read Frechet/coverage as diagnostic only"
+    }
+  ]
+}
