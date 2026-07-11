@@ -305,3 +305,10 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 2. Test-suite tiering: @pytest.mark.slow markers + "-m not slow" default, budget-scale the integration tests, pytest-xdist; update session protocol (design agreed in-conversation 11 Jul)
 3. Red-team design review over the GT-battery + sweep numbers → hardening backlog
 4. Investigate: numerical over-count (independent agreement 15–27%), 3 unaligned IF scenes (goal disambiguation), 24 unscoreable OR questions
+
+## 2026-07-11 (architecture folder) - milestone one-liner
+
+- Finished task: current-implementation architecture guide as a
+  10-doc `architecture/` folder (source-only, core-loop
+  weighted; supersedes the rejected single-file draft) - record
+  at `docs/tasks/T6-architecture-folder/`

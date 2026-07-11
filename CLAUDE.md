@@ -32,6 +32,7 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 | `docs/windows_workplan.md` | What's doable on Windows now; core/adapter split design |
 | `docs/soc_cluster_guide.md` | NUS SoC cluster: access, Slurm, GPUs, TODOs to verify |
 | `docs/architecture.md` | System design v1.0 — merged from the 3-proposal debate (`docs/proposals/`), adjudication table + citations |
+| `architecture/` | **Current-implementation guide** - 10 source-verified docs (README index + 01-09), core-loop weighted (FSM tick loop, time budgeting, parsing, perception, answer heads); `09-gaps-and-risks.md` tracks implemented-vs-designed divergences. Describes what is BUILT; `docs/architecture.md` stays the design record |
 | `docs/ubuntu_setup.md` | **Ordered install guide for the Phase-2 Ubuntu machine** — OS → NVIDIA → Docker → challenge stack → our module. MUST be updated whenever any change affects installation/deployment (new dependency, model weight, env var, container change) |
 | `docs/upstream_notes.md` | Distilled upstream repo internals (topic contract, launch mechanics, gotchas) |
 | `docs/sim_verification.md` | "Is everything working?" runbook — three-tier ladder (Windows-now → WSL2 → native Ubuntu sim) with exact command + PASS/FAIL fix per step, and a known-good-state checklist |

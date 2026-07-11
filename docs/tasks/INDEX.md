@@ -12,3 +12,9 @@
 - **T4** implementation-gaps — top-5 discrepancies (missing /
   contradictory) between the implementation and the imported
   research findings; ranked, cited, one candidate falsified.
+- **T5** current-architecture - single-file root
+  ARCHITECTURE.md; commit dropped by rebase, superseded by T6
+  (content salvaged from `a864e0b` as raw material).
+- **T6** architecture-folder - root `architecture/` explainer
+  docs decomposed from the T5 monolith; core loop, perception,
+  answer submission, time budgeting deepened.
