@@ -84,3 +84,32 @@ Thinnest published area — biggest opportunity to differentiate:
 ## Open question carried forward
 
 - 2025 winning teams' write-ups: an MRSD team took 3rd worldwide ([CMU RI news](https://www.ri.cmu.edu/research-group-to-host-cmu-vision-language-autonomy-challenge/), [MRSD newsletter](https://labs.ri.cmu.edu/mrsd-news/articles/)); no arXiv technical reports found yet. Check the [2025 leaderboard page](https://www.ai-meets-autonomy.com/cmu-vla-challenge) and IROS-2025 workshop proceedings for team writeups when hardening the architecture.
+
+---
+
+## Update 11 Jul 2026 - open question resolved
+
+The 2025-results question above is settled. The full 2025
+leaderboard (with scores) was recovered via a Wayback snapshot of
+the challenge site, and per-team method dossiers were written from
+primary sources (entrant code read directly, papers fetched in
+full, talk videos frame-read). Index + leaderboard:
+`docs/prior_art/README.md`; dossiers under `docs/prior_art/`.
+
+- 1st: NROS Lab, HIT Shenzhen - 44.26. Scene graph + multi-modal
+  frontier-exploration scoring; method self-reported (Chinese
+  sources only), no public code.
+- 2nd: ReasonX, NTU+NUS - 34.58. Gemini 2.5 Pro JSON planner +
+  RoboRefer-8B pixel pointing + camera-ray waypoints; public code.
+- 3rd: CopyPasta, CMU MRSD - 30.98. Gemini state machine; public
+  repo + full method talk (contra the note above that none was
+  found - see `docs/prior_art/2025_3rd_copypasta.md`).
+- 4th: URL-KAIST - 22.80. Most feature-complete finalist but a
+  rushed, bug-ridden build - robustness beat componentry.
+
+Key strategic finding: ground-truth object markers
+(`/object_markers`) were legal and widely used in 2025 (ReasonX
+grounding, CopyPasta for two of three question types). That topic
+is absent from the 2026 allowed-I/O list (`docs/challenge_brief.md`),
+so 2025 pipelines do not port directly - open-vocabulary
+perception becomes the differentiator.

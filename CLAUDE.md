@@ -38,11 +38,39 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 | `docs/phase2_playbook.md` | **THE Ubuntu order-of-operations** — Gates 0–5 from fresh install to first scored dry-run, then the calibration loop to the Aug 3 MVS submission. Start here on Ubuntu day one |
 | `docs/question_analysis.md` | Training-question taxonomy — verified stats (75 Q / 255 pts; IF = 70.6%) |
 | `docs/prior_art.md` | Published-work survey: SORT3D blueprint, VLN/EQA literature, reading list |
+| `docs/prior_art/` | Per-source deep-dive dossiers (imported 11 Jul from a parallel research stream): full 2025 leaderboard + per-team method dossiers from primary sources, SORT3D exact thresholds, VLA-3D question-generation spec. `README.md` inside is the index and carries the provenance/conflict rules |
+| `docs/competitor_forks.md` | Dev-kit fork-network snapshot - who else is building for 2026, as of 11 Jul |
+| `docs/io_contract_crosscheck.md` | Independent source-inspection of the dev-kit I/O contract - corroborates `challenge_brief.md`/`upstream_notes.md` (which stay authoritative) |
 | `docs/organizer_playbook.md` | Organiser theses distilled + 2025 winner intel |
 | `docs/proposals/` | Architecture debate record: 3 proposals + 3 critiques |
 | `LOG.md` | Running session log — append, never rewrite history |
+| `docs/tasks/` | Task records - one folder per task + `INDEX.md`; see "Task-record workflow" below |
 | `upstream/` | Clone of the official challenge repo — **read-only reference, git-ignored**; never edit; `git pull` to refresh |
 | `src/` | Our `ai_module`: pure-Python `core/` (geometry, nav, fsm, parsing, perception, mocks — see `src/README.md`) + `ros_adapter/` (Phase 2). Run tests: `python -m pytest` from `src/` |
+
+## Task-record workflow (adapter, added 11 Jul 2026)
+
+Non-trivial work is tracked as task folders (a convention that
+arrived with the parallel research stream). In this repo the
+workflow is adapted to fit the existing conventions instead of
+replacing them:
+
+- Task records live under `docs/tasks/T<N>-<slug>/` (committed, so
+  every agent and teammate can read them). `docs/tasks/INDEX.md` is
+  the one-line-per-task index; next task number = highest existing
+  N + 1.
+- Each task folder's `task.md` is the detailed record (intent,
+  context, acceptance criteria, todo, dated notes). Detailed
+  progress logging for a task goes THERE, not in `LOG.md`.
+- `LOG.md` gets ONLY minimal one-liner entries at task milestones -
+  started / finished / wrapped up a task, with a pointer to the
+  task folder - never detailed task logs. Session entries unrelated
+  to task records keep the existing format.
+- Imported task folders (T1-T4) predate this repo merge and are
+  kept verbatim as historical records: path references inside them
+  use the pre-merge research-workspace layout (e.g.
+  `docs/prior-art.md` there = `docs/prior_art/README.md` here,
+  `docs/io-contract.md` = `docs/io_contract_crosscheck.md`).
 
 ## Hard constraints
 

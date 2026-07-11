@@ -272,3 +272,22 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 - Suite green (~711 tests). Reports: `reports/gt_battery_full_2026-07-11/`
 
 **Next:** k-fold CV sweep harness (leave-3-scenes-out) over high-sensitivity calibration params; OR scoreability via vocabulary bridging; investigate the 3 unaligned scenes + counting over-count.
+
+---
+
+## 2026-07-11 (research import) - parallel 2025-results research stream folded in
+
+- Imported an independent parallel research stream on branch `docs/import-2025-research`: 15 per-source dossiers under `docs/prior_art/` (index + provenance/conflict rules: `docs/prior_art/README.md`), `docs/competitor_forks.md`, `docs/io_contract_crosscheck.md`, and the 2025 leaderboard screenshot (`docs/assets/cmu_vla_2025_leaderboard.png`)
+- Resolves the standing "2025 1st/2nd unknown" gap: 1st NROS (HITSZ) 44.26, 2nd ReasonX (NTU+NUS) 34.58, 3rd CopyPasta (CMU MRSD) 30.98, 4th URL-KAIST 22.80; GT `/object_markers` reliance means most 2025 pipelines don't port to the 2026 I/O list
+- Dated update sections appended to `prior_art.md`, `organizer_playbook.md`, `vla3d_notes.md`; discovery rows added to `CLAUDE.md` layout table and `README.md`; no existing team text rewritten
+- Import references to the pre-merge workspace's roadmap/task files were remapped to `architecture.md`/`master_plan.md` equivalents so no links dangle
+
+**Next:** review + merge the PR, then mine the dossiers for calibration targets (e.g. VLA-3D relation thresholds vs `core/geometry/toolbox.py` constants; CopyPasta/ReasonX failure modes as battery test cases)
+
+---
+
+## 2026-07-11 (task-record import) - milestone one-liners
+
+- Wrapped up task: research import into this repo - record at `docs/tasks/T3-merge-into-team-repo/`
+- Finished task: implementation-vs-research gap analysis (ranked top-5) - record at `docs/tasks/T4-implementation-gaps/`
+- Task records now live under `docs/tasks/` (workflow adapter in `CLAUDE.md`); LOG gets one-liners only at task milestones from here on
