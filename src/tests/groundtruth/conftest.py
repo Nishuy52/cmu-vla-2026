@@ -32,3 +32,20 @@ def loft_referential() -> dict:
         pytest.skip("loft referential statements not present")
     with open(p, encoding="utf-8") as fh:
         return json.load(fh)
+
+
+@pytest.fixture(scope="session")
+def loft_scene_graph() -> dict:
+    p = LOFT_DIR / "loft_scene_graph.json"
+    if not p.exists():
+        pytest.skip("loft scene graph not present")
+    with open(p, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+#: Full downloaded VLA-3D Unity root (all 15 training scenes), if extracted.
+FULL_UNITY_ROOT = _REPO / "data" / "vla3d" / "Unity"
+_have_full = FULL_UNITY_ROOT.is_dir() and (FULL_UNITY_ROOT / "loft").is_dir()
+requires_full_unity = pytest.mark.skipif(
+    not _have_full, reason="full VLA-3D Unity dataset not extracted"
+)

@@ -9,6 +9,8 @@ from core.groundtruth.loader import load_scene
 from core.interfaces import MarkerBox
 from core.perception.scene_index import BasicSceneIndex
 
+from core.groundtruth.scoring import Frame2D, align_scene_trajectories, fit_frame
+
 from tests.groundtruth.conftest import requires_loft, LOFT_DIR
 
 
@@ -211,3 +213,212 @@ def test_instruction_score_aligned_paths(tmp_path):
     assert sc.frame_aligned is True
     assert sc.coverage_1m == pytest.approx(1.0)
     assert sc.frechet_m == pytest.approx(0.0)
+
+
+# --------------------------------------------------------------------------- frame fit
+
+
+def test_fit_frame_pure_translation():
+    """A shifted-but-unrotated correspondence recovers the translation, yaw ~ 0."""
+    src = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 3.0]])
+    shift = np.array([5.0, -1.5])
+    dst = src + shift
+    frame, res = fit_frame(src, dst)
+    assert res == pytest.approx(0.0, abs=1e-9)
+    assert frame.theta == pytest.approx(0.0, abs=1e-9)
+    assert np.allclose(frame.t, shift)
+    assert np.allclose(frame.apply(src), dst)
+
+
+def test_fit_frame_recovers_yaw():
+    """A rotated+translated correspondence needs yaw; translation-only can't fit it."""
+    theta = np.deg2rad(35.0)
+    c, s = np.cos(theta), np.sin(theta)
+    rot = np.array([[c, -s], [s, c]])
+    t = np.array([3.0, -2.0])
+    src = np.array([[0.0, 0.0], [4.0, 0.0], [4.0, 2.0], [1.0, 3.0]])
+    dst = src @ rot.T + t
+    frame, res = fit_frame(src, dst, yaw_residual_gate=0.5)
+    assert res == pytest.approx(0.0, abs=1e-6)
+    assert frame.theta == pytest.approx(theta, abs=1e-6)
+    assert np.allclose(frame.apply(src), dst, atol=1e-6)
+
+
+def test_fit_frame_translation_only_when_within_gate():
+    """When translation residual is under the gate, yaw is NOT introduced."""
+    src = np.array([[0.0, 0.0], [3.0, 0.0]])
+    dst = src + np.array([1.0, 1.0])
+    frame, res = fit_frame(src, dst, yaw_residual_gate=0.5)
+    assert frame.theta == pytest.approx(0.0)  # stayed translation-only
+    assert res == pytest.approx(0.0, abs=1e-9)
+
+
+def test_align_scene_two_endpoints_maps_ends_to_goals():
+    """Two trajectory endpoints -> two goal centroids fits one scene transform."""
+    # sim-frame trajectories sharing a start at origin
+    t4 = np.array([[0.0, 0.0, 0.75], [3.0, 0.0, 0.75], [6.0, 1.0, 0.75]])
+    t5 = np.array([[0.0, 0.0, 0.75], [1.0, -2.0, 0.75], [7.0, -1.0, 0.75]])
+    # object-frame goals = sim endpoints shifted by a known translation
+    shift = np.array([-0.15, -0.70])
+    goal4 = t4[-1, :2] + shift
+    goal5 = t5[-1, :2] + shift
+    frame, res = align_scene_trajectories([(t4, goal4), (t5, goal5)])
+    assert res == pytest.approx(0.0, abs=1e-9)
+    assert np.allclose(frame.apply(t4[-1:])[0], goal4)
+    assert np.allclose(frame.apply(t5[-1:])[0], goal5)
+    # shared start maps to a single spawn point in the object frame
+    s4 = frame.apply(t4[:1])[0]
+    s5 = frame.apply(t5[:1])[0]
+    assert np.allclose(s4, s5)
+
+
+def test_align_scene_single_endpoint_translation_only():
+    """One usable endpoint => translation-only fit (yaw unidentifiable)."""
+    t = np.array([[0.0, 0.0, 0.75], [5.0, 0.0, 0.75]])
+    goal = np.array([5.0, 2.0])  # shift (0, 2)
+    frame, res = align_scene_trajectories([(t, goal), (t, None)])
+    assert frame.theta == pytest.approx(0.0)
+    assert res == pytest.approx(0.0, abs=1e-9)
+    assert np.allclose(frame.t, np.array([0.0, 2.0]))
+
+
+def test_align_scene_no_goals_returns_none():
+    t = np.array([[0.0, 0.0, 0.75], [5.0, 0.0, 0.75]])
+    frame, res = align_scene_trajectories([(t, None)])
+    assert frame is None and res is None
+
+
+def test_score_if_with_frame_transforms_gt(tmp_path):
+    """A fitted frame maps the GT path into our frame before scoring (coverage rises)."""
+    # GT trajectory in 'sim' frame offset by (10, 10); our path near origin.
+    ply = tmp_path / "traj.ply"
+    ply.write_text(
+        "ply\nformat ascii 1.0\nelement vertex 2\nproperty float x\n"
+        "property float y\nproperty float z\nend_header\n"
+        "10.0 10.0 0.75\n11.0 10.0 0.75\n",
+        encoding="utf-8",
+    )
+    ours = np.array([[0.0, 0.0], [1.0, 0.0]])
+    # frame that subtracts (10, 10): maps GT sim -> our frame exactly onto ours.
+    frame = Frame2D(theta=0.0, t=np.array([-10.0, -10.0]))
+    sc = S.score_instruction_following(ours, ply, frame=frame, fit_residual_m=0.1)
+    assert sc.frame_aligned is True
+    assert sc.coverage_1m == pytest.approx(1.0)
+    assert sc.frechet_m == pytest.approx(0.0, abs=1e-9)
+
+
+def test_score_if_high_residual_marks_unaligned(tmp_path):
+    ply = tmp_path / "traj.ply"
+    ply.write_text(
+        "ply\nformat ascii 1.0\nelement vertex 2\nproperty float x\n"
+        "property float y\nproperty float z\nend_header\n"
+        "0.0 0.0 0.75\n1.0 0.0 0.75\n",
+        encoding="utf-8",
+    )
+    ours = np.array([[0.0, 0.0], [1.0, 0.0]])
+    frame = Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    sc = S.score_instruction_following(ours, ply, frame=frame, fit_residual_m=2.5)
+    assert sc.frame_aligned is False  # residual 2.5 m > 1.0 m gate
+    assert sc.fit_residual_m == 2.5
+
+
+# --------------------------------------------------------------------------- OR matching
+
+
+@requires_loft
+def test_or_exact_statement_match(loft_referential):
+    """A question equal (up to punctuation/case) to a statement matches exactly."""
+    scene = load_scene(LOFT_DIR)
+    idx = BasicSceneIndex(scene.instances)
+    # take a real statement verbatim and pose it as a question
+    stmt = None
+    for _rid, stmts in loft_referential["regions"].items():
+        for s, anns in stmts.items():
+            if isinstance(anns, list) and anns and "plant" in s and "between" in s:
+                stmt = s
+                break
+        if stmt:
+            break
+    assert stmt is not None
+    r = S.score_object_reference(stmt + ".", idx, scene.instances,
+                                 referential=loft_referential)
+    assert r.match_method == "exact"
+    assert r.gt_target_id is not None
+
+
+@requires_loft
+def test_or_relation_fuzzy_match_potted_plant(loft_referential):
+    """The 'potted plant between a vase and the cabinet' question matches by relation."""
+    scene = load_scene(LOFT_DIR)
+    idx = BasicSceneIndex(scene.instances)
+    q = "Find the potted plant between a vase and the cabinet with a TV on it."
+    r = S.score_object_reference(q, idx, scene.instances, referential=loft_referential)
+    assert r.gt_target_id is not None
+    assert r.match_method in ("fuzzy", "relation")
+    assert not np.isnan(r.iou)
+
+
+@requires_loft
+def test_or_ordinal_phrasing_tiebreak(loft_referential):
+    """When 'closest'/'second closest' share the relation string, phrasing picks the
+    literal 'closest'. Uses a synthetic referential set to isolate the tie-break."""
+    ref = {
+        "regions": {
+            "0": {
+                "the vase that is closest to the guitar": [
+                    {"target_index": "5", "target_class": "vase", "relation": "closest",
+                     "anchors": {"anchor_1": {"class": "guitar"}}},
+                ],
+                "the vase that is second closest to the guitar": [
+                    {"target_index": "6", "target_class": "vase", "relation": "closest",
+                     "anchors": {"anchor_1": {"class": "guitar"}}},
+                ],
+            }
+        }
+    }
+    tid, source, method = S._gt_target_from_referential(
+        "Find the vase closest to the guitar.", ref, []
+    )
+    assert tid == 5  # the literal 'closest', not the 'second closest'
+    assert method == "relation"
+
+
+@requires_loft
+def test_or_no_match_flagged_not_guessed(loft_referential):
+    """The 'blue chair closest to the cup of coffee' has no statement -> none, flagged."""
+    scene = load_scene(LOFT_DIR)
+    idx = BasicSceneIndex(scene.instances)
+    q = "The blue chair that is closest to the cup of coffee."
+    r = S.score_object_reference(q, idx, scene.instances, referential=loft_referential)
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
+
+
+# --------------------------------------------------------------------------- 3rd opinion
+
+
+@requires_loft
+def test_numerical_scenegraph_third_opinion(loft_referential, loft_scene_graph):
+    """Scene-graph relation count is reported as a distinct third opinion."""
+    scene = load_scene(LOFT_DIR)
+    idx = BasicSceneIndex(scene.instances)
+    a = S.score_numerical("How many black pillows are on the sofa?", idx,
+                          referential=loft_referential, scene_graph=loft_scene_graph)
+    assert a.gt_count_scenegraph is not None
+    assert a.scenegraph_source in ("scene_graph", "scene_graph_class_only")
+    # three opinions visible; disagreement surfaced in the note
+    assert a.gt_count_pipeline is not None
+    assert a.gt_count_independent is not None
+    if len({a.gt_count_pipeline, a.gt_count_independent, a.gt_count_scenegraph}) > 1:
+        assert "disagreement" in a.note
+
+
+@requires_loft
+def test_numerical_no_scenegraph_no_third_opinion(loft_referential):
+    scene = load_scene(LOFT_DIR)
+    idx = BasicSceneIndex(scene.instances)
+    a = S.score_numerical("How many black pillows are on the sofa?", idx,
+                          referential=loft_referential, scene_graph=None)
+    assert a.gt_count_scenegraph is None
+    assert a.scenegraph_source == "none"

@@ -21,6 +21,13 @@ QUESTIONS_DIR = QUESTIONS_JSON.parent
 _have_loft = LOFT_DIR.is_dir() and (LOFT_DIR / "loft_object_result.csv").exists()
 requires_loft = pytest.mark.skipif(not _have_loft, reason="loft sample data not present")
 
+#: Full downloaded VLA-3D Unity root (all 15 training scenes), if extracted.
+FULL_UNITY_ROOT = _REPO / "data" / "vla3d" / "Unity"
+_have_full = FULL_UNITY_ROOT.is_dir() and (FULL_UNITY_ROOT / "office_1").is_dir()
+requires_full_unity = pytest.mark.skipif(
+    not _have_full, reason="full VLA-3D Unity dataset not extracted"
+)
+
 
 @requires_loft
 def test_score_scene_loft_all_five_questions():
@@ -107,6 +114,48 @@ def test_run_gt_battery_reports_missing_scene(tmp_path):
     )
     assert scores == []
     assert "office_1" in missing
+
+
+@requires_full_unity
+def test_full_battery_smoke_two_scenes(tmp_path):
+    """Full-dataset smoke on 2 real scenes: scores present, aggregate shapes hold."""
+    scores, missing = GB.run_gt_battery(
+        FULL_UNITY_ROOT,
+        questions_path=QUESTIONS_JSON,
+        questions_dir=QUESTIONS_DIR,
+        scenes=["loft", "office_1"],
+        drive_if=True,
+    )
+    assert "loft" not in missing and "office_1" not in missing
+    assert {s.scene for s in scores} == {"loft", "office_1"}
+    agg = GB.aggregate(scores)
+    # new aggregate keys are present and well-formed
+    assert "match_method_breakdown" in agg["object_reference"]
+    assert "n_unaligned_scenes" in agg["instruction_following"]
+    assert "scenegraph_agreement_rate" in agg["numerical"]
+    # every scored OR question carries a match method label
+    for s in scores:
+        if s.qtype == QType.OBJECT_REFERENCE.value:
+            assert s.match_method in ("exact", "fuzzy", "relation", "unique", "none")
+    # report writes without error and round-trips
+    md_path, json_path = GB.write_report(scores, missing, tmp_path)
+    assert md_path.exists() and json_path.exists()
+
+
+@requires_full_unity
+def test_full_battery_if_alignment_reports_residual(tmp_path):
+    """Instruction-following scores carry a per-scene fit residual when aligned."""
+    scores, _ = GB.run_gt_battery(
+        FULL_UNITY_ROOT,
+        questions_path=QUESTIONS_JSON,
+        questions_dir=QUESTIONS_DIR,
+        scenes=["loft"],
+        drive_if=True,
+    )
+    ifs = [s for s in scores if s.qtype == QType.INSTRUCTION_FOLLOWING.value]
+    assert ifs
+    # loft aligns cleanly (endpoints co-locate), so a finite residual is recorded
+    assert any(s.fit_residual_m is not None for s in ifs)
 
 
 @requires_loft

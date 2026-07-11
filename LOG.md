@@ -261,3 +261,14 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 - **"How many white stools are in the room?" → 2** (5 labeled; 3 fused with ~300 lidar pts each, 2 adjacent merged IoU>0.3, 2 rejected min_points — sensible dedup); **"Find the folding chair closest to the yellow door." → MarkerBox(2.74, 1.27, 'chair')**; both via real heads, floor_used=False, 9 instances tracked
 - Judgment call flagged: bag's first ~9 s has no registered scan → startup fallback fuses keyframe-0 against the earliest scan (vehicle stationary there — geometrically valid)
 - **642 tests green.** The architecture's full chain is now demonstrated on real data: panorama → detections → fusion → instance map → spatial toolbox → published answer.
+
+---
+
+## 2026-07-11 (session 9) — Ground-truth evaluation: first real accuracy numbers
+
+- VLA-3D Unity subset (all 18 scenes) downloaded after a truncation fight (curl+resume beats the boto3 script) and extracted (5 GB, `data/vla3d/Unity/`); dataset notes in `docs/vla3d_notes.md` (MIT license, schemas verified, scene names/nouns match challenge verbatim)
+- GT harness: `core/groundtruth/` loader (OBB→AABB, colors→attributes) + honest per-type scorers + `gt_battery` runner; refined with statement-based target matching (exact/fuzzy/relation ladder), per-scene trajectory frame fitting (translation+optional yaw, residual-gated), multi-opinion counting
+- **FULL 15-SCENE TOPLINE (75 questions):** numerical pipeline-exact 100% but independent agreement only 15–27% (we over-count vs annotations — top calibration target); object-ref scoreable on 6/30 (4 perfect IoU, 2 wrong-instance; 24 honest vocabulary-drift non-matches); instruction-following mean Fréchet 6.1 m, 30% coverage@1m on 12/15 aligned scenes (3 scenes unaligned — goal disambiguation suspect: home_building_2, hotel_room_2, livingroom_3)
+- Suite green (~711 tests). Reports: `reports/gt_battery_full_2026-07-11/`
+
+**Next:** k-fold CV sweep harness (leave-3-scenes-out) over high-sensitivity calibration params; OR scoreability via vocabulary bridging; investigate the 3 unaligned scenes + counting over-count.

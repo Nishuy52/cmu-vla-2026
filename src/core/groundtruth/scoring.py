@@ -33,6 +33,7 @@ Pure/deterministic: numpy only, no network, no RNG.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -46,6 +47,58 @@ from core.parsing.regex_tier import parse_regex
 from core.perception.scene_index import BasicSceneIndex, normalize_label
 
 PROXIMITY_M = 1.0  # coverage radius for path scoring
+
+#: Fuzzy statement-match acceptance threshold (Jaccard over content tokens). At/above
+#: this the question phrasing is treated as the same statement despite surface drift.
+_FUZZY_JACCARD_MIN = 0.8
+
+#: Map a parsed :class:`~core.plan_schema.Pred` value to the set of VLA-3D statement
+#: ``relation`` strings (and scene-graph relationship keys) that express the same
+#: spatial predicate. Kept loose on purpose — a question's "closest to" and a
+#: statement's "closest" are the same relation; "on"/"near"/"above" all describe
+#: physical support/adjacency the scene graph splits into separate keys.
+_PRED_TO_RELATIONS: dict[str, tuple[str, ...]] = {
+    "closest_to": ("closest",),
+    "farthest_from": ("farthest",),
+    "between": ("between",),
+    "near": ("near", "beside"),
+    "next_to": ("near", "beside"),
+    "on": ("on", "near", "above", "hanging_on"),
+    "in": ("in",),
+    "above": ("above",),
+    "under": ("below",),
+    "with": ("on", "near", "hanging_on"),
+}
+
+
+def _pred_relations(pred) -> tuple[str, ...]:
+    """Statement/scene-graph relation strings a parsed predicate may correspond to."""
+    if pred is None:
+        return ()
+    val = getattr(pred, "value", pred)
+    return _PRED_TO_RELATIONS.get(str(val), ())
+
+
+def _norm_stmt(s: str) -> str:
+    """Whitespace/case/punctuation-normalised statement or question string."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", s.lower())).strip()
+
+
+def _jaccard(a: str, b: str) -> float:
+    """Token-set Jaccard overlap of two normalised strings ([0,1])."""
+    ta, tb = set(a.split()), set(b.split())
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def _question_relations(plan) -> tuple[str, ...]:
+    """Union of statement-relation strings implied by a parsed target's clauses."""
+    rels: set[str] = set()
+    if plan.target is not None:
+        for cl in plan.target.clauses:
+            rels.update(_pred_relations(getattr(cl, "pred", None)))
+    return tuple(sorted(rels))
 
 
 def _anchor_agrees(question_anchor: str, ann_anchor_class: str) -> bool:
@@ -105,8 +158,10 @@ class NumericalScore:
     our_count: int
     gt_count_pipeline: int  # primary: OUR resolve() over the GT index (circular)
     exact_match: bool  # our_count == gt_count_pipeline
-    gt_count_independent: int | None  # second opinion from referential/scene-graph
-    independent_source: str  # "referential" | "none"
+    gt_count_independent: int | None  # 2nd opinion from referential statements
+    independent_source: str  # "referential" | "referential_class_only" | "none"
+    gt_count_scenegraph: int | None = None  # 3rd opinion from scene-graph relations
+    scenegraph_source: str = "none"  # "scene_graph" | "scene_graph_class_only" | "none"
     note: str = ""
 
 
@@ -172,11 +227,80 @@ def _independent_count(
     return None, "none"
 
 
+def _scene_graph_count(
+    text: str, scene_graph: dict | None
+) -> tuple[int | None, str]:
+    """Third-opinion count directly from ``_scene_graph.json`` relation edges.
+
+    The scene graph stores, per region, ``relationships[relation][target_id] =
+    [anchor_ids]`` plus a per-object ``raw_label``. We count distinct objects whose
+    label matches the question's target noun AND that appear as the *target* of a
+    relation the question's predicate maps to (:data:`_PRED_TO_RELATIONS`) with an
+    anchor whose label matches a question anchor. When the question names no
+    resolvable relation/anchor we fall back to a class-only count (flagged coarser).
+    Returns (None, "none") when nothing is derivable — never a fabricated number.
+    """
+    if not scene_graph:
+        return None, "none"
+    plan = parse_regex(text)
+    if plan.target is None:
+        return None, "none"
+    tgt_noun = normalize_label(plan.target.noun)
+    anchor_nouns = {
+        normalize_label(a.noun) for cl in plan.target.clauses for a in cl.anchors
+    }
+    q_rels = set(_question_relations(plan))
+
+    # id -> label, and merged relation edges across all regions.
+    id2label: dict[str, str] = {}
+    # relation -> {target_id: set(anchor_ids)}
+    edges: dict[str, dict[str, set[str]]] = {}
+    for _rid, reg in (scene_graph.get("regions") or {}).items():
+        if not isinstance(reg, dict):
+            continue
+        for o in reg.get("objects", []):
+            oid = str(o.get("object_id", ""))
+            if oid:
+                id2label[oid] = str(o.get("raw_label", "")).lower()
+        for relname, tgts in (reg.get("relationships") or {}).items():
+            if not isinstance(tgts, dict):
+                continue
+            bucket = edges.setdefault(relname, {})
+            for tgt, anchors in tgts.items():
+                if isinstance(anchors, list):
+                    bucket.setdefault(str(tgt), set()).update(str(a) for a in anchors)
+
+    class_ids = {oid for oid, lbl in id2label.items() if _anchor_agrees(tgt_noun, lbl)}
+    if not class_ids:
+        return None, "none"
+
+    # Relation-aware: target-class objects that are the target of a mapped relation
+    # with an anchor whose label matches a question anchor.
+    rel_names = q_rels or {"on", "near", "beside", "above"}
+    rel_ids: set[str] = set()
+    for oid in class_ids:
+        for rn in rel_names:
+            anchors = edges.get(rn, {}).get(oid, set())
+            if not anchors:
+                continue
+            if not anchor_nouns:
+                rel_ids.add(oid)
+                break
+            anchor_labels = [id2label.get(a, "") for a in anchors]
+            if any(_anchor_agrees(qa, al) for qa in anchor_nouns for al in anchor_labels):
+                rel_ids.add(oid)
+                break
+    if rel_ids:
+        return len(rel_ids), "scene_graph"
+    return len(class_ids), "scene_graph_class_only"
+
+
 def score_numerical(
     text: str,
     index: SceneIndex,
     *,
     referential: dict | None = None,
+    scene_graph: dict | None = None,
 ) -> NumericalScore:
     """Score a numerical question against the GT index.
 
@@ -200,15 +324,24 @@ def score_numerical(
     gt_count, _ids = T.counting(plan.target, index, min_obs=1)
     our_count = gt_count  # same path; the exact-match records determinism
     indep, src = _independent_count(text, referential)
+    sg_count, sg_src = _scene_graph_count(text, scene_graph)
+    disagree = [f"pipeline={gt_count}"]
+    if indep is not None:
+        disagree.append(f"independent={indep}")
+    if sg_count is not None:
+        disagree.append(f"scene_graph={sg_count}")
+    distinct = {v for v in (gt_count, indep, sg_count) if v is not None}
     note = ""
-    if indep is not None and indep != gt_count:
-        note = f"pipeline={gt_count} vs independent={indep} (disagreement)"
+    if len(distinct) > 1:
+        note = "; ".join(disagree) + " (disagreement)"
     return NumericalScore(
         our_count=our_count,
         gt_count_pipeline=gt_count,
         exact_match=(our_count == gt_count),
         gt_count_independent=indep,
         independent_source=src,
+        gt_count_scenegraph=sg_count,
+        scenegraph_source=sg_src,
         note=note,
     )
 
@@ -223,75 +356,133 @@ class ObjectRefScore:
     iou: float
     our_marker: MarkerBox | None
     gt_target_id: int | None
-    target_source: str  # "referential" | "ambiguous" | "none"
+    target_source: str  # "referential" | "unique_in_scene" | "ambiguous" | "none"
+    match_method: str = "none"  # "exact" | "fuzzy" | "relation" | "unique" | "none"
     note: str = ""
+
+
+def _iter_statements(referential: dict | None):
+    """Yield (statement_string, annotation_dict) over every referential statement.
+
+    Skips metadata keys (e.g. a region's ``"region": "<label>"``) and any non-dict
+    annotation entries, so callers can assume ``ann`` is a grounding dict.
+    """
+    for _rid, stmts in (referential.get("regions") or {}).items() if referential else []:
+        if not isinstance(stmts, dict):
+            continue
+        for stmt, anns in stmts.items():
+            if not isinstance(anns, list):
+                continue
+            for ann in anns:
+                if isinstance(ann, dict):
+                    yield stmt, ann
 
 
 def _gt_target_from_referential(
     text: str, referential: dict | None, instances: list[InstanceRecord]
-) -> tuple[int | None, str]:
+) -> tuple[int | None, str, str]:
     """Find the GT target object id for an object-reference question.
 
-    Strategy: exact statement-string match first (the question phrasing often matches
-    a generated statement verbatim up to punctuation/case); else fall back to a
-    class+anchor match returning the id only when it is unique (else "ambiguous").
+    Returns ``(target_index, source, match_method)`` where ``match_method`` is one of
+    ``"exact"`` / ``"fuzzy"`` / ``"relation"`` / ``"none"``. Matching ladder:
+
+    1. **exact** — the question, normalised (whitespace/case/punctuation), equals a
+       generated statement string. Highest confidence, no guessing.
+    2. **fuzzy** — token-set Jaccard vs a statement ``>= _FUZZY_JACCARD_MIN`` AND the
+       statement's ``target_class`` agrees with the parsed target noun (the class guard
+       stops a high-overlap-but-wrong-referent match, e.g. a "closest to the chair"
+       statement whose target is a *light*, not the queried chair).
+    3. **relation** — class + relation + anchor agreement: the statement's target class
+       matches the question's target noun, its ``relation`` is one the question's parsed
+       predicate maps to, and at least one of its anchor classes matches a question
+       anchor. Returned when it pins a **unique** target id, or — when several ids share
+       the mapped relation (ordinal variants like "closest"/"second closest") — when one
+       statement's phrasing clearly and strictly best-matches the question; otherwise
+       "ambiguous".
+
+    ``"none"`` is returned when nothing matches — never a guess.
     """
     if not referential:
-        return None, "none"
+        return None, "none", "none"
 
-    def norm(s: str) -> str:
-        return re.sub(r"[^a-z0-9 ]", "", s.lower()).strip()
-
-    q = norm(text)
-    # 1) exact / substring statement match
-    for _rid, stmts in (referential.get("regions") or {}).items():
-        for stmt, anns in stmts.items():
-            if not isinstance(anns, list) or not anns:
-                continue
-            ns = norm(stmt)
-            if ns and (ns == q or ns in q or q in ns):
-                if isinstance(anns[0], dict):
-                    tid = anns[0].get("target_index")
-                    if tid is not None:
-                        return int(tid), "referential"
-
-    # 2) class + anchor match, unique-id only
+    q = _norm_stmt(text)
     plan = parse_regex(text)
+    tgt_noun = normalize_label(plan.target.noun) if plan.target is not None else ""
+
+    # 1) exact normalised statement match.
+    for stmt, ann in _iter_statements(referential):
+        if _norm_stmt(stmt) == q:
+            tid = ann.get("target_index")
+            if tid is not None:
+                return int(tid), "referential", "exact"
+
+    # 2) fuzzy (Jaccard >= threshold) with a target-class guard.
+    best_tid: int | None = None
+    best_j = _FUZZY_JACCARD_MIN
+    for stmt, ann in _iter_statements(referential):
+        if tgt_noun and not _anchor_agrees(tgt_noun, str(ann.get("target_class", ""))):
+            continue
+        j = _jaccard(q, _norm_stmt(stmt))
+        if j >= best_j:
+            tid = ann.get("target_index")
+            if tid is not None:
+                best_j, best_tid = j, int(tid)
+    if best_tid is not None:
+        return best_tid, "referential", "fuzzy"
+
+    # 3) class + relation + anchor match. Ordered relations ("closest" vs "second
+    # closest"/"third closest") all share one ``relation`` string, so a plain class+
+    # relation+anchor filter yields several candidate targets. We keep, per candidate
+    # id, its best statement-text Jaccard vs the question, then: (a) unique id -> take
+    # it; (b) multiple ids but one statement clearly closest in phrasing -> take that
+    # (this is how "closest to the guitar" selects the *closest* vase, not the second/
+    # third); (c) genuine tie -> "ambiguous", never guessed.
     if plan.target is None:
-        return None, "ambiguous"
-    tgt_noun = normalize_label(plan.target.noun)
+        return None, "ambiguous", "none"
+    q_rels = set(_question_relations(plan))
     anchor_nouns = {
         normalize_label(a.noun) for cl in plan.target.clauses for a in cl.anchors
     }
-    matched: set[int] = set()
-    for _rid, stmts in (referential.get("regions") or {}).items():
-        for _stmt, anns in stmts.items():
-            if not isinstance(anns, list):
+    id_best_j: dict[int, float] = {}
+    for stmt, ann in _iter_statements(referential):
+        if not _anchor_agrees(tgt_noun, str(ann.get("target_class", ""))):
+            continue
+        # Relation guard: when the question implies a relation, require the statement's
+        # relation to be one of the mapped strings (skip when we can't tell).
+        if q_rels:
+            if str(ann.get("relation", "")).lower() not in q_rels:
                 continue
-            for ann in anns:
-                if not isinstance(ann, dict):
-                    continue
-                if not _anchor_agrees(tgt_noun, str(ann.get("target_class", ""))):
-                    continue
-                if anchor_nouns:
-                    ann_anchor_classes = [
-                        str(v.get("class", ""))
-                        for v in (ann.get("anchors") or {}).values()
-                    ]
-                    if not any(
-                        _anchor_agrees(qa, ac)
-                        for qa in anchor_nouns
-                        for ac in ann_anchor_classes
-                    ):
-                        continue
-                tid = ann.get("target_index")
-                if tid is not None:
-                    matched.add(int(tid))
-    if len(matched) == 1:
-        return next(iter(matched)), "referential"
-    if matched:
-        return None, "ambiguous"
-    return None, "none"
+        if anchor_nouns:
+            ann_anchor_classes = [
+                str(v.get("class", "")) for v in (ann.get("anchors") or {}).values()
+            ]
+            if not any(
+                _anchor_agrees(qa, ac)
+                for qa in anchor_nouns
+                for ac in ann_anchor_classes
+            ):
+                continue
+        tid = ann.get("target_index")
+        if tid is None:
+            continue
+        j = _jaccard(q, _norm_stmt(stmt))
+        tid = int(tid)
+        id_best_j[tid] = max(id_best_j.get(tid, 0.0), j)
+    if len(id_best_j) == 1:
+        return next(iter(id_best_j)), "referential", "relation"
+    if id_best_j:
+        # Phrasing tie-break: pick the id whose best statement most overlaps the
+        # question, but only when it strictly and clearly beats the runner-up (guards
+        # against picking arbitrarily among equally-worded distractors).
+        ranked = sorted(id_best_j.items(), key=lambda kv: kv[1], reverse=True)
+        (top_id, top_j), (_, second_j) = ranked[0], ranked[1]
+        # A small strict margin is enough: ordinal variants ("second"/"third closest")
+        # differ from the base phrasing by one token, which separates them here, while
+        # equally-worded distractors tie at margin 0 and stay "ambiguous".
+        if top_j >= 0.5 and top_j - second_j >= 0.05:
+            return top_id, "referential", "relation"
+        return None, "ambiguous", "none"
+    return None, "none", "none"
 
 
 def score_object_reference(
@@ -326,23 +517,23 @@ def score_object_reference(
         if len(cat) == 1:
             unique_target_id = cat[0].instance_id
 
-    gt_id, source = _gt_target_from_referential(text, referential, instances)
+    gt_id, source, method = _gt_target_from_referential(text, referential, instances)
     # Prefer a referential-annotated target; else fall back to category-uniqueness.
     if gt_id is None and unique_target_id is not None:
-        gt_id, source = unique_target_id, "unique_in_scene"
+        gt_id, source, method = unique_target_id, "unique_in_scene", "unique"
     by_id = {r.instance_id: r for r in instances}
 
     if our_marker is None:
         return ObjectRefScore(
             iou=0.0, our_marker=None, gt_target_id=gt_id, target_source=source,
-            note="our resolver returned no candidate",
+            match_method=method, note="our resolver returned no candidate",
         )
 
     if gt_id is not None and gt_id in by_id:
         gt = by_id[gt_id]
         iou = aabb_iou_3d(our_marker, gt.aabb_min, gt.aabb_max)
-        note = "" if source in ("referential", "unique_in_scene") else "target inferred (non-exact)"
-        return ObjectRefScore(iou, our_marker, gt_id, source, note)
+        note = "" if method in ("exact", "unique") else f"target matched via {method}"
+        return ObjectRefScore(iou, our_marker, gt_id, source, method, note)
 
     # No trustworthy GT target: report self-IoU (1.0) but flag it clearly.
     return ObjectRefScore(
@@ -350,6 +541,7 @@ def score_object_reference(
         our_marker=our_marker,
         gt_target_id=None,
         target_source="ambiguous" if source != "none" else "none",
+        match_method="none",
         note="no GT target matched; IoU undefined (flagged, not guessed)",
     )
 
@@ -445,6 +637,145 @@ def path_coverage(
     return float((dmin <= radius).mean())
 
 
+# --------------------------------------------------------------------------- frame fit
+
+
+@dataclass
+class Frame2D:
+    """A 2D rigid transform (yaw ``theta`` about origin, then translation ``t``).
+
+    Maps a point ``p`` in the *source* (sim/trajectory) frame into the *destination*
+    (VLA-3D object) frame: ``R(theta) @ p + t``.
+    """
+
+    theta: float  # radians
+    t: np.ndarray  # (2,)
+
+    def apply(self, pts: np.ndarray) -> np.ndarray:
+        p = np.asarray(pts, dtype=float)
+        if p.ndim != 2 or p.shape[0] == 0:
+            return np.empty((0, 2), dtype=float)
+        p = p[:, :2]
+        c, s = math.cos(self.theta), math.sin(self.theta)
+        rot = np.array([[c, -s], [s, c]])
+        return p @ rot.T + self.t
+
+
+def _fit_translation(src: np.ndarray, dst: np.ndarray) -> Frame2D:
+    """Best translation-only fit (theta=0): t = mean(dst - src)."""
+    t = (dst - src).mean(axis=0)
+    return Frame2D(theta=0.0, t=t)
+
+
+def _fit_similarity(src: np.ndarray, dst: np.ndarray) -> Frame2D:
+    """Best rigid (rotation+translation) fit of ``src`` onto ``dst`` (Umeyama, no scale).
+
+    Needs >= 2 non-degenerate correspondence points. For 2 points this recovers the
+    exact yaw + translation aligning the segment; for more it is the least-squares
+    rigid fit. Falls back to translation-only when the point spread is degenerate
+    (identical source points), where yaw is unidentifiable.
+    """
+    src = np.asarray(src, dtype=float)[:, :2]
+    dst = np.asarray(dst, dtype=float)[:, :2]
+    if src.shape[0] < 2:
+        return _fit_translation(src, dst)
+    mu_s = src.mean(axis=0)
+    mu_d = dst.mean(axis=0)
+    sc = src - mu_s
+    dc = dst - mu_d
+    if float((sc * sc).sum()) < 1e-9:  # source points coincide -> yaw undefined
+        return _fit_translation(src, dst)
+    h = sc.T @ dc  # (2, 2) covariance
+    u, _s, vt = np.linalg.svd(h)
+    d = np.sign(np.linalg.det(vt.T @ u.T))
+    r = vt.T @ np.diag([1.0, d]) @ u.T  # (2, 2) proper rotation
+    theta = float(math.atan2(r[1, 0], r[0, 0]))
+    t = mu_d - r @ mu_s
+    return Frame2D(theta=theta, t=np.asarray(t, dtype=float))
+
+
+def _fit_residual(frame: Frame2D, src: np.ndarray, dst: np.ndarray) -> float:
+    """Mean correspondence residual (metres) after applying ``frame`` to ``src``."""
+    if src.shape[0] == 0:
+        return float("inf")
+    mapped = frame.apply(src)
+    return float(np.linalg.norm(mapped - np.asarray(dst)[:, :2], axis=1).mean())
+
+
+def fit_frame(
+    src: np.ndarray,
+    dst: np.ndarray,
+    *,
+    yaw_residual_gate: float = 0.5,
+) -> tuple[Frame2D, float]:
+    """Fit a 2D transform from ``src`` correspondences to ``dst`` (translation, +yaw).
+
+    Tries translation-only first; if its mean residual exceeds ``yaw_residual_gate``
+    and >= 2 correspondences are available, tries the full rigid (yaw+translation) fit
+    and keeps it when it lowers the residual. Returns ``(frame, mean_residual_m)``.
+    """
+    src = np.asarray(src, dtype=float)[:, :2]
+    dst = np.asarray(dst, dtype=float)[:, :2]
+    tr = _fit_translation(src, dst)
+    res_tr = _fit_residual(tr, src, dst)
+    if res_tr <= yaw_residual_gate or src.shape[0] < 2:
+        return tr, res_tr
+    sim = _fit_similarity(src, dst)
+    res_sim = _fit_residual(sim, src, dst)
+    if res_sim < res_tr:
+        return sim, res_sim
+    return tr, res_tr
+
+
+def align_scene_trajectories(
+    pairs: list[tuple[np.ndarray, np.ndarray | None]],
+    *,
+    yaw_residual_gate: float = 0.5,
+) -> tuple[Frame2D | None, float | None]:
+    """Fit ONE per-scene sim->object transform from trajectory endpoints (+shared start).
+
+    ``pairs`` is one ``(gt_trajectory_xyz, goal_centroid_xy)`` per instruction-following
+    question in the scene. Correspondences fed to the fit:
+
+    * each trajectory's **endpoint** (sim frame) -> that question's **goal centroid**
+      (object frame, the resolved terminal-GOTO anchor). Skipped when the goal is None.
+    * a **start-start** row when >= 2 trajectories share a near-identical start point:
+      their common sim start maps to the object-frame spawn. The spawn's object-frame
+      position is unknown independently, so this row does not over-constrain — it is
+      added only to stabilise the fit, using the mean of the endpoint-implied spawn as
+      the target (a soft anchor). In practice the two endpoints already determine the
+      rigid transform; start-start is a consistency check, not new information.
+
+    Returns ``(frame, mean_residual_m)`` over the endpoint correspondences, or
+    ``(None, None)`` when fewer than one usable endpoint correspondence exists.
+    """
+    src_ends: list[np.ndarray] = []
+    dst_ends: list[np.ndarray] = []
+    starts: list[np.ndarray] = []
+    for traj, goal in pairs:
+        t = _xy(traj)
+        if t.shape[0] == 0:
+            continue
+        starts.append(t[0])
+        if goal is not None:
+            g = np.asarray(goal, dtype=float).reshape(-1)[:2]
+            src_ends.append(t[-1])
+            dst_ends.append(g)
+    if not src_ends:
+        return None, None
+
+    src = np.asarray(src_ends, dtype=float)
+    dst = np.asarray(dst_ends, dtype=float)
+
+    if src.shape[0] == 1:
+        # One endpoint => translation only (yaw unidentifiable from a single point).
+        frame = _fit_translation(src, dst)
+        return frame, _fit_residual(frame, src, dst)
+
+    frame, residual = fit_frame(src, dst, yaw_residual_gate=yaw_residual_gate)
+    return frame, residual
+
+
 @dataclass
 class InstructionScore:
     """Result of scoring one instruction-following question (two numbers)."""
@@ -454,6 +785,7 @@ class InstructionScore:
     our_n_waypoints: int
     gt_n_waypoints: int
     frame_aligned: bool = True  # False when a frame offset was detected/uncorrected
+    fit_residual_m: float | None = None  # scene-level correspondence residual, if fit
     note: str = ""
 
 
@@ -467,28 +799,62 @@ class InstructionScore:
 _FRAME_OFFSET_FLAG_M = 2.0
 
 
+#: Scene-level fit residual (m) above which we declare the frames un-alignable and
+#: report Frechet/coverage as diagnostic-only rather than trustworthy accuracy.
+_ALIGN_RESIDUAL_GATE_M = 1.0
+
+
 def score_instruction_following(
     our_path: np.ndarray,
     trajectory_ply: os.PathLike | str,
+    *,
+    frame: Frame2D | None = None,
+    fit_residual_m: float | None = None,
 ) -> InstructionScore:
     """Score our waypoint path against a GT trajectory PLY (Frechet + coverage).
 
-    Reports two numbers, never a composite. Also flags a probable frame offset (see
-    ``_FRAME_OFFSET_FLAG_M``): when our path and the GT path centroids are far apart,
-    the frames are likely unaligned and the two numbers should be read as a lower
-    bound / diagnostic, not a clean accuracy.
+    Reports two numbers, never a composite. When a scene-level ``frame`` is supplied
+    (fitted by :func:`align_scene_trajectories` — maps the sim/trajectory frame into
+    the VLA-3D object frame), the GT trajectory is transformed into our frame before
+    scoring, so Frechet/coverage are directly comparable. ``fit_residual_m`` (the
+    scene's correspondence residual) is carried through; residuals above
+    :data:`_ALIGN_RESIDUAL_GATE_M` mark the scene unaligned (diagnostic-only). With no
+    ``frame`` we fall back to the raw centroid-offset flag (legacy diagnostic path).
     """
-    gt = load_trajectory_ply(trajectory_ply)
+    gt_raw = load_trajectory_ply(trajectory_ply)
+    op = np.asarray(our_path, dtype=float)
+    empty = op.ndim != 2 or op.shape[0] == 0
+
+    if frame is not None:
+        gt = frame.apply(gt_raw)  # into our (object) frame
+    else:
+        gt = _xy(gt_raw)
+
     frech = discrete_frechet(gt, our_path)
     cov = path_coverage(gt, our_path)
     note = ""
-    op = np.asarray(our_path, dtype=float)
-    empty = op.ndim != 2 or op.shape[0] == 0
     frame_aligned = True
+
     if empty:
         note = "our path empty — pipeline produced no waypoints"
+        frame_aligned = frame is not None and (
+            fit_residual_m is None or fit_residual_m <= _ALIGN_RESIDUAL_GATE_M
+        )
+    elif frame is not None:
+        if fit_residual_m is not None and fit_residual_m > _ALIGN_RESIDUAL_GATE_M:
+            frame_aligned = False
+            note = (
+                f"scene frame fit residual {fit_residual_m:.2f} m > "
+                f"{_ALIGN_RESIDUAL_GATE_M:.1f} m — endpoints/spawn did not co-locate "
+                "under a single rigid transform; Frechet/coverage diagnostic only"
+            )
+        else:
+            note = (
+                f"aligned via fitted scene transform (residual "
+                f"{fit_residual_m:.2f} m)" if fit_residual_m is not None else "aligned"
+            )
     elif gt.shape[0]:
-        gc = _xy(gt).mean(axis=0)
+        gc = gt.mean(axis=0)
         oc = _xy(op).mean(axis=0)
         if float(np.linalg.norm(gc - oc)) > _FRAME_OFFSET_FLAG_M:
             frame_aligned = False
@@ -501,7 +867,8 @@ def score_instruction_following(
         frechet_m=frech,
         coverage_1m=cov,
         our_n_waypoints=int(op.shape[0]) if op.ndim == 2 else 0,
-        gt_n_waypoints=int(gt.shape[0]),
+        gt_n_waypoints=int(gt_raw.shape[0]),
         frame_aligned=frame_aligned,
+        fit_residual_m=fit_residual_m,
         note=note,
     )

@@ -98,7 +98,12 @@ _IF_MAX_BUILD_TICKS = 12  # ticks to let the instruction head ground legs + plan
 
 
 def _drive_if_path(
-    text: str, gt: GTScene, idx: BasicSceneIndex, *, max_build_ticks: int = _IF_MAX_BUILD_TICKS
+    text: str,
+    gt: GTScene,
+    idx: BasicSceneIndex,
+    *,
+    max_build_ticks: int = _IF_MAX_BUILD_TICKS,
+    start_xy: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """Plan an instruction-following path over the GT scene and return it as (N, 2).
 
@@ -109,6 +114,11 @@ def _drive_if_path(
     through the costmap — then return the head's fully planned route (the
     ``BreadcrumbFollower.path``). This is our system's intended trajectory for the
     instruction, which is what the GT ``trajectory_qN.ply`` is compared against.
+
+    ``start_xy`` sets the robot spawn in the GT (object) frame. When the scene frame
+    has been fitted, the battery passes the GT trajectory's shared start mapped into
+    the object frame, so our planned path departs from the same spawn the GT path does
+    (a fair like-for-like comparison). Absent a fit it defaults to the scene corner.
     """
     from core.parsing.regex_tier import parse_regex
     from core.heads.instruction import InstructionHead
@@ -119,8 +129,11 @@ def _drive_if_path(
 
     sc = _synthetic_from_gt(gt)
     clk = FakeClock(0.0)
-    start_x = float(min(r.aabb_min[0] for r in gt.instances)) + 0.5
-    start_y = float(min(r.aabb_min[1] for r in gt.instances)) + 0.5
+    if start_xy is not None:
+        start_x, start_y = float(start_xy[0]), float(start_xy[1])
+    else:
+        start_x = float(min(r.aabb_min[0] for r in gt.instances)) + 0.5
+        start_y = float(min(r.aabb_min[1] for r in gt.instances)) + 0.5
     io = MockRobotIO(sc, clk, start_x=start_x, start_y=start_y)
 
     head = InstructionHead(plan=plan)
@@ -139,6 +152,39 @@ def _drive_if_path(
     return np.array([[p[0], p[1]] for p in follower.path], dtype=float)
 
 
+def _terminal_goal_centroid(text: str, idx: BasicSceneIndex) -> np.ndarray | None:
+    """Object-frame centroid of an IF question's terminal goal (final GOTO anchor).
+
+    We take the LAST ``GOTO`` route leg's anchor, build a :class:`TargetSpec` from it
+    (noun + attributes + disambiguating clause), resolve it on the GT index exactly as
+    the instruction head would, and return the top candidate's XY centroid — the point
+    the GT ``trajectory_qN.ply`` should end at. Returns None when the route has no GOTO
+    leg or the anchor doesn't resolve (so the scene fit simply drops that endpoint).
+    """
+    from core.parsing.regex_tier import parse_regex
+    from core.geometry.toolbox import TargetSpec, resolve
+    from core.plan_schema import LegKind
+
+    plan = parse_regex(text)
+    if not plan.route:
+        return None
+    goto_legs = [leg for leg in plan.route if leg.kind is LegKind.GOTO and leg.anchors]
+    if not goto_legs:
+        return None
+    anchor = goto_legs[-1].anchors[0]
+    spec = TargetSpec(
+        noun=anchor.noun,
+        raw=anchor.raw,
+        attributes=list(anchor.attributes),
+        clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
+    )
+    res = resolve(spec, idx)
+    if not res.candidates_ranked:
+        return None
+    c = res.candidates_ranked[0].centroid
+    return np.asarray(c, dtype=float).reshape(-1)[:2]
+
+
 # --------------------------------------------------------------------------- records
 
 
@@ -155,16 +201,20 @@ class GTQuestionScore:
     exact_match: bool | None = None
     gt_count_independent: int | None = None
     independent_source: str = ""
+    gt_count_scenegraph: int | None = None
+    scenegraph_source: str = ""
     # object_reference
     iou: float | None = None
     gt_target_id: int | None = None
     target_source: str = ""
+    match_method: str = ""
     # instruction_following
     frechet_m: float | None = None
     coverage_1m: float | None = None
     our_n_waypoints: int | None = None
     gt_n_waypoints: int | None = None
     frame_aligned: bool | None = None
+    fit_residual_m: float | None = None
     note: str = ""
 
 
@@ -176,6 +226,7 @@ def score_scene(
     questions: dict[str, list[str]],
     *,
     referential: dict | None = None,
+    scene_graph: dict | None = None,
     questions_dir: os.PathLike | str | None = None,
     drive_if: bool = True,
 ) -> list[GTQuestionScore]:
@@ -184,13 +235,15 @@ def score_scene(
     out: list[GTQuestionScore] = []
 
     for text in questions.get("numerical", []):
-        ns = S.score_numerical(text, idx, referential=referential)
+        ns = S.score_numerical(text, idx, referential=referential, scene_graph=scene_graph)
         out.append(
             GTQuestionScore(
                 scene=gt.scene_name, qtype=QType.NUMERICAL.value, question=text,
                 our_count=ns.our_count, gt_count_pipeline=ns.gt_count_pipeline,
                 exact_match=ns.exact_match, gt_count_independent=ns.gt_count_independent,
-                independent_source=ns.independent_source, note=ns.note,
+                independent_source=ns.independent_source,
+                gt_count_scenegraph=ns.gt_count_scenegraph,
+                scenegraph_source=ns.scenegraph_source, note=ns.note,
             )
         )
 
@@ -201,34 +254,68 @@ def score_scene(
                 scene=gt.scene_name, qtype=QType.OBJECT_REFERENCE.value, question=text,
                 iou=(None if ors.iou != ors.iou else round(ors.iou, 4)),
                 gt_target_id=ors.gt_target_id, target_source=ors.target_source,
-                note=ors.note,
+                match_method=ors.match_method, note=ors.note,
             )
         )
 
+    # Instruction following: two passes. First resolve each question's terminal goal +
+    # load its GT trajectory; fit ONE scene-level sim->object transform from the
+    # endpoints (+ shared start); then score each with the fitted frame applied.
     if_texts = questions.get("instruction_following", [])
+    if_traj: list[np.ndarray | None] = []
+    if_goal: list[np.ndarray | None] = []
     for i, text in enumerate(if_texts):
         traj_q = _IF_TRAJ_INDEX.get(i)
+        traj_arr: np.ndarray | None = None
+        if questions_dir is not None and traj_q is not None:
+            cand = Path(questions_dir) / gt.scene_name / f"trajectory_q{traj_q}.ply"
+            if cand.exists():
+                traj_arr = S.load_trajectory_ply(cand)
+        if_traj.append(traj_arr)
+        if_goal.append(_terminal_goal_centroid(text, idx) if traj_arr is not None else None)
+
+    pairs = [
+        (t, g) for t, g in zip(if_traj, if_goal) if t is not None and t.shape[0] > 0
+    ]
+    frame, residual = S.align_scene_trajectories(pairs) if pairs else (None, None)
+
+    # The GT trajectory's (shared) start, mapped into the object frame, is the robot
+    # spawn our planner should depart from — feed it so our path and the GT path start
+    # at the same place (fair comparison). Fall back to None (scene-corner) with no fit.
+    spawn_xy: tuple[float, float] | None = None
+    if frame is not None and pairs:
+        start_pt = pairs[0][0][0, :2]
+        mapped = frame.apply(np.asarray([start_pt], dtype=float))[0]
+        spawn_xy = (float(mapped[0]), float(mapped[1]))
+
+    for i, text in enumerate(if_texts):
+        traj_q = _IF_TRAJ_INDEX.get(i)
+        rec = GTQuestionScore(
+            scene=gt.scene_name, qtype=QType.INSTRUCTION_FOLLOWING.value, question=text,
+        )
         traj_path = None
         if questions_dir is not None and traj_q is not None:
             cand = Path(questions_dir) / gt.scene_name / f"trajectory_q{traj_q}.ply"
             if cand.exists():
                 traj_path = cand
-        rec = GTQuestionScore(
-            scene=gt.scene_name, qtype=QType.INSTRUCTION_FOLLOWING.value, question=text,
-        )
         if traj_path is None:
             rec.note = "no GT trajectory file found; IF unscored"
             out.append(rec)
             continue
         our_path = (
-            _drive_if_path(text, gt, idx) if drive_if else np.empty((0, 2), dtype=float)
+            _drive_if_path(text, gt, idx, start_xy=spawn_xy)
+            if drive_if
+            else np.empty((0, 2), dtype=float)
         )
-        isc = S.score_instruction_following(our_path, traj_path)
+        isc = S.score_instruction_following(
+            our_path, traj_path, frame=frame, fit_residual_m=residual
+        )
         rec.frechet_m = round(isc.frechet_m, 4) if np.isfinite(isc.frechet_m) else None
         rec.coverage_1m = round(isc.coverage_1m, 4)
         rec.our_n_waypoints = isc.our_n_waypoints
         rec.gt_n_waypoints = isc.gt_n_waypoints
         rec.frame_aligned = isc.frame_aligned
+        rec.fit_residual_m = round(residual, 4) if residual is not None else None
         rec.note = isc.note
         out.append(rec)
 
@@ -264,6 +351,14 @@ def _load_referential(folder: Path, scene_name: str) -> dict | None:
     return None
 
 
+def _load_scene_graph(folder: Path, scene_name: str) -> dict | None:
+    p = folder / f"{scene_name}_scene_graph.json"
+    if p.exists():
+        with open(p, encoding="utf-8") as fh:
+            return json.load(fh)
+    return None
+
+
 def run_gt_battery(
     unity_root: os.PathLike | str,
     *,
@@ -292,11 +387,13 @@ def run_gt_battery(
             continue
         gt = load_scene(folder, scene_name=scene_name)
         referential = _load_referential(folder, scene_name)
+        scene_graph = _load_scene_graph(folder, scene_name)
         scores.extend(
             score_scene(
                 gt,
                 entry["questions"],
                 referential=referential,
+                scene_graph=scene_graph,
                 questions_dir=questions_dir,
                 drive_if=drive_if,
             )
@@ -323,14 +420,30 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
         for s in num
         if s.gt_count_independent is not None
     ]
+    num_sg_agree = [
+        1.0 if (s.gt_count_scenegraph is not None and s.our_count == s.gt_count_scenegraph) else 0.0
+        for s in num
+        if s.gt_count_scenegraph is not None
+    ]
     obj_iou = [s.iou for s in obj if s.iou is not None]
     obj_scored = [s for s in obj if s.iou is not None]
+    # match-method breakdown across ALL object-reference questions
+    method_counts: dict[str, int] = {}
+    for s in obj:
+        m = s.match_method or "none"
+        method_counts[m] = method_counts.get(m, 0) + 1
+
+    # Instruction following: aligned vs unaligned scenes (diagnostic-only unaligned).
+    inf_aligned = [s for s in inf if s.frame_aligned]
+    unaligned_scenes = sorted({s.scene for s in inf if s.frame_aligned is False})
     return {
         "numerical": {
             "n": len(num),
             "exact_match_rate_pipeline": _mean(num_exact),
             "n_with_independent": len(num_agree),
             "independent_agreement_rate": _mean(num_agree) if num_agree else None,
+            "n_with_scenegraph": len(num_sg_agree),
+            "scenegraph_agreement_rate": _mean(num_sg_agree) if num_sg_agree else None,
         },
         "object_reference": {
             "n": len(obj),
@@ -338,11 +451,17 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
             "mean_iou": _mean(obj_iou),
             "iou_at_0p25": _mean([1.0 if v >= 0.25 else 0.0 for v in obj_iou]) if obj_iou else None,
             "iou_at_0p5": _mean([1.0 if v >= 0.5 else 0.0 for v in obj_iou]) if obj_iou else None,
+            "match_method_breakdown": method_counts,
         },
         "instruction_following": {
             "n": len(inf),
-            "mean_frechet_m": _mean([s.frechet_m for s in inf]),
-            "mean_coverage_1m": _mean([s.coverage_1m for s in inf]),
+            "n_aligned": len(inf_aligned),
+            "n_unaligned_scenes": len(unaligned_scenes),
+            "unaligned_scenes": unaligned_scenes,
+            "mean_frechet_m_aligned": _mean([s.frechet_m for s in inf_aligned]),
+            "mean_coverage_1m_aligned": _mean([s.coverage_1m for s in inf_aligned]),
+            "mean_frechet_m_all": _mean([s.frechet_m for s in inf]),
+            "mean_coverage_1m_all": _mean([s.coverage_1m for s in inf]),
         },
     }
 
@@ -364,14 +483,26 @@ def _md_table(scores: list[GTQuestionScore]) -> str:
                 if s.gt_count_independent is not None
                 else ""
             )
-            metric = f"count={s.our_count} pipeline_gt={s.gt_count_pipeline}{indep}"
+            sg = (
+                f", sg={s.gt_count_scenegraph}({s.scenegraph_source})"
+                if s.gt_count_scenegraph is not None
+                else ""
+            )
+            metric = f"count={s.our_count} pipeline_gt={s.gt_count_pipeline}{indep}{sg}"
         elif s.qtype == QType.OBJECT_REFERENCE.value:
             iou = "n/a" if s.iou is None else f"{s.iou:.3f}"
-            metric = f"IoU={iou} tgt={s.gt_target_id}({s.target_source})"
+            metric = (
+                f"IoU={iou} tgt={s.gt_target_id}({s.target_source}"
+                f"/{s.match_method or 'none'})"
+            )
         else:
             fr = "n/a" if s.frechet_m is None else f"{s.frechet_m:.2f}m"
             cov = "n/a" if s.coverage_1m is None else f"{s.coverage_1m:.0%}"
-            metric = f"Frechet={fr} cover1m={cov} (ours {s.our_n_waypoints}/gt {s.gt_n_waypoints})"
+            resid = "" if s.fit_residual_m is None else f" fit={s.fit_residual_m:.2f}m"
+            metric = (
+                f"Frechet={fr} cover1m={cov}{resid} "
+                f"(ours {s.our_n_waypoints}/gt {s.gt_n_waypoints})"
+            )
         note = s.note or ""
         rows.append(f"| {s.scene} | {s.qtype[:4]} | {metric} | {note} | {q} |")
     return header + "\n".join(rows) + "\n"
@@ -412,18 +543,24 @@ def write_report(
     )
 
     n, o, i = agg["numerical"], agg["object_reference"], agg["instruction_following"]
+    method_str = ", ".join(
+        f"{k}={v}" for k, v in sorted(o["match_method_breakdown"].items())
+    ) or "none"
     lines.append("## Topline (per type)\n")
     lines.append(
         f"- **Numerical** (n={n['n']}): pipeline exact-match "
-        f"{_pct(n['exact_match_rate_pipeline'])}; independent agreement "
-        f"{_pct(n['independent_agreement_rate'])} over {n['n_with_independent']} with a "
-        f"second opinion.\n"
+        f"{_pct(n['exact_match_rate_pipeline'])}; independent (referential) agreement "
+        f"{_pct(n['independent_agreement_rate'])} over {n['n_with_independent']}; "
+        f"scene-graph agreement {_pct(n['scenegraph_agreement_rate'])} over "
+        f"{n['n_with_scenegraph']}.\n"
         f"- **Object reference** (n={o['n']}, scored={o['n_scored']}): mean 3D IoU "
         f"{_num(o['mean_iou'])}; IoU>=0.25 {_pct(o['iou_at_0p25'])}; IoU>=0.5 "
-        f"{_pct(o['iou_at_0p5'])}.\n"
-        f"- **Instruction following** (n={i['n']}): mean discrete Frechet "
-        f"{_num(i['mean_frechet_m'])} m; mean coverage within 1.0 m "
-        f"{_pct(i['mean_coverage_1m'])}.\n"
+        f"{_pct(o['iou_at_0p5'])}. Match method: {method_str}.\n"
+        f"- **Instruction following** (n={i['n']}): aligned scenes score mean discrete "
+        f"Frechet {_num(i['mean_frechet_m_aligned'])} m; mean coverage within 1.0 m "
+        f"{_pct(i['mean_coverage_1m_aligned'])} (over {i['n_aligned']} aligned Qs). "
+        f"{i['n_unaligned_scenes']} scene(s) unaligned (residual > 1 m, diagnostic-only)"
+        f"{': ' + ', '.join(i['unaligned_scenes']) if i['unaligned_scenes'] else ''}.\n"
     )
     lines.append("\n## Per-question\n")
     lines.append(_md_table(scores))
@@ -496,7 +633,8 @@ def main(argv: list[str] | None = None) -> int:
         f"gt_battery: {len(scores)} questions / {len({s.scene for s in scores})} scenes  "
         f"num_exact={_pct(n['exact_match_rate_pipeline'])} "
         f"or_iou={_num(o['mean_iou'])} "
-        f"if_cover1m={_pct(i['mean_coverage_1m'])}"
+        f"if_cover1m_aligned={_pct(i['mean_coverage_1m_aligned'])} "
+        f"if_unaligned={i['n_unaligned_scenes']}"
     )
     print(f"wrote {md_path}")
     print(f"wrote {json_path}")
