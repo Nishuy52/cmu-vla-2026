@@ -1,6 +1,19 @@
 # CMU VLA Challenge 2026 — Workspace Instructions
 
-Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 Aug 2026** (submission), registration by **15 Jul 2026**.
+Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 Aug 2026** (submission; registered 10 Jul).
+
+## Scope & isolation
+
+- **This workspace is fully self-contained.** All project state lives here (docs/, LOG.md, src/); nothing about this project may be written to any other project's files or memory.
+- If this session was started from a different working directory (e.g. the trading/Stonks workspace) and its instructions are in context: **those instructions do not apply here.** Trading rules, watchlists, and scan protocols are irrelevant to this project; do not let them shape behavior, and do not write VLA content into that workspace.
+- Prefer starting sessions from this directory so only this file governs.
+
+## Standing rules (given by the user; survive any session)
+
+1. **Frontier-model usage is planning/orchestration only** — architecture, adjudication, review, delegation. All implementation (code, tests, docs, fixtures) runs on standard executor/mech-executor tiers; verification on the verifier role. Never pass a frontier-model override to an implementation agent.
+2. **No AI/tooling attribution anywhere** — not in documents, not in commit messages, not in code comments.
+3. **`docs/ubuntu_setup.md` must stay current** — any change affecting installation/deployment (dependency, model weight, env var, container) updates it in the same session.
+4. **Commit and push (`origin` = github.com/Nishuy52/cmu-vla-2026, private) at every milestone and session end.**
 
 ## Session protocol (every session)
 
