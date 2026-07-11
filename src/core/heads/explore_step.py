@@ -27,7 +27,7 @@ from typing import Any, Callable, Sequence
 from core.interfaces import QType, RobotIO, WaypointCmd
 from core.nav.exploration import ExplorationPolicy, ExplorationStatus
 from core.nav.frontiers import detect_frontiers
-from core.nav.occupancy import OccupancyGrid
+from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
 from core.plan_schema import Plan
 
 from core.heads.instruction import InstructionHead
@@ -119,6 +119,13 @@ class ExploreHead:
         patch = io.latest_terrain(extended=False)
         if patch is not None:
             self.grid.integrate_patch(patch)
+        # Overhead-clearance layer: flag overhangs (bar tables/shelves) the terrain
+        # slab dropped, so exploration/planning won't route under furniture the base
+        # stack reads as FREE floor. Terrain first so per-cell ground_z is set.
+        scan = io.latest_scan() if hasattr(io, "latest_scan") else None
+        if scan is not None:
+            odom_z = float(odom.z) if odom is not None else 0.0
+            integrate_scan_overhead_decimated(self.grid, scan, odom_z)
         self.grid.mark_pose(pose[0], pose[1])
 
         self._maybe_recover_miss(io, scene, pose)

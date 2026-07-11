@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from core.interfaces import TerrainPatch
+from core.interfaces import LidarScan, TerrainPatch
 
 # --------------------------------------------------------------------------- tunables
 CELL_M: float = 0.10  # grid resolution, metres/cell
@@ -33,6 +33,39 @@ GROW_PAD_CELLS: int = 8  # extra ring of cells added when the grid must grow
 UNKNOWN: int = 0
 FREE: int = 1
 OBSTACLE: int = 2
+
+
+# --------------------------------------------------------------------------- overhead cfg
+@dataclass(frozen=True)
+class OverheadConfig:
+    """Tunables for the overhead-clearance layer (see docs/calibration.md).
+
+    Motivation: terrainAnalysis.cpp filters /registered_scan to a thin slab
+    (maxRelZ=0.2 m above the vehicle) before publishing /terrain_map, so
+    overhanging surfaces — bar-height tabletops, shelves, stool seats roughly
+    0.25-1.2 m off the floor — are ABSENT from the terrain cloud: cells directly
+    under a table read FREE. The full /registered_scan DOES carry those overhang
+    points. ``integrate_scan_overhead`` re-reads the raw scan and flags any cell
+    whose scan points fall in the clearance band above the local ground as
+    OVERHEAD, so the planner can refuse to route the vehicle under furniture the
+    base terrain stack cannot see.
+    """
+
+    overhead_min: float = 0.25  # m above local ground: band lower edge (skip near-ground)
+    overhead_max: float = 1.20  # m above local ground: band upper edge (skip tall walls/ceiling)
+    min_points_per_cell: int = 3  # cell needs >= this many in-band points to flag (noise reject)
+    #: fallback local-ground estimate when a cell has no terrain-derived ground z:
+    #: ground_z ~= vehicle_z - vehicle_sensor_height. The registered-scan / terrain
+    #: clouds are map-frame, with the vehicle sensor origin ~0.6 m above the floor
+    #: (jingfan fixtures: vehicle z ~= 0.0, ground/free terrain z ~= -0.6).
+    vehicle_sensor_height: float = 0.60
+
+
+DEFAULT_OVERHEAD_CONFIG = OverheadConfig()
+
+#: max scan points fed to the overhead layer per tick (decimation for the per-tick
+#: wiring path — the raw /registered_scan is ~10-60k points; deterministic stride).
+OVERHEAD_SCAN_MAX_PTS: int = 12000
 
 
 @dataclass
@@ -54,6 +87,13 @@ class OccupancyGrid:
     state: np.ndarray | None = None
     intensity: np.ndarray | None = None
     observed: np.ndarray | None = None
+    #: OVERHEAD flag — a cell has a scan return in the clearance band above local
+    #: ground (furniture the terrain slab filtered out). Kept SEPARATE from `state`
+    #: so terrain-derived FREE/OBSTACLE classification stays pure (spec §1).
+    overhead: np.ndarray | None = None
+    #: per-cell terrain-derived ground surface z (map frame), max-lag from the
+    #: lowest terrain point seen; NaN until a terrain point lands in the cell.
+    ground_z: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         if self.state is None:
@@ -61,6 +101,8 @@ class OccupancyGrid:
             self.state = np.zeros((1, 1), dtype=np.int8)
             self.intensity = np.full((1, 1), -np.inf, dtype=np.float32)
             self.observed = np.zeros((1, 1), dtype=bool)
+            self.overhead = np.zeros((1, 1), dtype=bool)
+            self.ground_z = np.full((1, 1), np.nan, dtype=np.float32)
 
     # ------------------------------------------------------------- indexing
     @property
@@ -109,14 +151,20 @@ class OccupancyGrid:
         new_state = np.zeros((new_h, new_w), dtype=np.int8)
         new_int = np.full((new_h, new_w), -np.inf, dtype=np.float32)
         new_obs = np.zeros((new_h, new_w), dtype=bool)
+        new_over = np.zeros((new_h, new_w), dtype=bool)
+        new_gz = np.full((new_h, new_w), np.nan, dtype=np.float32)
 
         new_state[pad_top : pad_top + h, pad_left : pad_left + w] = self.state
         new_int[pad_top : pad_top + h, pad_left : pad_left + w] = self.intensity
         new_obs[pad_top : pad_top + h, pad_left : pad_left + w] = self.observed
+        new_over[pad_top : pad_top + h, pad_left : pad_left + w] = self.overhead
+        new_gz[pad_top : pad_top + h, pad_left : pad_left + w] = self.ground_z
 
         self.state = new_state
         self.intensity = new_int
         self.observed = new_obs
+        self.overhead = new_over
+        self.ground_z = new_gz
         # Shifting the top/left corner moves the origin (cell (0,0)) outward.
         self.origin_x -= pad_left * self.cell_m
         self.origin_y -= pad_top * self.cell_m
@@ -129,7 +177,7 @@ class OccupancyGrid:
         # differently at exact cell boundaries.
         if pts.size == 0:
             return
-        xs, ys, inten = pts[:, 0], pts[:, 1], pts[:, 3]
+        xs, ys, zs, inten = pts[:, 0], pts[:, 1], pts[:, 2], pts[:, 3]
         cols = np.floor((xs - self.origin_x) / self.cell_m).astype(np.int64)
         rows = np.floor((ys - self.origin_y) / self.cell_m).astype(np.int64)
         self._ensure_bounds(rows, cols)
@@ -140,9 +188,13 @@ class OccupancyGrid:
         # Reduce to max intensity per unique cell before writing (order-independent).
         flat = rows * self.shape[1] + cols
         order = np.argsort(flat, kind="stable")
-        flat_s, inten_s = flat[order], inten[order]
+        flat_s, inten_s, z_s = flat[order], inten[order], zs[order]
         uniq, starts = np.unique(flat_s, return_index=True)
         seg_max = np.maximum.reduceat(inten_s, starts)
+        # Local ground surface z per cell = the LOWEST terrain point in the cell
+        # (min z), so the overhead band is measured off the floor, not off a
+        # low obstacle. Kept as a running min across patches.
+        seg_gz = np.minimum.reduceat(z_s, starts)
         u_rows = (uniq // self.shape[1]).astype(np.int64)
         u_cols = (uniq % self.shape[1]).astype(np.int64)
 
@@ -151,6 +203,59 @@ class OccupancyGrid:
         self.intensity[u_rows, u_cols] = new_int
         classified = np.where(new_int < self.free_max, FREE, OBSTACLE).astype(np.int8)
         self.state[u_rows, u_cols] = classified
+
+        prev_gz = self.ground_z[u_rows, u_cols]
+        merged_gz = np.where(np.isnan(prev_gz), seg_gz, np.minimum(prev_gz, seg_gz))
+        self.ground_z[u_rows, u_cols] = merged_gz.astype(np.float32)
+
+    def integrate_scan_overhead(
+        self,
+        scan: LidarScan,
+        vehicle_z: float,
+        cfg: OverheadConfig = DEFAULT_OVERHEAD_CONFIG,
+    ) -> None:
+        """Flag cells with an overhang the terrain slab can't see (spec §1, §5 gate).
+
+        For each scan point (map-frame xyz from /registered_scan) whose height above
+        the LOCAL GROUND estimate falls in the band [cfg.overhead_min, cfg.overhead_max],
+        we accumulate a per-cell count; a cell with >= cfg.min_points_per_cell such
+        points is set OVERHEAD. This is a separate boolean layer — it never touches
+        the terrain-derived FREE/OBSTACLE `state`.
+
+        Local ground per cell: the terrain-derived `ground_z` if a terrain point has
+        landed in the cell; otherwise the fallback (vehicle_z - vehicle_sensor_height).
+        Overhead points over UNKNOWN floor (no terrain yet) therefore still flag — the
+        table is caught before the floor beneath it is ever classified.
+        """
+        pts = np.asarray(scan.points, dtype=np.float64)
+        if pts.size == 0:
+            return
+        xs, ys, zs = pts[:, 0], pts[:, 1], pts[:, 2]
+        cols = np.floor((xs - self.origin_x) / self.cell_m).astype(np.int64)
+        rows = np.floor((ys - self.origin_y) / self.cell_m).astype(np.int64)
+        self._ensure_bounds(rows, cols)
+        cols = np.floor((xs - self.origin_x) / self.cell_m).astype(np.int64)
+        rows = np.floor((ys - self.origin_y) / self.cell_m).astype(np.int64)
+
+        # Per-point local ground: terrain ground_z where known, else the fallback.
+        fallback_gz = float(vehicle_z) - float(cfg.vehicle_sensor_height)
+        cell_gz = self.ground_z[rows, cols]
+        gz = np.where(np.isnan(cell_gz), fallback_gz, cell_gz)
+        height = zs - gz
+        in_band = (height >= cfg.overhead_min) & (height <= cfg.overhead_max)
+        if not in_band.any():
+            return
+
+        br, bc = rows[in_band], cols[in_band]
+        flat = br * self.shape[1] + bc
+        uniq, counts = np.unique(flat, return_counts=True)
+        keep = counts >= cfg.min_points_per_cell
+        if not keep.any():
+            return
+        u = uniq[keep]
+        u_rows = (u // self.shape[1]).astype(np.int64)
+        u_cols = (u % self.shape[1]).astype(np.int64)
+        self.overhead[u_rows, u_cols] = True
 
     def mark_pose(self, x: float, y: float) -> None:
         """Carve the vehicle cell FREE and flag all cells within lidar radius observed."""
@@ -188,3 +293,43 @@ class OccupancyGrid:
 
     def is_unknown(self, row: int, col: int) -> bool:
         return (not self.in_bounds(row, col)) or self.state[row, col] == UNKNOWN
+
+    def is_overhead(self, row: int, col: int) -> bool:
+        """True if the cell carries an overhang in the clearance band (furniture)."""
+        return self.in_bounds(row, col) and bool(self.overhead[row, col])
+
+
+def integrate_scan_overhead_decimated(
+    grid: OccupancyGrid,
+    scan: LidarScan,
+    vehicle_z: float,
+    cfg: OverheadConfig = DEFAULT_OVERHEAD_CONFIG,
+    max_pts: int = OVERHEAD_SCAN_MAX_PTS,
+) -> None:
+    """Per-tick wiring helper: decimate + bounds-clip the scan, then fold overhead.
+
+    Keeps the per-tick cost bounded (spec §3): a deterministic stride decimation to
+    ``max_pts`` and a pre-clip to points already within the grid's current world
+    bounds (a table well outside the mapped area is skipped — the grid should not
+    grow just to flag a far overhang). Points are only clipped, never reordered, so
+    the result stays deterministic.
+    """
+    pts = np.asarray(scan.points, dtype=np.float64)
+    if pts.size == 0:
+        return
+    # Clip to current grid world bounds so we neither grow for far points nor pay
+    # for them. Bounds are the outer edges of the current lattice.
+    h, w = grid.shape
+    min_x = grid.origin_x
+    min_y = grid.origin_y
+    max_x = grid.origin_x + w * grid.cell_m
+    max_y = grid.origin_y + h * grid.cell_m
+    xs, ys = pts[:, 0], pts[:, 1]
+    inside = (xs >= min_x) & (xs < max_x) & (ys >= min_y) & (ys < max_y)
+    pts = pts[inside]
+    if pts.shape[0] == 0:
+        return
+    if pts.shape[0] > max_pts:
+        stride = int(np.ceil(pts.shape[0] / max_pts))
+        pts = pts[::stride]
+    grid.integrate_scan_overhead(LidarScan(t=scan.t, points=pts), vehicle_z, cfg)

@@ -38,7 +38,7 @@ from core.geometry import toolbox as TB
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.nav.breadcrumbs import BreadcrumbFollower
 from core.nav.costmap import Costmap
-from core.nav.occupancy import OccupancyGrid
+from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
 from core.nav.planner import astar, plan_through
 from core.plan_schema import Anchor, LegKind, Plan, RouteLeg, TargetSpec
 
@@ -128,6 +128,13 @@ class InstructionHead:
         patch = io.latest_terrain(extended=False)
         if patch is not None:
             self.grid.integrate_patch(patch)
+        # Overhead-clearance layer: fold the raw /registered_scan through the grid so
+        # overhangs the terrain slab filtered out (bar tables the base stack reads as
+        # FREE floor) get flagged. Terrain first so per-cell ground_z is available.
+        scan = io.latest_scan() if hasattr(io, "latest_scan") else None
+        if scan is not None:
+            vehicle_z = _vehicle_z(io)
+            integrate_scan_overhead_decimated(self.grid, scan, vehicle_z)
         self.grid.mark_pose(pose[0], pose[1])
 
     # ------------------------------------------------------------------ grounding
@@ -390,6 +397,12 @@ class InstructionHead:
 
 def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def _vehicle_z(io: RobotIO) -> float:
+    """Latest vehicle z (map frame) for the overhead local-ground fallback; 0.0 if none."""
+    odom = io.latest_odom()
+    return float(odom.z) if odom is not None else 0.0
 
 
 def _is_legacy_anchor_seam(fn: Callable) -> bool:

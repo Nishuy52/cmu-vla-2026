@@ -99,6 +99,11 @@ are hard module constants.
 | nav.observe_radius_m | 8.0 | m | Lidar footprint radius for the observed mask | `occupancy.OBSERVE_RADIUS_M` | constructor arg (`OccupancyGrid.observe_radius_m`) | M |
 | nav.grow_pad_cells | 8 | cells | Extra ring added when the grid grows | `occupancy.GROW_PAD_CELLS` | module constant — **wiring TODO (Phase 2)** (read directly in `_ensure_bounds`) | L |
 | nav.vehicle_radius_m | 0.4 | m | Obstacle inflation radius | `costmap.VEHICLE_RADIUS_M` | constructor arg (`Costmap.vehicle_radius_m` default = const) | H |
+| nav.overhead_min | 0.25 | m | Overhead-clearance band lower edge (height above local ground; skip near-ground returns) | `occupancy.OverheadConfig.overhead_min` | dataclass field (`OverheadConfig`, passed to `integrate_scan_overhead`) | H |
+| nav.overhead_max | 1.20 | m | Overhead-clearance band upper edge (skip walls/ceiling above furniture) | `occupancy.OverheadConfig.overhead_max` | dataclass field (`OverheadConfig`) | H |
+| nav.overhead_min_points_per_cell | 3 | points | In-band scan points a cell needs before it flags OVERHEAD (noise reject) | `occupancy.OverheadConfig.min_points_per_cell` | dataclass field (`OverheadConfig`) | M |
+| nav.vehicle_sensor_height | 0.60 | m | Fallback local-ground = `vehicle_z − this` when a cell has no terrain-derived ground z (jingfan: vehicle z ≈ 0.0, floor z ≈ −0.6) | `occupancy.OverheadConfig.vehicle_sensor_height` | dataclass field (`OverheadConfig`) | M |
+| nav.overhead_scan_max_pts | 12000 | points | Per-tick decimation cap for the raw /registered_scan fed to the overhead layer | `occupancy.OVERHEAD_SCAN_MAX_PTS` | module constant (default arg to `integrate_scan_overhead_decimated`) | L |
 | nav.min_cluster_size | 5 | cells | Frontier clusters below this are noise | `frontiers.MIN_CLUSTER_SIZE` | function param (`detect_frontiers`) | M |
 | nav.w_size | 1.0 | — | Frontier score reward on cluster size | `frontiers.W_SIZE` | function param | M |
 | nav.w_dist | 0.5 | per cell | Frontier score penalty on path distance | `frontiers.W_DIST` | function param | H |
