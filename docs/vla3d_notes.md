@@ -423,3 +423,14 @@ programmatically.
    trajectory PLYs are confirmed ASCII, but `<scene>_pc_result.ply` files were not directly
    inspected (would require the actual download) and could plausibly be binary given they contain
    full colored point clouds at real scene scale.
+
+---
+
+## See also (added 11 Jul 2026)
+
+`docs/prior_art/vla_3d.md` - the question-generation side of this
+dataset: exact relation thresholds, the closed 15-color
+vocabulary, and the disambiguation cascade, extracted from the
+organizers' own generation code. Complements the download/schema
+mechanics above; effectively the test-time scene-graph spec the
+challenge questions are built from.

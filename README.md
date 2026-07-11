@@ -4,6 +4,7 @@ Planning + development workspace for the [CMU Vision-Language-Navigation Challen
 
 - **Submission deadline:** 15 Aug 2026 (AoE) · **Registration:** by 15 Jul 2026
 - **Status & plan:** [docs/master_plan.md](docs/master_plan.md) · **Session log:** [LOG.md](LOG.md)
+- **2025 results & prior-art dossiers:** [docs/prior_art/README.md](docs/prior_art/README.md)
 - **New Claude session?** Start with [CLAUDE.md](CLAUDE.md).
 
 The official challenge repo is cloned read-only under `upstream/` (git-ignored).

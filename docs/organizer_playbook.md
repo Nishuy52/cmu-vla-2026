@@ -109,3 +109,29 @@ This thesis is the more directly relevant of the two — it contains a section e
 - **Treat the camera stream as semantics-only, LiDAR as geometry-only.** Kachana's fisheye visual-odometry failure is a direct warning against trying to infer depth/scale/position from the 360° camera image alone; use `/registered_scan` for anything positional and the camera purely for VLM captioning/detection, exactly as SORT3D does.
 - **Plan an explicit, time-boxed exploration policy** — this is the one piece neither thesis actually solves (SORT3D's real-world demos pre-map the environment manually before querying, which the competition's 10-minute autonomous format does not allow). The independent 2025 arxiv report's frontier-based exploration with a hard time cutoff (500s in their case, scaled to our 10-minute/question budget) is the only concretely described exploration strategy found across both organizer material and third-party reports, and is a reasonable starting point in the absence of anything better-validated.
 - **Watch for Yonatan Bisk's IROS 2026 talk** (Pittsburgh, Oct 1, 2026) — he's on Zhang's thesis committee and a confirmed 2026 workshop speaker, making his talk the most likely single source of forward-looking signal about what the 2026 challenge will emphasize, if it's accessible before or shortly after our competition dates.
+
+---
+
+## Update 11 Jul 2026 - Part B "not found" items resolved
+
+Full detail in `docs/prior_art/README.md` and the per-team
+dossiers under `docs/prior_art/`.
+
+- **Full 2025 leaderboard** (Wayback screenshot, saved at
+  `docs/assets/cmu_vla_2025_leaderboard.png`): 1st NROS Lab (HIT
+  Shenzhen) 44.26, 2nd ReasonX (NTU+NUS) 34.58, 3rd CopyPasta
+  (CMU MRSD) 30.98, 4th URL-KAIST 22.80. The 1st-place fact was
+  findable only in Chinese-language sources.
+- **Two corrections to Part B's CopyPasta account**, from reading
+  their actual code: (a) the question classifier and the
+  numerical + object-reference solvers run `gemini-2.0-flash-001`;
+  only the instruction-following solver defaults to Gemini 2.5
+  Pro. (b) The talk's standalone "Verifier" module does not exist
+  in code - the system is a 5-state linear ROS state machine with
+  ad hoc retry/reprompt loops.
+- **CopyPasta does have a public repo and a recorded method
+  talk** - see `docs/prior_art/2025_3rd_copypasta.md`.
+- CopyPasta and ReasonX both leaned on the 2025 sim's
+  ground-truth `/object_markers` topic, which the 2026 allowed-I/O
+  list does not include - their reported approaches overstate how
+  much ports to 2026.
