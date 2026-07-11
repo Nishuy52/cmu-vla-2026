@@ -35,6 +35,7 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 | `docs/ubuntu_setup.md` | **Ordered install guide for the Phase-2 Ubuntu machine** — OS → NVIDIA → Docker → challenge stack → our module. MUST be updated whenever any change affects installation/deployment (new dependency, model weight, env var, container change) |
 | `docs/upstream_notes.md` | Distilled upstream repo internals (topic contract, launch mechanics, gotchas) |
 | `docs/sim_verification.md` | "Is everything working?" runbook — three-tier ladder (Windows-now → WSL2 → native Ubuntu sim) with exact command + PASS/FAIL fix per step, and a known-good-state checklist |
+| `docs/phase2_playbook.md` | **THE Ubuntu order-of-operations** — Gates 0–5 from fresh install to first scored dry-run, then the calibration loop to the Aug 3 MVS submission. Start here on Ubuntu day one |
 | `docs/question_analysis.md` | Training-question taxonomy — verified stats (75 Q / 255 pts; IF = 70.6%) |
 | `docs/prior_art.md` | Published-work survey: SORT3D blueprint, VLN/EQA literature, reading list |
 | `docs/organizer_playbook.md` | Organiser theses distilled + 2025 winner intel |
