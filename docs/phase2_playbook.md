@@ -65,6 +65,15 @@ clock). Score by hand: numerical/object-ref vs VLA-3D ground truth (see `vla3d_n
 ground-truth eval docs), instruction-following vs the `trajectory_q4/q5.ply` paths. Log the
 per-question wall-time split (explore vs answer) — that's the calibration currency.
 
+## Gate 5b — perception-vs-reasoning error split (do once, right after Gate 5)
+
+2025 teams could ground against sim-published GT semantics; **2026 forbids it at test time**
+(upstream gotcha 8 — only the six topics are legal), but it remains legal in *development*. Use
+that: run the same scene's questions twice — (a) full pipeline, (b) sim/VLA-3D ground-truth
+objects injected via the scene-index seam (the GT-battery wiring). Score both. The (b)−(a) gap is
+**perception-caused loss**; (b)'s own gap to full marks is **reasoning-caused loss**. This split
+decides where the calibration weeks go — do not skip it, and re-run it after any detector change.
+
 ## Then: the calibration loop (until ~Aug 3 MVS)
 
 Sweep the ledger (`docs/calibration.md`, 55 tunables; wire the 14 wiring-TODO fields as needed)
