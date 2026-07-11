@@ -45,6 +45,10 @@ bottom of ubuntu_setup.md.
    its pano column matches the predicted azimuth; flip constants if mirrored. Also verify the
    camera-level assumption note in tiling.
 
+During bring-up use the debug launch `ros2 launch vla_ai_module ai_module_debug.launch.py`
+(our additive RVIZ view of the instance map + planned path + answer marker) — see
+`docs/sim_verification.md` §2.8. Keep the eval path on `ai_module.launch.py` (debug OFF, no rviz).
+
 ## Gate 4 — real perception — ~half a day
 
 1. Uncomment torch/groundingdino in the Dockerfile; download weights (`GDINO_MODEL_ID` in

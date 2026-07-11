@@ -18,6 +18,11 @@ and ROS 2. It contains ZERO task logic — no perception, no counting, no explor
   4. drives ``QuestionController.tick(self)`` at 5 Hz — ``self`` IS the RobotIO,
   5. publishes the three answer topics (Marker / Pose2D / Int32).
 
+Optionally (visualization only, behind the ``debug_viz`` launch arg, default OFF for eval) it
+also republishes the tracked instance map and a planned-path breadcrumb for RVIZ — see the
+"OPTIONAL DEBUG VISUALIZATION" block in ``__init__``. When debug_viz is false these publishers
+and their timer are never created, so the eval path carries zero debug overhead.
+
 Dependency direction is one-way: ros_adapter -> core. core never imports ros_adapter and
 never imports rclpy, so ``pytest`` on the core suite stays ROS-free.
 
@@ -58,7 +63,7 @@ from geometry_msgs.msg import Pose2D
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image, PointCloud2
 from std_msgs.msg import Int32, String
-from visualization_msgs.msg import Marker
+from visualization_msgs.msg import Marker, MarkerArray
 
 # core is pure-Python and ROS-free. This is the one-way dependency ros_adapter -> core.
 from core.interfaces import (
@@ -95,7 +100,15 @@ TOPIC_WAYPOINT = "/way_point_with_heading"
 TOPIC_MARKER = "/selected_object_marker"
 TOPIC_NUMERICAL = "/numerical_response"
 
+# Debug-only visualization topics (published ONLY when the debug_viz launch arg is true —
+# see the "OPTIONAL DEBUG VISUALIZATION" block below). These are NOT part of the answer
+# contract and never appear on the eval path (debug_viz defaults false in ai_module.launch.py).
+TOPIC_DBG_INSTANCE_MAP = "/ai_module/instance_map"
+TOPIC_DBG_PLANNED_PATH = "/ai_module/planned_path"
+
 TICK_HZ = 5.0  # QuestionController.tick() cadence (core/fsm/controller.py docstring)
+DEBUG_VIZ_HZ = 1.0  # instance-map republish cadence when debug_viz is on
+DEBUG_PATH_MAX = 500  # cap on retained waypoint breadcrumb points (bounded memory)
 
 
 def _reliable_transient_qos(depth: int = 5) -> QoSProfile:
@@ -182,6 +195,31 @@ class AdapterNode(Node):
             Int32, TOPIC_NUMERICAL, _reliable_qos()
         )
 
+        # ---- OPTIONAL DEBUG VISUALIZATION (default OFF — eval path stays clean) ----
+        # Visualization only: zero task logic. When debug_viz is false (the eval default,
+        # set in ai_module.launch.py) NO debug publisher, timer, or breadcrumb state is
+        # created, so the eval path allocates and executes nothing extra. Only when
+        # ai_module_debug.launch.py passes debug_viz:=true do these come alive.
+        self.declare_parameter("debug_viz", False)
+        self._debug_viz = bool(
+            self.get_parameter("debug_viz").get_parameter_value().bool_value
+        )
+        self._dbg_path_pts: list[tuple[float, float]] = []
+        if self._debug_viz:
+            self._pub_dbg_instances = self.create_publisher(
+                MarkerArray, TOPIC_DBG_INSTANCE_MAP, _reliable_qos()
+            )
+            self._pub_dbg_path = self.create_publisher(
+                Marker, TOPIC_DBG_PLANNED_PATH, _reliable_qos()
+            )
+            self._dbg_timer = self.create_timer(
+                1.0 / DEBUG_VIZ_HZ, self._on_debug_viz
+            )
+            self.get_logger().warn(
+                "debug_viz=true: publishing %s (1 Hz) + %s. DEBUG ONLY — do not "
+                "enable for evaluation." % (TOPIC_DBG_INSTANCE_MAP, TOPIC_DBG_PLANNED_PATH)
+            )
+
         # ---- Controller (built lazily once the question is known) -------------
         # The heads resolve against the live SceneIndex. Phase 2 wires the real perception
         # map here; until then an empty index means the FSM floor still emits a legal answer.
@@ -259,6 +297,94 @@ class AdapterNode(Node):
         except Exception as exc:  # a dead adapter must never crash the node
             self.get_logger().error("tick error: %s" % exc)
 
+    # ------------------------------------------------------------------ debug viz (1 Hz)
+    def _on_debug_viz(self) -> None:
+        """Republish the instance map + planned-path breadcrumb for RVIZ. debug_viz only.
+
+        Visualization only — reads the scene index and the breadcrumb list, publishes two
+        debug topics, mutates no controller/answer state. Never raises (a viz error must not
+        disturb the drive loop). Only wired when debug_viz is true, so it does not exist on
+        the eval path at all.
+        """
+        try:
+            now = self.get_clock().now().to_msg()
+            self._publish_instance_map(now)
+            self._publish_planned_path(now)
+        except Exception as exc:  # a viz glitch must never crash the node
+            self.get_logger().error("debug_viz error: %s" % exc)
+
+    def _publish_instance_map(self, stamp) -> None:
+        """One semi-transparent CUBE + TEXT label per tracked InstanceRecord."""
+        instances = self._scene_index.all_instances()
+        arr = MarkerArray()
+        for rec in instances:
+            c = (rec.aabb_min + rec.aabb_max) / 2.0
+            e = rec.extents
+            box = Marker()
+            box.header.frame_id = "map"
+            box.header.stamp = stamp
+            box.ns = "instance_box"
+            box.id = int(rec.instance_id)
+            box.type = Marker.CUBE
+            box.action = Marker.ADD
+            box.pose.position.x = float(c[0])
+            box.pose.position.y = float(c[1])
+            box.pose.position.z = float(c[2])
+            box.pose.orientation.w = 1.0
+            box.scale.x = max(float(e[0]), 1e-3)
+            box.scale.y = max(float(e[1]), 1e-3)
+            box.scale.z = max(float(e[2]), 1e-3)
+            box.color.r = 0.1
+            box.color.g = 0.8
+            box.color.b = 1.0
+            box.color.a = 0.25  # semi-transparent
+            arr.markers.append(box)
+
+            text = Marker()
+            text.header.frame_id = "map"
+            text.header.stamp = stamp
+            text.ns = "instance_label"
+            text.id = int(rec.instance_id)
+            text.type = Marker.TEXT_VIEW_FACING
+            text.action = Marker.ADD
+            text.pose.position.x = float(c[0])
+            text.pose.position.y = float(c[1])
+            text.pose.position.z = float(rec.aabb_max[2]) + 0.2
+            text.pose.orientation.w = 1.0
+            text.scale.z = 0.25  # text height (m)
+            text.color.r = 1.0
+            text.color.g = 1.0
+            text.color.b = 1.0
+            text.color.a = 0.9
+            text.text = "%s#%d (%dx)" % (rec.label, rec.instance_id, rec.n_obs)
+            arr.markers.append(text)
+        self._pub_dbg_instances.publish(arr)
+
+    def _publish_planned_path(self, stamp) -> None:
+        """LINE_STRIP breadcrumb of the waypoints we have commanded so far."""
+        from geometry_msgs.msg import Point
+
+        line = Marker()
+        line.header.frame_id = "map"
+        line.header.stamp = stamp
+        line.ns = "planned_path"
+        line.id = 0
+        line.type = Marker.LINE_STRIP
+        line.action = Marker.ADD
+        line.pose.orientation.w = 1.0
+        line.scale.x = 0.05  # line width (m)
+        line.color.r = 1.0
+        line.color.g = 0.65
+        line.color.b = 0.0
+        line.color.a = 0.9
+        for x, y in self._dbg_path_pts:
+            p = Point()
+            p.x = float(x)
+            p.y = float(y)
+            p.z = 0.05
+            line.points.append(p)
+        self._pub_dbg_path.publish(line)
+
     # ------------------------------------------------------------------ RobotIO: getters
     # Return the latest latched value or None; never block (contract in core/interfaces.py).
 
@@ -293,6 +419,12 @@ class AdapterNode(Node):
         msg.y = float(wp.y)
         msg.theta = 0.0  # heading ignored this year (gotcha 4)
         self._pub_waypoint.publish(msg)
+        # Debug breadcrumb only (guarded): record the goal we just commanded so the 1 Hz
+        # debug timer can render it as a LINE_STRIP. No effect when debug_viz is false.
+        if self._debug_viz:
+            self._dbg_path_pts.append((float(wp.x), float(wp.y)))
+            if len(self._dbg_path_pts) > DEBUG_PATH_MAX:
+                del self._dbg_path_pts[: len(self._dbg_path_pts) - DEBUG_PATH_MAX]
 
     def publish_marker(self, box: MarkerBox) -> None:
         msg = Marker()

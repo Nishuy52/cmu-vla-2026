@@ -28,7 +28,15 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        ("share/" + package_name + "/launch", ["launch/ai_module.launch.py"]),
+        (
+            "share/" + package_name + "/launch",
+            [
+                "launch/ai_module.launch.py",
+                "launch/ai_module_debug.launch.py",
+            ],
+        ),
+        # Debug RVIZ config (loaded by ai_module_debug.launch.py). Debug-only asset.
+        ("share/" + package_name + "/rviz", ["rviz/ai_module_debug.rviz"]),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
