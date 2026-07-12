@@ -316,3 +316,6 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
   `docs/next_task_colored_reconstruction.md` deleted per its lifecycle note
   (decisions preserved in the task record; full text in git history). PR from
   `tool/colored-cloud`.
+- Started + finished task: live colored voxel map + RViz robot-in-map debug
+  view (T6) — record at `docs/tasks/T6-live-colored-map/`; stacked PR from
+  `feat/live-colored-map`. Debug layer only; scored path untouched.

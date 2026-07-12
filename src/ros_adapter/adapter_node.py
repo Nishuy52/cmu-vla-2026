@@ -61,7 +61,7 @@ from rclpy.qos import (
 
 from geometry_msgs.msg import Pose2D
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Image, PointCloud2
+from sensor_msgs.msg import Image, PointCloud2, PointField
 from std_msgs.msg import Int32, String
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -79,7 +79,9 @@ from core.interfaces import (
 )
 from core.fsm.controller import QuestionController
 from core.heads import build_callables
+from core.perception.colored_map import ColoredVoxelMap
 from core.perception.scene_index import BasicSceneIndex
+from ros_adapter.cloud_packing import pack_colored_cloud
 from core.replay.bag_reader import (
     TOPIC_CAMERA,
     TOPIC_ODOM,
@@ -105,10 +107,14 @@ TOPIC_NUMERICAL = "/numerical_response"
 # contract and never appear on the eval path (debug_viz defaults false in ai_module.launch.py).
 TOPIC_DBG_INSTANCE_MAP = "/ai_module/instance_map"
 TOPIC_DBG_PLANNED_PATH = "/ai_module/planned_path"
+# Live colored voxel map (T6): the growing colored reconstruction the robot's pose display
+# moves through in RVIZ. Debug-only; never on the eval path (debug_viz defaults false).
+TOPIC_DBG_COLORED_CLOUD = "/debug/colored_cloud"
 
 TICK_HZ = 5.0  # QuestionController.tick() cadence (core/fsm/controller.py docstring)
 DEBUG_VIZ_HZ = 1.0  # instance-map republish cadence when debug_viz is on
 DEBUG_PATH_MAX = 500  # cap on retained waypoint breadcrumb points (bounded memory)
+DEBUG_CLOUD_PERIOD_S = 2.0  # publish the FULL colored map at most this often (RVIZ stays responsive)
 
 
 def _reliable_transient_qos(depth: int = 5) -> QoSProfile:
@@ -204,7 +210,16 @@ class AdapterNode(Node):
         self._debug_viz = bool(
             self.get_parameter("debug_viz").get_parameter_value().bool_value
         )
+        # Throttle period (s) for the full colored-map republish (debug_viz only).
+        self.declare_parameter("colored_cloud_period", DEBUG_CLOUD_PERIOD_S)
+        self._colored_cloud_period = float(
+            self.get_parameter("colored_cloud_period").get_parameter_value().double_value
+        ) or DEBUG_CLOUD_PERIOD_S
         self._dbg_path_pts: list[tuple[float, float]] = []
+        # Live colored voxel map + its publisher exist only under debug_viz. All the map
+        # math is in core.perception.ColoredVoxelMap / ros_adapter.cloud_packing (both
+        # pure-numpy, Windows-tested); the rclpy code here is a thin publish shim.
+        self._colored_map: ColoredVoxelMap | None = None
         if self._debug_viz:
             self._pub_dbg_instances = self.create_publisher(
                 MarkerArray, TOPIC_DBG_INSTANCE_MAP, _reliable_qos()
@@ -212,12 +227,23 @@ class AdapterNode(Node):
             self._pub_dbg_path = self.create_publisher(
                 Marker, TOPIC_DBG_PLANNED_PATH, _reliable_qos()
             )
+            self._pub_dbg_cloud = self.create_publisher(
+                PointCloud2, TOPIC_DBG_COLORED_CLOUD, _reliable_qos()
+            )
+            self._colored_map = ColoredVoxelMap()
             self._dbg_timer = self.create_timer(
                 1.0 / DEBUG_VIZ_HZ, self._on_debug_viz
             )
+            # Separate (slower) timer so the FULL colored cloud is republished at most
+            # once per colored_cloud_period, NOT per ingest — RVIZ stays responsive.
+            self._dbg_cloud_timer = self.create_timer(
+                self._colored_cloud_period, self._on_colored_cloud
+            )
             self.get_logger().warn(
-                "debug_viz=true: publishing %s (1 Hz) + %s. DEBUG ONLY — do not "
-                "enable for evaluation." % (TOPIC_DBG_INSTANCE_MAP, TOPIC_DBG_PLANNED_PATH)
+                "debug_viz=true: publishing %s (1 Hz) + %s + %s (every %.1f s). DEBUG "
+                "ONLY — do not enable for evaluation."
+                % (TOPIC_DBG_INSTANCE_MAP, TOPIC_DBG_PLANNED_PATH,
+                   TOPIC_DBG_COLORED_CLOUD, self._colored_cloud_period)
             )
 
         # ---- Controller (built lazily once the question is known) -------------
@@ -256,6 +282,14 @@ class AdapterNode(Node):
         scan = pointcloud_to_lidar(msg, self._now_ns())
         with self._lock:
             self._scan = scan
+            pano = self._pano  # nearest-in-time pano = latest latched (node's sync model)
+        # Debug colored map: ingest this (scan, latest-pano) pair. Visualization only —
+        # touches no answer state; guarded so the eval path never runs it. Never raises.
+        if self._colored_map is not None and pano is not None:
+            try:
+                self._colored_map.ingest(scan, pano)
+            except Exception as exc:  # a viz-map glitch must never disturb the drive loop
+                self.get_logger().error("colored_map ingest error: %s" % exc)
 
     def _on_terrain(self, msg: PointCloud2) -> None:
         patch = pointcloud_to_terrain(msg, self._now_ns(), extended=False)
@@ -384,6 +418,39 @@ class AdapterNode(Node):
             p.z = 0.05
             line.points.append(p)
         self._pub_dbg_path.publish(line)
+
+    # ------------------------------------------------------------------ colored map (throttled)
+    def _on_colored_cloud(self) -> None:
+        """Publish the FULL current colored voxel map as PointCloud2. debug_viz only.
+
+        Throttled (its own slow timer, default every 2 s) so RVIZ stays responsive as the
+        map grows — the per-scan ingest happens in _on_scan, this only republishes the
+        accumulated cloud. Frame 'map'; RGB rides in a packed float32 'rgb' field
+        (ros_adapter.cloud_packing). Visualization only; never raises.
+        """
+        try:
+            if self._colored_map is None or self._colored_map.n_voxels == 0:
+                return
+            xyz, rgb = self._colored_map.to_arrays()
+            data, fields, point_step = pack_colored_cloud(xyz, rgb)
+
+            msg = PointCloud2()
+            msg.header.frame_id = "map"
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.height = 1
+            msg.width = len(xyz)
+            msg.is_bigendian = False
+            msg.is_dense = True
+            msg.point_step = point_step
+            msg.row_step = point_step * len(xyz)
+            msg.fields = [
+                PointField(name=name, offset=offset, datatype=dtype, count=count)
+                for (name, offset, dtype, count) in fields
+            ]
+            msg.data = data
+            self._pub_dbg_cloud.publish(msg)
+        except Exception as exc:  # a viz glitch must never crash the node
+            self.get_logger().error("colored_cloud error: %s" % exc)
 
     # ------------------------------------------------------------------ RobotIO: getters
     # Return the latest latched value or None; never block (contract in core/interfaces.py).
