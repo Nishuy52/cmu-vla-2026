@@ -39,6 +39,7 @@ def test_numerical_happy_path_publishes_int_before_watchdog():
     assert wall < 5.0
 
 
+@pytest.mark.slow
 def test_object_reference_happy_path_publishes_marker():
     q = "Find the vase on the table"
     io = _io_for(q, "object_reference")
@@ -52,6 +53,7 @@ def test_object_reference_happy_path_publishes_marker():
     assert wall < 5.0
 
 
+@pytest.mark.slow
 def test_instruction_following_happy_path_publishes_waypoint():
     q = "Go to the table and stop at the chair"
     io = _io_for(q, "instruction_following")
@@ -77,6 +79,7 @@ def test_flight_log_and_states_populated():
     assert r.checkpoint_calls >= 1  # at least the parse checkpoint fired
 
 
+@pytest.mark.slow
 def test_run_question_is_deterministic():
     q = "Find the vase on the table"
     r1 = run_question(q, _io_for(q, "object_reference"), tick_hz=_HZ)
@@ -86,6 +89,7 @@ def test_run_question_is_deterministic():
     assert r1.states_visited == r2.states_visited
 
 
+@pytest.mark.slow
 def test_unknown_noun_completes_via_floor_never_silent():
     """Regression: a question with an unknown noun still completes via the floor."""
     q = "Find the wibblesprocket near the flibber"

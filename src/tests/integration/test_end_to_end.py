@@ -12,6 +12,7 @@ to the synthetic scene's objects. LLM checkpoints are absent (deterministic path
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from core.fsm.controller import QuestionController, State
 from core.geometry.toolbox import (
@@ -27,13 +28,29 @@ from core.mocks.synthetic_scene import Room, SyntheticScene
 from core.perception.scene_index import BasicSceneIndex
 from core.plan_schema import Anchor, AvoidSpec
 
+from ._scaled import BUDGET_SCALE, install_scaled_budget
+
+# Full-controller sims: slow even after budget-scaling (A* replans every tick). Fast tier
+# skips these; run them via `pytest -m ""`.
+pytestmark = pytest.mark.slow
+
 TICK_DT = 0.2  # 5 Hz
 DRIVE_STEP_M = 0.1  # kinematic follower step per tick
 
 
 def _run(io: MockRobotIO, ctrl: QuestionController, clk: FakeClock, *, drive: bool,
          max_t: float = 600.0):
-    """Tick the controller at 5 Hz; optionally chase waypoints. Return the trajectory."""
+    """Tick the controller at 5 Hz; optionally chase waypoints. Return the trajectory.
+
+    The FSM's budget clock is compressed via ``install_scaled_budget`` (see
+    ``tests/integration/_scaled.py``): only the FSM's budget/watchdog gates see amplified
+    time, so a floor-terminated case reaches DONE in ~20x fewer ticks. The follower still
+    steps ``DRIVE_STEP_M`` per tick, so the driven trajectory these tests assert on is
+    unchanged; ``max_t`` scales with the compression so the guard tracks the same sim
+    horizon.
+    """
+    install_scaled_budget(io)
+    max_t = max_t * BUDGET_SCALE
     traj = [(io.latest_odom().x, io.latest_odom().y)]
     while ctrl.state is not State.DONE and clk.now() < max_t:
         ctrl.tick(io)
@@ -69,7 +86,9 @@ def test_numerical_publishes_correct_int_before_watchdog():
 
     assert ctrl.state is State.DONE
     assert io.ints == [IntAnswer(2)]
-    assert clk.now() < 570.0  # before the watchdog floor
+    # Before the watchdog floor, in the FSM's own (scaled) budget time — the quantity the
+    # 570 s gate is actually measured against. clk.now() is raw ticked time (~scale x this).
+    assert ctrl.budget.elapsed() < 570.0
 
 
 # --------------------------------------------------------------------------- (b) object-ref

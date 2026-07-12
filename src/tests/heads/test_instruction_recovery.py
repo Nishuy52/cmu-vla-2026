@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+import pytest
 
 from core.geometry.toolbox import avoid_capsule, capsule_violated
 from core.heads.instruction import InstructionHead
@@ -81,6 +82,7 @@ def _engulfing_scene() -> tuple[SyntheticScene, BasicSceneIndex]:
     return sc, BasicSceneIndex(sc.instances())
 
 
+@pytest.mark.slow
 def test_build_route_fallback_uses_astar_not_raw_segment():
     """When the route is unreachable, the follower's path is an A*-planned polyline
     (many costmap-adjacent vertices), never a raw 2-point [start, legal] segment."""
@@ -105,6 +107,7 @@ def test_build_route_fallback_uses_astar_not_raw_segment():
         assert line_of_sight(cm, p, q), f"recovery path edge {p}->{q} crosses a blocked cell"
 
 
+@pytest.mark.slow
 def test_build_route_fallback_drive_never_violates_capsule():
     """Driving the recovery route never enters the hard avoid capsule (aside from the
     engulfed start, which no planner can undo)."""
@@ -134,6 +137,7 @@ def test_build_route_fallback_drive_never_violates_capsule():
     assert violated is False
 
 
+@pytest.mark.slow
 def test_recovery_remains_in_place_when_astar_fails(caplog):
     """If A* to the nearest legal point ever fails (theoretically impossible given the
     BFS reachability guarantee), the head emits an in-place single-vertex path — never

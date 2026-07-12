@@ -30,6 +30,7 @@ requires_full_unity = pytest.mark.skipif(
 
 
 @requires_loft
+@pytest.mark.slow
 def test_score_scene_loft_all_five_questions():
     """loft has 1 numerical + 2 object_reference + 2 instruction_following = 5 Qs."""
     gt = load_scene(LOFT_DIR)
@@ -63,6 +64,7 @@ def test_score_scene_numerical_has_real_count():
 
 
 @requires_loft
+@pytest.mark.slow
 def test_score_scene_if_produces_two_numbers():
     gt = load_scene(LOFT_DIR)
     with open(QUESTIONS_JSON, encoding="utf-8") as fh:
@@ -81,6 +83,7 @@ def test_score_scene_if_produces_two_numbers():
 
 
 @requires_loft
+@pytest.mark.slow
 def test_run_gt_battery_emits_report(tmp_path):
     """End-to-end: discover loft under the sample Unity root, write a report."""
     scores, missing = GB.run_gt_battery(
@@ -117,6 +120,7 @@ def test_run_gt_battery_reports_missing_scene(tmp_path):
 
 
 @requires_full_unity
+@pytest.mark.slow
 def test_full_battery_smoke_two_scenes(tmp_path):
     """Full-dataset smoke on 2 real scenes: scores present, aggregate shapes hold."""
     scores, missing = GB.run_gt_battery(
@@ -143,6 +147,7 @@ def test_full_battery_smoke_two_scenes(tmp_path):
 
 
 @requires_full_unity
+@pytest.mark.slow
 def test_full_battery_if_alignment_reports_residual(tmp_path):
     """Instruction-following scores carry a per-scene fit residual when aligned."""
     scores, _ = GB.run_gt_battery(
@@ -159,6 +164,7 @@ def test_full_battery_if_alignment_reports_residual(tmp_path):
 
 
 @requires_loft
+@pytest.mark.slow
 def test_cli_groundtruth_flag_delegates(tmp_path):
     """`battery --groundtruth` switches to v2 and writes the gt report."""
     from core.runner import battery

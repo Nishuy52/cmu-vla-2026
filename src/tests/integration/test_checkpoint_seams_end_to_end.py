@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+import pytest
 
 from core.fsm.controller import QuestionController, State
 from core.heads import build_callables
@@ -18,6 +19,12 @@ from core.interfaces import MarkerBox, WaypointCmd
 from core.mocks.mock_io import FakeClock, MockRobotIO
 from core.mocks.synthetic_scene import Room, SyntheticScene
 from core.perception.scene_index import BasicSceneIndex
+
+from ._scaled import BUDGET_SCALE, install_scaled_budget
+
+# Full-controller sims with all checkpoint seams live: slow even after budget-scaling.
+# Fast tier skips these; run them via `pytest -m ""`.
+pytestmark = pytest.mark.slow
 
 TICK_DT = 0.2
 
@@ -47,6 +54,10 @@ class _Frontier:
 
 
 def _run(io, ctrl, clk, *, drive, max_t=600.0):
+    # Compress the FSM's budget/watchdog gates (see tests/integration/_scaled.py); the seam
+    # call counts and published answers these cases assert are unaffected by tick count.
+    install_scaled_budget(io)
+    max_t = max_t * BUDGET_SCALE
     while ctrl.state is not State.DONE and clk.now() < max_t:
         ctrl.tick(io)
         clk.advance(TICK_DT)
