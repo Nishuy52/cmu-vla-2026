@@ -12,3 +12,6 @@
 - **T4** implementation-gaps — top-5 discrepancies (missing /
   contradictory) between the implementation and the imported
   research findings; ranked, cited, one candidate falsified.
+- **T5** colored-cloud-tool — offline colored point-cloud
+  reconstruction debug tool (`tools/`): lidar → pano color →
+  voxel downsample → PLY; validated on real jingfan data.
