@@ -42,6 +42,8 @@ from pathlib import Path
 import numpy as np
 
 from core.geometry import toolbox as T
+from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
+from core.groundtruth.vocab_bridge import bridge_synonyms, bridged_agree
 from core.interfaces import InstanceRecord, MarkerBox, SceneIndex
 from core.parsing.regex_tier import parse_regex
 from core.perception.scene_index import BasicSceneIndex, normalize_label
@@ -92,6 +94,34 @@ def _jaccard(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)
 
 
+def _bridge_normalise_stmt(stmt_norm: str, question_noun: str) -> str:
+    """Rewrite a bridged annotation-vocabulary noun in a statement to the question noun.
+
+    The phrasing tie-break (step 3 below) scores a statement's token overlap with the
+    question to pick, among ordinal variants ("farthest" vs "second farthest"), the one
+    that best matches the question's phrasing. When the question and statement use a
+    *bridged synonym* for the same object ("bedside table" vs "night stand"), the noun
+    tokens never overlap, deflating that overlap uniformly across all variants and below
+    the tie-break's absolute floor — even though the ordinal words that actually
+    discriminate ARE present. To restore a meaningful comparison we substitute, in the
+    normalised statement, any whitelisted synonym surface of ``question_noun`` with the
+    question noun itself, so the shared object tokens count and the ordinal qualifier
+    becomes the deciding difference. Only bridged (explicitly whitelisted) synonyms are
+    rewritten — this never invents overlap between genuinely different objects.
+    """
+    qn = normalize_label(question_noun)
+    if not qn:
+        return stmt_norm
+    syns = bridge_synonyms(qn)
+    if not syns:
+        return stmt_norm
+    out = stmt_norm
+    for syn in sorted(syns, key=len, reverse=True):  # longest first (multi-word synonyms)
+        if syn and syn in out:
+            out = out.replace(syn, qn)
+    return out
+
+
 def _question_relations(plan) -> tuple[str, ...]:
     """Union of statement-relation strings implied by a parsed target's clauses."""
     rels: set[str] = set()
@@ -117,7 +147,13 @@ def _anchor_agrees(question_anchor: str, ann_anchor_class: str) -> bool:
     if a == b or a in b or b in a:
         return True
     ta, tb = set(a.split()), set(b.split())
-    return bool(ta & tb)
+    if ta & tb:
+        return True
+    # Final leniency: a whitelisted surface-form synonym linking the SAME object class
+    # across the challenge/annotation vocabulary drift ("bedside table" <-> "night
+    # stand", "potted plant" <-> "plant"). Adds only explicitly bridged pairs — it does
+    # not widen the substring/token guard, so honest-none is preserved for true misses.
+    return bridged_agree(question_anchor, ann_anchor_class)
 
 
 # --------------------------------------------------------------------------- 3D IoU
@@ -301,6 +337,8 @@ def score_numerical(
     *,
     referential: dict | None = None,
     scene_graph: dict | None = None,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
+    min_obs: int = 1,
 ) -> NumericalScore:
     """Score a numerical question against the GT index.
 
@@ -320,8 +358,10 @@ def score_numerical(
             independent_source="none",
             note="no target parsed",
         )
-    # min_obs=1: GT is fully observed (n_obs=3), so this is not the gate here.
-    gt_count, _ids = T.counting(plan.target, index, min_obs=1)
+    # min_obs default 1: GT is fully observed (every instance has n_obs=3), so raising
+    # this gate does not change the count on GT scenes — the sweep may vary it but it is
+    # inert here by construction (kept wired so the harness is faithful, not so it moves).
+    gt_count, _ids = T.counting(plan.target, index, min_obs=min_obs, th=thresholds)
     our_count = gt_count  # same path; the exact-match records determinism
     indep, src = _independent_count(text, referential)
     sg_count, sg_src = _scene_graph_count(text, scene_graph)
@@ -465,7 +505,10 @@ def _gt_target_from_referential(
         tid = ann.get("target_index")
         if tid is None:
             continue
-        j = _jaccard(q, _norm_stmt(stmt))
+        # Bridge-normalise the statement noun to the question's so a whitelisted synonym
+        # swap ("night stand" -> "bedside table") does not deflate the ordinal-phrasing
+        # overlap the tie-break depends on.
+        j = _jaccard(q, _bridge_normalise_stmt(_norm_stmt(stmt), tgt_noun))
         tid = int(tid)
         id_best_j[tid] = max(id_best_j.get(tid, 0.0), j)
     if len(id_best_j) == 1:
@@ -491,6 +534,7 @@ def score_object_reference(
     instances: list[InstanceRecord],
     *,
     referential: dict | None = None,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
 ) -> ObjectRefScore:
     """Score an object-reference question: 3D IoU of our box vs the GT target box.
 
@@ -506,7 +550,7 @@ def score_object_reference(
     our_marker: MarkerBox | None = None
     unique_target_id: int | None = None
     if plan.target is not None:
-        res = T.resolve(plan.target, index)
+        res = T.resolve(plan.target, index, thresholds)
         if res.candidates_ranked:
             our_marker = res.candidates_ranked[0].to_marker()
         # Category-level uniqueness: if the scene has exactly ONE instance of the

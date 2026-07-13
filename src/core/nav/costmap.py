@@ -31,13 +31,26 @@ _BLOCKED = 1  # OBSTACLE, inflated obstacle, or capsule stamp — hard, never pa
 class Costmap:
     """A question-scoped planning surface over a snapshot of an OccupancyGrid."""
 
-    def __init__(self, grid: OccupancyGrid, vehicle_radius_m: float = VEHICLE_RADIUS_M):
+    def __init__(
+        self,
+        grid: OccupancyGrid,
+        vehicle_radius_m: float = VEHICLE_RADIUS_M,
+        allow_overhead: bool = False,
+    ):
         self.grid = grid
         self.vehicle_radius_m = vehicle_radius_m
+        self.allow_overhead = allow_overhead
         self.cell_m = grid.cell_m
         h, w = grid.shape
         # base_blocked: OBSTACLE + inflation. capsule_blocked: hard avoid stamps.
-        self.base_blocked = self._inflate(grid.state == OBSTACLE, vehicle_radius_m)
+        # Overhead-flagged cells (furniture the terrain slab filtered out — bar
+        # tables/shelves the base stack reads as FREE floor) are treated as
+        # obstacles and inflated the same way, UNLESS allow_overhead is set (the
+        # explicit, sweepable opt-out that restores terrain-only behaviour).
+        blocked_seed = grid.state == OBSTACLE
+        if not allow_overhead and grid.overhead is not None:
+            blocked_seed = blocked_seed | grid.overhead
+        self.base_blocked = self._inflate(blocked_seed, vehicle_radius_m)
         self.capsule_blocked = np.zeros((h, w), dtype=bool)
         # UNKNOWN mask travels for the planner's UNKNOWN penalty.
         self.unknown = grid.state == UNKNOWN
@@ -101,6 +114,7 @@ class Costmap:
         cm = Costmap.__new__(Costmap)
         cm.grid = self.grid
         cm.vehicle_radius_m = self.vehicle_radius_m
+        cm.allow_overhead = self.allow_overhead
         cm.cell_m = self.cell_m
         cm.base_blocked = self.base_blocked  # shared read-only
         cm.capsule_blocked = self.capsule_blocked.copy()

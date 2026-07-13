@@ -291,6 +291,34 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 - Wrapped up task: research import into this repo - record at `docs/tasks/T3-merge-into-team-repo/`
 - Finished task: implementation-vs-research gap analysis (ranked top-5) - record at `docs/tasks/T4-implementation-gaps/`
 - Task records now live under `docs/tasks/` (workflow adapter in `CLAUDE.md`); LOG gets one-liners only at task milestones from here on
+## 2026-07-11 (session 9 close) — Overhead clearance; stopped on user instruction
+
+- **Overhead-clearance layer** (`core/nav/occupancy.py` OverheadConfig + costmap integration): the base stack's terrain analysis discards lidar points above maxRelZ=0.2 (verified terrainAnalysis.cpp:172), so under-furniture floor reads FREE; our layer reads the unfiltered /registered_scan and blocks cells with points in the 0.25–1.2 m band. **Validated on real jingfan data: 73 cells of terrain-FREE floor under actual tabletops now blocked (+10.1 m² total)**. 5 new calibration tunables documented. 19 tests; suite green.
+- RVIZ debug kit committed earlier this session (`d9ff785`): ai_module_debug.launch.py + config, gated instance-map/planned-path publishers, sim_verification §2.8.
+- Vocab bridge raised scoreable OR questions 6→7 (from the cvsweep agent's pre-step, committed with its files when sweep lands).
+- Playbook Gate 5b added: perception-vs-reasoning error split via dev-time GT semantics (2025's GT-semantics loophole is closed at test time in 2026 — only the six topics are legal).
+
+**Still running detached (local compute, no quota):** the k-fold CV sweep (two python processes; writes to `reports/cvsweep_<date>/{report.md,results.json,recommended_calibration.json}` when done; cvsweep code itself is on disk uncommitted in `core/runner/cvsweep.py` + tests — commit with its results next session).
+
+**Backlog for next session (not dispatched, per stop instruction):**
+1. Read + commit the CV sweep results; adopt/record the recommended calibration
+2. Test-suite tiering: @pytest.mark.slow markers + "-m not slow" default, budget-scale the integration tests, pytest-xdist; update session protocol (design agreed in-conversation 11 Jul)
+3. Red-team design review over the GT-battery + sweep numbers → hardening backlog
+4. Investigate: numerical over-count (independent agreement 15–27%), 3 unaligned IF scenes (goal disambiguation), 24 unscoreable OR questions
+
+---
+
+## 2026-07-11 — task milestones
+
+- Started + finished task: colored point-cloud reconstruction debug tool (T5) —
+  `tools/` package, validated on real jingfan data; record at
+  `docs/tasks/T5-colored-cloud-tool/`. Spec file
+  `docs/next_task_colored_reconstruction.md` deleted per its lifecycle note
+  (decisions preserved in the task record; full text in git history). PR from
+  `tool/colored-cloud`.
+- Started + finished task: live colored voxel map + RViz robot-in-map debug
+  view (T6) — record at `docs/tasks/T6-live-colored-map/`; stacked PR from
+  `feat/live-colored-map`. Debug layer only; scored path untouched.
 
 ---
 

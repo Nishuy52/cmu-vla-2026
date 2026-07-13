@@ -20,6 +20,11 @@ from core.groundtruth.loader import (
     obb_to_aabb,
     parse_object_csv,
 )
+from core.groundtruth.vocab_bridge import (
+    VOCAB_BRIDGE,
+    bridge_synonyms,
+    bridged_agree,
+)
 
 __all__ = [
     "GTScene",
@@ -27,4 +32,7 @@ __all__ = [
     "load_scene",
     "obb_to_aabb",
     "parse_object_csv",
+    "VOCAB_BRIDGE",
+    "bridge_synonyms",
+    "bridged_agree",
 ]

@@ -12,6 +12,13 @@
 - **T4** implementation-gaps — top-5 discrepancies (missing /
   contradictory) between the implementation and the imported
   research findings; ranked, cited, one candidate falsified.
+- **T5** colored-cloud-tool — offline colored point-cloud
+  reconstruction debug tool (`tools/`): lidar → pano color →
+  voxel downsample → PLY; validated on real jingfan data.
+- **T6** live-colored-map — incremental colored voxel map
+  (`core/perception/colored_map.py`) + debug-gated RViz
+  PointCloud2 publisher: live "robot inside the colored map"
+  view; debug layer only, scored path unchanged.
 - **T7** numerical-count-diagnosis - per-question cause bucket
   and calibration-vs-code verdict for the GT-battery numerical
   count disagreements (13 of 15 questions).

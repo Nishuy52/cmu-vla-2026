@@ -1,6 +1,6 @@
 # Phase 2 Playbook — Ubuntu Day One to First Scored Dry-Run
 
-*Written 11 Jul 2026, for the Ubuntu reinstall (~15 Jul). This is the ORDER OF OPERATIONS; the
+*Written 11 Jul 2026, for the Ubuntu reinstall (Thu 16 Jul). This is the ORDER OF OPERATIONS; the
 detailed commands live in `ubuntu_setup.md` (install) and `sim_verification.md` (verification
 ladder). Work through the gates in sequence — each gate is a hard prerequisite for the next.
 Estimated total: 2–3 focused days to Gate 5, then calibration until the Aug 3 MVS submission.*
@@ -44,6 +44,10 @@ bottom of ubuntu_setup.md.
    `AZIMUTH_SIGN`, `COLUMN0_YAW_OFFSET`, `ELEVATION_SIGN`): drive toward a known object, check
    its pano column matches the predicted azimuth; flip constants if mirrored. Also verify the
    camera-level assumption note in tiling.
+
+During bring-up use the debug launch `ros2 launch vla_ai_module ai_module_debug.launch.py`
+(our additive RVIZ view of the instance map + planned path + answer marker) — see
+`docs/sim_verification.md` §2.8. Keep the eval path on `ai_module.launch.py` (debug OFF, no rviz).
 
 ## Gate 4 — real perception — ~half a day
 

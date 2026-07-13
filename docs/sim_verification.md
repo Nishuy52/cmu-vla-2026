@@ -429,6 +429,77 @@ step replaces the dummy launch entry with the adapter node in the `ai_module` co
 - [ ] Full training-scene run under the 10-minute clock before any submission
       (`docs/ubuntu_setup.md` §7 step 4).
 
+### 2.8 AI-module debug view
+
+**What this is:** OUR additive RVIZ view of what the ai_module believes and publishes during a
+sim run. The sim is **Unity** (per-scene binary + ROS-TCP bridge on port 10000 — *not* Gazebo,
+`docs/upstream_notes.md` §4), and the base autonomy stack **already opens its own system RVIZ**
+(`visualization_tools`, `vehicle_simulator.rviz`) when `system_simulation.sh` runs. This step is
+purely additive — it does not replace or modify that system view.
+
+Bring the base sim up as in 2.2, then in the `ai_module` container launch OUR node with the
+debug view instead of the eval-clean launch:
+
+```bash
+# DEBUG launch: adapter node with debug_viz:=true + an rviz2 window loading our config.
+# Eval still uses `ros2 launch vla_ai_module ai_module.launch.py` (no rviz, debug OFF).
+ros2 launch vla_ai_module ai_module_debug.launch.py
+```
+
+The view (`src/ros_adapter/rviz/ai_module_debug.rviz`, Fixed Frame `map`) groups displays as
+**Sensors** (`/registered_scan`, `/terrain_map`(`_ext`) colored by intensity = traversability,
+`/camera/image` panorama), **Autonomy** (`/state_estimation` pose+trail, `/path` local-planner
+drive intent), and **AI Module** (`/selected_object_marker` answer box; `/way_point` — the
+`waypointConverter` PointStamped republish of our Pose2D, since Pose2D itself is not RVIZ-
+displayable; plus the two debug-only topics below).
+
+**What you should see** once a question is published and the robot starts exploring:
+
+- **Instance boxes** (`/ai_module/instance_map`, 1 Hz MarkerArray) appear and accumulate as the
+  robot explores — one semi-transparent box + text label per tracked instance. Only present
+  because the debug launch sets `debug_viz:=true`.
+- **Planned-path breadcrumb** (`/ai_module/planned_path`, LINE_STRIP) traces the waypoints we
+  have commanded.
+- On question completion, the **answer marker** (`/selected_object_marker`) shows OUR bright box.
+
+**PASS:** instance boxes appear and grow as the robot explores; the answer marker shows up on
+question completion; sensor/autonomy displays stream live. **FAIL:** no instance boxes after the
+robot has moved through mapped area (perception/scene-index not populating), or the answer marker
+never appears on completion. Note: `debug_viz` defaults **false** — the eval launch must NOT show
+these two `/ai_module/*` topics (confirm they are absent under `ros2 launch ... ai_module.launch.py`).
+
+*confirm on Ubuntu: this whole step is untested on Windows (no rclpy/rviz2); the Windows guard
+only parse-checks the launch file and YAML-parses the config (`src/tests/ros_adapter/`).*
+
+**Live colored map (T6).** The debug-only `PointCloud2` publisher on `/debug/colored_cloud`
+comes up under the same `debug_viz:=true` gate as the instance map/planned-path topics above —
+there is no separate launch arg. Its republish cadence is a second parameter,
+`colored_cloud_period` (default `2.0` s, `ros_adapter/adapter_node.py::DEBUG_CLOUD_PERIOD_S`),
+kept slower than the 1 Hz debug timer so RVIZ stays responsive as the map grows; the per-scan
+ingest itself happens every `/registered_scan` callback, only the full-cloud republish is
+throttled. `ai_module_debug.launch.py` already loads a matching `ColoredMap` display
+(`src/ros_adapter/rviz/ai_module_debug.rviz`) — if configuring RVIZ manually instead, add a
+`PointCloud2` display on `/debug/colored_cloud` with **Color Transformer: RGB8**, **Style:
+Points**, **Size (Pixels): 3**, reliability matching the publisher (reliable/volatile, so
+**Unreliable: false**).
+
+**What you should see:** a colored reconstruction of the room accumulating voxel-by-voxel as the
+robot drives — walls/floor/furniture tinted from the panorama, growing outward from wherever the
+robot has already looked — updating roughly once every `colored_cloud_period` (~2 s), with the
+`StateEstimation` odometry arrow moving through the cloud so the robot is visibly "inside" its own
+map. **PASS:** the cloud is non-empty and visibly grows over consecutive updates as the robot
+covers new area; the arrow tracks with `/state_estimation` inside the colored region. **FAIL:** the
+cloud stays empty (no `/camera/image`+`/registered_scan` pairs ingested — check both topics are
+streaming) or never grows past the first update (ingest not being called — check `debug_viz` is
+actually `true` for this run).
+
+*confirm on Ubuntu: same caveat as above — this display is untested end-to-end outside the
+container. The underlying math (`core/perception/colored_map.py`, `core/perception/
+pano_projection.py`) is Windows-tested via the replay harness and can be sanity-checked offline
+without any of this RVIZ machinery: `python -m tools.colored_cloud extract
+data/fixtures/jingfan out.ply --voxel 0.05` runs the same projection/voxel pipeline against a
+fixture and writes a `.ply` you can open in any point-cloud viewer.*
+
 ---
 
 ## Known-good state checklist
