@@ -15,3 +15,7 @@
 - **T5** colored-cloud-tool — offline colored point-cloud
   reconstruction debug tool (`tools/`): lidar → pano color →
   voxel downsample → PLY; validated on real jingfan data.
+- **T6** live-colored-map — incremental colored voxel map
+  (`core/perception/colored_map.py`) + debug-gated RViz
+  PointCloud2 publisher: live "robot inside the colored map"
+  view; debug layer only, scored path unchanged.
