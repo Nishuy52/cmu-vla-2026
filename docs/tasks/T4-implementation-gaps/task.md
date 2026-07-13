@@ -338,4 +338,4 @@ unmoved at 5c8601d; the import branch adds docs only, no code):
   point: the only near-driven battery question passed with the
   current adaptive form - demoted from "proven wrong" to
   "sweep dimension". See
-  docs/tasks/T5-numerical-count-diagnosis/docs/diagnosis.md.
+  docs/tasks/T7-numerical-count-diagnosis/docs/diagnosis.md.

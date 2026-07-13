@@ -3,7 +3,7 @@
 Adjudication pass (2026-07-14) over docs/mining-table.md
 Table C, informed by the instance-level GT evidence in the
 numerical-count diagnosis
-(../T5-numerical-count-diagnosis/docs/diagnosis.md). Verdicts
+(../T7-numerical-count-diagnosis/docs/diagnosis.md). Verdicts
 are append-only per the provenance rules in
 docs/prior_art/README.md: team docs stay authoritative for
 build/process; dossiers are the primary record for 2025 facts.
