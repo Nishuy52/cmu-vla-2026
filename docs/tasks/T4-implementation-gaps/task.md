@@ -145,6 +145,77 @@ team can decide what to fix before the sim comes online.
   research: docs/prior-art/vla-3d.md:300-310;
   impl: src/core/groundtruth/loader.py:51-52, :165-172
 
+## Verified clean: no disallowed GT semantics at test time
+
+Checked directly (this is the exact rule that sank 2 of the
+2025 top-3), and the build is clean. Recording the full trace
+because it is load-bearing for hole #4's framing and is the kind
+of thing a reviewer will (rightly) want to re-confirm on Ubuntu.
+
+The distinction that matters:
+- DEV-TIME ground truth (offline scoring against the VLA-3D
+  dataset in a battery runner) is ALLOWED and expected - it is
+  how you grade yourself offline with no sim.
+- TEST-TIME ground truth (the running module reading GT scene
+  semantics, or subscribing a GT topic like the 2025
+  `/object_markers`, to produce its answer) is DISALLOWED - the
+  2026 I/O list omits every GT channel. This is precisely what
+  ReasonX (2nd) and CopyPasta (3rd) leaned on in 2025 (see hole
+  #4), and it does not port forward.
+
+Evidence the GT code is quarantined to the dev harness:
+- Import graph: `core.groundtruth` (loader + scoring) is
+  imported ONLY by the dev-time runners and the test suite -
+  `src/core/runner/battery.py`, `src/core/runner/gt_battery.py`,
+  and `src/tests/**`. Nothing else.
+- The runtime path has ZERO references to `groundtruth`,
+  `object_markers`, or any GT topic: grep across
+  `src/ros_adapter/`, `src/core/fsm/`, `src/core/heads/`, and
+  `src/core/perception/` returns nothing.
+
+Evidence the runtime resolves against perception, not GT:
+- The answer heads resolve against a source-agnostic
+  `SceneIndex` abstraction (`src/core/heads/factory.py:110-144`,
+  `numerical.py:57-74`, `object_ref.py:76-92`) - they do not
+  know or care whether the index came from perception or GT, so
+  the runtime can (and does) feed the non-GT one.
+- The ROS node builds its index from the PERCEPTION module, not
+  the loader: `src/ros_adapter/adapter_node.py:77` imports
+  `BasicSceneIndex` from `core.perception.scene_index`, and
+  `:190` sets `self._scene_index = BasicSceneIndex([])`, fed to
+  `build_callables(self._scene_index)` at `:255`.
+- GT-derived indexes enter ONLY through the dev-side runner
+  chain: `runner/single.py:_derive_scene_index` (`:98-105`)
+  picks explicit > `io.scene` > empty, and `gt_battery.py` is
+  what passes a GT-backed `io.scene`. The ROS adapter never
+  calls that path.
+
+The honest caveat (why this is "clean by design", not yet
+"proven end-to-end"):
+- The runtime is clean partly because the live-perception
+  replacement is NOT built yet. `adapter_node.py:186-190`
+  wires an EMPTY `BasicSceneIndex([])` with an explicit Phase-2
+  TODO: "The heads resolve against the live SceneIndex. Phase 2
+  wires the real perception map here... swap `BasicSceneIndex([])`
+  for the live perception scene index once core/perception is
+  fused into this node." Until then the FSM floor still emits a
+  legal (but uninformed) answer.
+- So the separation is confirmed by architecture and by the
+  import graph, but the perception path that REPLACES the empty
+  index is unimplemented - there is no GT leakage wired in, and
+  none can sneak in without importing `core.groundtruth` into a
+  runtime module (currently nothing does). Re-confirm on Ubuntu
+  when core/perception is fused in: the invariant to hold is
+  "no `core.groundtruth` import anywhere under `ros_adapter/`,
+  `fsm/`, `heads/`, `perception/`."
+
+Bottom line: architecturally the OPPOSITE of the 2025 2nd/3rd
+approach - GT is a grading tool, not an answer source. This
+strengthens hole #4: the design correctly forbids the channel;
+the gap there is only that the docs never state how much harder
+that makes the perception job than it was for the teams that
+got the free pass.
+
 ## Runners-up (real, lower impact - not in the top 5)
 - "10 min per SCENE" (challenge_brief.md:16) vs the research's
   "10 min per QUESTION" (challenge-rules.md:20-23) -
@@ -247,3 +318,24 @@ unmoved at 5c8601d; the import branch adds docs only, no code):
   research-import PR landed on the branch; #4 partially filled
   (docs), #1/#2/#3/#5 unchanged in code. See "Status re-check"
   above.
+- 2026-07-11 (later): traced the runtime GT question directly
+  (does the build read disallowed GT semantics at test time?).
+  Answer: no - GT is quarantined to the dev harness; the ROS
+  runtime feeds a perception-sourced (currently empty)
+  SceneIndex, never the loader. Full evidence + the Phase-2
+  caveat in the new "Verified clean: no disallowed GT semantics
+  at test time" section above.
+- 2026-07-14: #2 and #5a CLOSED against the real VLA-3D JSON
+  (all 15 scenes, instance-level dump in the numerical-count
+  diagnosis task record). #2: every referential target_index
+  exists as an object_id - the id join is sound (caveat: 5-25%
+  of statements carry a target_class that drifts from the
+  object's raw_label). #5a: `between` IS pair-shaped
+  ([id,id] pairs) - research right; `hanging_on` is a FLAT
+  scalar list - research wrong on that half; the scorer's
+  uniform flattening garbles between pairs (latent, no current
+  numerical question routes through it). #1 (near) got a data
+  point: the only near-driven battery question passed with the
+  current adaptive form - demoted from "proven wrong" to
+  "sweep dimension". See
+  docs/tasks/T5-numerical-count-diagnosis/docs/diagnosis.md.
