@@ -12,3 +12,8 @@
 - **T4** implementation-gaps — top-5 discrepancies (missing /
   contradictory) between the implementation and the imported
   research findings; ranked, cited, one candidate falsified.
+- **T5** redteam-review — five-facet adversarial design review
+  (IF, counting, OR+checkpoints, eval-day systems, 2025 dossier
+  adjudication) run as a parallel frontier-agent batch in the
+  closing Fable window; adjudicated into
+  docs/redteam/hardening_backlog.md.

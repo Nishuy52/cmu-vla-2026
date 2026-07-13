@@ -305,3 +305,9 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 2. Test-suite tiering: @pytest.mark.slow markers + "-m not slow" default, budget-scale the integration tests, pytest-xdist; update session protocol (design agreed in-conversation 11 Jul)
 3. Red-team design review over the GT-battery + sweep numbers → hardening backlog
 4. Investigate: numerical over-count (independent agreement 15–27%), 3 unaligned IF scenes (goal disambiguation), 24 unscoreable OR questions
+
+---
+
+## 2026-07-14 — Task milestones
+
+- Wrapped up task: red-team design review (five-facet frontier batch + adjudication) — record at `docs/tasks/T5-redteam-review/`, output at `docs/redteam/` (**start at `hardening_backlog.md`**: 4 dominant defects incl. a QoS run-killer and the IF exploration deadlock; CV-sweep rerun is now HELD until Tier-0 fixes + scorer repairs land — supersedes the standing "rerun cvsweep" next-step until then)
