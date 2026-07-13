@@ -319,3 +319,10 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 - Started + finished task: live colored voxel map + RViz robot-in-map debug
   view (T6) — record at `docs/tasks/T6-live-colored-map/`; stacked PR from
   `feat/live-colored-map`. Debug layer only; scored path untouched.
+
+---
+
+## 2026-07-14 (task milestones) - one-liners
+
+- Finished task: GT-battery numerical count diagnosis - record at `docs/tasks/T7-numerical-count-diagnosis/` (headline: not a calibration problem - 4 resolver code defects + 3 scorer-side measurement artifacts; k-fold sweep gated on the fixes)
+- Finished task: 2025-dossier adjudication vs architecture v1.0 - record at `docs/tasks/T8-2025-dossier-adjudication/` (7 conflict verdicts; two dossier priors rejected on instance-level GT evidence; GT-markers implication folded into `architecture.md` section 8 + `master_plan.md` Phase 2)
