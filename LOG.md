@@ -291,3 +291,10 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 - Wrapped up task: research import into this repo - record at `docs/tasks/T3-merge-into-team-repo/`
 - Finished task: implementation-vs-research gap analysis (ranked top-5) - record at `docs/tasks/T4-implementation-gaps/`
 - Task records now live under `docs/tasks/` (workflow adapter in `CLAUDE.md`); LOG gets one-liners only at task milestones from here on
+
+---
+
+## 2026-07-14 (task milestones) - one-liners
+
+- Finished task: GT-battery numerical count diagnosis - record at `docs/tasks/T5-numerical-count-diagnosis/` (headline: not a calibration problem - 4 resolver code defects + 3 scorer-side measurement artifacts; k-fold sweep gated on the fixes)
+- Finished task: 2025-dossier adjudication vs architecture v1.0 - record at `docs/tasks/T6-2025-dossier-adjudication/` (7 conflict verdicts; two dossier priors rejected on instance-level GT evidence; GT-markers implication folded into `architecture.md` section 8 + `master_plan.md` Phase 2)

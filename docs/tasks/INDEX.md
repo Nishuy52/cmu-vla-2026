@@ -12,3 +12,10 @@
 - **T4** implementation-gaps — top-5 discrepancies (missing /
   contradictory) between the implementation and the imported
   research findings; ranked, cited, one candidate falsified.
+- **T5** numerical-count-diagnosis - per-question cause bucket
+  and calibration-vs-code verdict for the GT-battery numerical
+  count disagreements (13 of 15 questions).
+- **T6** 2025-dossier-adjudication - mine 2025 dossier
+  threshold priors / failure modes, adjudicate conflicts with
+  architecture v1.0, fold GT-markers implication into design
+  docs.
