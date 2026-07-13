@@ -96,7 +96,8 @@ emphasis. Decisions:
   source + cross-doc constant consistency + gaps coverage of
   cross-writer findings; fixes applied (see review.md).
 - [x] LOG.md one-liner, CLAUDE.md layout row.
-- [ ] Commit + push via commit-pr.
+- [x] Commit + push via commit-pr (`b44a005` on
+  docs/current-architecture, pushed to origin).
 
 ## Notes
 
