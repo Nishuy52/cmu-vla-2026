@@ -47,6 +47,7 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 | `docs/tasks/` | Task records - one folder per task + `INDEX.md`; see "Task-record workflow" below |
 | `upstream/` | Clone of the official challenge repo — **read-only reference, git-ignored**; never edit; `git pull` to refresh |
 | `src/` | Our `ai_module`: pure-Python `core/` (geometry, nav, fsm, parsing, perception, mocks — see `src/README.md`) + `ros_adapter/` (Phase 2). Run tests: `python -m pytest` from `src/` |
+| `tools/` | Offline dev/debug tools — **outside the challenge-fork surface**, never part of the scored pipeline. `colored_cloud.py`: colored point-cloud reconstruction from replay data → PLY (`python -m tools.colored_cloud extract <bag_or_fixtures> <out.ply>`). Tests: `python -m pytest tools` from repo root (not collected by the `src/` suite) |
 
 ## Task-record workflow (adapter, added 11 Jul 2026)
 

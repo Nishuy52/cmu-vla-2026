@@ -1,4 +1,4 @@
-# T7 — Test-suite tiering
+# T9 — Test-suite tiering
 
 ## Intent
 

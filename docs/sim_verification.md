@@ -471,6 +471,35 @@ these two `/ai_module/*` topics (confirm they are absent under `ros2 launch ... 
 *confirm on Ubuntu: this whole step is untested on Windows (no rclpy/rviz2); the Windows guard
 only parse-checks the launch file and YAML-parses the config (`src/tests/ros_adapter/`).*
 
+**Live colored map (T6).** The debug-only `PointCloud2` publisher on `/debug/colored_cloud`
+comes up under the same `debug_viz:=true` gate as the instance map/planned-path topics above —
+there is no separate launch arg. Its republish cadence is a second parameter,
+`colored_cloud_period` (default `2.0` s, `ros_adapter/adapter_node.py::DEBUG_CLOUD_PERIOD_S`),
+kept slower than the 1 Hz debug timer so RVIZ stays responsive as the map grows; the per-scan
+ingest itself happens every `/registered_scan` callback, only the full-cloud republish is
+throttled. `ai_module_debug.launch.py` already loads a matching `ColoredMap` display
+(`src/ros_adapter/rviz/ai_module_debug.rviz`) — if configuring RVIZ manually instead, add a
+`PointCloud2` display on `/debug/colored_cloud` with **Color Transformer: RGB8**, **Style:
+Points**, **Size (Pixels): 3**, reliability matching the publisher (reliable/volatile, so
+**Unreliable: false**).
+
+**What you should see:** a colored reconstruction of the room accumulating voxel-by-voxel as the
+robot drives — walls/floor/furniture tinted from the panorama, growing outward from wherever the
+robot has already looked — updating roughly once every `colored_cloud_period` (~2 s), with the
+`StateEstimation` odometry arrow moving through the cloud so the robot is visibly "inside" its own
+map. **PASS:** the cloud is non-empty and visibly grows over consecutive updates as the robot
+covers new area; the arrow tracks with `/state_estimation` inside the colored region. **FAIL:** the
+cloud stays empty (no `/camera/image`+`/registered_scan` pairs ingested — check both topics are
+streaming) or never grows past the first update (ingest not being called — check `debug_viz` is
+actually `true` for this run).
+
+*confirm on Ubuntu: same caveat as above — this display is untested end-to-end outside the
+container. The underlying math (`core/perception/colored_map.py`, `core/perception/
+pano_projection.py`) is Windows-tested via the replay harness and can be sanity-checked offline
+without any of this RVIZ machinery: `python -m tools.colored_cloud extract
+data/fixtures/jingfan out.ply --voxel 0.05` runs the same projection/voxel pipeline against a
+fixture and writes a `.ply` you can open in any point-cloud viewer.*
+
 ---
 
 ## Known-good state checklist

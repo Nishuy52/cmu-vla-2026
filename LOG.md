@@ -306,6 +306,29 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 3. Red-team design review over the GT-battery + sweep numbers → hardening backlog
 4. Investigate: numerical over-count (independent agreement 15–27%), 3 unaligned IF scenes (goal disambiguation), 24 unscoreable OR questions
 
+---
+
+## 2026-07-11 — task milestones
+
+- Started + finished task: colored point-cloud reconstruction debug tool (T5) —
+  `tools/` package, validated on real jingfan data; record at
+  `docs/tasks/T5-colored-cloud-tool/`. Spec file
+  `docs/next_task_colored_reconstruction.md` deleted per its lifecycle note
+  (decisions preserved in the task record; full text in git history). PR from
+  `tool/colored-cloud`.
+- Started + finished task: live colored voxel map + RViz robot-in-map debug
+  view (T6) — record at `docs/tasks/T6-live-colored-map/`; stacked PR from
+  `feat/live-colored-map`. Debug layer only; scored path untouched.
+
+---
+
+## 2026-07-14 (task milestones) - one-liners
+
+- Finished task: GT-battery numerical count diagnosis - record at `docs/tasks/T7-numerical-count-diagnosis/` (headline: not a calibration problem - 4 resolver code defects + 3 scorer-side measurement artifacts; k-fold sweep gated on the fixes)
+- Finished task: 2025-dossier adjudication vs architecture v1.0 - record at `docs/tasks/T8-2025-dossier-adjudication/` (7 conflict verdicts; two dossier priors rejected on instance-level GT evidence; GT-markers implication folded into `architecture.md` section 8 + `master_plan.md` Phase 2)
+
+---
+
 ## 2026-07-12 (task milestone one-liner)
 
-- Finished task: test-suite tiering (fast default tier + slow milestone gate, budget-scaled integration tests, pytest-xdist full gate) — record at `docs/tasks/T7-test-suite-tiering/`
+- Finished task: test-suite tiering (fast default tier + slow milestone gate, budget-scaled integration tests, pytest-xdist full gate) — record at `docs/tasks/T9-test-suite-tiering/`
