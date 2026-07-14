@@ -18,8 +18,8 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 ## Session protocol (every session)
 
 1. Read `LOG.md` (last entry = where we stopped) and `docs/master_plan.md` (current phase + checkboxes).
-2. Do the work. Delegate execution to role subagents per the global orchestration policy. **Frontier-model (Fable-class) usage is restricted to planning, architecture, adjudication, and orchestration — never implementation.** All code/doc execution runs on standard executor/mech-executor tiers; verification on the verifier role. Never pass a frontier model override to an implementation agent (see `docs/claude_budget.md`).
-3. Before ending: append a dated entry to `LOG.md` (what was done, decisions made, next step), tick any completed checkboxes in `master_plan.md`, **update `docs/ubuntu_setup.md` if anything changed that affects installing/running on the Ubuntu machine**, commit, and **push to `origin` (private backup: github.com/Nishuy52/cmu-vla-2026)**.
+2. Do the work. Delegate execution to role subagents per the global orchestration policy. **Frontier-model (Fable-class) usage is restricted to planning, architecture, adjudication, and orchestration — never implementation.** All code/doc execution runs on standard executor/mech-executor tiers; verification on the verifier role. Never pass a frontier model override to an implementation agent (see `docs/claude_budget.md`). While iterating on `src/`, run the fast test tier (`pytest` from `src/`, ~40 s); it skips the slow full-controller sims and batteries.
+3. Before ending: append a dated entry to `LOG.md` (what was done, decisions made, next step), tick any completed checkboxes in `master_plan.md`, **update `docs/ubuntu_setup.md` if anything changed that affects installing/running on the Ubuntu machine**, run the full test gate (`pytest -m ""` from `src/`, or `pytest -m "" -n auto` with the `dev` extra) before a milestone commit, commit, and **push to `origin` (private backup: github.com/Nishuy52/cmu-vla-2026)**.
 4. Documents and commits carry no AI/tooling attribution.
 
 ## Layout

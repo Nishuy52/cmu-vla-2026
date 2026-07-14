@@ -305,3 +305,7 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 2. Test-suite tiering: @pytest.mark.slow markers + "-m not slow" default, budget-scale the integration tests, pytest-xdist; update session protocol (design agreed in-conversation 11 Jul)
 3. Red-team design review over the GT-battery + sweep numbers → hardening backlog
 4. Investigate: numerical over-count (independent agreement 15–27%), 3 unaligned IF scenes (goal disambiguation), 24 unscoreable OR questions
+
+## 2026-07-12 (task milestone one-liner)
+
+- Finished task: test-suite tiering (fast default tier + slow milestone gate, budget-scaled integration tests, pytest-xdist full gate) — record at `docs/tasks/T7-test-suite-tiering/`

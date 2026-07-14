@@ -12,3 +12,8 @@
 - **T4** implementation-gaps — top-5 discrepancies (missing /
   contradictory) between the implementation and the imported
   research findings; ranked, cited, one candidate falsified.
+- **T7** test-suite-tiering — split the pytest suite into a fast
+  default tier + slow milestone gate (`@pytest.mark.slow` +
+  `-m "not slow"` addopts), budget-scale the structural
+  integration tests (~363 s → ~16 s), add pytest-xdist for the
+  parallel full gate. Fast ~38 s / full ~152 s (-n auto).

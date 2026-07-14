@@ -27,3 +27,23 @@ written later and only ever *executed* on Ubuntu.
 - Determinism: no wall-clock or RNG in `core/` logic except via injected `Clock`/seeded generators.
 - Tests must run offline (`pytest -q` from `src/`), no network, no GPU.
 - Do not commit from module tasks; integration commits happen at review.
+
+## Test tiers
+
+The suite is split into a **fast** default tier and a **slow** tier of full-controller
+sims and multi-scene batteries (marked `@pytest.mark.slow`):
+
+- **While iterating** (default): `pytest` — runs the fast tier only (`-m "not slow"` is
+  baked into `addopts`). ~40 s, no test over ~2 s.
+- **At milestones** (the full gate — run before committing a milestone / opening a PR):
+  `pytest -m ""` runs everything (~6 min serial). With the optional `dev` extra installed
+  (`pip install -e .[dev]`, adds `pytest-xdist`), `pytest -m "" -n auto` runs it in
+  parallel (~2.5 min). `-n` is deliberately **not** in `addopts` so single-test debugging
+  stays serial and readable; add it explicitly for the full gate.
+
+The slow tier is where simulated FSM ticking or batteries dominate runtime. Several
+integration cases compress the FSM's budget/watchdog gates via a scaled budget clock
+(`tests/integration/_scaled.py`, mirroring `core.runner.single._ScaledClock`): only the
+FSM's time-budget sees amplified time, so structural assertions (states, answers, driven
+geometry) are unchanged while the tick count collapses ~20x. Cases that genuinely need
+real-scale timing stay unscaled.
