@@ -105,10 +105,24 @@ class ExploreHead:
 
     # ------------------------------------------------------------------ per-tick
     def advance(self, io: RobotIO, scene) -> None:
-        """One exploration/execution step for this tick."""
+        """One exploration/execution step for this tick.
+
+        For INSTRUCTION_FOLLOWING we delegate to the instruction head FIRST; if it did
+        not emit a waypoint this tick (no grounded prefix yet, or the route is
+        ungrounded) we FALL THROUGH to frontier exploration so the robot always moves
+        and can observe the ungrounded anchors (H3 / IF-F1 / SYS-F3 — the deadlock:
+        the IF head waited for grounding, grounding waited for motion, motion never
+        came). Exploration is noun-affinity-biased toward the still-ungrounded nouns.
+        """
         if self.plan is not None and self.plan.qtype is QType.INSTRUCTION_FOLLOWING:
+            emitted = False
             if self.instruction is not None:
-                self.instruction.advance(io, scene)
+                emitted = bool(self.instruction.advance(io, scene))
+            if emitted:
+                return
+            # No waypoint from the route this tick — explore to ground the remaining
+            # anchors instead of parking.
+            self._explore(io, scene)
             return
         self._explore(io, scene)
 
@@ -247,11 +261,37 @@ class ExploreHead:
         return _ProvisionalInstance(noun=noun, xy=xy, n_obs=n_obs, score=score)
 
     def _affinity(self):
-        nouns = _plan_nouns(self.plan)
+        nouns = self._affinity_nouns()
         try:
             return self.affinity_fn(nouns)
         except Exception:
             return uniform_affinity(nouns)
+
+    def _affinity_nouns(self) -> list[str]:
+        """Nouns the frontier scorer should bias toward.
+
+        For INSTRUCTION_FOLLOWING the exploration is a bootstrap for grounding: bias the
+        frontier score toward the still-ungrounded route nouns so we drive toward where
+        the missing anchors most likely are (architecture §4 row 10, H3b). The earliest
+        ungrounded leg's noun leads (``next_noun_affinity_target``), then any other
+        ungrounded nouns, then the rest of the plan's nouns as a fallback. For non-IF
+        qtypes this is exactly the plan's nouns as before.
+        """
+        base = _plan_nouns(self.plan)
+        inst = self.instruction
+        if inst is None or self.plan is None or self.plan.qtype is not QType.INSTRUCTION_FOLLOWING:
+            return base
+        biased: list[str] = []
+        lead = inst.next_noun_affinity_target()
+        if lead:
+            biased.append(lead)
+        for n in inst.ungrounded_nouns():
+            if n not in biased:
+                biased.append(n)
+        for n in base:  # keep the remaining plan nouns as a fallback tail
+            if n not in biased:
+                biased.append(n)
+        return biased or base
 
 
 def _explored_area_m2(grid: OccupancyGrid) -> float:

@@ -51,7 +51,7 @@ Sources: SYS-F4. Our Dockerfile location/context cannot slot into the fork's req
 Sources: SYS-F5, SYS-F6, SYS-F7, SYS-F8.
 - Correct `controller.qtype` from `plan.qtype` after parse (a motion-verbed OR question otherwise gets a WaypointCmd floor on the wrong topic: categorical 0).
 - Budget-skew hedge: gates to 480/540 s or launch params (evaluator's clock starts at system startup, not question receipt); measure real skew at the Ubuntu gate. The ns-vs-s unit-mismatch lead was chased and cleared — no bug; add the `use_sim_time` assert.
-- Wire the LLM ladder + checkpoint seams in the adapter (today the entire reasoning tier is dead code on the eval path) — and make the dark-network local-VLM tier a deliberate decision: ship it or descope it and amend architecture §3.
+- Wire the LLM ladder + checkpoint seams in the adapter (today the entire reasoning tier is dead code on the eval path) — and make the dark-network local-VLM tier a deliberate decision: ship it or descope it and amend architecture §3. *Add `budget_frac` to that wiring list (verifier note, 14 Jul): without it the H4c provisional-terminal gate commits immediately in production — safe (never strands) but the withholding guard never fires until the seam is injected.*
 - Checkpoints off the tick thread (worker + polled future, or MultiThreadedExecutor) and enforce `with_timeout` on every injected seam inside `build_callables`; admission bound = reserve + per-call worst case (also OR-F7's repair-outside-envelope).
 
 ### H9. Checkpoint protocol repairs (CP2/CP3/CP4) — **guards all 60 OR-equivalent pts; cost S–M, Windows-now**

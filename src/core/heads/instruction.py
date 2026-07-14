@@ -40,7 +40,7 @@ from core.nav.breadcrumbs import BreadcrumbFollower
 from core.nav.costmap import Costmap
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
 from core.nav.planner import astar, plan_through
-from core.plan_schema import Anchor, LegKind, Plan, RouteLeg, TargetSpec
+from core.plan_schema import Anchor, LegKind, Plan, Pred, RouteLeg, TargetSpec
 
 # Flight-recorder-visible seam: recovery events are logged here so a violation-free
 # least-bad choice is auditable (architecture §1 row 4 — "never a silent geometry edit").
@@ -49,6 +49,20 @@ _LOG = logging.getLogger("core.heads.instruction")
 VIA_NEAR_OFFSET_M: float = 1.2  # how far "near" the via anchor to place the waypoint
 ARRIVAL_TOL_M: float = 0.8  # within this of a leg goal -> arrived (mark progress)
 MIN_GROUND_OBS: int = 3  # per architecture: grounded == confirmed with >= 3 obs
+
+# H4c: fraction of the explore budget past which a PROVISIONAL terminal grounding
+# (one resolved via a relaxation rung — drop_relation/category_only/drop_disambiguator)
+# is committed anyway. Below this, we keep exploring for the missing disambiguator/anchor
+# rather than banking a possibly-wrong terminal (IF-F3). With no budget signal injected
+# (budget_frac is None) there is no pressure to withhold, so a provisional terminal
+# commits immediately (today's behaviour + the drive still banks the grounded prefix).
+PROVISIONAL_COMMIT_FRAC: float = 0.85
+
+# Relaxation steps that make a terminal grounding PROVISIONAL (the resolve audit exposes
+# these): the terminal instance was picked only after a filter was dropped.
+_PROVISIONAL_STEPS = frozenset(
+    {"drop_relation", "category_only", "drop_disambiguator", "relax_attributes"}
+)
 
 
 from typing import Any, Callable
@@ -75,6 +89,10 @@ class _GroundedLeg:
     nouns: tuple[str, ...]
     record: object | None = None  # best InstanceRecord for the primary anchor (CP3)
     runner_up: object | None = None  # runner-up InstanceRecord for demote-and-replan (CP3)
+    #: H4c — True when this leg's grounding used a relaxation rung (drop_relation /
+    #: category_only / drop_disambiguator / relax_attributes). A provisional TERMINAL
+    #: leg is withheld from the committed route while explore budget remains.
+    provisional: bool = False
 
 
 @dataclass
@@ -84,11 +102,17 @@ class InstructionHead:
     plan: Plan | None = None
     thresholds: Thresholds = DEFAULT_THRESHOLDS
     anchor_confirm: AnchorConfirmFn | None = None
+    #: H4c — zero-arg callable -> explored-budget fraction [0,1]. Feeds the provisional
+    #: terminal commit gate: below PROVISIONAL_COMMIT_FRAC a relaxation-audited terminal
+    #: is withheld from the route (keep exploring for the disambiguator). None == no
+    #: pressure signal, so a provisional terminal commits immediately.
+    budget_frac: Callable[[], float] | None = None
 
     grid: OccupancyGrid = field(default_factory=OccupancyGrid)
     _costmap: Costmap | None = None
     _follower: BreadcrumbFollower | None = None
     _legs: list[_GroundedLeg] = field(default_factory=list)
+    _driven_prefix: int = 0  # number of leading legs the committed route currently covers
     _leg_progress: int = 0  # index of the current (not-yet-arrived) leg
     _confirmed: set[int] = field(default_factory=set)
     _terminal_xy: tuple[float, float] | None = None
@@ -104,14 +128,18 @@ class InstructionHead:
             self._legacy_confirm = True
 
     # ------------------------------------------------------------------ per-tick
-    def advance(self, io: RobotIO, scene) -> None:
+    def advance(self, io: RobotIO, scene) -> bool:
         """One deterministic step: refresh the map, (re)ground legs, drive the route.
 
         ``scene`` is the live SceneIndex the factory injected (the anchors are resolved
         against it); ``io`` supplies terrain/odom and the waypoint sink.
+
+        Returns ``True`` iff a waypoint was published this tick. ``False`` lets the
+        caller (``ExploreHead``) fall through to frontier exploration so an ungrounded
+        or not-yet-grounded route never leaves the robot parked (H3 / IF-F1 / SYS-F3).
         """
         if self.plan is None or not self.plan.route:
-            return
+            return False
         self._scene = scene
         odom = io.latest_odom()
         pose = (float(odom.x), float(odom.y)) if odom is not None else (0.0, 0.0)
@@ -119,9 +147,11 @@ class InstructionHead:
         self._ingest_terrain(io, pose)
         self._ground_legs(scene)
 
-        if self._follower is None:
-            self._build_route(pose, scene)
-        self._drive(io, pose, t)
+        # (Re)build/extend the committed route to cover the longest grounded prefix.
+        # A later leg grounding after the first build extends the drive (H3c); until any
+        # prefix is grounded, no follower exists and we emit nothing (caller explores).
+        self._maybe_build_or_extend_route(pose, scene)
+        return self._drive(io, pose, t)
 
     # ------------------------------------------------------------------ map
     def _ingest_terrain(self, io: RobotIO, pose: tuple[float, float]) -> None:
@@ -140,18 +170,27 @@ class InstructionHead:
     # ------------------------------------------------------------------ grounding
     def _ground_legs(self, scene) -> None:
         legs: list[_GroundedLeg] = []
+        prev_xy: tuple[float, float] | None = None
         for leg in self.plan.route:
-            legs.append(self._ground_one(leg, scene))
+            gl = self._ground_one(leg, scene, prev_xy)
+            legs.append(gl)
+            if gl.geom is not None:
+                g = gl.geom
+                prev_xy = g[1] if isinstance(g[0], tuple) else g
         self._legs = legs
 
-    def _ground_one(self, leg: RouteLeg, scene) -> _GroundedLeg:
+    def _ground_one(
+        self, leg: RouteLeg, scene, prev_xy: tuple[float, float] | None = None
+    ) -> _GroundedLeg:
         nouns = tuple(a.noun for a in leg.anchors)
         if scene is None:
             return _GroundedLeg(leg.kind, False, None, nouns)
-        resolved = [self._resolve_anchor(a, scene) for a in leg.anchors]
-        recs = [r[0] for r in resolved]
+        recs, provisional = self._resolve_leg_anchors(leg, scene, prev_xy)
         if any(r is None for r in recs):
-            return _GroundedLeg(leg.kind, False, None, nouns)
+            # IF-F6: a corridor leg whose two anchors share a noun but has < 2 distinct
+            # instances lands here (recs[1] is None) and stays ungrounded — which now
+            # correctly feeds the H3 explore path, not a zero-width-gate recovery beeline.
+            return _GroundedLeg(leg.kind, False, None, nouns, provisional=provisional)
         grounded = all(r.n_obs >= MIN_GROUND_OBS for r in recs)
         if leg.kind is LegKind.CORRIDOR_BETWEEN:
             gate = TB.corridor_gate(recs[0], recs[1])
@@ -163,20 +202,104 @@ class InstructionHead:
             geom = self._via_point(recs[0])
         else:  # GOTO
             geom = self._goto_point(recs[0])
+        runner_up = self._resolve_anchor(leg.anchors[0], scene, prev_xy)[1]
         return _GroundedLeg(
-            leg.kind, grounded, geom, nouns, record=recs[0], runner_up=resolved[0][1]
+            leg.kind, grounded, geom, nouns, record=recs[0], runner_up=runner_up,
+            provisional=provisional,
         )
 
-    def _resolve_anchor(self, anchor: Anchor, scene):
+    def _resolve_leg_anchors(
+        self, leg: RouteLeg, scene, prev_xy: tuple[float, float] | None = None
+    ):
+        """Resolve every anchor of a leg to a best InstanceRecord, enforcing DISTINCT
+        instances across the leg's anchors (IF-F6).
+
+        Returns ``(recs, provisional)`` where ``recs`` is one record (or None) per
+        anchor in order, and ``provisional`` is True iff ANY anchor's resolve leaned on
+        a relaxation rung (H4c). "the two X" / "between the two X" duplicate the anchor
+        (regex_tier ``_split_pair``); resolving both independently yields the SAME
+        top-ranked instance -> a zero-width gate -> whole-route recovery collapse. Here
+        the second anchor of a shared-noun pair takes the next distinct ranked instance;
+        if fewer than 2 exist the leg stays ungrounded.
+        """
+        recs: list[object | None] = []
+        used: set[int] = set()
+        provisional = False
+        for anchor in leg.anchors:
+            best, prov = self._resolve_anchor_distinct(anchor, scene, used, prev_xy)
+            provisional = provisional or prov
+            recs.append(best)
+            if best is not None:
+                used.add(getattr(best, "instance_id", -1))
+        return recs, provisional
+
+    def _resolve_anchor_distinct(
+        self, anchor: Anchor, scene, used: set[int],
+        prev_xy: tuple[float, float] | None = None,
+    ):
+        """Best ranked InstanceRecord for ``anchor`` NOT already claimed by an earlier
+        anchor of the same leg (``used``); plus whether the resolve was relaxation-audited.
+        """
+        ranked, provisional = self._ranked_anchor(anchor, scene, prev_xy)
+        for c in ranked:
+            if getattr(c, "instance_id", -1) not in used:
+                return c, provisional
+        return None, provisional
+
+    def _ranked_anchor(
+        self, anchor: Anchor, scene, prev_xy: tuple[float, float] | None = None
+    ):
+        """(ranked survivors minus demoted, provisional?) for one anchor spec.
+
+        ``provisional`` mirrors H4c: True when the resolve audit trail contains a
+        relaxation rung (a filter was dropped to land on these candidates).
+
+        Salience tie-break (IF-F3): the toolbox ranks survivors, but among ambiguous
+        equals it falls back to instance-id order — an arbitrary detection-order pick.
+        When a previous leg is grounded we re-order the survivors by proximity to it
+        (nearest-to-previous-leg), a defensible ordered-route salience: the instance the
+        robot would reach next by continuing the drive wins, never a detection-id accident.
+        Chosen over largest-instance because IF routes are ordered and spatially local, so
+        "nearest to where I just was" matches the instruction's intent far more often.
+        """
+        spec = TargetSpec(
+            noun=anchor.noun,
+            raw=anchor.raw,
+            attributes=list(anchor.attributes),
+            # A nested disambiguator on a route anchor ("the lamp near the bench") is a
+            # constraint the toolbox must evaluate — carry it as a target clause so any
+            # relaxation (drop_relation/category_only) shows up in the audit and marks the
+            # grounding provisional (H4c). Without this the clause is invisible and a
+            # relaxed terminal looks clean.
+            clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
+        )
+        res = TB.resolve(spec, scene, self.thresholds)
+        ranked = [c for c in res.candidates_ranked if c.instance_id not in self._demoted]
+        provisional = any(r.step in _PROVISIONAL_STEPS for r in res.audit)
+        # Only re-order when the toolbox left an instance-id-only tie (no superlative
+        # margin distinguishing the top survivors) and we have a previous leg to anchor on.
+        if prev_xy is not None and len(ranked) > 1 and not _has_superlative(anchor):
+            px, py = prev_xy
+            ranked = sorted(
+                ranked,
+                key=lambda c: (
+                    (float(TB.P._as3(c.centroid)[0]) - px) ** 2
+                    + (float(TB.P._as3(c.centroid)[1]) - py) ** 2,
+                    getattr(c, "instance_id", 0),
+                ),
+            )
+        return ranked, provisional
+
+    def _resolve_anchor(
+        self, anchor: Anchor, scene, prev_xy: tuple[float, float] | None = None
+    ):
         """Resolve one anchor to (best, runner_up) InstanceRecords, honouring attributes.
 
         The runner-up is used by the CP3 demote-and-replan path. Demoted anchors (CP3
         confidently rejected on arrival) are skipped so re-resolution lands on the
         runner-up.
         """
-        spec = TargetSpec(noun=anchor.noun, raw=anchor.raw, attributes=list(anchor.attributes))
-        res = TB.resolve(spec, scene, self.thresholds)
-        ranked = [c for c in res.candidates_ranked if c.instance_id not in self._demoted]
+        ranked, _ = self._ranked_anchor(anchor, scene, prev_xy)
         if not ranked:
             return (None, None)
         return (ranked[0], ranked[1] if len(ranked) > 1 else None)
@@ -205,21 +328,82 @@ class InstructionHead:
         return self.grid.cell_to_world(nr, nc)
 
     # ------------------------------------------------------------------ routing
-    def _build_route(self, start_xy: tuple[float, float], scene) -> None:
-        """Stamp avoids ONCE, plan the ordered legs, wrap in a BreadcrumbFollower.
+    def _grounded_prefix_len(self) -> int:
+        """Length of the longest LEADING run of legs that already have geometry.
 
-        Requires the first leg grounded (a start point to plan from) and all legs to
-        have geometry; retried each tick until legs firm up.
+        Partial-credit drive (H3c): a route with legs 1-2 grounded and leg 3 not yields
+        prefix length 2 — we build and drive that prefix now, banking the ordered legs,
+        and extend the route when leg 3 later grounds. A provisional TERMINAL leg (H4c)
+        is withheld from the prefix while budget remains (see ``_committable_prefix_len``).
         """
-        if not self._legs or any(l.geom is None for l in self._legs):
+        n = 0
+        for leg in self._legs:
+            if leg.geom is None:
+                break
+            n += 1
+        return n
+
+    def _committable_prefix_len(self) -> int:
+        """The grounded-prefix length we will actually commit to the route this tick.
+
+        H4c — provisional terminal: if the grounded prefix reaches the FINAL route leg
+        and that terminal was resolved via a relaxation rung, hold it back (drive only
+        the legs before it) until budget pressure forces the commit, so exploration can
+        still find the missing disambiguator/anchor. Non-terminal provisional legs are
+        NOT withheld — partial credit on ordered early legs is banked regardless.
+        """
+        n = self._grounded_prefix_len()
+        if n == 0 or n < len(self._legs):
+            return n  # terminal not yet in the prefix; nothing to withhold
+        terminal = self._legs[-1]
+        if terminal.provisional and not self._commit_forced():
+            return n - 1  # withhold the provisional terminal; drive the rest
+        return n
+
+    def _commit_forced(self) -> bool:
+        """True once budget pressure forces committing even a provisional terminal.
+
+        No injected budget signal (``budget_frac is None``) == no pressure to withhold,
+        so a provisional terminal commits immediately (preserves today's single-tick
+        behaviour and still banks the drive)."""
+        if self.budget_frac is None:
+            return True
+        try:
+            return float(self.budget_frac()) >= PROVISIONAL_COMMIT_FRAC
+        except Exception:  # noqa: BLE001 — a broken signal must not strand the route
+            return True
+
+    def _maybe_build_or_extend_route(self, start_xy: tuple[float, float], scene) -> None:
+        """Build the committed route over the grounded prefix, or extend it as later
+        legs ground. Rebuilds from ``start_xy`` whenever the committable prefix grows
+        (H3c partial-route drive); a shrinking/steady prefix leaves the follower intact.
+        """
+        want = self._committable_prefix_len()
+        if want == 0:
+            return  # nothing grounded yet — caller (ExploreHead) explores this tick
+        if self._follower is not None and want <= self._driven_prefix:
+            return  # already driving a route covering (at least) this prefix
+        self._build_route(start_xy, scene, want)
+
+    def _build_route(self, start_xy: tuple[float, float], scene, prefix_len: int) -> None:
+        """Stamp avoids ONCE, plan the leading ``prefix_len`` ordered legs, wrap in a
+        BreadcrumbFollower.
+
+        Plans only the grounded prefix (partial-route drive, H3c); the route is rebuilt
+        with a longer prefix as later legs ground. ``_stamp_avoids`` is idempotent over
+        specs, so a rebuild re-stamps any avoid anchors that have since grounded.
+        """
+        prefix = self._legs[:prefix_len]
+        if not prefix or any(l.geom is None for l in prefix):
             return
         self._costmap = Costmap(self.grid)
         self._stamp_avoids(scene)
         # geometry may need re-projection now the costmap exists.
         self._ground_legs(scene)
-        if any(l.geom is None for l in self._legs):
+        prefix = self._legs[:prefix_len]
+        if any(l.geom is None for l in prefix):
             return
-        legs = [self._leg_tuple(l) for l in self._legs]
+        legs = [self._leg_tuple(l) for l in prefix]
         path = plan_through(self._costmap, start_xy, legs)
         if path is None:
             # Unreachable with the hard capsules in place: drive to the nearest legal
@@ -227,22 +411,26 @@ class InstructionHead:
             # The recovery path MUST be planned through the costmap — never a raw
             # straight segment, which could cut through a hard capsule (the very
             # violation the capsule exists to prevent).
-            path = self._recover_path(start_xy)
+            path = self._recover_path(start_xy, prefix)
         self._terminal_xy = path[-1]
         self._follower = BreadcrumbFollower(path=path, costmap=self._costmap)
+        self._driven_prefix = prefix_len
 
-    def _recover_path(self, start_xy: tuple[float, float]) -> list[tuple[float, float]]:
-        """Least-bad legal path when the full route is unreachable (architecture §1 row 4).
+    def _recover_path(
+        self, start_xy: tuple[float, float], prefix: list[_GroundedLeg] | None = None
+    ) -> list[tuple[float, float]]:
+        """Least-bad legal path when the (prefix) route is unreachable (architecture §1 row 4).
 
-        ``nearest_reachable_point`` returns the passable cell closest to the terminal
-        goal, found by BFS over passable cells *from start* — so it is astar-reachable
-        by construction. We still plan the segment with A* over the stamped costmap so
-        the path is capsule-validated, never a raw segment. If A* nonetheless fails
-        (theoretically impossible given the BFS reachability guarantee), we remain in
-        place (emit the start cell) and log a flight-recorder-visible event rather than
-        ever hand a raw, unvalidated segment to the follower.
+        ``nearest_reachable_point`` returns the passable cell closest to the goal (the
+        prefix's last grounded leg), found by BFS over passable cells *from start* — so
+        it is astar-reachable by construction. We still plan the segment with A* over the
+        stamped costmap so the path is capsule-validated, never a raw segment. If A*
+        nonetheless fails (theoretically impossible given the BFS reachability guarantee),
+        we remain in place (emit the start cell) and log a flight-recorder-visible event
+        rather than ever hand a raw, unvalidated segment to the follower.
         """
-        goal = self._legs[-1].geom
+        legs = prefix if prefix is not None else self._legs
+        goal = legs[-1].geom
         goal_xy = goal[1] if isinstance(goal[0], tuple) else goal  # corridor->2nd pt
         legal = self._costmap.nearest_reachable_point(goal_xy, start_xy)
         path = astar(self._costmap, start_xy, legal)
@@ -289,9 +477,12 @@ class InstructionHead:
             self._costmap.stamp_capsule(seg, cap.radius)
 
     # ------------------------------------------------------------------ drive
-    def _drive(self, io: RobotIO, pose: tuple[float, float], t: float) -> None:
+    def _drive(self, io: RobotIO, pose: tuple[float, float], t: float) -> bool:
+        """Emit the next crumb (or hold at the terminal). Returns True iff a waypoint
+        was published this tick — the emit-signal ExploreHead reads to decide whether to
+        fall through to frontier exploration (H3)."""
         if self._follower is None:
-            return
+            return False
         wp = self._follower.advance(pose, t)
         self._mark_arrivals(pose)
         if wp is None:
@@ -301,6 +492,8 @@ class InstructionHead:
         if wp is not None:
             io.publish_waypoint(wp)
             self._last_wp = wp
+            return True
+        return False
 
     def _mark_arrivals(self, pose: tuple[float, float]) -> None:
         """Confirm each leg goal as the vehicle reaches it (anchor-confirmation checkpoint)."""
@@ -354,6 +547,7 @@ class InstructionHead:
             self._confirmed.discard(i)
             self._leg_progress = min(self._leg_progress, i)
             self._follower = None
+            self._driven_prefix = 0
             self._ground_legs(self._scene)
 
     def _project_crop(self, leg: _GroundedLeg):
@@ -386,7 +580,35 @@ class InstructionHead:
         for leg in self._legs:
             if not leg.grounded and leg.nouns:
                 return leg.nouns[0]
+        # No grounding attempted yet (empty scene at t=0): the plan's route still names
+        # the anchors we must explore toward, so bias toward the first leg's noun (H3b).
+        if not self._legs and self.plan is not None and self.plan.route:
+            for leg in self.plan.route:
+                if leg.anchors and leg.anchors[0].noun:
+                    return leg.anchors[0].noun
         return None
+
+    def ungrounded_nouns(self) -> list[str]:
+        """All distinct nouns of not-yet-grounded legs (frontier affinity bias, H3b).
+
+        Before any grounding attempt (empty ``_legs``) this is every route anchor noun,
+        so exploration is biased from the very first tick against an empty scene.
+        """
+        out: list[str] = []
+        if not self._legs:
+            if self.plan is not None:
+                for leg in self.plan.route:
+                    for a in leg.anchors:
+                        if a.noun and a.noun not in out:
+                            out.append(a.noun)
+            return out
+        for leg in self._legs:
+            if leg.grounded:
+                continue
+            for n in leg.nouns:
+                if n and n not in out:
+                    out.append(n)
+        return out
 
     def terminal_waypoint(self) -> WaypointCmd | None:
         """The WaypointCmd at the terminal goal — the FSM's IF 'answer'."""
@@ -397,6 +619,19 @@ class InstructionHead:
 
 def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+_SUPERLATIVE_PREDS = frozenset({Pred.CLOSEST_TO, Pred.FARTHEST_FROM})
+
+
+def _has_superlative(anchor: Anchor) -> bool:
+    """True if the anchor carries a superlative disambiguator (closest_to/farthest_from).
+
+    The toolbox already ranks those survivors by the superlative metric, so the
+    nearest-to-previous-leg salience tie-break must not override it.
+    """
+    disamb = anchor.disambiguator
+    return disamb is not None and disamb.pred in _SUPERLATIVE_PREDS
 
 
 def _vehicle_z(io: RobotIO) -> float:

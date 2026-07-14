@@ -91,7 +91,10 @@ class HeadState:
             )
         elif plan.qtype is QType.INSTRUCTION_FOLLOWING:
             self.instruction = InstructionHead(
-                plan=plan, thresholds=self.thresholds, anchor_confirm=self.anchor_confirm
+                plan=plan,
+                thresholds=self.thresholds,
+                anchor_confirm=self.anchor_confirm,
+                budget_frac=self.budget_frac,  # H4c provisional-terminal commit gate
             )
         # The explore head is always built (it may delegate to the IF head).
         self.explore = ExploreHead(
