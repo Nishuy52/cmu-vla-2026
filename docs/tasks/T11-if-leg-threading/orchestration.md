@@ -55,6 +55,25 @@ modified files in the tree (instruction.py, synthetic_scene.py,
 vocab.py, gt_battery.py + tests); re-dispatch an executor to finish
 per `task.md` acceptance criteria before verifying.
 
+## Agent restart-proofing (applies to every agent in this pipeline)
+
+Agent final messages are ephemeral (lost if the agent or the
+orchestrating session dies — it already happened once this task). Rule:
+**every agent writes its deliverable to a repo file incrementally and
+commits it; the returned message is only a courtesy summary.** A dead
+agent is re-dispatched with the same brief + a pointer to its partial
+on-disk output; it continues, never restarts from zero.
+
+Per-stage artifact paths + dead-agent recovery:
+
+| Stage | On-disk deliverable | If found dead |
+|---|---|---|
+| Executor (fix) | `task.md` dated notes + `executor_report.md` (requested mid-run) + milestone commits on branch | Changes are the modified files in the tree; re-dispatch executor pointing at task.md notes + `git status` to finish remaining acceptance criteria |
+| Verifier | `verification.md` in this folder — one section PER CLAIM, written as each probe completes (not one dump at the end) | Re-dispatch verifier for the claims missing a CONFIRMED/REFUTED verdict in the file |
+| CV sweep | `reports/cvsweep_<date>/` — the re-pointed sweep has a DISK-RESUME CACHE; rerunning the same command resumes, it does not restart | Relaunch same command (see `docs/cvsweep_rerun_brief.md`); cache makes it idempotent |
+| Fable critics | one draft file per critic under `critique/` in this folder, written section-by-section as they go | Re-dispatch only the critic(s) whose draft is missing/truncated |
+| Adjudication | `critique/adjudication.md` | Re-run adjudication over the on-disk drafts (inputs are all files, not messages) |
+
 ## Standing cautions
 
 - Stale untracked leftovers NOT to commit: `reports/cvsweep_run.*`,
