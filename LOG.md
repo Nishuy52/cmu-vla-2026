@@ -353,3 +353,4 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 - Verified: targeted file 12/12 pass; fast tier passes; H15b cross-check ran read-only against the sibling worktree's head (expected values confirmed: cold-start min=1/unstable; established stable with answer 1). Full gate has 5 `tests/runner/` failures + 3 `tests/parsing/test_regex_full_set.py` collection errors, all `FileNotFoundError` on this worktree's missing git-ignored `upstream/` clone — environmental, pre-existing, unrelated to this change.
 
 **Next:** unchanged — session-9 backlog items 1, 3, 4 (see session-10 entry). The hygiene stream can now merge/rebase onto this branch's test.
+- Opened PR #6 (`claude/mystifying-bohr-e206eb` → `main`, fast-forwardable) to integrate the test rework; merge pending user approval (self-merge without review was blocked). Once merged, the hygiene stream rebases/merges from main to pick up the bridged test.
