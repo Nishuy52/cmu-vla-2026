@@ -372,3 +372,28 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 - **Post-wave battery** (`reports/gt_battery_postwave_2026-07-14/`): numerical 56% / OR 0.875 hold; **IF rubric 0.061 unchanged — intermediate-leg threading (routes reach terminals without passing within 0.8 m of intermediate leg goals) is confirmed as the top remaining pipeline item (36 pts)**. CV sweep stays deliberately HELD until it lands (flat IF term = no gradient for the ×6 weight). Backlog status ledger updated in `docs/redteam/hardening_backlog.md`.
 
 **Next:** (1) IF intermediate-leg threading diagnosis + fix → battery → un-hold sweep; (2) Ubuntu Thu 16 Jul: phase2_playbook Gate 0 with the new gate items (QoS verify, skew measurement, compose-up from clean fork, stub-index guard); (3) merge branch to main via PR.
+
+---
+
+## 2026-07-14 (session 11) — Calibration-ledger drift check (tracker decay_k)
+
+- Investigated the reported `test_field_counts_per_subsystem` failure (`tracker: 2 != 1`). Not reproducible on main-derived branches: the H15 `decay_k` change lives only in the concurrent red-team worktree (`claude/nostalgic-mccarthy-3bb3ea`, uncommitted). That session had already fixed the test pin (`tracker: 2`, `nav: 21`), the `tracker.decay_k` doc row, and the tracker section header; its calibration test passes 17/17.
+- Residual drift was only the two hand-maintained header lines in that worktree's `docs/calibration.md`. Fixed the nav section header (20 → 21 fields). The wiring-summary line could not be edited from this session (permission boundary on another session's active worktree) and **still reads `59 fields total (… tracker 1 … nav 20 …) / wireable 45`; correct values are `61 total (tracker 2, nav 21) / wireable 47` (TODO stays 14; 47+14=61)** — H15 session: fold this one-line fix into your commit. Note the five `overhead_*` band rows in the nav table are OverheadConfig/module-constant documentation, not NavTunables fields, and are correctly excluded from all tallies.
+- No code changes on this branch; no test-gate run needed (LOG-only commit).
+
+**Next:** H15 session applies the wiring-summary line fix above and commits it with the rest of its calibration.md edits.
+
+---
+
+## 2026-07-14 (session 12) — CP2 provisional-gate test reworked for H15b
+
+- Coordination fix requested by the perception-hygiene stream (H15b / NUM-F8, uncommitted in sibling worktree `nostalgic-mccarthy-3bb3ea`): their answer-time n_obs gating in `NumericalHead.advance` (once a noun is established at n_obs>=3, n_obs==1 instances are excluded from the count) breaks `test_provisional_never_satisfies_early_answer_gate`, which asserted the old pinning mechanism; that file is owned by this stream.
+- Split it into two contract-bridging tests in `src/tests/heads/test_explore_cp2.py`, green against BOTH the current head on this branch and the H15b head: (1) cold-start — all instances below the establish threshold, single-obs contributor still pins `min_contrib_n_obs < 3`, gate shut; (2) established class — mechanism-agnostic CP2 guarantee `stable ⇒ answer excludes the provisional` (pre-H15b holds via the shut gate, post-H15b via exclusion with count == 1).
+- Verified: targeted file 12/12 pass; fast tier passes; H15b cross-check ran read-only against the sibling worktree's head (expected values confirmed: cold-start min=1/unstable; established stable with answer 1). Full gate has 5 `tests/runner/` failures + 3 `tests/parsing/test_regex_full_set.py` collection errors, all `FileNotFoundError` on this worktree's missing git-ignored `upstream/` clone — environmental, pre-existing, unrelated to this change.
+- Integrated into `main` via PR #6 (user-approved merge). Conflict vs main: LOG-only interleave with the session-11 calibration-drift entry from PR #7; this entry renumbered 11 → 12 (number claimed on main). No code overlap (#7 was LOG-only).
+
+**Next:** unchanged — session-9 backlog items 1, 3, 4 (see session-10 entry). The hygiene stream now rebases/merges from main to pick up the bridged test.
+
+---
+
+*(Merge note, session 11: PR #6's bridged CP2 test variant was superseded by this branch's version, which was written and verified against the integrated H15b head; PR #7's wiring-summary line fix is applied in this merge commit.)*

@@ -18,8 +18,8 @@ is the sweep checklist.
 - **Sensitivity** — H/M/L judgement of how much sweeping this field moves behaviour,
   from reading the consuming code. Guides sweep priority, not a hard claim.
 
-**Wiring summary:** 59 fields total (geometry 15 · fusion 5 · tracker 1 · keyframe 3 ·
-nav 20 · budget 15). **Wireable today (constructor arg or function param): 45.**
+**Wiring summary:** 61 fields total (geometry 15 · fusion 5 · tracker 2 · keyframe 3 ·
+nav 21 · budget 15). **Wireable today (constructor arg or function param): 47.**
 **Wiring TODO (module constant, needs a setter/param before a sweep can move it): 14.**
 
 ---
