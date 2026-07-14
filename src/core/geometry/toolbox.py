@@ -24,6 +24,7 @@ import numpy as np
 from core.interfaces import InstanceRecord, SceneIndex
 from core.plan_schema import Anchor, AvoidSpec, Clause, Pred, TargetSpec
 from core.geometry import primitives as P
+from core.perception.vocab import colour_synonyms
 
 
 # --------------------------------------------------------------------------- config
@@ -145,12 +146,28 @@ def _label_text(a: InstanceRecord) -> str:
     return " ".join([a.label, a.caption, *a.aliases]).lower()
 
 
+def _attr_present(attr: str, text: str) -> bool:
+    """True if a single requested attribute keyword matches the record text.
+
+    Colour attributes are matched through the colour bridge: a question colour word
+    (``red``, British ``grey``, ...) matches when ANY name in its VLA-3D 15-scheme
+    neighbourhood (``red`` -> {red, maroon}, ``grey`` -> {gray}) appears in the text,
+    so a scheme-named caption ("maroon") satisfies a "red" filter without relaxing.
+    Non-colour attributes keep the plain substring test.
+    """
+    attr = attr.lower()
+    schemes = colour_synonyms(attr)
+    if schemes:
+        return any(name in text for name in schemes)
+    return attr in text
+
+
 def _attrs_match(a: InstanceRecord, attributes: Sequence[str]) -> bool:
     """True if every requested attribute keyword appears in the record's text."""
     if not attributes:
         return True
     text = _label_text(a)
-    return all(attr.lower() in text for attr in attributes)
+    return all(_attr_present(attr, text) for attr in attributes)
 
 
 # --------------------------------------------------------------------------- predicates
@@ -355,16 +372,113 @@ def _match_noun(index: SceneIndex, noun: str) -> list[InstanceRecord]:
     return list(index.by_label(noun))
 
 
+# Recursion guard for nested-disambiguator resolution: an anchor's disambiguator
+# may itself reference an anchored clause, so cap the nesting depth defensively.
+_MAX_ANCHOR_DEPTH: int = 4
+
+
+def _audit_add(audit: list[Relaxation] | None, step: str, detail: str) -> None:
+    """Append a Relaxation, de-duplicating identical entries.
+
+    Anchor resolution runs once per candidate, so a single disambiguator drop
+    would otherwise be logged once per candidate; the drop is a property of the
+    anchor set, not the candidate, so collapse repeats to one honest entry.
+    """
+    if audit is None:
+        return
+    entry = Relaxation(step, detail)
+    if entry not in audit:
+        audit.append(entry)
+
+
 def _resolve_anchor(
-    anchor: Anchor, index: SceneIndex, th: Thresholds
+    anchor: Anchor,
+    index: SceneIndex,
+    th: Thresholds,
+    audit: list[Relaxation] | None = None,
+    _depth: int = 0,
 ) -> list[InstanceRecord]:
-    """Resolve an anchor to matching records (noun + attributes; ignores disambiguator
-    nesting for the toolbox's binary-predicate needs — nested disambiguation is a
-    resolver concern handled by resolve() on the top-level target)."""
+    """Resolve an anchor to matching records (noun + attributes + nested disambiguator).
+
+    Base pool = noun (typo-tolerant) filtered by the anchor's own attributes. When
+    the anchor carries a nested disambiguator clause it is bound here (this is the
+    dominant multi-constraint object-reference form, e.g. "the bowl on the table
+    CLOSEST TO the screen"):
+
+    * non-superlative disambiguator -> keep only anchor candidates for which the
+      clause holds (anchor as subject);
+    * superlative disambiguator -> rank the anchor candidates by it and keep the
+      argmin/argmax only.
+
+    A disambiguator that cannot be applied (its own anchor noun has no instances,
+    or filtering would empty the pool) is dropped and recorded in ``audit`` as a
+    ``Relaxation`` so the drop is never silent. ``_depth`` guards against a
+    disambiguator that (transitively) references another anchored clause.
+    """
     cands = _match_noun(index, anchor.noun)
     if anchor.attributes:
         cands = [c for c in cands if _attrs_match(c, anchor.attributes)]
-    return cands
+
+    disamb = anchor.disambiguator
+    if disamb is None or not cands or _depth >= _MAX_ANCHOR_DEPTH:
+        if disamb is not None and _depth >= _MAX_ANCHOR_DEPTH:
+            _audit_add(
+                audit,
+                "drop_disambiguator",
+                f"anchor '{anchor.noun}' disambiguator dropped: nesting depth "
+                f"limit ({_MAX_ANCHOR_DEPTH}) reached",
+            )
+        return cands
+
+    narrowed = _apply_disambiguator(disamb, cands, index, th, audit, _depth)
+    return narrowed
+
+
+def _apply_disambiguator(
+    disamb: Clause,
+    cands: list[InstanceRecord],
+    index: SceneIndex,
+    th: Thresholds,
+    audit: list[Relaxation] | None,
+    _depth: int,
+) -> list[InstanceRecord]:
+    """Narrow anchor candidates by their own disambiguator clause; drop it (audited)
+    when it cannot be applied. Returns the narrowed (never empty unless cands was)."""
+    if disamb.pred in _SUPERLATIVE_PREDS:
+        sub_anchor_recs = _resolve_anchor(
+            disamb.anchors[0], index, th, audit, _depth + 1
+        )
+        if not sub_anchor_recs:
+            _audit_add(
+                audit,
+                "drop_disambiguator",
+                f"disambiguator {disamb.pred.value} dropped: anchor "
+                f"'{disamb.anchors[0].noun}' not found",
+            )
+            return cands
+        ranked = (
+            closest_to(cands, sub_anchor_recs[0], th)
+            if disamb.pred is Pred.CLOSEST_TO
+            else farthest_from(cands, sub_anchor_recs[0], th)
+        )
+        by_id = {c.instance_id: c for c in cands}
+        return [by_id[ranked.order[0]]]
+
+    # non-superlative disambiguator: keep candidates for which the clause holds.
+    kept = [
+        c
+        for c in cands
+        if _eval_clause(c, disamb, index, th, audit, _depth + 1).passed
+    ]
+    if not kept:
+        _audit_add(
+            audit,
+            "drop_disambiguator",
+            f"disambiguator {disamb.pred.value} dropped: no "
+            f"'{cands[0].label}' candidate satisfied it",
+        )
+        return cands
+    return kept
 
 
 def _eval_clause(
@@ -372,14 +486,18 @@ def _eval_clause(
     clause: Clause,
     index: SceneIndex,
     th: Thresholds,
+    audit: list[Relaxation] | None = None,
+    _depth: int = 0,
 ) -> PredResult:
     """Evaluate one non-superlative clause for a candidate; honours negation.
 
     Existential over resolved anchors: passes if the relation holds for ANY
     matching anchor instance (the definite/indefinite distinction is a counting
-    concern, not a filter concern here).
+    concern, not a filter concern here). Anchors are resolved through
+    :func:`_resolve_anchor`, so a nested disambiguator on the clause's anchor is
+    bound (and any drop recorded in ``audit``).
     """
-    anchor_recs = [_resolve_anchor(a, index, th) for a in clause.anchors]
+    anchor_recs = [_resolve_anchor(a, index, th, audit, _depth) for a in clause.anchors]
     if any(len(r) == 0 for r in anchor_recs):
         base = PredResult(False, 0.0, float("-inf"), f"{clause.pred.value}: anchor not found")
         return _apply_negation(base, clause)
@@ -420,6 +538,8 @@ def _clause_selectivity(
     """Fraction of candidates that pass a clause; lower = more selective.
 
     Used to drop the *weakest* (least selective) relation in the fallback ladder.
+    Audit is intentionally not threaded here: this is a scoring pass over the pool,
+    not the committed evaluation, so disambiguator drops must not be double-logged.
     """
     if not cands:
         return 1.0
@@ -492,7 +612,7 @@ def resolve(
     # --- ranking -------------------------------------------------------------
     margins: dict[int, float] = {c.instance_id: 0.0 for c in survivors}
     if sup is not None and survivors:
-        anchor_recs = _resolve_anchor(sup.anchors[0], index, th)
+        anchor_recs = _resolve_anchor(sup.anchors[0], index, th, audit)
         if anchor_recs:
             anchor = anchor_recs[0]  # salience: first (index order); deterministic
             ranked = (
@@ -509,16 +629,53 @@ def resolve(
                 Relaxation("superlative_anchor_missing", f"{sup.anchors[0].noun} not found")
             )
             survivors = _stable_by_id(survivors)
+    elif len(survivors) > 1:
+        # No top-level superlative: if a surviving hard clause's anchor carried a
+        # nested superlative disambiguator, break ties by that nested metric rather
+        # than by instance id (OR-F1: two-tables-two-bowls). Otherwise stable-by-id.
+        survivors = _nested_superlative_order(survivors, hard_clauses, index, th)
     else:
         survivors = _stable_by_id(survivors)
 
     # --- pass matrix (over the clauses actually applied) ---------------------
     pass_matrix: dict[int, list[PredResult]] = {}
     for c in survivors:
-        row = [_eval_clause(c, cl, index, th) for cl in hard_clauses]
+        row = [_eval_clause(c, cl, index, th, audit) for cl in hard_clauses]
         pass_matrix[c.instance_id] = row
 
     return ResolveResult(survivors, pass_matrix, margins, audit)
+
+
+def _nested_superlative_order(
+    survivors: list[InstanceRecord],
+    hard_clauses: Sequence[Clause],
+    index: SceneIndex,
+    th: Thresholds,
+) -> list[InstanceRecord]:
+    """Order survivors by the nested superlative metric of the first hard clause
+    whose anchor carries one; fall back to stable-by-id when none applies.
+
+    Each survivor is scored by the distance from the survivor to its own
+    best-matching disambiguated anchor (the anchor kept by the nested superlative),
+    so the survivor sitting by the argmin/argmax anchor ranks first — never an
+    instance-id accident.
+    """
+    for clause in hard_clauses:
+        if clause.pred in _SUPERLATIVE_PREDS:
+            continue
+        anchor = clause.anchors[0]
+        disamb = anchor.disambiguator
+        if disamb is None or disamb.pred not in _SUPERLATIVE_PREDS:
+            continue
+        anchor_recs = _resolve_anchor(anchor, index, th)  # already narrowed to argmin/argmax
+        if not anchor_recs:
+            continue
+        target_anchor = anchor_recs[0]
+        # Rank survivors by proximity to the disambiguated (argmin/argmax) anchor:
+        # the survivor most bound to the selected anchor wins, never instance id.
+        dists = {c.instance_id: _centroid_dist(c, target_anchor) for c in survivors}
+        return sorted(survivors, key=lambda c: (dists[c.instance_id], c.instance_id))
+    return _stable_by_id(survivors)
 
 
 def _filter_and(
@@ -526,11 +683,12 @@ def _filter_and(
     clauses: Sequence[Clause],
     index: SceneIndex,
     th: Thresholds,
+    audit: list[Relaxation] | None = None,
 ) -> list[InstanceRecord]:
     """Keep candidates passing ALL clauses (AND)."""
     out = []
     for c in pool:
-        if all(_eval_clause(c, cl, index, th).passed for cl in clauses):
+        if all(_eval_clause(c, cl, index, th, audit).passed for cl in clauses):
             out.append(c)
     return out
 
@@ -541,22 +699,134 @@ def _stable_by_id(recs: Sequence[InstanceRecord]) -> list[InstanceRecord]:
 
 # --------------------------------------------------------------------------- counting
 
+# Generic scene-scope nouns: the room is the universe of discourse for a count
+# ("how many stools are in the room?"), so a clause anchored ONLY on one of
+# these is vacuous scoping, not a filter — no instance is ever labeled "room".
+# Named room types (kitchen, bedroom, office, ...) are NOT in this set and stay
+# strict: "how many stools are in the kitchen?" must still filter on "kitchen".
+_SCOPE_NOUNS = frozenset({"room", "scene", "area", "house", "home", "building", "apartment"})
+
+
+def _normalize_noun(noun: str) -> str:
+    """Lowercase + strip a trailing 's' so plural scope nouns ('rooms') match."""
+    n = noun.strip().lower()
+    return n[:-1] if n.endswith("s") and len(n) > 1 else n
+
+
+def _is_scope_clause(clause: Clause) -> bool:
+    """True if every anchor of ``clause`` is a generic scene-scope noun."""
+    return bool(clause.anchors) and all(
+        _normalize_noun(a.noun) in _SCOPE_NOUNS for a in clause.anchors
+    )
+
+
+@dataclass(frozen=True)
+class CountResult:
+    """Output of :func:`counting`.
+
+    count: cardinality of the strictly-filtered set (0 is a legal answer).
+    ids: contributing instance_ids.
+    explanations: when ``count == 0`` and a clause emptied the set, the failing
+                  clause explanation(s) — so the head can distinguish "relation
+                  unmeasurable" from "genuinely zero" and decide for itself; empty
+                  otherwise.
+    audit: any disambiguator drops surfaced while evaluating the clauses (the
+           counting path never relaxes noun/attribute/relation filters, but a
+           nested disambiguator on an anchor may still be dropped and must remain
+           visible).
+
+    Iterable as ``(count, ids)`` so existing ``n, ids = counting(...)`` callers are
+    unchanged; ``.explanations`` / ``.audit`` are available to callers that read them.
+    """
+
+    count: int
+    ids: set[int]
+    explanations: list[str] = field(default_factory=list)
+    audit: list[Relaxation] = field(default_factory=list)
+
+    def __iter__(self):
+        yield self.count
+        yield self.ids
+
 
 def counting(
     target: TargetSpec,
     index: SceneIndex,
     min_obs: int = 1,
     th: Thresholds = DEFAULT_THRESHOLDS,
-) -> tuple[int, set[int]]:
-    """Set-cardinality over resolve() survivors with n_obs >= min_obs.
+) -> CountResult:
+    """Strict set-cardinality: noun + attributes + hard clauses, NO relaxation.
 
-    Returns (count, contributing_instance_ids). Deduplicates by instance_id (the
-    tracker/NMS layer upstream guarantees one id per physical object; this guards
-    against a survivor list that repeated an id).
+    Unlike :func:`resolve` (which must publish *some* box and so runs the fallback
+    ladder), counting is the cardinality of a filtered set — a relaxed or dropped
+    filter must yield 0, never the whole-category total (red-team NUM-F1). The
+    pipeline here is therefore the AND-filter only: category match, target
+    attributes, then every non-superlative clause. A superlative clause never
+    filters (it ranks), so it is ignored for counting. When the filtered set is
+    empty, the failing clause explanation(s) are attached to the result so the
+    head can tell "relation unmeasurable" from "genuinely zero"; the toolbox does
+    not guess a fallback integer.
+
+    Returns a :class:`CountResult`; deduplicates by instance_id (the tracker/NMS
+    layer upstream guarantees one id per physical object).
     """
-    res = resolve(target, index, th)
-    ids = {r.instance_id for r in res.candidates_ranked if r.n_obs >= min_obs}
-    return len(ids), ids
+    audit: list[Relaxation] = []
+    base = _match_noun(index, target.noun)
+    pool = [c for c in base if _attrs_match(c, target.attributes)]
+    hard_clauses = []
+    for c in target.clauses:
+        if c.pred in _SUPERLATIVE_PREDS:
+            continue
+        if _is_scope_clause(c):
+            anchor_desc = ", ".join(a.noun for a in c.anchors)
+            audit.append(
+                Relaxation(
+                    "scope_clause",
+                    f"'{c.pred.value}({anchor_desc})' is scene-scope, not a filter — skipped",
+                )
+            )
+            continue
+        hard_clauses.append(c)
+
+    survivors = _filter_and(pool, hard_clauses, index, th, audit)
+    ids = {r.instance_id for r in survivors if r.n_obs >= min_obs}
+
+    explanations: list[str] = []
+    if not ids:
+        explanations = _empty_count_explanations(target, base, pool, hard_clauses, index, th)
+
+    return CountResult(len(ids), ids, explanations, audit)
+
+
+def _empty_count_explanations(
+    target: TargetSpec,
+    base: Sequence[InstanceRecord],
+    pool: Sequence[InstanceRecord],
+    hard_clauses: Sequence[Clause],
+    index: SceneIndex,
+    th: Thresholds,
+) -> list[str]:
+    """Name why a count came out 0: which stage of the strict filter emptied it.
+
+    Ordered most-specific-first so the head sees the operative reason first.
+    """
+    out: list[str] = []
+    if not base:
+        out.append(f"no '{target.noun}' instances in scene")
+        return out
+    if target.attributes and not pool:
+        out.append(f"no '{target.noun}' matched attributes {list(target.attributes)}")
+        return out
+    # noun (+ attributes) matched; a relation clause is what emptied the set.
+    for cl in hard_clauses:
+        if not _filter_and(pool, [cl], index, th):
+            out.append(f"no '{target.noun}' satisfied {cl.pred.value} clause")
+    if not out:
+        # every clause individually retained something, but their conjunction did
+        # not — report the joint failure rather than a single clause.
+        preds = ", ".join(cl.pred.value for cl in hard_clauses)
+        out.append(f"no '{target.noun}' satisfied all clauses jointly ({preds})")
+    return out
 
 
 # --------------------------------------------------------------------------- corridor / avoid

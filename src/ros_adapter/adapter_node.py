@@ -41,9 +41,13 @@ Publications (AI -> system):
     /numerical_response      std_msgs/Int32
 
 QoS: the five high-rate sensor streams use SENSOR_DATA (best-effort, keep-last depth 5) so a
-dropped frame never blocks; /challenge_question uses RELIABLE + TRANSIENT_LOCAL so the single
-question (republished at 1 Hz, gotcha 3) is not missed on a late join. Publishers are reliable
-depth 5, matching the dummy's default profile.
+dropped frame never blocks; /challenge_question is subscribed TWICE — a primary RELIABLE +
+VOLATILE sub matching the dummy's default publisher profile, plus a second RELIABLE +
+TRANSIENT_LOCAL sub in case the evaluator offers durability. Both feed the same idempotent
+latch, so whichever the publisher matches wins and a duplicate delivery is a no-op. Requesting
+TRANSIENT_LOCAL *alone* against a VOLATILE publisher would silence the whole run (SYS-F2), so
+the volatile sub is load-bearing; the 1 Hz republish (gotcha 3) covers late joins regardless.
+Publishers are reliable depth 5, matching the dummy's default profile.
 """
 from __future__ import annotations
 
@@ -180,6 +184,19 @@ class AdapterNode(Node):
         self.create_subscription(
             Odometry, TOPIC_ODOM, self._on_odom, qos_profile_sensor_data
         )
+        # /challenge_question: the PRIMARY subscription is RELIABLE + VOLATILE, matching the
+        # upstream dummy's default publisher profile (docs/upstream_notes.md §6). The evaluator
+        # is closed-source but almost certainly publishes with defaults (VOLATILE); a subscriber
+        # REQUESTING TRANSIENT_LOCAL against a VOLATILE publisher is DDS-incompatible => zero
+        # messages => zero questions => whole run scores zero (SYS-F2). The 1 Hz republish
+        # (gotcha 3) already provides late-join safety, so VOLATILE loses nothing.
+        self.create_subscription(
+            String, TOPIC_QUESTION, self._on_question, _reliable_qos()
+        )
+        # SECOND subscription at TRANSIENT_LOCAL, feeding the SAME latch: matches a publisher
+        # that offers durability instead. Both matching is harmless — _on_question latches the
+        # first non-empty text and ignores the rest (idempotent), so a duplicate delivery is a
+        # no-op. This is belt-and-braces; the volatile sub above is the load-bearing one.
         self.create_subscription(
             String, TOPIC_QUESTION, self._on_question, _reliable_transient_qos()
         )
@@ -227,6 +244,30 @@ class AdapterNode(Node):
         # once core/perception is fused into this node (architecture Phase 2/3).
         self._scene_index = BasicSceneIndex([])
         self._controller: QuestionController | None = None
+
+        # SUBMISSION-BLOCKER shout: the node came up with the empty BasicSceneIndex([]) stub —
+        # perception is NOT wired into this node, so every question is answered from an empty
+        # world (numerical floor, origin marker, spawn-point waypoint) and the run scores luck
+        # only (SYS-F1 / H6). This is acknowledged Phase-2 work; the loud line exists so it
+        # cannot pass a smoke test silently. Remove once core/perception feeds a live index.
+        if not self._scene_index.all_instances():
+            self.get_logger().error(
+                "SUBMISSION-BLOCKER: scene index is the empty stub — perception is NOT wired; "
+                "answers come from FSM floors only. Do not submit until instances_tracked > 0 "
+                "on a live scene (phase2_playbook gate)."
+            )
+
+        # ---- Sim-time guard ---------------------------------------------------
+        # The watchdog arithmetic keys off get_clock().now(). If use_sim_time is true without a
+        # live /clock source the node clock freezes at 0, elapsed() pins below the 60 s ORIENT
+        # gate, and the watchdog floor NEVER fires => permanent silence (SYS-F6 residual). The
+        # eval path must run on the wall clock; shout loudly if it is ever set on this node.
+        if self.get_parameter("use_sim_time").get_parameter_value().bool_value:
+            self.get_logger().error(
+                "SUBMISSION-BLOCKER: use_sim_time is TRUE on vla_ai_module. A frozen sim clock "
+                "pins elapsed() below the ORIENT gate and silences the watchdog forever. The "
+                "eval path must use the wall clock — unset use_sim_time."
+            )
 
         # ---- 5 Hz drive timer -------------------------------------------------
         self._timer = self.create_timer(1.0 / TICK_HZ, self._on_tick)

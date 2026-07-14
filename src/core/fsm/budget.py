@@ -17,6 +17,14 @@ from core.interfaces import (
     WATCHDOG_FLOOR_S,
 )
 
+# Effective answer gates the controller uses by default. Pulled in from the neutral
+# 510/570 interface constants to hedge the evaluator-vs-us budget-clock skew (SYS-F6):
+# the evaluator's clock starts at system startup, ours at question receipt, so boot +
+# DDS discovery can cost us 10-60 s. Ordering explore < forced_assembly < floor < total
+# is enforced in BudgetState.__init__.
+DEFAULT_FORCED_ASSEMBLY_S: float = 480.0  # T-120: begin best-effort answer assembly
+DEFAULT_WATCHDOG_FLOOR_S: float = 540.0  # T-60: publish floor answer unconditionally
+
 ORIENTATION_S: float = 60.0  # in-place sweep window (architecture §5 step 1)
 
 # Reserve below which no discretionary checkpoint may fire — leave room for the floor path.
@@ -30,10 +38,37 @@ class BudgetState:
     query derives from now() - t0.
     """
 
-    def __init__(self, clock: Clock, qtype: QType | None = None) -> None:
+    def __init__(
+        self,
+        clock: Clock,
+        qtype: QType | None = None,
+        *,
+        forced_assembly_s: float = FORCED_ASSEMBLY_S,
+        watchdog_floor_s: float = WATCHDOG_FLOOR_S,
+    ) -> None:
+        # The two answer gates are configurable so the controller can pull them earlier than
+        # the 510/570 interface constants (which stay the neutral, evaluator-clock-agnostic
+        # defaults). The evaluator's 10-minute budget starts at SYSTEM startup while ours
+        # starts at question receipt (SYS-F6); pulling the gates in absorbs that boot+discovery
+        # skew so the whole floor path still clears against the evaluator's clock. The derived
+        # ordering explore < forced_assembly < floor < total must hold for every qtype.
+        if not (
+            max(EXPLORE_BUDGET_S.values())
+            < forced_assembly_s
+            < watchdog_floor_s
+            < QUESTION_BUDGET_S
+        ):
+            raise ValueError(
+                "gate ordering violated: require max(explore) < forced_assembly < "
+                f"watchdog_floor < total, got explore_max={max(EXPLORE_BUDGET_S.values())}, "
+                f"forced_assembly={forced_assembly_s}, watchdog_floor={watchdog_floor_s}, "
+                f"total={QUESTION_BUDGET_S}"
+            )
         self._clock = clock
         self._t0: float | None = None
         self.qtype = qtype
+        self._forced_assembly_s = float(forced_assembly_s)
+        self._watchdog_floor_s = float(watchdog_floor_s)
 
     # ------------------------------------------------------------------ latch
     def latch(self, t0: float | None = None) -> float:
@@ -82,14 +117,24 @@ class BudgetState:
         return self.latched and self.elapsed() >= self.explore_budget(qtype)
 
     @property
+    def forced_assembly_s(self) -> float:
+        """The effective forced-assembly gate for this budget (s)."""
+        return self._forced_assembly_s
+
+    @property
+    def watchdog_floor_s(self) -> float:
+        """The effective watchdog-floor gate for this budget (s)."""
+        return self._watchdog_floor_s
+
+    @property
     def forced_assembly(self) -> bool:
-        """T-90: begin best-effort answer assembly (>= 510 s)."""
-        return self.latched and self.elapsed() >= FORCED_ASSEMBLY_S
+        """Begin best-effort answer assembly (>= the configured forced-assembly gate)."""
+        return self.latched and self.elapsed() >= self._forced_assembly_s
 
     @property
     def watchdog_floor(self) -> bool:
-        """T-30: publish the floor answer unconditionally (>= 570 s)."""
-        return self.latched and self.elapsed() >= WATCHDOG_FLOOR_S
+        """Publish the floor answer unconditionally (>= the configured watchdog gate)."""
+        return self.latched and self.elapsed() >= self._watchdog_floor_s
 
 
 # Per-checkpoint hard call caps (architecture §3). A checkpoint absent from this map is

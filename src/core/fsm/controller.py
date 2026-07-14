@@ -31,7 +31,12 @@ from core.interfaces import (
     SceneIndex,
     WaypointCmd,
 )
-from core.fsm.budget import BudgetState, CallLedger
+from core.fsm.budget import (
+    BudgetState,
+    CallLedger,
+    DEFAULT_FORCED_ASSEMBLY_S,
+    DEFAULT_WATCHDOG_FLOOR_S,
+)
 from core.fsm.events import EventLog
 from core.fsm.floors import FloorAnswers, PartialResults
 
@@ -103,6 +108,8 @@ class QuestionController:
         probe: ProbeFn,
         floors: FloorAnswers | None = None,
         events: EventLog | None = None,
+        forced_assembly_s: float = DEFAULT_FORCED_ASSEMBLY_S,
+        watchdog_floor_s: float = DEFAULT_WATCHDOG_FLOOR_S,
     ) -> None:
         self._parse = parse
         self._explore = explore
@@ -110,6 +117,11 @@ class QuestionController:
         self._probe = probe
         self.floors = floors if floors is not None else FloorAnswers()
         self.events = events if events is not None else EventLog()
+        # Answer gates the budget will use (pulled in from the interface constants to hedge
+        # the evaluator-clock skew; see core.fsm.budget). Kept as controller params so a
+        # launch/config layer can override them from measured Ubuntu-gate skew.
+        self._forced_assembly_s = float(forced_assembly_s)
+        self._watchdog_floor_s = float(watchdog_floor_s)
 
         self.state: State = State.IDLE
         self.budget: BudgetState | None = None
@@ -147,7 +159,12 @@ class QuestionController:
         if self.question is None:
             self.question = q
             self.qtype = _infer_qtype(q)
-            self.budget = BudgetState(io.clock(), self.qtype)
+            self.budget = BudgetState(
+                io.clock(),
+                self.qtype,
+                forced_assembly_s=self._forced_assembly_s,
+                watchdog_floor_s=self._watchdog_floor_s,
+            )
             self.budget.latch(getattr(q, "t_received", None))
             self.ledger = CallLedger(self.budget)
             self._log("question_latched", f"{self.qtype.value if self.qtype else '?'}: {q.text!r}")
@@ -197,6 +214,20 @@ class QuestionController:
             if plan is not None:
                 self.plan = plan
                 self._log("parsed", f"tier={getattr(plan, 'parse_tier', '?')}")
+                # The regex _infer_qtype at intake is only a pre-parse seed; the parse carries
+                # the authoritative qtype. Adopt it so floor selection and the budget's
+                # explore/answer gates key off the real type (SYS-F7: a motion-verbed OR
+                # question otherwise gets a WaypointCmd floor on the wrong answer topic).
+                plan_qtype = getattr(plan, "qtype", None)
+                if isinstance(plan_qtype, QType) and plan_qtype is not self.qtype:
+                    old = self.qtype
+                    self.qtype = plan_qtype
+                    if self.budget is not None:
+                        self.budget.qtype = plan_qtype
+                    self._log(
+                        "qtype_corrected",
+                        f"{old.value if old else '?'}->{plan_qtype.value} (parse over seed)",
+                    )
         # Parse runs concurrently with orientation; move on regardless (floor covers a dark parse).
         self._to(State.ORIENT, "parse attempted")
 

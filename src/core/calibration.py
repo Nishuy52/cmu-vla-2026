@@ -99,6 +99,10 @@ class BudgetTunables:
     """
 
     # --- interfaces.py (clock gates) --------------------------------------------
+    # forced_assembly_s / watchdog_floor_s pin the neutral BudgetState interface
+    # constants. The controller's EFFECTIVE defaults are the skew-hedged 480/540
+    # (fsm/budget.py DEFAULT_*), sized for the evaluator's clock starting at
+    # system startup rather than question receipt (redteam H8 / SYS-F6).
     question_budget_s: float = 600.0   # total per-question wall budget (QUESTION_BUDGET_S)
     forced_assembly_s: float = 510.0   # T-90: begin best-effort assembly (FORCED_ASSEMBLY_S)
     watchdog_floor_s: float = 570.0    # T-30: publish floor answer (WATCHDOG_FLOOR_S)

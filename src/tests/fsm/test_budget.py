@@ -3,8 +3,21 @@ from __future__ import annotations
 
 import pytest
 
-from core.fsm.budget import BudgetState, CallLedger, LEDGER_RESERVE_S, ORIENTATION_S
-from core.interfaces import EXPLORE_BUDGET_S, QType
+from core.fsm.budget import (
+    BudgetState,
+    CallLedger,
+    DEFAULT_FORCED_ASSEMBLY_S,
+    DEFAULT_WATCHDOG_FLOOR_S,
+    LEDGER_RESERVE_S,
+    ORIENTATION_S,
+)
+from core.interfaces import (
+    EXPLORE_BUDGET_S,
+    FORCED_ASSEMBLY_S,
+    QUESTION_BUDGET_S,
+    QType,
+    WATCHDOG_FLOOR_S,
+)
 from tests.fsm._fakes import FakeClock
 
 
@@ -71,6 +84,63 @@ def test_past_explore_budget():
     assert b.past_explore_budget() is False
     clk.set(EXPLORE_BUDGET_S[QType.NUMERICAL])
     assert b.past_explore_budget() is True
+
+
+def test_budget_gate_defaults_are_interface_constants():
+    """BudgetState's own defaults stay the neutral 510/570 interface constants."""
+    b = BudgetState(FakeClock(0.0), QType.NUMERICAL)
+    assert b.forced_assembly_s == FORCED_ASSEMBLY_S
+    assert b.watchdog_floor_s == WATCHDOG_FLOOR_S
+
+
+def test_controller_effective_gate_defaults_are_pulled_in():
+    """The controller's effective defaults are earlier than the interface constants (SYS-F6)."""
+    assert DEFAULT_FORCED_ASSEMBLY_S == 480.0
+    assert DEFAULT_WATCHDOG_FLOOR_S == 540.0
+    assert DEFAULT_FORCED_ASSEMBLY_S < FORCED_ASSEMBLY_S
+    assert DEFAULT_WATCHDOG_FLOOR_S < WATCHDOG_FLOOR_S
+
+
+def test_configurable_gates_move_the_boundaries():
+    clk = FakeClock(0.0)
+    b = BudgetState(
+        clk,
+        QType.NUMERICAL,
+        forced_assembly_s=DEFAULT_FORCED_ASSEMBLY_S,
+        watchdog_floor_s=DEFAULT_WATCHDOG_FLOOR_S,
+    )
+    b.latch()
+    clk.set(479.9)
+    assert b.forced_assembly is False
+    clk.set(480.0)
+    assert b.forced_assembly is True
+    assert b.watchdog_floor is False
+    clk.set(540.0)
+    assert b.watchdog_floor is True
+
+
+def test_gate_ordering_invariant_holds_for_defaults():
+    """explore < forced_assembly < floor < total for both the neutral and pulled-in gates."""
+    explore_max = max(EXPLORE_BUDGET_S.values())
+    for fa, wf in (
+        (FORCED_ASSEMBLY_S, WATCHDOG_FLOOR_S),
+        (DEFAULT_FORCED_ASSEMBLY_S, DEFAULT_WATCHDOG_FLOOR_S),
+    ):
+        assert explore_max < fa < wf < QUESTION_BUDGET_S
+
+
+@pytest.mark.parametrize(
+    "fa, wf",
+    [
+        (570.0, 540.0),  # forced_assembly after floor
+        (200.0, 540.0),  # forced_assembly below max explore (270)
+        (480.0, 700.0),  # floor past total budget
+        (540.0, 540.0),  # equal (must be strict)
+    ],
+)
+def test_gate_ordering_invariant_rejects_bad_gates(fa, wf):
+    with pytest.raises(ValueError):
+        BudgetState(FakeClock(0.0), QType.NUMERICAL, forced_assembly_s=fa, watchdog_floor_s=wf)
 
 
 def test_phases_false_before_latch():

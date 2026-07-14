@@ -23,10 +23,14 @@ one per :class:`~core.interfaces.QType`:
   target is flagged (``target_source == "ambiguous"``) rather than guessed, and IoU
   is reported against our own top pick as a lower-confidence signal.
 
-* INSTRUCTION_FOLLOWING -> :func:`score_instruction_following`. Two numbers, never a
-  single fake composite: (1) **discrete Frechet distance** between our waypoint path
-  and the GT ``trajectory_qN.ply`` path, and (2) **fraction of GT path within 1.0 m**
-  of our path (coverage). Both in metres / [0,1]; low Frechet + high coverage == good.
+* INSTRUCTION_FOLLOWING -> :func:`score_instruction_rubric` (HEADLINE, IF-F2) and
+  :func:`score_instruction_following` (SECONDARY diagnostics). The challenge scores the
+  *driven* trajectory on ordered path-constraint adherence with forbidden-region
+  penalties, so the headline is a rubric proxy over a simulated driven trajectory:
+  ordered per-leg arrival credit (partial credit per leg reached in order) minus
+  ``threading_check`` / ``capsule_violated`` penalties. The old discrete-Frechet +
+  coverage@1m of the PLANNED path are kept ONLY as secondary diagnostics (shape
+  similarity to the reference PLY, which the rubric does not pay for).
 
 Pure/deterministic: numpy only, no network, no RNG.
 """
@@ -42,7 +46,14 @@ from pathlib import Path
 import numpy as np
 
 from core.geometry import toolbox as T
-from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
+from core.geometry.toolbox import (
+    DEFAULT_THRESHOLDS,
+    Capsule,
+    Gate,
+    Thresholds,
+    capsule_violated,
+    threading_check,
+)
 from core.groundtruth.vocab_bridge import bridge_synonyms, bridged_agree
 from core.interfaces import InstanceRecord, MarkerBox, SceneIndex
 from core.parsing.regex_tier import parse_regex
@@ -156,6 +167,27 @@ def _anchor_agrees(question_anchor: str, ann_anchor_class: str) -> bool:
     return bridged_agree(question_anchor, ann_anchor_class)
 
 
+def _class_equal(question_noun: str, ann_class: str) -> bool:
+    """Strict target-class equality: normalised equality OR a whitelisted bridge only.
+
+    NUM-F6 fix. Where :func:`_anchor_agrees` deliberately accepts substring / shared-
+    token overlap (right for *anchor* linkage, which tolerates surface drift like
+    "coffee cup" vs "cup"), that leniency *inflates independent counts* when used to
+    pick which annotated targets belong to the queried class: "photo frame" targets
+    counted as "photo" (livingroom_3: 10 vs 9), "tv cabinet" matched by the shared "tv"
+    token to any TV relation. For counting a *class*, the match must be strict — the
+    normalised nouns are equal, or they are explicitly bridged as the same object class
+    (``vocab_bridge`` whitelist). No substring, no shared-token fallback.
+    """
+    a = normalize_label(question_noun)
+    b = normalize_label(ann_class)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    return bridged_agree(question_noun, ann_class)
+
+
 # --------------------------------------------------------------------------- 3D IoU
 
 
@@ -198,6 +230,11 @@ class NumericalScore:
     independent_source: str  # "referential" | "referential_class_only" | "none"
     gt_count_scenegraph: int | None = None  # 3rd opinion from scene-graph relations
     scenegraph_source: str = "none"  # "scene_graph" | "scene_graph_class_only" | "none"
+    #: NUM-F6 annotation-coverage: (annotated target instances of the class, CSV
+    #: instances of the class). When the first is far below the second the class is
+    #: under-annotated and any independent count over it is deflated / untrustworthy.
+    annotated_targets_of_class: int | None = None
+    csv_instances_of_class: int | None = None
     note: str = ""
 
 
@@ -235,7 +272,9 @@ def _independent_count(
                 if not isinstance(ann, dict):
                     continue
                 tclass = str(ann.get("target_class", ""))
-                if not _anchor_agrees(tgt_noun, tclass):
+                # NUM-F6: strict class equality for the TARGET class (no substring/token
+                # fallback) — that leniency inflated "photo" with "photo frame" targets.
+                if not _class_equal(tgt_noun, tclass):
                     continue
                 tid = str(ann.get("target_index", ""))
                 if not tid:
@@ -261,6 +300,52 @@ def _independent_count(
         # report the class-level count, flagged as relation-agnostic (coarser).
         return len(class_ids), "referential_class_only"
     return None, "none"
+
+
+def _annotation_coverage(
+    text: str, referential: dict | None, index: SceneIndex
+) -> tuple[int | None, int | None]:
+    """(annotated target instances of the class, CSV instances of the class).
+
+    NUM-F6 coverage column. The first counts distinct ``target_index`` values whose
+    ``target_class`` strictly equals the question's target noun across every referential
+    statement (relation-agnostic — how many instances of the class the generator ever
+    annotated as a target). The second is the scene's instance count of the same class
+    (via the index's strict label lookup). A first value well below the second flags an
+    under-annotated class whose independent count is deflated and untrustworthy. Returns
+    (None, csv) when no referential set is present.
+    """
+    plan = parse_regex(text)
+    if plan.target is None:
+        return None, None
+    tgt_noun = normalize_label(plan.target.noun)
+    csv_n: int | None = None
+    try:
+        csv_n = sum(
+            1
+            for r in index.by_label(plan.target.noun)
+            if _class_equal(tgt_noun, r.label)
+        )
+    except Exception:  # noqa: BLE001 — index lookup is best-effort for the coverage column
+        csv_n = None
+    if not referential:
+        return None, csv_n
+    ann_ids: set[str] = set()
+    for _rid, stmts in (referential.get("regions") or {}).items():
+        if not isinstance(stmts, dict):
+            continue
+        for _stmt, anns in stmts.items():
+            if not isinstance(anns, list):
+                continue
+            for ann in anns:
+                if not isinstance(ann, dict):
+                    continue
+                if not _class_equal(tgt_noun, str(ann.get("target_class", ""))):
+                    continue
+                tid = str(ann.get("target_index", ""))
+                if tid:
+                    ann_ids.add(tid)
+    return len(ann_ids), csv_n
 
 
 def _scene_graph_count(
@@ -306,7 +391,9 @@ def _scene_graph_count(
                 if isinstance(anchors, list):
                     bucket.setdefault(str(tgt), set()).update(str(a) for a in anchors)
 
-    class_ids = {oid for oid, lbl in id2label.items() if _anchor_agrees(tgt_noun, lbl)}
+    # NUM-F6: strict class equality for the target class (anchor linkage below still
+    # uses the looser _anchor_agrees, which is correct for surface-drifting anchors).
+    class_ids = {oid for oid, lbl in id2label.items() if _class_equal(tgt_noun, lbl)}
     if not class_ids:
         return None, "none"
 
@@ -365,15 +452,35 @@ def score_numerical(
     our_count = gt_count  # same path; the exact-match records determinism
     indep, src = _independent_count(text, referential)
     sg_count, sg_src = _scene_graph_count(text, scene_graph)
+    ann_cov, csv_cov = _annotation_coverage(text, referential, index)
+    # NUM-F6(b): a ``*_class_only`` count is a relation-agnostic total, NOT independent
+    # evidence for the relation-filtered question — comparing it as a disagreement is a
+    # scorer artifact (arabic_room "1 vs 3"). Such rows are excluded from the
+    # disagreement signal and reported as "no independent evidence" instead.
+    indep_is_evidence = indep is not None and src == "referential"
+    sg_is_evidence = sg_count is not None and sg_src == "scene_graph"
     disagree = [f"pipeline={gt_count}"]
-    if indep is not None:
+    if indep_is_evidence:
         disagree.append(f"independent={indep}")
-    if sg_count is not None:
+    if sg_is_evidence:
         disagree.append(f"scene_graph={sg_count}")
-    distinct = {v for v in (gt_count, indep, sg_count) if v is not None}
+    distinct = {gt_count}
+    if indep_is_evidence:
+        distinct.add(indep)
+    if sg_is_evidence:
+        distinct.add(sg_count)
     note = ""
     if len(distinct) > 1:
         note = "; ".join(disagree) + " (disagreement)"
+    elif not indep_is_evidence and not sg_is_evidence:
+        note = "no independent evidence (relation-agnostic class-only counts only)"
+    # NUM-F6(c): flag a deflated (under-annotated) class so the row reads as untrustworthy.
+    if ann_cov is not None and csv_cov is not None and ann_cov < csv_cov:
+        cov_note = (
+            f"annotation coverage {ann_cov}/{csv_cov} — class under-annotated, "
+            "independent count deflated"
+        )
+        note = f"{note}; {cov_note}" if note else cov_note
     return NumericalScore(
         our_count=our_count,
         gt_count_pipeline=gt_count,
@@ -382,6 +489,8 @@ def score_numerical(
         independent_source=src,
         gt_count_scenegraph=sg_count,
         scenegraph_source=sg_src,
+        annotated_targets_of_class=ann_cov,
+        csv_instances_of_class=csv_cov,
         note=note,
     )
 
@@ -915,4 +1024,188 @@ def score_instruction_following(
         frame_aligned=frame_aligned,
         fit_residual_m=fit_residual_m,
         note=note,
+    )
+
+
+# ----------------------------------------------------------------- IF rubric proxy (IF-F2)
+
+#: Distance (m) within which a driven pose counts as "arrived" at a leg goal. Matches
+#: the instruction head's own ``ARRIVAL_TOL_M`` so the scorer agrees with what the
+#: pipeline treats as reaching a leg.
+LEG_ARRIVAL_TOL_M: float = 0.8
+
+#: Per-violation penalty (fraction of one leg's worth of credit) subtracted from the
+#: ordered-leg credit for each threading miss / avoid-capsule breach. Kept at one full
+#: leg-equivalent so a forbidden-region breach or a missed corridor gate costs as much
+#: as failing to reach a leg — the rubric penalises them explicitly (question_analysis
+#: §2/§5: forbidden regions are scored, ordered adherence is scored).
+IF_PENALTY_PER_VIOLATION: float = 1.0
+
+
+@dataclass
+class IFLegOutcome:
+    """Per-leg ordered-arrival record for the rubric-proxy score."""
+
+    index: int
+    kind: str  # "goto" | "via_near" | "corridor_between"
+    goal_xy: tuple[float, float]
+    reached: bool  # some driven pose came within tolerance...
+    reached_in_order: bool  # ...AND after the previous ordered leg's arrival
+
+
+@dataclass
+class InstructionRubricScore:
+    """Rubric-proxy score of a DRIVEN instruction-following trajectory (IF-F2).
+
+    Headline is :attr:`rubric_score` in [0, 1]: ordered per-leg arrival credit minus
+    threading/avoid penalties. Fréchet/coverage are carried as SECONDARY diagnostics
+    only — never in the headline (they measure shape similarity to the reference PLY,
+    which the rubric does not pay for).
+    """
+
+    rubric_score: float  # HEADLINE: ordered-leg credit minus penalties, clamped [0,1]
+    ordered_leg_credit: float  # fraction of legs reached IN ORDER, before penalties
+    n_legs: int
+    n_legs_reached_in_order: int
+    leg_outcomes: list[IFLegOutcome] = field(default_factory=list)
+    n_threading_legs: int = 0
+    n_threading_violations: int = 0  # corridor legs the driven traj never threaded
+    threading_details: list[str] = field(default_factory=list)
+    n_avoid_specs: int = 0
+    n_avoid_violations: int = 0  # avoid capsules the driven traj entered
+    avoid_details: list[str] = field(default_factory=list)
+    penalty: float = 0.0
+    # secondary diagnostics (never headline)
+    frechet_m: float | None = None
+    coverage_1m: float | None = None
+    driven_n_poses: int = 0
+    note: str = ""
+
+
+def _first_arrival_index(
+    traj: np.ndarray, goal: tuple[float, float], tol: float, start: int
+) -> int | None:
+    """First index >= ``start`` where a driven pose is within ``tol`` of ``goal``."""
+    if traj.ndim != 2 or traj.shape[0] == 0:
+        return None
+    g = np.asarray(goal, dtype=float)[:2]
+    for i in range(max(start, 0), traj.shape[0]):
+        if float(np.linalg.norm(traj[i, :2] - g)) <= tol:
+            return i
+    return None
+
+
+def score_instruction_rubric(
+    driven_traj: np.ndarray,
+    leg_goals: list[tuple[str, tuple[float, float]]],
+    *,
+    corridor_gates: list[tuple[int, Gate]] | None = None,
+    avoid_capsules: list[Capsule] | None = None,
+    trajectory_ply: os.PathLike | str | None = None,
+    frame: Frame2D | None = None,
+    tol: float = LEG_ARRIVAL_TOL_M,
+) -> InstructionRubricScore:
+    """Score a DRIVEN trajectory against the instruction rubric proxy (IF-F2).
+
+    Args:
+      driven_traj: (N, 2) pose stream the vehicle actually followed (object frame).
+      leg_goals: ordered ``(kind, (x, y))`` per route leg — the point each ordered leg
+        must be reached at, in order. Corridor legs use the gate midpoint as the goal.
+      corridor_gates: ``(leg_index, Gate)`` per corridor leg, for threading checks.
+      avoid_capsules: forbidden regions active for the whole traversal.
+      trajectory_ply / frame: optional reference PLY (+ scene frame) for the SECONDARY
+        Fréchet/coverage diagnostics only.
+
+    Scoring:
+      * (b) ordered per-leg arrival: walk the trajectory once; a leg counts only if a
+        pose reaches it within ``tol`` AND at/after the previous ordered leg's arrival
+        index (partial credit = ordered legs reached / total legs).
+      * (c) threading_check per corridor leg and capsule_violated per avoid spec: each
+        miss/breach is a penalty of :data:`IF_PENALTY_PER_VIOLATION` leg-equivalents.
+      * headline ``rubric_score`` = clamp(ordered_leg_credit - penalty/n_legs, 0, 1).
+    """
+    corridor_gates = corridor_gates or []
+    avoid_capsules = avoid_capsules or []
+    traj = np.asarray(driven_traj, dtype=float)
+    if traj.ndim != 2 or traj.shape[1] < 2:
+        traj = np.empty((0, 2), dtype=float)
+
+    n_legs = len(leg_goals)
+    outcomes: list[IFLegOutcome] = []
+    cursor = 0  # ordered arrival index frontier
+    n_in_order = 0
+    for i, (kind, goal) in enumerate(leg_goals):
+        # "reached" ignores order (did we ever get there); "reached_in_order" requires
+        # arrival at/after the previous ordered leg's arrival.
+        any_idx = _first_arrival_index(traj, goal, tol, 0)
+        ordered_idx = _first_arrival_index(traj, goal, tol, cursor)
+        reached = any_idx is not None
+        in_order = ordered_idx is not None
+        if in_order:
+            cursor = ordered_idx + 1
+            n_in_order += 1
+        outcomes.append(
+            IFLegOutcome(
+                index=i, kind=kind,
+                goal_xy=(float(goal[0]), float(goal[1])),
+                reached=reached, reached_in_order=in_order,
+            )
+        )
+
+    ordered_leg_credit = (n_in_order / n_legs) if n_legs else 0.0
+
+    # (c) threading + avoid penalties over the DRIVEN trajectory.
+    threading_details: list[str] = []
+    n_thread_viol = 0
+    for leg_i, gate in corridor_gates:
+        ok, msg = threading_check(traj, gate)
+        if not ok:
+            n_thread_viol += 1
+            threading_details.append(f"leg {leg_i}: {msg}")
+
+    avoid_details: list[str] = []
+    n_avoid_viol = 0
+    for k, cap in enumerate(avoid_capsules):
+        hit, pt = capsule_violated(traj, cap)
+        if hit:
+            n_avoid_viol += 1
+            where = f" at ({pt[0]:.2f}, {pt[1]:.2f})" if pt is not None else ""
+            avoid_details.append(f"avoid[{k}]: trajectory entered capsule{where}")
+
+    penalty = IF_PENALTY_PER_VIOLATION * (n_thread_viol + n_avoid_viol)
+    penalty_fraction = (penalty / n_legs) if n_legs else penalty
+    rubric_score = max(0.0, min(1.0, ordered_leg_credit - penalty_fraction))
+
+    # secondary diagnostics only.
+    frech: float | None = None
+    cov: float | None = None
+    if trajectory_ply is not None:
+        diag = score_instruction_following(traj, trajectory_ply, frame=frame)
+        frech = diag.frechet_m if np.isfinite(diag.frechet_m) else None
+        cov = diag.coverage_1m
+
+    note_parts: list[str] = []
+    if traj.shape[0] == 0:
+        note_parts.append("driven trajectory empty — pipeline produced no motion")
+    if n_thread_viol:
+        note_parts.append(f"{n_thread_viol} corridor leg(s) never threaded")
+    if n_avoid_viol:
+        note_parts.append(f"{n_avoid_viol} avoid capsule(s) breached")
+    return InstructionRubricScore(
+        rubric_score=rubric_score,
+        ordered_leg_credit=ordered_leg_credit,
+        n_legs=n_legs,
+        n_legs_reached_in_order=n_in_order,
+        leg_outcomes=outcomes,
+        n_threading_legs=len(corridor_gates),
+        n_threading_violations=n_thread_viol,
+        threading_details=threading_details,
+        n_avoid_specs=len(avoid_capsules),
+        n_avoid_violations=n_avoid_viol,
+        avoid_details=avoid_details,
+        penalty=penalty,
+        frechet_m=frech,
+        coverage_1m=cov,
+        driven_n_poses=int(traj.shape[0]),
+        note="; ".join(note_parts),
     )

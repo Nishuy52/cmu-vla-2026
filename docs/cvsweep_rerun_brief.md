@@ -23,6 +23,13 @@ count agreement ×1, OR IoU ×2, IF path coverage ×6). Outputs to `reports/cvsw
 `report.md`, `results.json`, `recommended_calibration.json` + per-parameter stability table +
 generalization gap.
 
+> **H2 (14 Jul): re-point the sweep objective before any rerun.** The scorer now emits an IF
+> rubric-proxy headline (`rubric_score` = ordered per-leg arrival + threading/avoid penalties over
+> the *driven* trajectory) and strict-class independent counts (class-only rows excluded from the
+> agreement stat); the sweep objective must optimise those new columns — IF `rubric_score` (not
+> planned-path coverage) and the strict `referential` count agreement (not the class-only-inclusive
+> `_best_independent`) — otherwise it still tunes against the retired artifact metrics.
+
 ## Rerun instructions (pick one)
 
 **Option A — overnight on this machine (simplest):**
