@@ -141,29 +141,45 @@ multi-GB bag to a few hundred MB that move freely between machines.
 4. Verify against a full training scene with the 10-minute clock before any submission
    (`docs/master_plan.md` Phase 2/3).
 
-## 7a. Build & run OUR ai_module (Phase-2 adapter artifacts)
+## 7a. Build & run OUR ai_module (Phase-2 adapter artifacts) — FORK-SHAPED packaging (H7)
 
-*These artifacts (`src/ros_adapter/`, `docker/ai_module/`) were written on Windows and are
+*These artifacts (`src/ros_adapter/`, `docker/ai_module_fork/`) were written on Windows and are
 **untested drafts** — expect to fix small things on first Ubuntu build; anything surprising is
 flagged "confirm on Ubuntu" in the files.*
 
-```bash
-cd ~/vla
-# Build our image (context = repo root so COPY src/ resolves):
-docker build -t iros2026/ai_module:latest -f docker/ai_module/Dockerfile .
-```
+**Packaging shape (H7 / red-team F4).** The submission is a **fork** in which only `ai_module/`
+may be modified, and the upstream compose builds the `ai_module` service from **context
+`../ai_module` using `ai_module/docker/Dockerfile`** (`docs/upstream_notes.md` §5B, gotcha 12).
+Our fork-shaped Dockerfile + sync scripts live in `docker/ai_module_fork/`. The old
+`docker/ai_module/` (repo-root build context) is **deprecated — do not build from it.**
 
-Then run the compose stack with our node instead of the dummy — edit the upstream
-`docker/compose.yml` `ai_module` service to build from `docker/ai_module/Dockerfile` (context
-`..`) and `command: ros2 launch vla_ai_module ai_module.launch.py`, add
-`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` and an optional `env_file` for `VLA_LLM_*` keys. Full
-recipe (build/tag/push + the exact compose snippet + key pass-through) is in
-`docker/ai_module/README.md`.
+**The packaging gate is now: `docker compose up --build` from a clean clone of the FORK
+succeeds.** Building our repo directly does not count. Exact commands:
 
 ```bash
+# 0. clean clone of the FORK (the submitted repo) — NOT our dev repo
+git clone <fork-remote> /tmp/fork-clean
+
+# 1. stage our payload (src/ minus tests + the fork-shaped Dockerfile) into ai_module/
+#    from a checkout of THIS repo:
+~/vla/docker/ai_module_fork/sync_to_fork.sh /tmp/fork-clean
+#    -> writes /tmp/fork-clean/ai_module/docker/Dockerfile and /tmp/fork-clean/ai_module/src/
+
+# 2. edit the fork's docker/compose.yml ai_module service to launch OUR node:
+#    build.context: ../ai_module ; build.dockerfile: docker/Dockerfile
+#    command: ros2 launch vla_ai_module ai_module.launch.py
+#    environment: RMW_IMPLEMENTATION=rmw_cyclonedds_cpp  (re-assert; OVERRIDES the Dockerfile ENV)
+#    env_file: ../.env.llm  (optional; VLA_LLM_* keys)
+#    Full snippet in docker/ai_module_fork/README.md.
+
+# 3. build + bring the stack up exactly as evaluators do:
 xhost +
-cd ~/vla/upstream/CMU-VLN-Challenge-2026/docker && docker compose -f compose.yml up --build -d
+cd /tmp/fork-clean/docker && docker compose -f compose.yml up --build -d
 ```
+
+Resolve the three **confirm-on-Ubuntu flags** marked in the Dockerfile as you go: (1) cross-container
+topic discovery under `rmw_cyclonedds_cpp`; (2) whether `--break-system-packages` is needed on the
+Noble base (PEP 668); (3) the colcon symlink layout + `ament`/`core`-on-PYTHONPATH coexistence.
 
 **First smoke test:** run the ordered Tier-2 checks in `docs/sim_verification.md`, especially
 **Tier 2.7** (our-module round-trip — publish a challenge question, confirm the adapter latches

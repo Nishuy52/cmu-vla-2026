@@ -149,6 +149,96 @@ def test_cp4_verifier_receives_full_context():
     assert captured["hook"] is True
 
 
+# ------------------------------------------------------------------ OR-F4: keep on neither
+def test_cp4_hallucinated_neither_keeps_winner_or_f4():
+    """OR-F4 attack: the model returns a schema-valid `neither` with a missed constraint it
+    cannot actually verify. The head must KEEP the deterministic winner — never silently
+    swap to an unverified runner-up (the deployed-seam inversion this test guards against).
+    """
+    sc = scene(
+        inst(1, "bowl", centroid=(0, 0, 0)),
+        inst(2, "bowl", centroid=(5, 0, 0)),
+    )
+    head = _orhead(sc, object_plan("bowl"))
+    winner_id = head.best_candidate.instance_id
+
+    def verifier(*, question, winner, runner_up, winner_facts, notes, resolve_again):
+        # keep-on-neither: a non-actionable verdict returns the winner unchanged.
+        return _Outcome("keep", winner, "neither",
+                        missed_constraint="closest_to folding screen")
+
+    head.verifier = verifier
+    head.verify()
+    assert head.best_candidate.instance_id == winner_id
+
+
+# ---------------------------------------------------- OR-F5: re-resolve flips the instance
+def test_cp4_reresolve_flips_to_correct_instance_two_tables_or_f5():
+    """OR-F5 attack scene: two bowls (one per table); the deterministic rank picks bowl 1
+    (lowest id). CP4 diagnoses the missed `closest_to folding screen` constraint; the
+    re-resolve hook synthesizes a REAL superlative clause and the winner flips to bowl 2 —
+    the bowl on the table nearest the folding screen. Proves the re-resolve is no longer a
+    no-op.
+    """
+    sc = scene(
+        inst(1, "bowl", centroid=(0, 0, 0)),           # far table
+        inst(2, "bowl", centroid=(5, 0, 0)),           # near table
+        inst(3, "folding screen", centroid=(5.5, 0, 0)),  # beside bowl 2's table
+    )
+    head = _orhead(sc, object_plan("bowl"))
+    assert head.best_candidate.instance_id == 1  # deterministic rank: lowest id
+
+    def verifier(*, question, winner, runner_up, winner_facts, notes, resolve_again):
+        new = resolve_again("closest_to folding screen")
+        return _Outcome("re_resolve", new, "neither",
+                        missed_constraint="closest_to folding screen")
+
+    head.verifier = verifier
+    head.verify()
+    assert head.best_candidate.instance_id == 2  # flipped to the correct instance
+
+
+def test_cp4_reresolve_unparseable_constraint_keeps_winner_or_f5():
+    """OR-F5: a missed constraint that names no known relation does not parse into a clause;
+    the re-resolve keeps the deterministic winner rather than crashing."""
+    sc = scene(inst(1, "bowl"), inst(2, "bowl", centroid=(5, 0, 0)))
+    head = _orhead(sc, object_plan("bowl"))
+
+    def verifier(*, question, winner, runner_up, winner_facts, notes, resolve_again):
+        new = resolve_again("gibberish phrase here")
+        return _Outcome("re_resolve", new, "neither", missed_constraint="gibberish phrase here")
+
+    head.verifier = verifier
+    head.verify()
+    assert head.best_candidate.instance_id == 1
+
+
+# ---------------------------------------------------- OR-F8: provisional never published
+def test_cp4_provisional_only_winner_not_published_or_f8():
+    """OR-F8: a provisional-only winner (n_obs=1, a CP2 hallucination-recovery instance) is
+    never committed as the published marker. verify() falls to the next re-observed
+    candidate."""
+    sc = scene(
+        inst(1, "bowl", n_obs=1, centroid=(0, 0, 0)),   # provisional (CP2 hit)
+        inst(2, "bowl", n_obs=3, centroid=(5, 0, 0)),   # real, re-observed
+    )
+    head = _orhead(sc, object_plan("bowl"))
+    assert head.best_candidate.instance_id == 1  # ranks first by id
+    m = head.verify()
+    assert m is not None
+    assert head.best_candidate.instance_id == 2  # provisional refused, fell through
+
+
+def test_cp4_all_provisional_publishes_nothing_or_f8():
+    """OR-F8: when every ranked candidate is provisional-only, verify() refuses to publish a
+    confident wrong box and returns None."""
+    sc = scene(inst(1, "bowl", n_obs=1), inst(2, "bowl", n_obs=1, centroid=(5, 0, 0)))
+    head = _orhead(sc, object_plan("bowl"))
+    m = head.verify()
+    assert m is None
+    assert head.best_candidate is None
+
+
 # --------------------------------------------------------------------------- backward compat
 def test_legacy_bool_seam_injected_as_verifier_is_detected():
     sc = scene(

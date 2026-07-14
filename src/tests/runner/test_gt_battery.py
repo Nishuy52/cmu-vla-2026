@@ -29,6 +29,90 @@ requires_full_unity = pytest.mark.skipif(
 )
 
 
+def _synthetic_gt_scene(objs, scene_name="synthetic"):
+    """Build a GTScene from ``[(label, cx, cy, cz, sx, sy, sz), ...]`` for driven-trajectory
+    tests — no dataset needed, deterministic. Every instance is fully observed (n_obs=3)."""
+    from core.groundtruth.loader import GTScene
+    from core.interfaces import InstanceRecord
+
+    recs = []
+    for i, (label, cx, cy, cz, sx, sy, sz) in enumerate(objs):
+        lo = np.array([cx - sx / 2, cy - sy / 2, cz - sz / 2], dtype=float)
+        hi = np.array([cx + sx / 2, cy + sy / 2, cz + sz / 2], dtype=float)
+        recs.append(
+            InstanceRecord(
+                instance_id=i,
+                label=label,
+                score=1.0,
+                n_obs=3,
+                centroid=(lo + hi) / 2.0,
+                aabb_min=lo,
+                aabb_max=hi,
+            )
+        )
+    return GTScene(scene_name=scene_name, instances=recs, regions=[])
+
+
+def test_drive_if_trajectory_not_truncated_by_build_draining():
+    """Regression: the driven trajectory must span the whole committed route, not be cut
+    short because the route-build ticks already advanced the follower's progress index.
+
+    The old harness ticked the instruction head from the *stationary* spawn to firm up the
+    route, then drove the SAME follower — so every build tick's ``head.advance`` already
+    called ``follower.advance`` at the spawn, consuming leading crumbs. For a route whose
+    early crumbs sit within reach of the spawn this left an already-advanced (or fully
+    exhausted) follower, and the drive produced a 2-pose trajectory that reaches no leg.
+    Here spawn sits ON the first leg goal (the worst case for draining); the drive must
+    still traverse to the well-separated terminal, i.e. many poses and terminal arrival.
+    """
+    from core.perception.scene_index import BasicSceneIndex
+
+    # Two GOTO legs 8 m apart on a clear floor; spawn will be placed on leg-0's anchor.
+    gt = _synthetic_gt_scene(
+        [
+            ("stool", -4.0, 0.0, 0.3, 0.4, 0.4, 0.6),  # leg 0 anchor (near spawn)
+            ("table", 4.0, 0.0, 0.4, 1.0, 1.0, 0.8),  # leg 1 / terminal anchor (far)
+        ]
+    )
+    idx = BasicSceneIndex(gt.instances)
+    text = "Go to the stool and then go to the table."
+
+    driven = GB._drive_if_trajectory(gt=gt, idx=idx, text=text, start_xy=(-4.0, 0.0))
+
+    assert driven.shape[0] > 2, (
+        f"driven trajectory spuriously truncated to {driven.shape[0]} poses - "
+        "the follower was drained during route build"
+    )
+    # It must actually reach the far terminal (table at +4,0), well outside any spawn-local
+    # draining radius — proof the whole route was driven, not just the near cluster.
+    # It must cross the whole 8 m route to the far side. The GOTO goal is projected to a
+    # free cell off the table's (1 m) AABB and the follower stops a step short, so the
+    # closest approach sits ~1-1.5 m from the centroid; assert the vehicle got to the far
+    # neighbourhood (not that it hit the exact centroid) — proof the whole route was driven.
+    term = np.array([4.0, 0.0])
+    min_term = float(np.min(np.hypot(driven[:, 0] - term[0], driven[:, 1] - term[1])))
+    assert min_term <= 1.5, f"driven trajectory never reached the terminal (min {min_term:.2f} m)"
+
+
+def test_drive_if_trajectory_progresses_with_moving_pose():
+    """The closed-loop driver advances the follower only as the vehicle moves: the pose
+    stream must be monotonically progressing (net displacement from spawn to end large),
+    not a stationary point repeated."""
+    from core.perception.scene_index import BasicSceneIndex
+
+    gt = _synthetic_gt_scene(
+        [
+            ("stool", -4.0, 0.0, 0.3, 0.4, 0.4, 0.6),
+            ("table", 4.0, 0.0, 0.4, 1.0, 1.0, 0.8),
+        ]
+    )
+    idx = BasicSceneIndex(gt.instances)
+    text = "Go to the stool and then go to the table."
+    driven = GB._drive_if_trajectory(gt=gt, idx=idx, text=text, start_xy=(-4.0, 0.0))
+    net = float(np.hypot(*(driven[-1] - driven[0])))
+    assert net >= 4.0, f"vehicle barely moved (net {net:.2f} m) — drive did not progress"
+
+
 @requires_loft
 @pytest.mark.slow
 def test_score_scene_loft_all_five_questions():

@@ -152,6 +152,252 @@ def _drive_if_path(
     return np.array([[p[0], p[1]] for p in follower.path], dtype=float)
 
 
+#: Constant-speed kinematic-follower step (m) per breadcrumb tick when simulating the
+#: DRIVEN trajectory (IF-F2). v1 simplification: the vehicle advances straight toward
+#: each published crumb at a fixed step, no dynamics/heading lag. Documented as a v1
+#: proxy — good enough to test ordered-leg arrival, gate threading, and avoid breaches,
+#: which is what the rubric scores; it does NOT model local-planner deviation or
+#: waypoint-snapping (those are Ubuntu-sim concerns).
+_DRIVE_STEP_M: float = 0.25
+_DRIVE_MAX_TICKS: int = 4000  # hard cap so a stuck follower can't loop forever
+
+#: Max number of full ``head.advance`` re-ticks DURING the drive (each re-integrates
+#: terrain + re-grounds + can re-plan, ~0.5 s, so it must be bounded). The head is re-ticked
+#: only while the committed route can still grow (a later leg still ungrounded / a provisional
+#: terminal withheld); once this budget is spent — or the route covers every leg — we drive
+#: the follower directly (microseconds/step). In the fully-observed battery the route commits
+#: on tick 0, so this budget is rarely touched; it exists so a route that can NEVER fully
+#: ground (a leg unresolvable from the mirror scene) cannot make the drive loop 4000× at the
+#: head's per-tick cost. Matches the build budget: the drive gets the same extension window.
+_DRIVE_HEAD_RETICK_BUDGET: int = _IF_MAX_BUILD_TICKS
+
+
+def _run_instruction_head(
+    text: str,
+    gt: GTScene,
+    idx: BasicSceneIndex,
+    *,
+    start_xy: tuple[float, float] | None,
+    max_build_ticks: int,
+):
+    """Build a scene mirror + MockRobotIO and tick the InstructionHead until its route
+    firms up. Returns ``(head, io, plan)`` (head is None when the question isn't IF)."""
+    from core.parsing.regex_tier import parse_regex
+    from core.heads.instruction import InstructionHead
+
+    plan = parse_regex(text)
+    if plan.qtype is not QType.INSTRUCTION_FOLLOWING or not plan.route:
+        return None, None, plan
+
+    sc = _synthetic_from_gt(gt)
+    clk = FakeClock(0.0)
+    if start_xy is not None:
+        start_x, start_y = float(start_xy[0]), float(start_xy[1])
+    else:
+        start_x = float(min(r.aabb_min[0] for r in gt.instances)) + 0.5
+        start_y = float(min(r.aabb_min[1] for r in gt.instances)) + 0.5
+    io = MockRobotIO(sc, clk, start_x=start_x, start_y=start_y)
+
+    head = InstructionHead(plan=plan)
+    for _ in range(max_build_ticks):
+        head.advance(io, idx)
+        clk.advance(1.0)
+        if head._follower is not None and head._follower.path:
+            break
+    return head, io, plan
+
+
+def _drive_if_trajectory(
+    text: str,
+    gt: GTScene,
+    idx: BasicSceneIndex,
+    *,
+    max_build_ticks: int = _IF_MAX_BUILD_TICKS,
+    start_xy: tuple[float, float] | None = None,
+) -> np.ndarray:
+    """Simulate the DRIVEN trajectory (IF-F2), returning the pose stream as (N, 2).
+
+    Unlike :func:`_drive_if_path` (which returns the *planned* ``BreadcrumbFollower.path``),
+    this closes the loop against the instruction head: we build + ground the route, then
+    step a constant-speed kinematic vehicle toward the follower's current crumb, recording
+    each pose — and we KEEP TICKING THE HEAD between drive steps so the committed route
+    re-grounds and EXTENDS as later legs commit (H3c prefix-growth / H4c provisional-terminal
+    commit). The follower's progress index therefore advances in lockstep with the *real*
+    (moving) pose. This is what the rubric proxy scores — the actual trajectory the vehicle
+    followed through the crumbs, so ordered arrival / gate threading / avoid breaches are
+    measured on motion, not on a plan. v1 kinematics: straight steps of ``_DRIVE_STEP_M``
+    toward the crumb (see the constant's note).
+
+    HARNESS-bug history (the reason this was rewritten): the previous version ticked the
+    head ``max_build_ticks`` times from a *stationary* spawn to firm up the route, then
+    drove the SAME follower object. But every build tick already calls
+    ``head.advance -> _drive -> follower.advance`` at the spawn pose, so for a short route
+    sitting near the spawn the follower's progress index was fully consumed before the
+    drive began. The reused follower returned ``None`` on the first drive step -> a 2-pose
+    trajectory (spawn + terminal vertex) that reaches no leg -> rubric 0. That was the
+    ``poses=2..30`` signature in the report: a harness artifact, not a pipeline failure.
+    We fix it by (a) rewinding the follower's progress after the build, and (b) driving
+    closed-loop with a moving pose so progress only advances as the vehicle really moves.
+
+    Performance: re-ticking ``head.advance`` (terrain re-integration + full re-ground +
+    re-plan) costs ~0.5 s/tick, so we do it ONLY while the committed route can still grow
+    (``_committable_prefix_len`` has not reached every leg, i.e. a later leg is still
+    ungrounded or a provisional terminal is withheld). In this fully-observed battery the
+    route commits on tick 0, so we fall straight through to driving the follower directly
+    (microseconds/step). When exploration/provisional-withholding is in play the head keeps
+    ticking until the route is whole, which is exactly the general-case fidelity F2 wants.
+    """
+    head, io, plan = _run_instruction_head(
+        text, gt, idx, start_xy=start_xy, max_build_ticks=max_build_ticks
+    )
+    if head is None:
+        return np.empty((0, 2), dtype=float)
+    follower = head._follower
+    if follower is None or not follower.path:
+        return np.empty((0, 2), dtype=float)
+
+    # The build loop drove the follower from the stationary spawn (each _run tick calls
+    # head.advance -> _drive), so its progress index may already be advanced (or fully
+    # consumed) against the spawn pose. Rewind so the drive starts at the route's head and
+    # progresses only as the vehicle really moves.
+    follower._idx = 0
+    follower._hist = []
+
+    odom = io.latest_odom()
+    pose = (float(odom.x), float(odom.y)) if odom is not None else (0.0, 0.0)
+    t = 0.0
+    poses: list[tuple[float, float]] = [pose]
+    last_term = (float(follower.path[-1][0]), float(follower.path[-1][1]))
+    n_legs = len(head._legs) if head._legs else len(plan.route)
+    head_reticks_left = _DRIVE_HEAD_RETICK_BUDGET
+
+    for _ in range(_DRIVE_MAX_TICKS):
+        # Route still growing? Re-tick the head (moving the vehicle first) so re-grounding,
+        # prefix-growth and provisional-terminal commit can extend the committed route. Once
+        # the route covers every leg — or the bounded re-tick budget is spent (a leg that
+        # never grounds must not make us pay the head's ~0.5 s/tick cost 4000×) — we stop
+        # re-ticking and drive the committed follower directly.
+        route_growing = head._driven_prefix < n_legs and head_reticks_left > 0
+        if route_growing:
+            head_reticks_left -= 1
+            io.set_pose(pose[0], pose[1])
+            head.advance(io, idx)
+            new_follower = head._follower
+            if new_follower is not None and new_follower.path:
+                if new_follower is not follower:
+                    # The route was extended/replanned: resync progress to the nearest
+                    # not-yet-passed vertex so the drive continues smoothly on the new path.
+                    follower = new_follower
+                    follower._idx = _nearest_forward_idx(follower.path, pose)
+                    follower._hist = []
+                last_term = (
+                    float(follower.path[-1][0]),
+                    float(follower.path[-1][1]),
+                )
+
+        wp = follower.advance(pose, t)
+        if wp is None:
+            break
+        target = (float(wp.x), float(wp.y))
+        dx, dy = target[0] - pose[0], target[1] - pose[1]
+        d = (dx * dx + dy * dy) ** 0.5
+        if d <= _DRIVE_STEP_M:
+            pose = target
+        else:
+            pose = (pose[0] + _DRIVE_STEP_M * dx / d, pose[1] + _DRIVE_STEP_M * dy / d)
+        poses.append(pose)
+        t += 1.0
+
+    # Ensure the planned terminal vertex is represented (the follower returns None once the
+    # progress index passes the last crumb, which can be a step short of the exact vertex
+    # under the constant-speed stepping).
+    if not poses or (poses[-1][0] - last_term[0]) ** 2 + (
+        poses[-1][1] - last_term[1]
+    ) ** 2 > (_DRIVE_STEP_M**2):
+        poses.append((float(last_term[0]), float(last_term[1])))
+    return np.array(poses, dtype=float)
+
+
+def _nearest_forward_idx(
+    path: list[tuple[float, float]], pose: tuple[float, float]
+) -> int:
+    """Index of the path vertex nearest to ``pose`` (used to resync progress after the
+    committed route is extended/replanned mid-drive)."""
+    best_i, best_d = 0, float("inf")
+    for i, p in enumerate(path):
+        d = (p[0] - pose[0]) ** 2 + (p[1] - pose[1]) ** 2
+        if d < best_d:
+            best_d, best_i = d, i
+    return best_i
+
+
+def _if_rubric_geometry(
+    text: str, gt: GTScene, idx: BasicSceneIndex
+) -> tuple[
+    list[tuple[str, tuple[float, float]]],
+    list[tuple[int, object]],
+    list[object],
+]:
+    """Resolve the ordered leg goals, corridor gates, and avoid capsules for the rubric.
+
+    Returns ``(leg_goals, corridor_gates, avoid_capsules)`` in the GT (object) frame:
+      * leg_goals: ``(kind, (x, y))`` per route leg, in order. GOTO/VIA_NEAR -> the
+        resolved anchor centroid; CORRIDOR_BETWEEN -> the gate midpoint.
+      * corridor_gates: ``(leg_index, Gate)`` per corridor leg (for threading_check).
+      * avoid_capsules: one :class:`Capsule` per resolvable AvoidSpec.
+    Legs/avoids whose anchors don't resolve are skipped (an unscored, not a wrong, leg).
+    """
+    from core.parsing.regex_tier import parse_regex
+    from core.geometry.toolbox import (
+        TargetSpec,
+        avoid_capsule,
+        corridor_gate,
+        resolve,
+    )
+    from core.geometry import primitives as P
+    from core.plan_schema import LegKind
+
+    plan = parse_regex(text)
+    leg_goals: list[tuple[str, tuple[float, float]]] = []
+    corridor_gates: list[tuple[int, object]] = []
+    avoid_capsules: list[object] = []
+    if not plan.route:
+        return leg_goals, corridor_gates, avoid_capsules
+
+    def _resolve_anchor_rec(anchor):
+        spec = TargetSpec(
+            noun=anchor.noun, raw=anchor.raw, attributes=list(anchor.attributes),
+            clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
+        )
+        res = resolve(spec, idx)
+        return res.candidates_ranked[0] if res.candidates_ranked else None
+
+    for i, leg in enumerate(plan.route):
+        if leg.kind is LegKind.CORRIDOR_BETWEEN and len(leg.anchors) == 2:
+            r0 = _resolve_anchor_rec(leg.anchors[0])
+            r1 = _resolve_anchor_rec(leg.anchors[1])
+            if r0 is None or r1 is None:
+                continue
+            gate = corridor_gate(r0, r1)
+            mid = (float(gate.midpoint[0]), float(gate.midpoint[1]))
+            leg_goals.append(("corridor_between", mid))
+            corridor_gates.append((i, gate))
+        else:
+            rec = _resolve_anchor_rec(leg.anchors[0]) if leg.anchors else None
+            if rec is None:
+                continue
+            c = P._as3(rec.centroid)
+            kind = "via_near" if leg.kind is LegKind.VIA_NEAR else "goto"
+            leg_goals.append((kind, (float(c[0]), float(c[1]))))
+
+    for spec in plan.avoid:
+        try:
+            avoid_capsules.append(avoid_capsule(spec, idx))
+        except ValueError:
+            continue
+    return leg_goals, corridor_gates, avoid_capsules
+
+
 def _terminal_goal_centroid(text: str, idx: BasicSceneIndex) -> np.ndarray | None:
     """Object-frame centroid of an IF question's terminal goal (final GOTO anchor).
 
@@ -203,12 +449,22 @@ class GTQuestionScore:
     independent_source: str = ""
     gt_count_scenegraph: int | None = None
     scenegraph_source: str = ""
+    annotated_targets_of_class: int | None = None
+    csv_instances_of_class: int | None = None
     # object_reference
     iou: float | None = None
     gt_target_id: int | None = None
     target_source: str = ""
     match_method: str = ""
-    # instruction_following
+    # instruction_following — HEADLINE: rubric proxy over the DRIVEN trajectory (IF-F2)
+    rubric_score: float | None = None
+    ordered_leg_credit: float | None = None
+    n_legs: int | None = None
+    n_legs_reached_in_order: int | None = None
+    n_threading_violations: int | None = None
+    n_avoid_violations: int | None = None
+    driven_n_poses: int | None = None
+    # instruction_following — SECONDARY diagnostics only (never headline)
     frechet_m: float | None = None
     coverage_1m: float | None = None
     our_n_waypoints: int | None = None
@@ -229,8 +485,20 @@ def score_scene(
     scene_graph: dict | None = None,
     questions_dir: os.PathLike | str | None = None,
     drive_if: bool = True,
+    no_spawn_hint: bool = False,
 ) -> list[GTQuestionScore]:
-    """Score every question of one GT scene."""
+    """Score every question of one GT scene.
+
+    ``no_spawn_hint`` (IF-F2 realism knob): when True, the IF planner spawns at the
+    scene centroid instead of the GT trajectory's mapped start, so the exploration cost
+    of *finding* the route from a neutral start is visible (eval never hands us the GT
+    start). The wall-realism alternative — adding real wall occupancy to the mirror
+    costmap — is NOT available: the VLA-3D region data ships only per-region AABBs (room
+    bounding boxes, overlapping, no door/passage geometry), so stamping region-boundary
+    walls would disconnect the free-space graph rather than model interior walls. This
+    is documented in the report header; the no-spawn-hint flag is the realism knob we
+    can honestly offer.
+    """
     idx = BasicSceneIndex(gt.instances)
     out: list[GTQuestionScore] = []
 
@@ -243,7 +511,10 @@ def score_scene(
                 exact_match=ns.exact_match, gt_count_independent=ns.gt_count_independent,
                 independent_source=ns.independent_source,
                 gt_count_scenegraph=ns.gt_count_scenegraph,
-                scenegraph_source=ns.scenegraph_source, note=ns.note,
+                scenegraph_source=ns.scenegraph_source,
+                annotated_targets_of_class=ns.annotated_targets_of_class,
+                csv_instances_of_class=ns.csv_instances_of_class,
+                note=ns.note,
             )
         )
 
@@ -283,7 +554,16 @@ def score_scene(
     # spawn our planner should depart from — feed it so our path and the GT path start
     # at the same place (fair comparison). Fall back to None (scene-corner) with no fit.
     spawn_xy: tuple[float, float] | None = None
-    if frame is not None and pairs:
+    if no_spawn_hint:
+        # Realism knob (IF-F2): ignore the GT-matched start; spawn at the scene centroid
+        # so the exploration cost of reaching the route from a neutral pose is visible.
+        mins = np.array([r.aabb_min for r in gt.instances])
+        maxs = np.array([r.aabb_max for r in gt.instances])
+        spawn_xy = (
+            float((mins[:, 0].min() + maxs[:, 0].max()) / 2),
+            float((mins[:, 1].min() + maxs[:, 1].max()) / 2),
+        )
+    elif frame is not None and pairs:
         start_pt = pairs[0][0][0, :2]
         mapped = frame.apply(np.asarray([start_pt], dtype=float))[0]
         spawn_xy = (float(mapped[0]), float(mapped[1]))
@@ -302,21 +582,43 @@ def score_scene(
             rec.note = "no GT trajectory file found; IF unscored"
             out.append(rec)
             continue
-        our_path = (
-            _drive_if_path(text, gt, idx, start_xy=spawn_xy)
-            if drive_if
-            else np.empty((0, 2), dtype=float)
+
+        if not drive_if:
+            rec.note = "drive_if disabled; IF unscored"
+            out.append(rec)
+            continue
+
+        # HEADLINE: rubric proxy over the DRIVEN trajectory (IF-F2). We simulate the
+        # drive (constant-speed kinematic follower over the planned breadcrumbs), then
+        # score ordered per-leg arrival + threading + avoid violations. The planned-path
+        # Frechet/coverage are carried through the rubric as SECONDARY diagnostics only.
+        driven = _drive_if_trajectory(text, gt, idx, start_xy=spawn_xy)
+        leg_goals, corridor_gates, avoid_caps = _if_rubric_geometry(text, gt, idx)
+        rub = S.score_instruction_rubric(
+            driven,
+            leg_goals,
+            corridor_gates=corridor_gates,
+            avoid_capsules=avoid_caps,
+            trajectory_ply=traj_path,
+            frame=frame,
         )
-        isc = S.score_instruction_following(
-            our_path, traj_path, frame=frame, fit_residual_m=residual
-        )
-        rec.frechet_m = round(isc.frechet_m, 4) if np.isfinite(isc.frechet_m) else None
-        rec.coverage_1m = round(isc.coverage_1m, 4)
-        rec.our_n_waypoints = isc.our_n_waypoints
-        rec.gt_n_waypoints = isc.gt_n_waypoints
-        rec.frame_aligned = isc.frame_aligned
+        rec.rubric_score = round(rub.rubric_score, 4)
+        rec.ordered_leg_credit = round(rub.ordered_leg_credit, 4)
+        rec.n_legs = rub.n_legs
+        rec.n_legs_reached_in_order = rub.n_legs_reached_in_order
+        rec.n_threading_violations = rub.n_threading_violations
+        rec.n_avoid_violations = rub.n_avoid_violations
+        rec.driven_n_poses = rub.driven_n_poses
+        # secondary diagnostics (frame alignment + planned-path frechet/coverage)
+        rec.frechet_m = rub.frechet_m
+        rec.coverage_1m = round(rub.coverage_1m, 4) if rub.coverage_1m is not None else None
+        rec.gt_n_waypoints = int(S.load_trajectory_ply(traj_path).shape[0])
+        rec.frame_aligned = residual is None or residual <= S._ALIGN_RESIDUAL_GATE_M
         rec.fit_residual_m = round(residual, 4) if residual is not None else None
-        rec.note = isc.note
+        detail = "; ".join(
+            filter(None, [rub.note] + rub.threading_details + rub.avoid_details)
+        )
+        rec.note = detail
         out.append(rec)
 
     return out
@@ -366,6 +668,7 @@ def run_gt_battery(
     questions_dir: os.PathLike | str = DEFAULT_QUESTIONS_ROOT,
     scenes: list[str] | None = None,
     drive_if: bool = True,
+    no_spawn_hint: bool = False,
 ) -> tuple[list[GTQuestionScore], list[str]]:
     """Score every question whose scene folder is present under ``unity_root``.
 
@@ -396,6 +699,7 @@ def run_gt_battery(
                 scene_graph=scene_graph,
                 questions_dir=questions_dir,
                 drive_if=drive_if,
+                no_spawn_hint=no_spawn_hint,
             )
         )
     return scores, missing
@@ -415,16 +719,23 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
         return round(float(np.mean(vals)), 4) if vals else None
 
     num_exact = [1.0 if s.exact_match else 0.0 for s in num]
+    # NUM-F6(b): a ``*_class_only`` count is relation-agnostic, NOT independent evidence
+    # for the relation-filtered question — exclude those rows from the agreement stat
+    # (report them separately as "no independent evidence"), leaving only strict
+    # ``referential`` / ``scene_graph`` rows.
+    num_evidence = [s for s in num if s.independent_source == "referential"]
     num_agree = [
-        1.0 if (s.gt_count_independent is not None and s.our_count == s.gt_count_independent) else 0.0
-        for s in num
-        if s.gt_count_independent is not None
+        1.0 if s.our_count == s.gt_count_independent else 0.0 for s in num_evidence
     ]
+    num_sg_evidence = [s for s in num if s.scenegraph_source == "scene_graph"]
     num_sg_agree = [
-        1.0 if (s.gt_count_scenegraph is not None and s.our_count == s.gt_count_scenegraph) else 0.0
-        for s in num
-        if s.gt_count_scenegraph is not None
+        1.0 if s.our_count == s.gt_count_scenegraph else 0.0 for s in num_sg_evidence
     ]
+    num_no_evidence = sum(
+        1
+        for s in num
+        if s.independent_source != "referential" and s.scenegraph_source != "scene_graph"
+    )
     obj_iou = [s.iou for s in obj if s.iou is not None]
     obj_scored = [s for s in obj if s.iou is not None]
     # match-method breakdown across ALL object-reference questions
@@ -433,7 +744,10 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
         m = s.match_method or "none"
         method_counts[m] = method_counts.get(m, 0) + 1
 
-    # Instruction following: aligned vs unaligned scenes (diagnostic-only unaligned).
+    # Instruction following (IF-F2): HEADLINE is the rubric-proxy score over the driven
+    # trajectory; Frechet/coverage are secondary diagnostics only. Aligned vs unaligned
+    # is retained for the diagnostic columns.
+    inf_scored = [s for s in inf if s.rubric_score is not None]
     inf_aligned = [s for s in inf if s.frame_aligned]
     unaligned_scenes = sorted({s.scene for s in inf if s.frame_aligned is False})
     return {
@@ -444,6 +758,7 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
             "independent_agreement_rate": _mean(num_agree) if num_agree else None,
             "n_with_scenegraph": len(num_sg_agree),
             "scenegraph_agreement_rate": _mean(num_sg_agree) if num_sg_agree else None,
+            "n_no_independent_evidence": num_no_evidence,
         },
         "object_reference": {
             "n": len(obj),
@@ -455,13 +770,22 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
         },
         "instruction_following": {
             "n": len(inf),
+            "n_scored": len(inf_scored),
+            # HEADLINE (rubric proxy over driven trajectory)
+            "mean_rubric_score": _mean([s.rubric_score for s in inf_scored]),
+            "mean_ordered_leg_credit": _mean([s.ordered_leg_credit for s in inf_scored]),
+            "total_threading_violations": sum(
+                s.n_threading_violations or 0 for s in inf_scored
+            ),
+            "total_avoid_violations": sum(
+                s.n_avoid_violations or 0 for s in inf_scored
+            ),
+            # SECONDARY diagnostics only (frame-aligned planned-path shape metrics)
             "n_aligned": len(inf_aligned),
             "n_unaligned_scenes": len(unaligned_scenes),
             "unaligned_scenes": unaligned_scenes,
-            "mean_frechet_m_aligned": _mean([s.frechet_m for s in inf_aligned]),
-            "mean_coverage_1m_aligned": _mean([s.coverage_1m for s in inf_aligned]),
-            "mean_frechet_m_all": _mean([s.frechet_m for s in inf]),
-            "mean_coverage_1m_all": _mean([s.coverage_1m for s in inf]),
+            "mean_frechet_m_aligned_diag": _mean([s.frechet_m for s in inf_aligned]),
+            "mean_coverage_1m_aligned_diag": _mean([s.coverage_1m for s in inf_aligned]),
         },
     }
 
@@ -488,7 +812,14 @@ def _md_table(scores: list[GTQuestionScore]) -> str:
                 if s.gt_count_scenegraph is not None
                 else ""
             )
-            metric = f"count={s.our_count} pipeline_gt={s.gt_count_pipeline}{indep}{sg}"
+            cov_ann = (
+                f", ann_cov={s.annotated_targets_of_class}/{s.csv_instances_of_class}"
+                if s.csv_instances_of_class is not None
+                else ""
+            )
+            metric = (
+                f"count={s.our_count} pipeline_gt={s.gt_count_pipeline}{indep}{sg}{cov_ann}"
+            )
         elif s.qtype == QType.OBJECT_REFERENCE.value:
             iou = "n/a" if s.iou is None else f"{s.iou:.3f}"
             metric = (
@@ -496,13 +827,19 @@ def _md_table(scores: list[GTQuestionScore]) -> str:
                 f"/{s.match_method or 'none'})"
             )
         else:
-            fr = "n/a" if s.frechet_m is None else f"{s.frechet_m:.2f}m"
-            cov = "n/a" if s.coverage_1m is None else f"{s.coverage_1m:.0%}"
-            resid = "" if s.fit_residual_m is None else f" fit={s.fit_residual_m:.2f}m"
-            metric = (
-                f"Frechet={fr} cover1m={cov}{resid} "
-                f"(ours {s.our_n_waypoints}/gt {s.gt_n_waypoints})"
-            )
+            # HEADLINE: rubric proxy over the driven trajectory; frechet/coverage secondary.
+            if s.rubric_score is None:
+                metric = "IF unscored"
+            else:
+                fr = "n/a" if s.frechet_m is None else f"{s.frechet_m:.2f}m"
+                cov = "n/a" if s.coverage_1m is None else f"{s.coverage_1m:.0%}"
+                metric = (
+                    f"rubric={s.rubric_score:.2f} "
+                    f"legs={s.n_legs_reached_in_order}/{s.n_legs} "
+                    f"thread_viol={s.n_threading_violations} "
+                    f"avoid_viol={s.n_avoid_violations} poses={s.driven_n_poses} "
+                    f"| diag: Frechet={fr} cover1m={cov}"
+                )
         note = s.note or ""
         rows.append(f"| {s.scene} | {s.qtype[:4]} | {metric} | {note} | {q} |")
     return header + "\n".join(rows) + "\n"
@@ -541,6 +878,28 @@ def write_report(
         "non-axis-aligned objects — small IoU deficits on rotated targets are partly "
         "this, not localisation error.\n"
     )
+    lines.append(
+        "> **IF headline is the rubric proxy (IF-F2):** the instruction-following "
+        "headline is `rubric` — ordered per-leg arrival credit over the DRIVEN "
+        "trajectory (a constant-speed kinematic follower over the planned breadcrumbs; "
+        "a v1 simplification, no local-planner deviation / waypoint-snapping), minus one "
+        "leg-equivalent penalty per corridor leg never threaded (`threading_check`) and "
+        "per avoid capsule breached (`capsule_violated`). `legs=k/n` is ordered legs "
+        "reached. Fréchet/coverage after `| diag:` are SECONDARY planned-path shape "
+        "diagnostics only — never the headline (they measure shape similarity to the "
+        "reference PLY, which the challenge rubric does not score).\n"
+    )
+    lines.append(
+        "> **Wall realism (IF-F2) — no usable wall source:** the mirror costmap used "
+        "for IF planning has object obstacles + an outer boundary but NO interior walls. "
+        "The VLA-3D region data ships only per-region AABBs (room bounding boxes, which "
+        "overlap and carry no door/passage geometry), so stamping region-boundary walls "
+        "would disconnect the free-space graph rather than model real interior walls. No "
+        "wall mesh is available, so none is faked. The realism knob offered instead is "
+        "`--no-spawn-hint` (spawn at the scene centroid instead of the GT-matched start), "
+        "which exposes the exploration cost eval imposes. Planned paths may still cut "
+        "through where walls are — read cross-room routes with that caveat.\n"
+    )
 
     n, o, i = agg["numerical"], agg["object_reference"], agg["instruction_following"]
     method_str = ", ".join(
@@ -550,16 +909,21 @@ def write_report(
     lines.append(
         f"- **Numerical** (n={n['n']}): pipeline exact-match "
         f"{_pct(n['exact_match_rate_pipeline'])}; independent (referential) agreement "
-        f"{_pct(n['independent_agreement_rate'])} over {n['n_with_independent']}; "
-        f"scene-graph agreement {_pct(n['scenegraph_agreement_rate'])} over "
-        f"{n['n_with_scenegraph']}.\n"
+        f"{_pct(n['independent_agreement_rate'])} over {n['n_with_independent']} with "
+        f"strict evidence; scene-graph agreement {_pct(n['scenegraph_agreement_rate'])} "
+        f"over {n['n_with_scenegraph']}; {n['n_no_independent_evidence']} question(s) had "
+        f"no independent evidence (class-only counts excluded from agreement).\n"
         f"- **Object reference** (n={o['n']}, scored={o['n_scored']}): mean 3D IoU "
         f"{_num(o['mean_iou'])}; IoU>=0.25 {_pct(o['iou_at_0p25'])}; IoU>=0.5 "
         f"{_pct(o['iou_at_0p5'])}. Match method: {method_str}.\n"
-        f"- **Instruction following** (n={i['n']}): aligned scenes score mean discrete "
-        f"Frechet {_num(i['mean_frechet_m_aligned'])} m; mean coverage within 1.0 m "
-        f"{_pct(i['mean_coverage_1m_aligned'])} (over {i['n_aligned']} aligned Qs). "
-        f"{i['n_unaligned_scenes']} scene(s) unaligned (residual > 1 m, diagnostic-only)"
+        f"- **Instruction following** (n={i['n']}, scored={i['n_scored']}): HEADLINE "
+        f"mean rubric-proxy score {_num(i['mean_rubric_score'])} (mean ordered-leg "
+        f"credit {_num(i['mean_ordered_leg_credit'])}; {i['total_threading_violations']} "
+        f"threading + {i['total_avoid_violations']} avoid violation(s) total). SECONDARY "
+        f"(diagnostic only): aligned planned-path mean Frechet "
+        f"{_num(i['mean_frechet_m_aligned_diag'])} m, coverage-1m "
+        f"{_pct(i['mean_coverage_1m_aligned_diag'])} over {i['n_aligned']} aligned; "
+        f"{i['n_unaligned_scenes']} scene(s) unaligned"
         f"{': ' + ', '.join(i['unaligned_scenes']) if i['unaligned_scenes'] else ''}.\n"
     )
     lines.append("\n## Per-question\n")
@@ -608,7 +972,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--scenes", default=None, help="comma-separated scene subset")
     ap.add_argument(
         "--no-drive-if", action="store_true",
-        help="skip driving instruction-following paths (score IF as empty path)",
+        help="skip driving instruction-following paths (score IF as unscored)",
+    )
+    ap.add_argument(
+        "--no-spawn-hint", action="store_true",
+        help="IF realism knob: spawn at the scene centroid instead of the GT-matched "
+             "start, so exploration cost from a neutral pose is visible (IF-F2).",
     )
     args = ap.parse_args(argv)
 
@@ -621,6 +990,7 @@ def main(argv: list[str] | None = None) -> int:
         questions_dir=args.questions_dir,
         scenes=scenes,
         drive_if=not args.no_drive_if,
+        no_spawn_hint=args.no_spawn_hint,
     )
     if not scores:
         print(f"gt_battery: no scenes found under {args.groundtruth} (missing={missing})")
@@ -633,8 +1003,9 @@ def main(argv: list[str] | None = None) -> int:
         f"gt_battery: {len(scores)} questions / {len({s.scene for s in scores})} scenes  "
         f"num_exact={_pct(n['exact_match_rate_pipeline'])} "
         f"or_iou={_num(o['mean_iou'])} "
-        f"if_cover1m_aligned={_pct(i['mean_coverage_1m_aligned'])} "
-        f"if_unaligned={i['n_unaligned_scenes']}"
+        f"if_rubric={_num(i['mean_rubric_score'])} "
+        f"if_thread_viol={i['total_threading_violations']} "
+        f"if_avoid_viol={i['total_avoid_violations']}"
     )
     print(f"wrote {md_path}")
     print(f"wrote {json_path}")

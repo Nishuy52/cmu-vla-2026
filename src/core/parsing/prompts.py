@@ -300,8 +300,31 @@ def _render_examples() -> str:
     return "\n\n".join(blocks)
 
 
+def _strip_schema(obj):
+    """Recursively drop cost-only keys ($schema/title/description) from the JSON schema.
+
+    OR-F10: the rendered schema dominates the CP1 token spend. The parse contract is fully
+    conveyed by the structure (required keys + enums) and the in-context examples, so the
+    human-readable ``description`` / ``$schema`` / ``title`` fields are dropped from the
+    wire copy. Combined with a no-indent, compact-separator dump this brings the system
+    prompt under the ~2k-token budget without changing what the model is asked to produce.
+    """
+    if isinstance(obj, dict):
+        return {
+            k: _strip_schema(v)
+            for k, v in obj.items()
+            if k not in ("$schema", "title", "description")
+        }
+    if isinstance(obj, list):
+        return [_strip_schema(v) for v in obj]
+    return obj
+
+
+#: Compact wire copy of the schema (descriptions stripped, no indent) — see _strip_schema.
+COMPACT_PLAN_JSON_SCHEMA: dict = _strip_schema(PLAN_JSON_SCHEMA)
+
 SYSTEM_PROMPT: str = _RULES.format(
-    schema=json.dumps(PLAN_JSON_SCHEMA, indent=1),
+    schema=json.dumps(COMPACT_PLAN_JSON_SCHEMA, indent=None, separators=(",", ":")),
     examples=_render_examples(),
 )
 

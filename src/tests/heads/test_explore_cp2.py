@@ -186,36 +186,29 @@ def test_provisional_instance_has_single_observation():
     assert p.n_obs == 1  # can NEVER satisfy the >=3-obs early-answer gate on its own
 
 
-def test_provisional_pins_gate_before_class_established():
-    # Cold start: no chair has reached the establish threshold (n_obs >= 3), so every
-    # instance contributes to the count and the provisional-like single-obs contributor
-    # pins min_contrib_n_obs below the FSM's >=3 gate (design §CP2 "Risk note").
-    sc = scene(
-        inst(1, "chair", n_obs=2, centroid=(0, 0, 0)),
-        inst(2, "chair", n_obs=1, centroid=(3, 0, 0)),  # provisional-like single-obs
-    )
-    head = NumericalHead(plan=numerical_plan("chair"))
-    for _ in range(5):  # let the count stabilise
-        head.advance(sc)
-    sig = head.signal()
-    assert sig.min_contrib_n_obs < 3
-    assert sig.stable is False
-
-
-def test_provisional_never_drives_early_answer_once_established():
-    # CP2 guarantee, mechanism-agnostic: once the class is established (a chair with
-    # n_obs >= 3 exists), a provisional (n_obs=1) instance must not drive an early
-    # answer. Pre-H15b the head kept the provisional in the count, pinning
-    # min_contrib_n_obs < 3 so the gate stayed shut; under H15b (perception hygiene,
-    # NUM-F8) the provisional is excluded from the count at answer time instead.
-    # Either way the invariant is: if the signal can fire, the fired count must not
-    # include the provisional.
-    sc = scene(
+def test_provisional_never_satisfies_early_answer_gate():
+    # A provisional (n_obs=1) instance can NEVER inflate a numerical answer (design §CP2
+    # "Risk note"). The safety property now holds by EXCLUSION: answer-time observation
+    # gating drops single-observation instances from the count entirely, so a provisional
+    # ghost cannot on its own become a counted object. We verify the property directly —
+    # adding the ghost leaves the count (and its min-contributor floor) unchanged versus a
+    # scene without it.
+    confident_only = scene(inst(1, "chair", n_obs=5, centroid=(0, 0, 0)))
+    with_ghost = scene(
         inst(1, "chair", n_obs=5, centroid=(0, 0, 0)),
-        inst(2, "chair", n_obs=1, centroid=(3, 0, 0)),  # provisional-like single-obs
+        inst(2, "chair", n_obs=1, centroid=(3, 0, 0)),  # provisional-like single-obs ghost
     )
-    head = NumericalHead(plan=numerical_plan("chair"))
-    for _ in range(5):
-        head.advance(sc)
-    sig = head.signal()
-    assert (not sig.stable) or head.answer().value == 1
+
+    def _settle(sc):
+        head = NumericalHead(plan=numerical_plan("chair"))
+        for _ in range(5):  # let the count stabilise
+            head.advance(sc)
+        return head
+
+    base = _settle(confident_only)
+    ghosted = _settle(with_ghost)
+
+    # The ghost is excluded: the counted answer is identical with and without it, and no
+    # single-obs contributor is ever counted (min contributor stays >= 3).
+    assert ghosted.answer().value == base.answer().value
+    assert ghosted.signal().min_contrib_n_obs >= 3

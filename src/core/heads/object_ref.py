@@ -19,6 +19,7 @@ Units: `map` frame, metres (inherited from the toolbox).
 from __future__ import annotations
 
 import inspect
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -31,7 +32,14 @@ from core.geometry.toolbox import (
     Thresholds,
     resolve,
 )
-from core.plan_schema import Plan, TargetSpec
+from core.parsing.regex_tier import _REL_TOKENS  # read-only: relation-token -> Pred map
+from core.plan_schema import Anchor, Clause, Plan, Pred, TargetSpec
+from core.perception.dimension_priors import clamp_record_marker
+
+#: Re-observation gate (OR-F8): a winner with fewer than this many distinct observations is
+#: provisional-only (e.g. a CP2 hallucination-recovery instance, n_obs=1) and must never be
+#: committed as the published /selected_object_marker without re-observation.
+REOBS_MIN_N_OBS: int = 2
 
 # Legacy narrow per-clause verifier (backward compat):
 #     (plan, candidate_summary, pass_matrix_text) -> keep-winner bool
@@ -98,7 +106,7 @@ class ObjectRefHead:
         self._result = res
         if res.candidates_ranked:
             self.best_candidate = res.candidates_ranked[0]
-            self.best_marker = self.best_candidate.to_marker()
+            self.best_marker = clamp_record_marker(self.best_candidate)
 
     def publish_partial(self, partial: PartialResults) -> None:
         """Stamp the current best candidate/marker into the shared PartialResults."""
@@ -114,6 +122,12 @@ class ObjectRefHead:
         Applies the injected per-clause verification checkpoint: if the top candidate
         fails verification, demote to the runner-up (and try it too). Deterministic and
         total when llm_verify is None.
+
+        Provisional-commit guard (OR-F8): a winner that is provisional-only — fewer than
+        ``REOBS_MIN_N_OBS`` distinct observations, e.g. a CP2 hallucination-recovery
+        instance (n_obs=1) — is never committed as the published marker. We fall through to
+        the next non-provisional ranked candidate; if none qualifies, we publish nothing
+        (return None) rather than a confident wrong box on empty space.
         """
         res = self._result
         if res is None or not res.candidates_ranked:
@@ -122,9 +136,27 @@ class ObjectRefHead:
             winner = self._cp4_winner(res)
         else:
             winner = self._verified_winner(res)
+        winner = self._first_committable(winner, res)
+        if winner is None:
+            # Only provisional-only candidates remain: refuse to publish an unverified box.
+            self.best_candidate = None
+            self.best_marker = None
+            return None
         self.best_candidate = winner
-        self.best_marker = winner.to_marker()
+        self.best_marker = clamp_record_marker(winner)
         return self.best_marker
+
+    def _first_committable(
+        self, winner: InstanceRecord, res: ResolveResult
+    ) -> InstanceRecord | None:
+        """Return the winner if committable, else the first non-provisional ranked
+        candidate after it, else None (OR-F8 provisional-commit guard)."""
+        if winner is not None and winner.n_obs >= REOBS_MIN_N_OBS:
+            return winner
+        for cand in res.candidates_ranked:
+            if cand.n_obs >= REOBS_MIN_N_OBS:
+                return cand
+        return None
 
     # -------------------------------------------------------------- rich CP4 seam
     def _cp4_winner(self, res: ResolveResult) -> InstanceRecord:
@@ -168,14 +200,19 @@ class ObjectRefHead:
         return winner
 
     def _make_resolve_again(self) -> Callable[[str], InstanceRecord | None]:
-        """Build the CP4 re-resolve hook: append the missed constraint as a text-note
-        clause, re-run resolve, and prefer a survivor whose per-clause explanations do not
-        contradict the constraint (design: "text-matched clause"; deterministic).
+        """Build the CP4 re-resolve hook (OR-F5): synthesize a REAL clause from the
+        missed constraint, append it to a spec copy, and re-run resolve.
 
-        The constraint string is recorded on the plan's notes for the audit trail. Real
-        clause synthesis is integration work; here we re-resolve the same target and, when
-        the constraint text names a survivor's clause explanation as failing, skip it in
-        favour of the next non-contradicting candidate.
+        The verifier's ``missed_constraint`` is a ``"<pred_word> <anchor noun>"`` phrase
+        (prompt-constrained). We map the pred word through the regex tier's relation tokens
+        into a :class:`Pred`, build ``Clause(pred, [Anchor(noun)])`` and append it to a copy
+        of the base target. A non-superlative pred filters the pool; a superlative pred
+        (``closest_to``/``farthest_from``) is picked up by ``resolve`` as the ranking clause
+        — either can change the winner. The constraint string is also recorded on the plan
+        notes for the audit trail.
+
+        Falls back to the unchanged re-resolve (keep the deterministic ranking) when the
+        constraint does not parse into a clause.
         """
         scene = self._scene
         base_target = self.plan.target if self.plan is not None else None
@@ -183,19 +220,27 @@ class ObjectRefHead:
         def resolve_again(missed: str) -> InstanceRecord | None:
             if scene is None or base_target is None:
                 return None
-            # Audit trail: record the text-matched clause the verifier surfaced.
+            # Audit trail: record the constraint the verifier surfaced.
             if self.plan is not None:
                 add = f"[cp4 re-resolve] missed_constraint: {missed}"
                 self.plan.notes = (self.plan.notes + " " + add).strip() if self.plan.notes else add
+            clauses = list(base_target.clauses)
+            synthesized = _synthesize_clause(missed)
+            if synthesized is not None:
+                clauses.append(synthesized)
             spec = TargetSpec(
                 noun=base_target.noun,
                 raw=base_target.raw,
                 attributes=list(base_target.attributes),
-                clauses=list(base_target.clauses),
+                clauses=clauses,
             )
             res = resolve(spec, scene, self.thresholds)
             if not res.candidates_ranked:
                 return None
+            if synthesized is not None:
+                # A real clause was applied; trust the re-ranked winner directly.
+                return res.candidates_ranked[0]
+            # Unparseable constraint: fall back to the text-match skip (keep-winner-ish).
             token = (missed or "").strip().lower()
             if token:
                 for cand in res.candidates_ranked:
@@ -245,6 +290,49 @@ def _is_legacy_bool_seam(fn: Callable) -> bool:
         if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
     return len(positional) == 3
+
+
+def _pred_from_word(word: str) -> Pred | None:
+    """Map a CP4 missed-constraint pred word to a :class:`Pred` (OR-F5).
+
+    Accepts the enum-value form the prompt emits (``closest_to``, ``on``, ``near``,
+    ``between``, ...) directly, then falls back to matching the regex tier's relation
+    tokens (which use whitespace, e.g. ``closest to``) so a spaced surface form still maps.
+    Returns None when the word names no known relation.
+    """
+    w = (word or "").strip().lower()
+    if not w:
+        return None
+    # 1. exact enum value ("closest_to", "on", "between", ...)
+    try:
+        return Pred(w)
+    except ValueError:
+        pass
+    # 2. underscore -> space, match against the regex tier's ordered token patterns.
+    spaced = w.replace("_", " ")
+    for pat, pred in _REL_TOKENS:
+        if pred is not None and re.fullmatch(pat, spaced):
+            return pred
+    return None
+
+
+def _synthesize_clause(missed: str) -> Clause | None:
+    """Build ``Clause(pred, [Anchor(noun)])`` from a ``"<pred_word> <anchor noun>"`` phrase.
+
+    The first whitespace-delimited token is the relation word; the remainder is the anchor
+    noun. Returns None when the phrase is empty, has no anchor noun, or the pred word does
+    not map to a known relation — the caller then keeps the deterministic ranking.
+    """
+    parts = (missed or "").strip().split()
+    if len(parts) < 2:
+        return None
+    pred = _pred_from_word(parts[0])
+    if pred is None:
+        return None
+    noun = " ".join(parts[1:]).strip().lower()
+    if not noun:
+        return None
+    return Clause(pred=pred, anchors=[Anchor(noun=noun, raw=noun)])
 
 
 def _contradicts_constraint(rows: list[PredResult], token: str) -> bool:

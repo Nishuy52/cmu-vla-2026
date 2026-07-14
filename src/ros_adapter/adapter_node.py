@@ -41,12 +41,17 @@ Publications (AI -> system):
     /numerical_response      std_msgs/Int32
 
 QoS: the five high-rate sensor streams use SENSOR_DATA (best-effort, keep-last depth 5) so a
-dropped frame never blocks; /challenge_question uses RELIABLE + TRANSIENT_LOCAL so the single
-question (republished at 1 Hz, gotcha 3) is not missed on a late join. Publishers are reliable
-depth 5, matching the dummy's default profile.
+dropped frame never blocks; /challenge_question is subscribed TWICE — a primary RELIABLE +
+VOLATILE sub matching the dummy's default publisher profile, plus a second RELIABLE +
+TRANSIENT_LOCAL sub in case the evaluator offers durability. Both feed the same idempotent
+latch, so whichever the publisher matches wins and a duplicate delivery is a no-op. Requesting
+TRANSIENT_LOCAL *alone* against a VOLATILE publisher would silence the whole run (SYS-F2), so
+the volatile sub is load-bearing; the 1 Hz republish (gotcha 3) covers late joins regardless.
+Publishers are reliable depth 5, matching the dummy's default profile.
 """
 from __future__ import annotations
 
+import os
 import threading
 
 import rclpy
@@ -79,8 +84,12 @@ from core.interfaces import (
 )
 from core.fsm.controller import QuestionController
 from core.heads import build_callables
+from core.llm.config import build_chat_fns, load_config
+from core.parsing import ladder as parse_ladder
 from core.perception.colored_map import ColoredVoxelMap
+from core.perception.detector import GroundingDinoDetector
 from core.perception.scene_index import BasicSceneIndex
+from core.perception.tracker import PerceptionPipeline
 from ros_adapter.cloud_packing import pack_colored_cloud
 from core.replay.bag_reader import (
     TOPIC_CAMERA,
@@ -111,6 +120,69 @@ TOPIC_DBG_PLANNED_PATH = "/ai_module/planned_path"
 # moves through in RVIZ. Debug-only; never on the eval path (debug_viz defaults false).
 TOPIC_DBG_COLORED_CLOUD = "/debug/colored_cloud"
 
+# Detector selection env var (H6 / SYS-F1). "none" (default) keeps the offline stub — no
+# torch/GroundingDINO on the Windows dev box — so the node behaves exactly as today (empty
+# live index -> the SUBMISSION-BLOCKER shout). "grounding_dino" constructs the lazy
+# GroundingDINO seam in core.perception.detector; its torch import stays lazy until the first
+# real frame, so merely selecting it does not require the model deps at construction.
+ENV_DETECTOR = "VLA_DETECTOR"
+DETECTOR_NONE = "none"
+DETECTOR_GDINO = "grounding_dino"
+
+
+def make_detector(logger=None):
+    """Build the perception detector from ``VLA_DETECTOR`` (default: stub / None).
+
+    Returns ``None`` for ``none`` (the offline stub — the PerceptionPipeline is still
+    constructed and fed, but with no detector it produces zero instances, keeping today's
+    empty-index behaviour and the SUBMISSION-BLOCKER shout). Returns a
+    :class:`~core.perception.detector.GroundingDinoDetector` for ``grounding_dino`` — the
+    real Phase-2 seam; its torch/groundingdino import is lazy (first ``__call__``), so this
+    constructs cleanly on Windows and only fails loudly at inference time if the model deps
+    are absent. An unrecognised value falls back to the stub with a warning.
+    """
+    choice = os.environ.get(ENV_DETECTOR, DETECTOR_NONE).strip().lower()
+    if choice in ("", DETECTOR_NONE):
+        return None
+    if choice == DETECTOR_GDINO:
+        if logger is not None:
+            logger.info(
+                "%s=%s: constructing the GroundingDINO detector seam (torch import is lazy; "
+                "real inference lands in Phase 2)." % (ENV_DETECTOR, DETECTOR_GDINO)
+            )
+        return GroundingDinoDetector()
+    if logger is not None:
+        logger.warn(
+            "%s=%r is not recognised (expected %s|%s); falling back to the offline stub "
+            "(no detector)." % (ENV_DETECTOR, choice, DETECTOR_NONE, DETECTOR_GDINO)
+        )
+    return None
+
+
+def _tile_pixel_dims(pipeline) -> tuple[int, int]:
+    """Return (tile_w, tile_h) in pixels for the CP2 bbox-bounds gate (OR-F8, coord item 3).
+
+    Uses the same projection formula as core.perception.tiling.project_tiles so the CP2
+    dimension check matches the tiles the detector actually sees. Reads the pipeline's live
+    (hfov, vfov) when perception is on; otherwise the module defaults (480x640 tile).
+    """
+    import numpy as np
+
+    from core.perception.tiling import (
+        DEFAULT_TILE_HFOV,
+        DEFAULT_TILE_VFOV,
+        PANO_HEIGHT,
+        PANO_VFOV,
+        PANO_WIDTH,
+    )
+
+    hfov = getattr(pipeline, "hfov", DEFAULT_TILE_HFOV) if pipeline is not None else DEFAULT_TILE_HFOV
+    vfov = getattr(pipeline, "vfov", DEFAULT_TILE_VFOV) if pipeline is not None else DEFAULT_TILE_VFOV
+    tile_w = int(round(PANO_WIDTH * hfov / (2.0 * np.pi)))
+    tile_h = int(round(PANO_HEIGHT * vfov / PANO_VFOV))
+    return tile_w, tile_h
+
+
 TICK_HZ = 5.0  # QuestionController.tick() cadence (core/fsm/controller.py docstring)
 DEBUG_VIZ_HZ = 1.0  # instance-map republish cadence when debug_viz is on
 DEBUG_PATH_MAX = 500  # cap on retained waypoint breadcrumb points (bounded memory)
@@ -135,6 +207,32 @@ def _reliable_qos(depth: int = 5) -> QoSProfile:
         reliability=ReliabilityPolicy.RELIABLE,
         durability=DurabilityPolicy.VOLATILE,
     )
+
+
+class _LedgerProxy:
+    """Duck-typed CallLedger view that resolves the live ledger lazily per call (H8).
+
+    The checkpoint builders (build_verifier/anchor_confirm/miss_recovery/frontier_select) bind
+    a ledger at construction time, but the controller's real CallLedger only exists after
+    question intake. This proxy is bound at build time and delegates ``allow``/``record`` to
+    whatever ``resolve()`` returns at call time; when the ledger is not yet available it fails
+    open (allow -> True, record -> no-op), matching guarded_call's own duck-typing.
+    """
+
+    def __init__(self, resolve) -> None:
+        self._resolve = resolve
+
+    def allow(self, checkpoint: str) -> bool:
+        led = self._resolve()
+        if led is None:
+            return True
+        return bool(led.allow(checkpoint))
+
+    def record(self, checkpoint: str, duration: float, tier: str):
+        led = self._resolve()
+        if led is None:
+            return None
+        return led.record(checkpoint, duration, tier)
 
 
 class _NodeClock:
@@ -186,6 +284,19 @@ class AdapterNode(Node):
         self.create_subscription(
             Odometry, TOPIC_ODOM, self._on_odom, qos_profile_sensor_data
         )
+        # /challenge_question: the PRIMARY subscription is RELIABLE + VOLATILE, matching the
+        # upstream dummy's default publisher profile (docs/upstream_notes.md §6). The evaluator
+        # is closed-source but almost certainly publishes with defaults (VOLATILE); a subscriber
+        # REQUESTING TRANSIENT_LOCAL against a VOLATILE publisher is DDS-incompatible => zero
+        # messages => zero questions => whole run scores zero (SYS-F2). The 1 Hz republish
+        # (gotcha 3) already provides late-join safety, so VOLATILE loses nothing.
+        self.create_subscription(
+            String, TOPIC_QUESTION, self._on_question, _reliable_qos()
+        )
+        # SECOND subscription at TRANSIENT_LOCAL, feeding the SAME latch: matches a publisher
+        # that offers durability instead. Both matching is harmless — _on_question latches the
+        # first non-empty text and ignores the rest (idempotent), so a duplicate delivery is a
+        # no-op. This is belt-and-braces; the volatile sub above is the load-bearing one.
         self.create_subscription(
             String, TOPIC_QUESTION, self._on_question, _reliable_transient_qos()
         )
@@ -246,13 +357,80 @@ class AdapterNode(Node):
                    TOPIC_DBG_COLORED_CLOUD, self._colored_cloud_period)
             )
 
-        # ---- Controller (built lazily once the question is known) -------------
-        # The heads resolve against the live SceneIndex. Phase 2 wires the real perception
-        # map here; until then an empty index means the FSM floor still emits a legal answer.
-        # confirm on Ubuntu: swap BasicSceneIndex([]) for the live perception scene index
-        # once core/perception is fused into this node (architecture Phase 2/3).
-        self._scene_index = BasicSceneIndex([])
+        # ---- LLM provider config (H8 / SYS-F5) --------------------------------
+        # Loaded once at boot from env + optional llm_config.json (env wins; no keys in code).
+        # A wholly unconfigured environment yields all-None slots -> build_chat_fns([]) empty
+        # -> the parse ladder goes straight to the deterministic regex floor, and every
+        # checkpoint seam stays None/off (offline determinism preserved for tests + dark net).
+        self._llm_config = load_config()
+        self._chat_fns = build_chat_fns(self._llm_config)
+        self._llm_configured = bool(self._chat_fns)
+        if self._llm_configured:
+            self.get_logger().info(
+                "LLM ladder configured: %d provider tier(s) (parse via api->api2->regex; "
+                "local tier is DESCOPED — see build_callables wiring)." % len(self._chat_fns)
+            )
+        else:
+            self.get_logger().info(
+                "no LLM provider configured: parse is regex-only and all checkpoint seams are "
+                "off (deterministic offline path)."
+            )
+
+        # ---- Perception pipeline seam (H6 / SYS-F1) ---------------------------
+        # The heads resolve against a live SceneIndex. Following the runner/single.py
+        # _ScriptedPerception pattern, a PerceptionPipeline is fed (pano, scan) pairs on
+        # new-pano ticks (see _maybe_process_perception) and ITS index is the one the
+        # controller sees when perception is on. The detector is pluggable via VLA_DETECTOR:
+        #   * VLA_DETECTOR=none (default): make_detector() -> None. Windows has no detector, so
+        #     we keep the empty BasicSceneIndex([]) stub and DO NOT construct a pipeline (a
+        #     None detector cannot run). Behaviour is exactly today's -> the SUBMISSION-BLOCKER
+        #     shout below fires and answers come from FSM floors only.
+        #   * VLA_DETECTOR=grounding_dino: make_detector() -> the lazy GroundingDINO seam; the
+        #     pipeline's live index replaces the stub and grows as frames are grounded.
+        detector = make_detector(self.get_logger())
+        self._perception: PerceptionPipeline | None = None
+        self._last_pano_t: float | None = None
+        if detector is not None:
+            self._perception = PerceptionPipeline(detector, index=BasicSceneIndex([]))
+            # The controller sees the pipeline's LIVE index (mutated in place as frames fuse).
+            self._scene_index = self._perception.index
+        else:
+            self._scene_index = BasicSceneIndex([])
         self._controller: QuestionController | None = None
+
+        # SUBMISSION-BLOCKER shout: the node came up with the empty BasicSceneIndex([]) stub —
+        # perception is NOT wired into this node (VLA_DETECTOR=none), so every question is
+        # answered from an empty world (numerical floor, origin marker, spawn-point waypoint)
+        # and the run scores luck only (SYS-F1 / H6). This is acknowledged Phase-2 work; the
+        # loud line exists so it cannot pass a smoke test silently. Set VLA_DETECTOR and feed a
+        # live index to clear it.
+        if self._perception is None and not self._scene_index.all_instances():
+            self.get_logger().error(
+                "SUBMISSION-BLOCKER: scene index is the empty stub (%s=none) — perception is "
+                "NOT wired; answers come from FSM floors only. Do not submit until "
+                "instances_tracked > 0 on a live scene (phase2_playbook gate)."
+                % ENV_DETECTOR
+            )
+
+        # ---- Startup assert: network provider must NOT pair with the .npy encoder ----
+        # (H14 / OR-F10). A configured network LLM/VLM provider paired with the default raw
+        # .npy image encoder means CP2/CP3/CP5 vision calls send bytes a real vision API
+        # rejects — they would silently NEVER work at eval while every offline test stays
+        # green. There is no JPEG encode_fn swap in this node yet, so if any provider is
+        # configured we must fail LOUD at boot rather than silently at eval.
+        self._assert_encoder_provider_consistency()
+
+        # ---- Sim-time guard ---------------------------------------------------
+        # The watchdog arithmetic keys off get_clock().now(). If use_sim_time is true without a
+        # live /clock source the node clock freezes at 0, elapsed() pins below the 60 s ORIENT
+        # gate, and the watchdog floor NEVER fires => permanent silence (SYS-F6 residual). The
+        # eval path must run on the wall clock; shout loudly if it is ever set on this node.
+        if self.get_parameter("use_sim_time").get_parameter_value().bool_value:
+            self.get_logger().error(
+                "SUBMISSION-BLOCKER: use_sim_time is TRUE on vla_ai_module. A frozen sim clock "
+                "pins elapsed() below the ORIENT gate and silences the watchdog forever. The "
+                "eval path must use the wall clock — unset use_sim_time."
+            )
 
         # ---- 5 Hz drive timer -------------------------------------------------
         self._timer = self.create_timer(1.0 / TICK_HZ, self._on_tick)
@@ -313,23 +491,231 @@ class AdapterNode(Node):
             return
         with self._lock:
             if self._question is not None:
+                already = self._question.text
+                same_text = msg.data == already
+            else:
+                already = None
+                same_text = False
+            if already is None:
+                self._question = string_to_question(msg, self._now_ns())
+                latched_text = self._question.text
+        if already is None:
+            self.get_logger().info("question latched: %r" % latched_text)
+            return
+        if same_text:
+            return  # same-text 1 Hz republish -> silent no-op (idempotent latch)
+        # DELIBERATE POLICY (H14 / SYS-F14-2): a SECOND, DIFFERENT question arrived on a
+        # running stack. The challenge relaunches a fresh process per question (upstream
+        # gotcha 1), so this is an upstream/harness anomaly. We KEEP the first question (do
+        # NOT switch mid-run — switching would abandon a partially-solved question and its
+        # budget) and log the drop LOUDLY so it cannot pass silently. Documented rather than
+        # exit(0): a hard exit assumes a container restart policy we cannot verify offline,
+        # and dropping the first question's in-flight answer is the worse failure. Revisit if
+        # the Ubuntu gate shows the evaluator reuses a running stack.
+        self.get_logger().error(
+            "SECOND QUESTION DROPPED: already answering %r; ignoring new text %r. The stack "
+            "expects one question per process launch (gotcha 1); keeping the first."
+            % (already, msg.data)
+        )
+
+    # ------------------------------------------------------------------ perception (H6)
+    def _maybe_process_perception(self) -> None:
+        """Feed the PerceptionPipeline one (pano, scan) pair on each NEW pano (H6 / SYS-F1).
+
+        Mirrors runner/single.py::_ScriptedPerception.maybe_process: process only when a new
+        pano appears (PanoFrame.t changed) and a scan is available. The pipeline mutates
+        ``self._scene_index`` (its own live index) in place, so the controller/heads resolve
+        against the growing map. No-op when perception is off (VLA_DETECTOR=none). Never
+        raises — a perception glitch must not disturb the drive loop.
+        """
+        if self._perception is None:
+            return
+        try:
+            pano = self.latest_pano()
+            if pano is None:
                 return
-            self._question = string_to_question(msg, self._now_ns())
-        self.get_logger().info("question latched: %r" % self._question.text)
+            if self._last_pano_t is not None and pano.t == self._last_pano_t:
+                return
+            scan = self.latest_scan()
+            if scan is None:
+                return
+            self._last_pano_t = pano.t
+            self._perception.process(pano, scan)
+        except Exception as exc:  # perception must never crash the drive loop
+            self.get_logger().error("perception error: %s" % exc)
 
     # ------------------------------------------------------------------ timer / drive
     def _on_tick(self) -> None:
-        """5 Hz: build the controller on first question, then tick it once. Never raises."""
+        """5 Hz: feed perception, build the controller on first question, tick it once.
+
+        Never raises (a dead adapter must not crash the node).
+        """
         try:
+            # Perception runs every tick (independent of the question) so the live index is
+            # already populated by the time the controller starts resolving.
+            self._maybe_process_perception()
             if self._controller is None:
                 if self.question() is None:
                     return  # no question yet — nothing to drive
-                callables = build_callables(self._scene_index)
+                callables = self._build_controller_callables()
                 self._controller = QuestionController(**callables)
-                self.get_logger().info("QuestionController constructed; driving")
+                self.get_logger().info(
+                    "QuestionController constructed; driving (llm=%s, perception=%s)"
+                    % (self._llm_configured, self._perception is not None)
+                )
             self._controller.tick(self)
         except Exception as exc:  # a dead adapter must never crash the node
             self.get_logger().error("tick error: %s" % exc)
+
+    # ------------------------------------------------------------------ seam wiring (H8)
+    def _build_controller_callables(self) -> dict:
+        """Wire build_callables with the real LLM ladder + checkpoint seams (H8 / SYS-F5).
+
+        All seams are None/off unless a provider is configured, so the offline path stays
+        byte-for-byte deterministic. When configured:
+
+        * ``parse`` runs through the ladder (api -> api2 -> regex floor) with the controller's
+          clock + ledger, so the ledger caps + 45 s time-cap + per-call timeouts apply. The
+          DARK-NETWORK LOCAL TIER IS DESCOPED (see build_chat_fns: only configured api/api2
+          slots are built; the ``local`` slot seam is left for a future llama.cpp/Qwen-VL
+          server — architecture §3). When nothing is configured, parse falls back to the
+          factory default (regex only).
+        * ``verifier`` (CP4), ``anchor_confirmer`` (CP3), ``miss_recoverer`` (CP2),
+          ``frontier_selector`` (CP5) come from core.checkpoints, bound to the configured
+          chat_fns + the controller's ledger/clock.
+        * ``budget_frac`` / ``remaining_s`` are late-bound closures over the controller's
+          BudgetState (which only exists after question intake). Without ``budget_frac`` the
+          H4c provisional-terminal gate is inert (commits immediately — safe but the
+          withholding guard never fires), so wiring it is load-bearing (H8 verifier note).
+
+        build_callables wraps every provider-triggering seam with a hard per-call timeout at
+        the injection boundary (SYS-F8), so nothing here can stall the 5 Hz tick past that
+        bound.
+        """
+        # Late-bound budget readers: the controller's BudgetState is created at intake, so
+        # these closures read it lazily each tick. Safe before latch (elapsed()/remaining()
+        # return 0.0 / full budget). budget_frac = elapsed / QUESTION_BUDGET_S in [0, 1].
+        from core.interfaces import QUESTION_BUDGET_S
+
+        def _remaining_s() -> float:
+            ctrl = self._controller
+            if ctrl is None or ctrl.budget is None:
+                return QUESTION_BUDGET_S
+            return float(ctrl.budget.remaining())
+
+        def _budget_frac() -> float:
+            ctrl = self._controller
+            if ctrl is None or ctrl.budget is None:
+                return 0.0
+            frac = float(ctrl.budget.elapsed()) / QUESTION_BUDGET_S
+            return max(0.0, min(1.0, frac))
+
+        if not self._llm_configured:
+            # Offline path: regex-only parse, all checkpoint seams off. budget_frac/
+            # remaining_s are still wired (they are pure BudgetState reads, no network) so the
+            # H4c gate is live even without an LLM.
+            return build_callables(
+                self._scene_index,
+                budget_frac=_budget_frac,
+                remaining_s=_remaining_s,
+            )
+
+        # A ledger-and-clock-bound closure for the parse ladder. The controller builds its own
+        # ledger/clock at intake; read them lazily so parse honours the live budget.
+        def _parse(question):
+            ctrl = self._controller
+            clock = ctrl.budget._clock if (ctrl is not None and ctrl.budget is not None) else self._clock
+            ledger = ctrl.ledger if ctrl is not None else None
+            return parse_ladder.parse(question, self._chat_fns, clock, ledger)
+
+        # Checkpoint seams bound to the configured chat_fns; their ledger/clock resolve lazily
+        # via _LedgerProxy since the controller's ledger only exists after intake.
+        seams = self._build_checkpoint_seams()
+
+        return build_callables(
+            self._scene_index,
+            parse=_parse,
+            verifier=seams.get("verifier"),
+            anchor_confirmer=seams.get("anchor_confirmer"),
+            miss_recoverer=seams.get("miss_recoverer"),
+            frontier_selector=seams.get("frontier_selector"),
+            budget_frac=_budget_frac,
+            remaining_s=_remaining_s,
+        )
+
+    def _build_checkpoint_seams(self) -> dict:
+        """Build the CP2/CP3/CP4/CP5 seam callables bound to the configured chat_fns.
+
+        The checkpoint builders need a ledger + clock. Those live on the controller and are
+        created at intake — but _build_controller_callables is only called AFTER the first
+        question is latched (the controller is being constructed on this very tick), so the
+        ledger is resolved lazily inside each seam via the _LedgerProxy.
+
+        The configured chat_fns are a bare text-ChatFn list (no vision transport wired yet),
+        so the VISION checkpoints (CP2/CP3/CP5) are given a chat adapter but WILL fall back to
+        deterministic behaviour until a real vision transport + JPEG encoder land (the boot
+        assert refuses to ship a network provider with the .npy encoder). CP4 (text) is fully
+        wired. All are ledger-gated + timeout-bounded inside guarded_call, and build_callables
+        adds a second injection-boundary timeout (SYS-F8).
+        """
+        from core.checkpoints.anchor_confirm import build_anchor_confirm
+        from core.checkpoints.frontier_select import build_frontier_select
+        from core.checkpoints.miss_recovery import build_miss_recovery
+        from core.checkpoints.verification import build_verifier
+
+        # The primary configured tier feeds the text/vision builders.
+        text_chat = self._chat_fns[0]
+
+        def _ledger():
+            ctrl = self._controller
+            return ctrl.ledger if ctrl is not None else None
+
+        clock = self._clock
+        ledger_proxy = _LedgerProxy(_ledger)
+
+        # CP2 tile-dims wiring (OR-F8, coordinator item 3): bound bbox_hint rejection needs
+        # the real tile pixel size. Derived from the pipeline's actual (hfov, vfov) via the
+        # same project_tiles formula, so it tracks any tiling recalibration. Falls back to the
+        # default 480x640 tile when perception is off.
+        tile_w, tile_h = _tile_pixel_dims(self._perception)
+
+        return {
+            "verifier": build_verifier(text_chat, ledger_proxy, clock),
+            "anchor_confirmer": build_anchor_confirm(text_chat, ledger_proxy, clock),
+            "miss_recoverer": build_miss_recovery(
+                text_chat, ledger_proxy, clock, {"tile_w": tile_w, "tile_h": tile_h}
+            ),
+            "frontier_selector": build_frontier_select(text_chat, ledger_proxy, clock),
+        }
+
+    def _assert_encoder_provider_consistency(self) -> None:
+        """Fail LOUD at boot if a network provider is paired with the default .npy encoder.
+
+        H14 / OR-F10 landmine: the vision checkpoints (CP2/CP3/CP5) default to
+        core.checkpoints._vision.default_encode_fn, which emits raw ``.npy`` bytes a real
+        vision API rejects. If a network provider is configured but this node has not swapped
+        in a JPEG encoder, those checkpoints would silently NEVER work at eval while all
+        offline tests stay green. There is no JPEG encode_fn swap in this node yet, so any
+        configured network provider is a boot-time inconsistency — shout so it cannot pass a
+        smoke test silently (this is the missing wiring-time assert OR-F10 called out).
+        """
+        if not self._llm_configured:
+            return  # no provider -> nothing sends images -> the .npy default is harmless
+        # A configured provider whose kind is a real network transport (openai/anthropic).
+        network_kinds = {"openai", "anthropic"}
+        configured = [
+            s for s in self._llm_config.slots()
+            if s is not None and s.kind in network_kinds
+        ]
+        if not configured:
+            return  # only stub/local tiers -> no live vision API to reject .npy bytes
+        self.get_logger().error(
+            "SUBMISSION-BLOCKER: a network LLM/VLM provider is configured (%s) but the vision "
+            "checkpoints still use the default raw .npy image encoder — a real vision API "
+            "rejects those bytes, so CP2/CP3/CP5 would silently never fire at eval. Swap in a "
+            "JPEG encode_fn before shipping vision checkpoints (H14 / OR-F10)."
+            % ", ".join(sorted({s.kind for s in configured}))
+        )
 
     # ------------------------------------------------------------------ debug viz (1 Hz)
     def _on_debug_viz(self) -> None:

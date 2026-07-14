@@ -34,6 +34,7 @@ from core.fsm.controller import WorldView
 from core.fsm.floors import PartialResults
 from core.interfaces import IntAnswer, MarkerBox, QType, Question, RobotIO, SceneIndex, WaypointCmd
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
+from core.llm.timeout import DEFAULT_CALL_TIMEOUT_S, wrap_call_timeout
 from core.plan_schema import Plan
 
 from core.heads.explore_step import (
@@ -91,7 +92,10 @@ class HeadState:
             )
         elif plan.qtype is QType.INSTRUCTION_FOLLOWING:
             self.instruction = InstructionHead(
-                plan=plan, thresholds=self.thresholds, anchor_confirm=self.anchor_confirm
+                plan=plan,
+                thresholds=self.thresholds,
+                anchor_confirm=self.anchor_confirm,
+                budget_frac=self.budget_frac,  # H4c provisional-terminal commit gate
             )
         # The explore head is always built (it may delegate to the IF head).
         self.explore = ExploreHead(
@@ -122,6 +126,7 @@ def build_callables(
     tiles_fn: Callable[[], object] | None = None,
     fuse_hint: FuseHintFn | None = None,
     thresholds: Thresholds = DEFAULT_THRESHOLDS,
+    call_timeout_s: float = DEFAULT_CALL_TIMEOUT_S,
 ) -> dict:
     """Build the {parse, explore, verify, probe} callables for a QuestionController.
 
@@ -139,7 +144,29 @@ def build_callables(
 
     CP-support hooks: ``remaining_s`` (CP4 90 s re-resolve rule), ``budget_frac`` (CP2
     >=60% coverage trigger), ``tiles_fn`` (CP2 tile supplier), ``fuse_hint`` (CP2 fusion).
+
+    Off-tick-thread safety (SYS-F8): every seam that can trigger a *provider call* (``parse``,
+    ``llm_verify``, ``anchor_confirm``/``anchor_confirmer``, ``verifier``, ``miss_recoverer``,
+    ``frontier_selector``) is wrapped with a hard per-call timeout (``call_timeout_s``, default
+    20 s) HERE, at the injection boundary — so a hung network can never stall the 5 Hz tick
+    past that bound regardless of whether the individual call site remembered to wrap its
+    ChatFn. The fast local support hooks (``budget_frac``, ``remaining_s``, ``tiles_fn``,
+    ``fuse_hint``, ``affinity_fn``) are NOT wrapped: they are synchronous map/clock reads, not
+    provider calls, and wrapping them would only add thread-handoff overhead. Unconfigured
+    (``None``) seams pass through untouched so the offline path stays deterministic.
     """
+    # Wrap only the provider-triggering seams (None -> None; see wrap_call_timeout).
+    def _tw(fn):
+        return wrap_call_timeout(fn, call_timeout_s)
+
+    parse = _tw(parse)
+    llm_verify = _tw(llm_verify)
+    anchor_confirm = _tw(anchor_confirm)
+    anchor_confirmer = _tw(anchor_confirmer)
+    verifier = _tw(verifier)
+    miss_recoverer = _tw(miss_recoverer)
+    frontier_selector = _tw(frontier_selector)
+
     state = HeadState(
         scene=scene_index,
         thresholds=thresholds,
@@ -207,6 +234,7 @@ def _assemble_worldview(state: HeadState) -> WorldView:
     partial = PartialResults()
     ungrounded = 0
     stability = None
+    drive_complete = False
 
     if state.numerical is not None:
         partial.count = state.numerical.count
@@ -218,8 +246,17 @@ def _assemble_worldview(state: HeadState) -> WorldView:
         pt = state.instruction.first_anchor_pt()
         if pt is not None:
             partial.first_anchor_pt = pt
+        # IF-F4: surface the head's continue-drive completion signal so the FSM's
+        # DRIVE_OUT state can stop driving once the route is finished (arrival, or
+        # exhausted with no replan budget). Read-only.
+        drive_complete = state.instruction.drive_complete()
 
-    wv = WorldView(scene=state.scene, partial=partial, ungrounded_subgoals=ungrounded)
+    wv = WorldView(
+        scene=state.scene,
+        partial=partial,
+        ungrounded_subgoals=ungrounded,
+        drive_complete=drive_complete,
+    )
     if stability is not None:
         wv.stability = stability
     return wv

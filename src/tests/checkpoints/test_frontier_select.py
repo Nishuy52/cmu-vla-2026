@@ -42,6 +42,14 @@ def test_out_of_range_falls_back():
     assert out.action == "fallback"
 
 
+def test_abstain_zero_routes_to_fallback_or_f10():
+    """OR-F10: choice 0 = "no direction clearly helps" is VALID and routes to the
+    geometric fallback (not coerced into a random disc, not a validation failure)."""
+    out = _run(text_stub('{"choice": 0, "reason": "none of these help"}'))
+    assert out.action == "fallback"
+    assert out.choice is None and out.index is None
+
+
 def test_respects_custom_n_frontiers():
     # with only 3 frontiers, choice 4 is out of range -> fallback
     out = _run(text_stub('{"choice": 4, "reason": "x"}'), n=3)

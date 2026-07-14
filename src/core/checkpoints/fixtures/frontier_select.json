@@ -18,6 +18,12 @@
     "expected": {"action": "fallback"}
   },
   {
+    "name": "abstain_zero_fallback",
+    "input": {"question": "find the plant", "n_frontiers": 5},
+    "stub_replies": ["{\"choice\": 0, \"reason\": \"no direction clearly helps\"}"],
+    "expected": {"action": "fallback"}
+  },
+  {
     "name": "malformed_then_repair_choice",
     "input": {"question": "which room has the tv", "n_frontiers": 5},
     "stub_replies": [

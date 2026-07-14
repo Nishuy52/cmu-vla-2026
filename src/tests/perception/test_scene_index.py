@@ -7,6 +7,7 @@ import numpy as np
 from core.interfaces import InstanceRecord
 from core.perception.scene_index import (
     BasicSceneIndex,
+    MatchTier,
     normalize_label,
     singularize,
 )
@@ -107,6 +108,93 @@ def test_by_label_orders_exact_before_typo():
     )
     hits = idx.by_label("table")
     assert hits[0].instance_id == 1  # exact first
+
+
+# ----------------------------------------------------- H10: bridge / tier discipline
+
+
+def test_by_label_bridge_pair_matches_live():
+    # bedside table <-> night stand: the vocab bridge must fire on the live matcher
+    idx = BasicSceneIndex(
+        [
+            _rec(1, "night stand", [0, 0, 0], [1, 1, 1]),
+            _rec(2, "nightstand", [3, 0, 0], [4, 1, 1]),
+        ]
+    )
+    assert sorted(r.instance_id for r in idx.by_label("bedside table")) == [1, 2]
+    # and the reverse direction
+    idx2 = BasicSceneIndex([_rec(1, "plant", [0, 0, 0], [1, 1, 1])])
+    assert [r.instance_id for r in idx2.by_label("potted plant")] == [1]
+
+
+def test_by_label_bridge_is_synonym_tier():
+    idx = BasicSceneIndex([_rec(1, "night stand", [0, 0, 0], [1, 1, 1])])
+    tiered = idx.by_label_tiered("bedside table")
+    assert [(r.instance_id, t) for r, t in tiered] == [(1, MatchTier.SYNONYM)]
+
+
+def test_by_label_head_noun_tier():
+    # "beer bottle" -> "bottle"; "X table" matches "table"-headed labels
+    idx = BasicSceneIndex(
+        [
+            _rec(1, "bottle", [0, 0, 0], [1, 1, 1]),
+            _rec(2, "coffee table", [3, 0, 0], [4, 1, 1]),
+        ]
+    )
+    assert [r.instance_id for r in idx.by_label("beer bottle")] == [1]
+    assert [r.instance_id for r in idx.by_label("table")] == [2]
+    # a modified query NOT in the bridge lands in the head-noun tier
+    # ("wooden table" -> "coffee table", both head "table")
+    assert idx.by_label_tiered("wooden table")[0][1] == MatchTier.HEAD_NOUN
+
+
+def test_typo_short_circuits_when_exact_present():
+    # THE door pollution case: exact 'door' present => no 'floor'/'book' typo cousins
+    idx = BasicSceneIndex(
+        [
+            _rec(1, "door", [0, 0, 0], [1, 1, 1]),
+            _rec(2, "floor", [3, 0, 0], [4, 1, 1]),  # lev('door','floor') == 2
+            _rec(3, "book", [6, 0, 0], [7, 1, 1]),
+        ]
+    )
+    assert [r.instance_id for r in idx.by_label("door")] == [1]
+
+
+def test_typo_length_gating_short_nouns_never_fuzzy():
+    # 3-4 letter nouns must never fuzzy-match (door/floor, tap/cup, bag/bed)
+    idx = BasicSceneIndex([_rec(1, "floor", [0, 0, 0], [1, 1, 1])])
+    assert idx.by_label("door") == []  # query len 4 -> no fuzzy
+    idx2 = BasicSceneIndex([_rec(1, "cup", [0, 0, 0], [1, 1, 1])])
+    assert idx2.by_label("tap") == []  # len 3
+    idx3 = BasicSceneIndex([_rec(1, "bed", [0, 0, 0], [1, 1, 1])])
+    assert idx3.by_label("bag") == []  # len 3
+
+
+def test_typo_length_gating_bands():
+    # 5-7 chars: distance 1 ok, distance 2 rejected
+    idx = BasicSceneIndex([_rec(1, "pillow", [0, 0, 0], [1, 1, 1])])  # len 6
+    assert [r.instance_id for r in idx.by_label("pillo")] == [1]  # dist 1 ok
+    assert idx.by_label("yellow") == []  # dist 2, band 5-7 -> rejected
+    # 8+ chars: distance 2 ok
+    idx2 = BasicSceneIndex([_rec(1, "refrigerator", [0, 0, 0], [1, 1, 1])])
+    assert [r.instance_id for r in idx2.by_label("refridgerator")] == [1]
+
+
+def test_alias_never_participates_in_fuzzy_match():
+    # colour-alias 'yellow' is lev-2 from 'pillow' but must NOT phantom-match 'pillow'
+    idx = BasicSceneIndex(
+        [_rec(1, "lamp", [0, 0, 0], [1, 1, 1], aliases=("black", "brown", "yellow"))]
+    )
+    assert idx.by_label("pillow") == []
+
+
+def test_alias_still_matches_exactly():
+    # exact alias match stays in the synonym tier (aliases lose only fuzzy privileges)
+    idx = BasicSceneIndex(
+        [_rec(1, "sofa", [0, 0, 0], [1, 1, 1], aliases=("settee",))]
+    )
+    hits = idx.by_label_tiered("settee")
+    assert [(r.instance_id, t) for r, t in hits] == [(1, MatchTier.SYNONYM)]
 
 
 # --------------------------------------------------------------------- merge

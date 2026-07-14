@@ -173,19 +173,42 @@ def test_seam_confirm_returns_true_keep():
     assert seam(P(), "#7 (mug)", "PASS: on shelf") is True
 
 
-def test_seam_neither_returns_false_demote():
+def test_seam_neither_keeps_winner_or_f4():
+    """OR-F4: a hallucinated `neither` must KEEP the deterministic winner, not demote.
+
+    The old seam mapped `neither` -> False (demote), which swapped to an unverified
+    runner-up the model never saw — strictly worse than not verifying. The design
+    fallback is keep-winner, so `neither` (non-actionable) returns True (keep).
+    """
     ledger = make_ledger()
     seam = as_llm_verify_seam(
-        text_stub('{"verdict": "neither", "missed_constraint": "red", "reason": "r"}'),
+        text_stub('{"verdict": "neither", "missed_constraint": "closest_to folding screen", "reason": "r"}'),
         ledger,
         FakeClock(),
     )
 
     class P:
-        question_raw = "the red mug"
+        question_raw = "the bowl on the table closest to the folding screen"
         notes = ""
 
-    assert seam(P(), "#7 (mug)", "PASS: on shelf") is False
+    assert seam(P(), "#7 (bowl)", "PASS: on table") is True
+
+
+def test_seam_runner_up_demotes_and_receives_real_runner_up():
+    """OR-F4: an explicit `runner_up` verdict demotes; the real runner-up summary is
+    passed into the prompt instead of the hardcoded (none)."""
+    ledger = make_ledger()
+    stub = text_stub('{"verdict": "runner_up", "missed_constraint": null, "reason": "r"}')
+    seam = as_llm_verify_seam(stub, ledger, FakeClock())
+
+    class P:
+        question_raw = "the chair closest to the table"
+        notes = ""
+
+    assert seam(P(), "#7 (chair)", "FAIL: closest_to", "#9 (chair)") is False
+    # the real runner-up one-liner reached the prompt (not the hardcoded placeholder)
+    body = stub.calls[-1][-1]["content"]
+    assert "#9 (chair)" in body  # real runner-up reached the prompt
 
 
 def test_seam_falls_back_true_on_exhausted_ledger():

@@ -6,22 +6,55 @@ detections: same-label instances overlapping in 3D (IoU > MERGE_IOU) are fused �
 points concatenated, AABB recomputed as the per-axis 2nd/98th-percentile trimmed
 box, ``n_obs`` incremented, ``score`` kept as the max.
 
-Label matching ladder (first hit wins):
-  1. exact canonical (lowercase-singular) match
-  2. synonym-table equivalence (fridge<->refrigerator, sofa<->couch, ...)
-  3. edit-distance <= 2 against any canonical label (typo tolerance;
-     'refridgerator' -> 'refrigerator')
+Label matching ladder (higher tier wins; :meth:`by_label` returns higher tiers
+first, and :meth:`by_label_tiered` surfaces which tier each hit came from):
+  1. exact     — canonical (lowercase-singular) match
+  2. synonym   — synonym-table / vocab-bridge equivalence (fridge<->refrigerator,
+                 sofa<->couch, bedside table<->night stand, ...); matches on the
+                 record canonical or its declared aliases (exact string only)
+  3. head-noun — the query's head noun matches a candidate's head-noun-headed label
+                 ("X table" matches "table"-headed labels, "beer bottle"->"bottle")
+  4. typo      — edit-distance fuzzy match, length-scaled tolerance, returned ONLY
+                 when tiers 1-3 are all empty; aliases NEVER participate here
+                 ('refridgerator' -> 'refrigerator')
 """
 from __future__ import annotations
 
+from enum import IntEnum
+
 import numpy as np
 
-from core.interfaces import InstanceRecord
+from core.interfaces import InstanceRecord, MarkerBox
 
 MERGE_IOU: float = 0.3  # 3D IoU threshold for fusing same-label instances
-TYPO_MAX_DIST: int = 2  # max Levenshtein distance for typo-tolerant match
+TYPO_MAX_DIST: int = 2  # max Levenshtein distance for the longest length band
 TRIM_LO_PCT: float = 2.0
 TRIM_HI_PCT: float = 98.0
+
+
+class MatchTier(IntEnum):
+    """Label-match provenance, ordered best-first (lower value = stronger match)."""
+
+    EXACT = 0
+    SYNONYM = 1
+    HEAD_NOUN = 2
+    TYPO = 3
+
+
+def _typo_budget(query: str, candidate: str) -> int:
+    """Length-scaled Levenshtein budget for a fuzzy match; 0 disables fuzzy.
+
+    No fuzzy match when either side is shorter than 5 chars (short words collide
+    too readily: 'door'/'floor', 'tap'/'cup', 'bag'/'bed'). Edit distance <= 1 for
+    length 5-7, <= 2 only for length 8+. The band is set by the SHORTER of the two
+    strings, so a long candidate cannot buy tolerance a short query never earns.
+    """
+    n = min(len(query), len(candidate))
+    if n < 5:
+        return 0
+    if n <= 7:
+        return 1
+    return 2
 
 # Canonical synonym groups. Every member maps to the group's canonical head
 # (the first element). Lookup normalises a query to its canonical head, then
@@ -125,6 +158,39 @@ class BasicSceneIndex:
     def all_instances(self):
         return list(self._instances)
 
+    def remove(self, instance_id: int) -> bool:
+        """Drop an instance by id; return True if one was removed.
+
+        Used by track decay (H15a) to prune one-frame ghosts. No-op (returns False)
+        if the id is absent. Never mutates ``_next_id`` — freed ids are not recycled,
+        so a pruned ghost's id cannot be silently reused by a later real object.
+        """
+        for i, rec in enumerate(self._instances):
+            if rec.instance_id == instance_id:
+                del self._instances[i]
+                return True
+        return False
+
+    def marker_for(self, record: InstanceRecord) -> MarkerBox:
+        """Prior-clamped marker for a record — the H12 marker seam.
+
+        The trimmed AABB an instance carries is a single-viewpoint *under*-box; the
+        raw ``record.to_marker()`` would publish it verbatim and shed IoU against the
+        GT over-hull (red-team OR-F6). This routes the record through the per-class
+        dimension prior (:mod:`core.perception.dimension_priors`): clamp every axis to
+        the class-min, inflate the least-observed axis toward class-typical only when
+        the instance signals under-observation, centre preserved. A GT-perfect / well-
+        observed box is returned identical to ``record.to_marker()``.
+
+        Marker-path owners (``heads/object_ref.py``, ``fsm/floors.py``) should publish
+        ``index.marker_for(rec)`` in place of ``rec.to_marker()`` — the seam lives here
+        so the clamp is applied wherever the scene index is in scope. Deferred import
+        avoids a load cycle (dimension_priors imports normalize_label from this module).
+        """
+        from core.perception.dimension_priors import clamp_record_marker
+
+        return clamp_record_marker(record)
+
     def next_id(self) -> int:
         """The instance_id the next fresh (non-merged) instance would receive.
 
@@ -134,25 +200,64 @@ class BasicSceneIndex:
         return self._next_id
 
     def by_label(self, noun: str):
-        """Typo/plural/synonym-tolerant lookup; returns matching instances."""
+        """Typo/plural/synonym-tolerant lookup; returns matching instances, best-first.
+
+        Tiers are tried exact -> synonym -> head-noun -> typo (see the module
+        docstring). The typo tier is a short-circuit: it contributes ONLY when the
+        exact, synonym and head-noun tiers are all empty, so an exact match is never
+        polluted by fuzzy cousins.
+        """
+        return [rec for rec, _ in self.by_label_tiered(noun)]
+
+    def by_label_tiered(self, noun: str) -> list[tuple[InstanceRecord, MatchTier]]:
+        """Like :meth:`by_label` but pairs each hit with its :class:`MatchTier`.
+
+        Lets consumers (e.g. ``resolve``/audit) prefer stronger-tier candidates before
+        superlative ranking without breaking the flat-list return type of
+        :meth:`by_label`.
+        """
+        # Deferred import: perception.vocab imports normalize_label from this module,
+        # so we consult it at call time to avoid a module-load cycle.
+        from core.perception.vocab import bridge_synonyms, head_noun
+
         query = normalize_label(noun)
+        query_head = head_noun(query)
+        syns = bridge_synonyms(query)  # normalised object-bridge equivalents
+
         exact: list[InstanceRecord] = []
         syn: list[InstanceRecord] = []
+        head: list[InstanceRecord] = []
         typo: list[InstanceRecord] = []
         for rec in self._instances:
             canon = normalize_label(rec.label)
             if canon == query:
                 exact.append(rec)
                 continue
-            # synonym already folded into normalize_label; typo tolerance next.
-            # match against both the record canonical and its declared aliases.
-            candidates = [canon] + [normalize_label(a) for a in rec.aliases]
-            if any(c == query for c in candidates):
+            # synonym tier: the vocab bridge, plus the record's declared aliases —
+            # but aliases are matched by EXACT string only, never fuzzily (colour
+            # aliases like 'yellow' are edit-distance 2 from 'pillow').
+            alias_canons = [normalize_label(a) for a in rec.aliases]
+            if canon in syns or query in bridge_synonyms(canon) or query in alias_canons:
                 syn.append(rec)
-            elif any(_levenshtein(c, query) <= TYPO_MAX_DIST for c in candidates):
+                continue
+            # head-noun tier: modifier-stripped class-word match, either direction
+            # ("beer bottle" query vs "bottle" label, or "table" query vs "X table").
+            if head_noun(canon) == query_head:
+                head.append(rec)
+                continue
+            # typo tier candidate (length-gated); aliases excluded on purpose.
+            budget = _typo_budget(query, canon)
+            if budget and _levenshtein(canon, query) <= budget:
                 typo.append(rec)
-        # exact first, then synonym, then typo — de-duplicated by identity order
-        return exact + syn + typo
+
+        tiered: list[tuple[InstanceRecord, MatchTier]] = []
+        tiered += [(r, MatchTier.EXACT) for r in exact]
+        tiered += [(r, MatchTier.SYNONYM) for r in syn]
+        tiered += [(r, MatchTier.HEAD_NOUN) for r in head]
+        # typo short-circuit: only when every stronger tier is empty.
+        if not tiered:
+            tiered += [(r, MatchTier.TYPO) for r in typo]
+        return tiered
 
     # -------------------------------------------------------------- write / merge
 

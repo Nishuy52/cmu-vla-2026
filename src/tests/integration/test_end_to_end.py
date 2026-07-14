@@ -157,6 +157,44 @@ def test_instruction_following_threads_corridor_avoids_capsule_and_publishes_ter
 # --------------------------------------------------------------------------- (d) pathological
 
 
+def test_instruction_following_empty_scene_still_publishes_waypoints():
+    """SYS-F3/H3 acceptance (the deadlock repro, inverted): an IF question over an EMPTY
+    scene index must still publish waypoints — the robot explores to ground the anchors
+    instead of sitting still until the watchdog. Full QuestionController, real regex parse.
+
+    Budget-scaled: we tick past the 60 s orientation window into EXPLORE_EXECUTE and assert
+    waypoints appear within a bounded tick count (the deadlock produced zero for the whole
+    run), rather than driving the full 600 s window.
+    """
+    sc = SyntheticScene(0)
+    sc.rooms = [Room(0.0, 0.0, 8.0, 6.0)]
+    idx = BasicSceneIndex([])  # empty: no anchor grounds from spawn
+    clk = FakeClock(0.0)
+    io = MockRobotIO(sc, clk, start_x=1.0, start_y=3.0)
+    io.set_question("take the path between the table and the chair to the sofa")
+    ctrl = QuestionController(**build_callables(idx))
+
+    published_before = 0
+    # ~130 s of ticks: clears the 60 s orientation window and enters EXPLORE_EXECUTE.
+    for _ in range(650):
+        ctrl.tick(io)
+        clk.advance(TICK_DT)
+        if io.waypoints:
+            wp = io.waypoints[-1]
+            od = io.latest_odom()
+            dx, dy = wp.x - od.x, wp.y - od.y
+            d = (dx * dx + dy * dy) ** 0.5
+            s = min(DRIVE_STEP_M, d)
+            if d > 1e-6:
+                io.set_pose(od.x + dx / d * s, od.y + dy / d * s)
+        published_before = len(io.waypoints)
+        if published_before > 0 and clk.now() > 70.0:
+            break
+
+    assert clk.now() > 60.0, "must reach the explore phase before asserting"
+    assert published_before > 0, "IF over empty scene deadlocked: 0 waypoints published"
+
+
 def test_absent_target_object_reference_falls_to_floor_never_silent():
     sc = SyntheticScene(0)
     sc.place_box("table", 2.0, 2.0)

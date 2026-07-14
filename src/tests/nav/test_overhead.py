@@ -151,13 +151,32 @@ def test_state_stays_pure_overhead_is_separate():
 
 
 # --------------------------------------------------------------------------- costmap
-def test_costmap_blocks_overhead_cell():
+def test_costmap_softens_overhead_cell_by_default():
+    """Default (soft): an overhead cell is TRAVERSABLE at a steep cost, not blocked.
+
+    Redteam H13: hard-blocking overhead sealed doorways on false positives. The
+    default now makes overhead a soft high-cost cell — passable, cost-bearing.
+    """
     grid = OccupancyGrid(cell_m=0.1)
     grid.integrate_patch(make_points([(0.05, 0.05, 0.02)]))  # FREE floor
     grid.integrate_scan_overhead(_scan(_repeat_cell(0.05, 0.05, 0.5, 5)), vehicle_z=0.0)
     cm = Costmap(grid, vehicle_radius_m=0.0)  # no inflation to isolate the cell
     r, c = grid.world_to_cell(0.05, 0.05)
+    # NOT hard-blocked, but flagged soft (A* pays the UNKNOWN_COST_MULT to cross).
+    assert cm.passable(r, c)
+    assert cm.is_soft_overhead(r, c)
+    assert cm.is_unknown(r, c)  # cost-bearing seam A* reads
+
+
+def test_costmap_overhead_hard_flag_blocks_cell():
+    """overhead_hard=True restores the legacy hard-block behaviour."""
+    grid = OccupancyGrid(cell_m=0.1)
+    grid.integrate_patch(make_points([(0.05, 0.05, 0.02)]))  # FREE floor
+    grid.integrate_scan_overhead(_scan(_repeat_cell(0.05, 0.05, 0.5, 5)), vehicle_z=0.0)
+    cm = Costmap(grid, vehicle_radius_m=0.0, overhead_hard=True)
+    r, c = grid.world_to_cell(0.05, 0.05)
     assert cm.blocked(r, c)
+    assert not cm.is_soft_overhead(r, c)
 
 
 def test_allow_overhead_true_restores_old_behavior():
@@ -170,17 +189,31 @@ def test_allow_overhead_true_restores_old_behavior():
     assert cm.passable(r, c)
 
 
-def test_overhead_inflation_applies():
-    """An overhead cell inflates like any obstacle (footprint stays clear)."""
+def test_overhead_soft_inflation_applies():
+    """A SOFT overhead cell inflates like an obstacle so the footprint is discouraged,
+    but the inflated cells stay passable (soft), not blocked."""
     grid = OccupancyGrid(cell_m=0.1)
     # Build a small FREE patch so neighbours exist to inflate onto.
     grid.integrate_patch(make_points([(x / 10 + 0.05, 0.05, 0.02) for x in range(6)]))
     grid.integrate_scan_overhead(_scan(_repeat_cell(0.25, 0.05, 0.5, 5)), vehicle_z=0.0)
     cm = Costmap(grid, vehicle_radius_m=0.2)  # 2-cell inflation radius
     r0, c0 = grid.world_to_cell(0.25, 0.05)
+    assert cm.is_soft_overhead(r0, c0)
+    assert cm.passable(r0, c0)  # soft, not hard
+    # A cell one step away carries the SOFT inflation (cost-bearing but passable).
+    assert cm.is_soft_overhead(r0, c0 + 1)
+    assert cm.passable(r0, c0 + 1)
+
+
+def test_overhead_hard_inflation_blocks():
+    """overhead_hard=True inflates the cell as a hard obstacle (legacy)."""
+    grid = OccupancyGrid(cell_m=0.1)
+    grid.integrate_patch(make_points([(x / 10 + 0.05, 0.05, 0.02) for x in range(6)]))
+    grid.integrate_scan_overhead(_scan(_repeat_cell(0.25, 0.05, 0.5, 5)), vehicle_z=0.0)
+    cm = Costmap(grid, vehicle_radius_m=0.2, overhead_hard=True)
+    r0, c0 = grid.world_to_cell(0.25, 0.05)
     assert cm.blocked(r0, c0)
-    # A cell one step away is blocked by inflation.
-    assert cm.blocked(r0, c0 + 1)
+    assert cm.blocked(r0, c0 + 1)  # blocked by inflation
 
 
 def test_clone_preserves_allow_overhead():
@@ -227,22 +260,36 @@ def test_astar_passes_gap_terrain_only():
     assert path is not None
 
 
-def test_astar_blocked_by_overhead_under_table():
-    """With the tabletop overhang flagged, A* can NO LONGER cross under the table."""
-    grid = _under_table_grid()
-    # Tabletop overhang across the corridor cols 2..7 at z=0.5 (in band) — seals the
-    # doorway. Ground in these cells is 0.0 (terrain floor point), so 0.5 is in band.
+def _seal_under_table(grid: OccupancyGrid) -> None:
+    """Flag the tabletop overhang across the corridor cols 2..7 (in band, seals gap)."""
     over = []
     for col in range(2, 8):
         x = col * 0.1 + 0.05
         over += _repeat_cell(x, 0.15, 0.5, 4)
     grid.integrate_scan_overhead(_scan(over), vehicle_z=0.0)
-    cm = Costmap(grid, vehicle_radius_m=0.0, allow_overhead=False)
+
+
+def test_astar_soft_overhead_still_crosses_under_table():
+    """Redteam H13 default: with the tabletop overhang flagged SOFT, A* can still
+    cross the only under-table corridor (route stays REACHABLE, just expensive) —
+    where the old hard-block made it unreachable."""
+    grid = _under_table_grid()
+    _seal_under_table(grid)
     start = grid.cell_to_world(*grid.world_to_cell(0.05, 0.15))
     goal = grid.cell_to_world(*grid.world_to_cell(0.95, 0.15))
-    path = astar(cm, start, goal)
-    assert path is None
-    # And allow_overhead=True restores the crossing (old terrain-only behaviour).
+
+    # Old behaviour (hard-block): unreachable.
+    cm_hard = Costmap(grid, vehicle_radius_m=0.0, overhead_hard=True)
+    assert astar(cm_hard, start, goal) is None
+
+    # New default (soft): still found — the corridor cells are cost-bearing, passable.
+    cm_soft = Costmap(grid, vehicle_radius_m=0.0)
+    path = astar(cm_soft, start, goal)
+    assert path is not None
+    # The route does traverse soft-overhead cells (there is no alternative here).
+    assert any(cm_soft.is_soft_overhead(*grid.world_to_cell(x, y)) for x, y in path)
+
+    # allow_overhead=True also crosses (terrain-only, zero penalty).
     cm_allow = Costmap(grid, vehicle_radius_m=0.0, allow_overhead=True)
     assert astar(cm_allow, start, goal) is not None
 
@@ -314,9 +361,11 @@ def test_real_data_overhead_flags_more_than_terrain_alone():
     over_unknown = int((grid.overhead & (grid.state == 0)).sum())
 
     cm_terrain = Costmap(grid, allow_overhead=True)
-    cm_overhead = Costmap(grid, allow_overhead=False)
+    cm_soft = Costmap(grid)  # default: soft overhead
+    cm_overhead = Costmap(grid, overhead_hard=True)  # legacy hard-block
     blk_terrain = int(cm_terrain.base_blocked.sum())
     blk_overhead = int(cm_overhead.base_blocked.sum())
+    soft_cells = int(cm_soft.overhead_soft.sum())
     delta = blk_overhead - blk_terrain
 
     print(
@@ -327,12 +376,18 @@ def test_real_data_overhead_flags_more_than_terrain_alone():
         f"({over_free * cell_a:.2f} m^2)  <-- tables the base stack reads as walkable\n"
         f"  of which over UNKNOWN floor:      {over_unknown} ({over_unknown * cell_a:.2f} m^2)\n"
         f"  costmap blocked terrain-only:  {blk_terrain} ({blk_terrain * cell_a:.2f} m^2)\n"
-        f"  costmap blocked +overhead:     {blk_overhead} ({blk_overhead * cell_a:.2f} m^2)\n"
-        f"  overhead adds (incl inflation):{delta} ({delta * cell_a:.2f} m^2)"
+        f"  costmap blocked +overhead(hard):{blk_overhead} ({blk_overhead * cell_a:.2f} m^2)\n"
+        f"  overhead adds if hard (infl):  {delta} ({delta * cell_a:.2f} m^2)\n"
+        f"  SOFT-overhead cells (default): {soft_cells} ({soft_cells * cell_a:.2f} m^2)"
     )
 
-    # The overhead layer must catch real furniture: more blocked area, and at least
-    # some of it over floor the terrain analysis called FREE (under-table cells).
+    # The overhead layer must catch real furniture: more blocked area under the
+    # legacy hard mode, and at least some of it over floor the terrain analysis
+    # called FREE (under-table cells).
     assert n_overhead > 0
     assert delta > 0
     assert over_free > 0
+    # Default (soft) mode adds ZERO hard-blocked area vs terrain-only, yet marks the
+    # furniture cells soft (cost-bearing) so routes stay reachable (redteam H13).
+    assert int(cm_soft.base_blocked.sum()) == blk_terrain
+    assert soft_cells > 0

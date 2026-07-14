@@ -31,3 +31,8 @@
   `-m "not slow"` addopts), budget-scale the structural
   integration tests (~363 s → ~16 s), add pytest-xdist for the
   parallel full gate. Fast ~38 s / full ~152 s (-n auto).
+- **T10** redteam-review — five-facet adversarial design review
+  (IF, counting, OR+checkpoints, eval-day systems, 2025 dossier
+  adjudication) run as a parallel frontier-agent batch in the
+  closing Fable window; adjudicated into
+  docs/redteam/hardening_backlog.md.

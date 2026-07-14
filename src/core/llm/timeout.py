@@ -19,9 +19,10 @@ caught like any other dead-provider failure and the ladder advances — exactly 
 """
 from __future__ import annotations
 
+import functools
 import queue
 import threading
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 from core.parsing.prompts import ChatFn
 
@@ -70,5 +71,31 @@ def with_timeout(fn: ChatFn, timeout_s: float = DEFAULT_CALL_TIMEOUT_S) -> ChatF
 
     def _wrapped(messages: list[dict[str, str]]) -> str:
         return call_with_timeout(lambda: fn(messages), timeout_s)
+
+    return _wrapped
+
+
+def wrap_call_timeout(fn: Callable[..., T], timeout_s: float = DEFAULT_CALL_TIMEOUT_S) -> Callable[..., T]:
+    """Wrap an ARBITRARY-signature callable so each call is bounded by ``timeout_s``.
+
+    Unlike :func:`with_timeout` (which is specific to the ``ChatFn`` ``list[dict] -> str``
+    shape), this preserves any ``*args, **kwargs`` signature — so it can wrap the injected
+    checkpoint seams (``llm_verify(plan, summary, matrix)``, ``anchor_confirm(...)``, the rich
+    ``verifier``/``miss_recoverer``/``frontier_selector`` callables, and the parse fn) at the
+    factory's injection boundary. This is the SYS-F8 requirement: enforce a hard per-call
+    timeout on EVERY seam that can trigger a provider call inside ``build_callables`` itself,
+    rather than trusting each call site to have wrapped its ChatFn. On timeout it raises
+    ``TimeoutError`` (an ``OSError`` subclass); the heads/ladder treat that like any other
+    dead-provider failure and fall through to their deterministic path.
+
+    Wrapping is idempotent-safe to skip: pass ``None`` through untouched so an unconfigured
+    seam stays ``None`` (offline determinism).
+    """
+    if fn is None:  # keep unconfigured seams None so offline tests stay deterministic
+        return fn  # type: ignore[return-value]
+
+    @functools.wraps(fn)
+    def _wrapped(*args: Any, **kwargs: Any) -> T:
+        return call_with_timeout(lambda: fn(*args, **kwargs), timeout_s)
 
     return _wrapped

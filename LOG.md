@@ -346,6 +346,35 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 
 ---
 
+## 2026-07-14 — task milestone (parallel stream, merged after session 10)
+
+- Wrapped up task: red-team design review (five-facet frontier batch + adjudication) — record at `docs/tasks/T10-redteam-review/`, output at `docs/redteam/` (**start at `hardening_backlog.md`**: 4 dominant defects incl. a QoS run-killer and the IF exploration deadlock; CV-sweep rerun is now HELD until Tier-0 fixes + scorer repairs land — supersedes the standing "rerun cvsweep" next-step until then)
+
+---
+
+## 2026-07-14 (session 11) — Red-team backlog implementation day 1: H1–H5, H8/H10 partials
+
+- Executed hardening backlog via agent batches, each independently verified CONFIRMED: **batch A** `4bcf18b` (H1 QoS dual-sub, H2 scorer rebuild [driven-trajectory IF rubric + strict counts], H4a/b ladder policies [+scope-clause follow-up: "in the room" is vacuous scoping, named rooms strict], H8 partial [qtype correction, 480/540 skew-hedged gates, sim-time guard, stub-index shout], H10 vocab tiers + colour bridge); **batch B** `8a8c78d` (H3 IF explore-while-ungrounded — the 36-pt deadlock is broken, empty scene ⇒ waypoints, full-controller verified; H4c provisional terminals; IF-F6 distinct pair anchors); **H5** `0863294` (predicate forms per the reconciled spec; 92.3% recall vs 819 real GT on-edges; T7-S2 scorer pair fix).
+- Merged main `bb79133`: T9 tiering (fast 56 s / full gate 71 s — verifier passes now minutes not an hour), colored-map stack, T7/T8 records; redteam task renumbered T5→T10.
+- **Cross-stream reconciliation before H5 (the judgment call of the day):** T8's instance-level-GT verdicts vs our dossier report's generator-code priors — evidence won; `above()` overlap gate REPLACED by lateral-offset (our own NUM-F2 sided with T8 against our dossier agent), `on()` upper-z-span, `between()` narrowed to strict-t. Appendix in `dossier_deltas.md`; backlog H5 rewritten pre-implementation.
+- **Post-fix GT battery** (`reports/gt_battery_postfix_2026-07-14/`): numerical independent agreement **15–27% → 56%** (strict-evidence rows; sg agreement 73%; the 31-pillow answer is now 11, red-pillows 10→3 vs truth 4); object-ref scored 8/30, mean IoU 0.875, **the OR-F1 nested-disambiguator case now scores 1.000** (was 0.000); IF measured honestly for the first time — **rubric-proxy 0.061** (ordered-leg credit 0.094, 9 threading violations): the old Fréchet numbers flattered shape, the rubric exposes that driven legs rarely arrive in order. Suspicious harness artifact flagged: several IF rows show poses=2–30 (follower exhausts near-immediately in the mirror sim) — investigate the v1 kinematic driver before trusting IF absolute levels.
+- Backlog status ledger added (H1–H5, H10, IF-F6 landed; H8/H6 partial; H7, H9, H11–H15 open; sweep still HELD pending objective re-point + this baseline).
+
+**Next:** (1) investigate the IF driven-sim poses collapse (harness vs pipeline) — it gates reading the rubric; (2) H9 checkpoint repairs + H8 seam wiring (budget_frac, ladder); (3) re-point cvsweep objective and un-hold the sweep; (4) Ubuntu Thu 16 Jul → phase2_playbook Gate 0 with the new Ubuntu-gate checklist items from the backlog.
+
+---
+
+## 2026-07-14 (session 11, continued) — Backlog wave: H6–H15 + follow-ups all landed
+
+- Nine-agent parallel wave (disjoint file ownership) + 2 follow-ups + FSM continue-drive: adapter seam wiring (perception `VLA_DETECTOR` switch, LLM ladder api→api2→regex with the local tier explicitly DESCOPED, checkpoint seams, budget_frac live, injection-boundary timeouts, ledger admission bound), CP2–CP5 checkpoint repairs (keep-on-neither, clause-synthesizing re-resolve, provisional-commit guard, cross-class-only demote, prompt ≤2k, abstain), nav/drive robustness (replan consumption, avoid lifecycle + edge-triggered tripwire, explore-goal guards, CP2 latch clear, free-space via, 1 Hz frontier throttle), dimension-priors marker clamp (69 data-derived classes; wired into object_ref + floors), detection-bearing-keyframe ghost decay + obs-gated counting, overhead soft-cost (via the A* unknown seam; clone() hardens for corridors), frontier BFS vectorized ~10× (bit-identical, oracle-tested), fork-shaped docker packaging + sync scripts, cvsweep objective re-point (rubric×6/strict×1/IoU×2, disk-resume cache) + tests, IF driven-sim made closed-loop (poses-collapse was a real harness bug — but fixing it proved rubric≈0 is genuine pipeline behavior), and a new FSM `DRIVE_OUT` state so IF keeps driving after ANSWER until route completion or the watchdog (verified: the publish latch means the floor can never overwrite the answer).
+- Verification: two combined fresh-context verifier passes (wave CONFIRMED; DRIVE_OUT CONFIRMED with 14 independent probes) + full gate **1039 passed** (only the 8 known worktree data gates non-passing). Four integration defects found by the gates/verifiers and fixed in-session (CP3 mid-tick demote crash, decay-vs-single-pass semantics, tracker ledger drift, FSM answer-and-stop-at-270 s).
+- Incident: a stray `git stash` by one wave agent swept the shared tree mid-wave; fully recovered (stash inventory → selective restore → owners re-applied), no work lost. Rule added to all agent briefs: never git stash/checkout/reset.
+- **Post-wave battery** (`reports/gt_battery_postwave_2026-07-14/`): numerical 56% / OR 0.875 hold; **IF rubric 0.061 unchanged — intermediate-leg threading (routes reach terminals without passing within 0.8 m of intermediate leg goals) is confirmed as the top remaining pipeline item (36 pts)**. CV sweep stays deliberately HELD until it lands (flat IF term = no gradient for the ×6 weight). Backlog status ledger updated in `docs/redteam/hardening_backlog.md`.
+
+**Next:** (1) IF intermediate-leg threading diagnosis + fix → battery → un-hold sweep; (2) Ubuntu Thu 16 Jul: phase2_playbook Gate 0 with the new gate items (QoS verify, skew measurement, compose-up from clean fork, stub-index guard); (3) merge branch to main via PR.
+
+---
+
 ## 2026-07-14 (session 11) — Calibration-ledger drift check (tracker decay_k)
 
 - Investigated the reported `test_field_counts_per_subsystem` failure (`tracker: 2 != 1`). Not reproducible on main-derived branches: the H15 `decay_k` change lives only in the concurrent red-team worktree (`claude/nostalgic-mccarthy-3bb3ea`, uncommitted). That session had already fixed the test pin (`tracker: 2`, `nav: 21`), the `tracker.decay_k` doc row, and the tracker section header; its calibration test passes 17/17.
@@ -364,3 +393,7 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 - Integrated into `main` via PR #6 (user-approved merge). Conflict vs main: LOG-only interleave with the session-11 calibration-drift entry from PR #7; this entry renumbered 11 → 12 (number claimed on main). No code overlap (#7 was LOG-only).
 
 **Next:** unchanged — session-9 backlog items 1, 3, 4 (see session-10 entry). The hygiene stream now rebases/merges from main to pick up the bridged test.
+
+---
+
+*(Merge note, session 11: PR #6's bridged CP2 test variant was superseded by this branch's version, which was written and verified against the integrated H15b head; PR #7's wiring-summary line fix is applied in this merge commit.)*

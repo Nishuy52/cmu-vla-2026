@@ -18,31 +18,35 @@ is the sweep checklist.
 - **Sensitivity** — H/M/L judgement of how much sweeping this field moves behaviour,
   from reading the consuming code. Guides sweep priority, not a hard claim.
 
-**Wiring summary:** 55 fields total (geometry 11 · fusion 5 · tracker 1 · keyframe 3 ·
-nav 20 · budget 15). **Wireable today (constructor arg or function param): 41.**
+**Wiring summary:** 61 fields total (geometry 15 · fusion 5 · tracker 2 · keyframe 3 ·
+nav 21 · budget 15). **Wireable today (constructor arg or function param): 47.**
 **Wiring TODO (module constant, needs a setter/param before a sweep can move it): 14.**
 
 ---
 
-## geometry (`core.geometry.toolbox.Thresholds`) — 11 fields, all wireable
+## geometry (`core.geometry.toolbox.Thresholds`) — 15 fields, all wireable
 
 Composed live: `default_calibration().geometry is-equal DEFAULT_THRESHOLDS`. Every
 predicate in `toolbox.py` takes `th: Thresholds = DEFAULT_THRESHOLDS`, so passing a
-swept `Thresholds` at the call site wires all 11 with no code change.
+swept `Thresholds` at the call site wires all 15 with no code change.
 
 | Field | Default | Unit | Controls | Evidence / source | How wired | Sens |
 |---|---|---|---|---|---|---|
 | geometry.near_floor | 1.2 | m | Floor of the scale-adaptive `near` radius: `max(near_floor, near_scale·diag)` | Spec-fixed "near" value | function param (`near`, `near_thresh`) | H |
 | geometry.near_scale | 0.6 | — | Slope of `near` radius vs anchor footprint diagonal | Spec-fixed | function param | H |
-| geometry.next_to_gap | 0.75 | m | Max AABB gap counting as adjacency (`next_to`) | Spec-fixed "next_to" | function param | H |
-| geometry.on_vert_tol | 0.15 | m | Vertical tolerance for `on` (a.bottom vs b.top) | Invented (docstring) | function param | M |
-| geometry.on_min_overlap_frac | 0.30 | frac | Min footprint-overlap fraction for `on` | Invented | function param | M |
+| geometry.next_to_gap | 0.75 | m | Max AABB gap for the tight `next_to` (unrouted; `Pred.NEXT_TO`→`near`, DD-A5) | Spec-fixed "next_to" | function param | L |
+| geometry.on_min_overlap_frac | 0.50 | frac | `on` footprint intersection-over-min gate (was 0.30 over-target; H5/T8-C2) | VLA-3D gen [V] IoM>0.5 | function param | M |
+| geometry.on_upper_span_frac | 0.25 | frac | `on` upper z-band starts at `zmin + this·height` (support semantics, H5/T8-C3/D3) | VLA-3D gen (reconciled) | function param | M |
+| geometry.on_top_tol | 0.15 | m | `on` allows `a.bottom` up to this far above b's AABB top | Invented (sweepable) | function param | M |
 | geometry.in_containment_frac | 0.60 | frac | Min footprint fraction inside b for `in_` | Invented | function param | M |
 | geometry.in_vert_slack | 0.10 | m | Z-span slack for `in_` vertical containment | Invented | function param | L |
-| geometry.above_gap_max | 3.0 | m | Cap on above/under vertical gap | Invented (declared; not yet consumed in `above`/`under`) | function param | L |
-| geometry.with_feature_pad | 0.30 | m | "near" pad for possession test (`with_feature`) | Invented | function param | M |
+| geometry.above_lateral_infl | 0.50 | m | `above` anchor-footprint inflation for the lateral-offset gate (replaces overlap, H5/T8-C4/D4) | VLA-3D evidence (reversed) | function param | M |
+| geometry.under_iom_min | 0.50 | frac | `under`/`below` footprint IoM-over-min gate (both branches, DD-A7) | VLA-3D gen [V] IoM>0.5 | function param | M |
+| geometry.under_tuck_tol | 0.15 | m | `under` tuck-under floor tolerance (`a.min_z ≤ b.zmin + this`) + strict-branch slack | VLA-3D `under_thres`=0.01 (sweepable) | function param | M |
+| geometry.with_feature_pad | 0.30 | m | "near" pad for the `with_feature` RELAXATION rung (primary is `on(feature,a)`, DD-A6) | Invented | function param | L |
 | geometry.avoid_inflate | 0.25 | m | Capsule/disc inflation for avoid geometry | Spec-fixed avoid inflation | function param (`avoid_capsule`) | H |
 | geometry.superlative_margin_frac | 0.25 | frac | Early-answer winner-margin gate for superlatives | Invented | function param (carried on `Thresholds`; read by the answer path) | M |
+| geometry.size_sep_gap | 1.20 | ratio | Size resolver: min largest-face-area ratio for a "small"/"big"/"largest" extreme (DD-A12) | VLA-3D gen 1.2× | function param (via `_attrs_match`) | M |
 
 ---
 
@@ -61,7 +65,7 @@ and `PerceptionPipeline(fusion_cfg=...)` both accept it → constructor/param wi
 
 ---
 
-## tracker (`core.perception.tracker.TrackerConfig`) — 1 field, wireable
+## tracker (`core.perception.tracker.TrackerConfig`) — 2 fields, wireable
 
 Composed live: equals `DEFAULT_TRACKER_CONFIG`. `associate(..., cfg=...)` and
 `PerceptionPipeline(tracker_cfg=...)` accept it.
@@ -69,6 +73,7 @@ Composed live: equals `DEFAULT_TRACKER_CONFIG`. `associate(..., cfg=...)` and
 | Field | Default | Unit | Controls | Evidence / source | How wired | Sens |
 |---|---|---|---|---|---|---|
 | tracker.gate | 0.75 | m | Max centroid distance for a cross-frame association match | Invented (docstring says default 0.75) | constructor arg + function param | H |
+| tracker.decay_k | 5 | keyframes | One-frame ghosts (n_obs==1) not re-observed within this many keyframes are pruned; confirmed tracks never decay; 0 disables (redteam H15a) | Invented, conservative | constructor arg | M |
 
 ---
 
@@ -85,7 +90,7 @@ accepts it; `_is_keyframe` reads it off the instance.
 
 ---
 
-## nav (`core.calibration.NavTunables`) — 20 fields
+## nav (`core.calibration.NavTunables`) — 21 fields
 
 New mirror dataclass; **not** composed from an existing config. Mixed wiring: the
 class-level params (`Costmap`, `OccupancyGrid`, `ExplorationPolicy`, `BreadcrumbFollower`,
@@ -99,9 +104,10 @@ are hard module constants.
 | nav.observe_radius_m | 8.0 | m | Lidar footprint radius for the observed mask | `occupancy.OBSERVE_RADIUS_M` | constructor arg (`OccupancyGrid.observe_radius_m`) | M |
 | nav.grow_pad_cells | 8 | cells | Extra ring added when the grid grows | `occupancy.GROW_PAD_CELLS` | module constant — **wiring TODO (Phase 2)** (read directly in `_ensure_bounds`) | L |
 | nav.vehicle_radius_m | 0.4 | m | Obstacle inflation radius | `costmap.VEHICLE_RADIUS_M` | constructor arg (`Costmap.vehicle_radius_m` default = const) | H |
+| nav.overhead_soft_cost_mult | 4.0 | × | Intended A* penalty to cross a SOFT-overhead cell vs FREE (redteam H13). Default overhead is now a SOFT high-cost layer (`Costmap`), NOT a hard block: a false-positive overhead flag makes a route expensive, not unreachable, while a genuinely-blocked under-furniture route (no alternative) stays strongly avoided. The applied per-cell penalty on the A* path is `planner.UNKNOWN_COST_MULT` (the only per-cell cost seam A* reads without a planner change); this value records the intended weight and is the sweep handle once a Phase-2 planner seam lands. Corridor threading still HARDENS overhead (`Costmap.clone`). | `costmap.OVERHEAD_SOFT_COST_MULT` | constructor arg (`Costmap.overhead_soft_cost_mult` default = const) | M |
 | nav.overhead_min | 0.25 | m | Overhead-clearance band lower edge (height above local ground; skip near-ground returns) | `occupancy.OverheadConfig.overhead_min` | dataclass field (`OverheadConfig`, passed to `integrate_scan_overhead`) | H |
 | nav.overhead_max | 1.20 | m | Overhead-clearance band upper edge (skip walls/ceiling above furniture) | `occupancy.OverheadConfig.overhead_max` | dataclass field (`OverheadConfig`) | H |
-| nav.overhead_min_points_per_cell | 3 | points | In-band scan points a cell needs before it flags OVERHEAD (noise reject) | `occupancy.OverheadConfig.min_points_per_cell` | dataclass field (`OverheadConfig`) | M |
+| nav.overhead_min_points_per_cell | 3 | points | In-band scan points a cell needs before it flags OVERHEAD (noise reject). The decimation helper `integrate_scan_overhead_decimated` now scales this DOWN by the applied stride (`ceil(min_points/stride)`, floor 1) so a sparse-but-real overhang edge that passes at full density still passes after decimation (redteam H13 / SYS-F12). | `occupancy.OverheadConfig.min_points_per_cell` | dataclass field (`OverheadConfig`) | M |
 | nav.vehicle_sensor_height | 0.60 | m | Fallback local-ground = `vehicle_z − this` when a cell has no terrain-derived ground z (jingfan: vehicle z ≈ 0.0, floor z ≈ −0.6) | `occupancy.OverheadConfig.vehicle_sensor_height` | dataclass field (`OverheadConfig`) | M |
 | nav.overhead_scan_max_pts | 12000 | points | Per-tick decimation cap for the raw /registered_scan fed to the overhead layer | `occupancy.OVERHEAD_SCAN_MAX_PTS` | module constant (default arg to `integrate_scan_overhead_decimated`) | L |
 | nav.min_cluster_size | 5 | cells | Frontier clusters below this are noise | `frontiers.MIN_CLUSTER_SIZE` | function param (`detect_frontiers`) | M |
@@ -119,6 +125,19 @@ are hard module constants.
 | nav.reach_m | 0.8 | m | Advance to next crumb within this distance | `breadcrumbs.REACH_M` | constructor arg | M |
 | nav.stall_move_m | 0.3 | m | Movement below this over the window ⇒ stalled | `breadcrumbs.STALL_MOVE_M` | constructor arg | M |
 | nav.stall_window_s | 10.0 | s | Stall observation window | `breadcrumbs.STALL_WINDOW_S` | constructor arg | M |
+
+> **Overhead-clearance tunables — single-bag fit; multi-scene validation is an
+> Ubuntu-gate item (redteam H13 / SYS-F12).** The five overhead tunables
+> (`overhead_min`, `overhead_max`, `overhead_min_points_per_cell`,
+> `vehicle_sensor_height`, `overhead_scan_max_pts`) plus the softening weight
+> (`overhead_soft_cost_mult`) are fitted to the single jingfan bag. They are NOT
+> validated on any other scene. Softening the layer to SOFT-cost by default (H13)
+> makes a wrong flag cheap rather than route-killing, which lowers the risk of the
+> single-bag fit — but the band/point-gate values still need validation on ≥2 more
+> scenes' recorded bags at the Ubuntu gate before they are trusted (the hardening
+> backlog lists this as an open Ubuntu-gate item). The exploration-side asymmetry
+> (only IF routes use a Costmap; frontier exploration ignores overhead) is likewise
+> flagged there and deferred.
 
 ---
 

@@ -27,6 +27,7 @@ from core.interfaces import (
     SceneIndex,
     WaypointCmd,
 )
+from core.perception.dimension_priors import clamp_record_marker
 
 MODAL_COUNT: int = 2  # most-common integer answer in the training distribution (architecture §4)
 _UNIT: float = 1.0  # side of the last-resort 1x1x1 marker
@@ -158,15 +159,15 @@ class FloorAnswers:
             return partial.best_marker
         # 2. best-scored candidate handed down by the ranking head
         if partial.best_candidate is not None:
-            return partial.best_candidate.to_marker()
+            return clamp_record_marker(partial.best_candidate)
         # 3. largest instance matching the target noun
         matches = _instances_for_noun(scene, noun)
         if matches:
-            return max(matches, key=_volume).to_marker()
+            return clamp_record_marker(max(matches, key=_volume))
         # 4. any instance at all (largest, for a defensible box)
         allinst = _all_instances(scene)
         if allinst:
-            return max(allinst, key=_volume).to_marker()
+            return clamp_record_marker(max(allinst, key=_volume))
         # 5. a 1x1x1 box at the most-observed cluster centroid (else origin)
         return self._unit_marker_at_most_observed(allinst)
 

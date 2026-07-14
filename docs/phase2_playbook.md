@@ -86,7 +86,9 @@ Priorities from the expected-points model: instruction-following timing/corridor
 Marker IoU tightness second, counting thresholds last.
 
 **Submit the MVS by Aug 3** (multiple submissions allowed, highest kept): push image → fork with
-`ai_module/` → Google Form. Then ratchet until the Aug 13–15 freeze.
+`ai_module/` → Google Form. Then ratchet until the Aug 13–15 freeze. **Pre-submit checklist:
+`instances_tracked > 0` on a live scene (Gate 4 hard gate — no empty-stub index), `VLA_DETECTOR`
+set to a real detector, and no `SUBMISSION-BLOCKER` lines in the boot log.**
 
 ## If something is on fire
 

@@ -122,23 +122,28 @@ def test_happy_path_visits_states_in_order():
 
 @pytest.mark.parametrize("stuck", [State.PARSING, State.ORIENT, State.EXPLORE_EXECUTE, State.VERIFY])
 @pytest.mark.parametrize("qtype", list(QType))
-def test_watchdog_fires_at_570_in_every_state(stuck, qtype):
-    """Freeze the FSM in `stuck`, jump the clock past 570 s -> exactly one floor answer, DONE."""
+def test_watchdog_fires_at_floor_in_every_state(stuck, qtype):
+    """Freeze the FSM in `stuck`, jump the clock past the floor -> one floor answer, DONE.
+
+    Boundaries are read from the controller's effective watchdog gate (pulled in to hedge the
+    evaluator-clock skew, SYS-F6) rather than hard-coded, so the test tracks the real default.
+    """
     clk = FakeClock(0.0)
     world = WorldView(scene=FakeScene([make_instance(1, "chair")]), partial=PartialResults(first_anchor_pt=(1.0, 1.0, 0.0)))
     ctrl, _ = build_controller(qtype=qtype, world=world)
     io = FakeRobotIO(clk, q_of(qtype))
+    floor_s = ctrl._watchdog_floor_s
 
     # Advance normally but pin the state by monkeypatching the handler to a no-op that
     # also parks the state, EXCEPT we simply drive a couple ticks then force the state.
     ctrl.tick(io)  # intake -> PARSING
     ctrl.state = stuck  # jam the FSM in the target state
     # keep it there right up to the floor
-    clk.set(569.0)
+    clk.set(floor_s - 1.0)
     ctrl.tick(io)
     assert io.publish_count == 0  # not yet
     # now cross the watchdog floor
-    clk.set(571.0)
+    clk.set(floor_s + 1.0)
     ctrl.tick(io)
 
     assert ctrl.state is State.DONE
@@ -168,17 +173,18 @@ def test_watchdog_publishes_only_once_even_if_ticked_again():
 # --------------------------------------------------------------------------- forced assembly
 
 
-def test_forced_assembly_forces_verify_at_510():
+def test_forced_assembly_forces_verify_at_gate():
     clk = FakeClock(0.0)
     ctrl, calls = build_controller(qtype=QType.OBJECT_REFERENCE, world=WorldView(scene=FakeScene([make_instance(1, "chair")])))
     io = FakeRobotIO(clk, q_of(QType.OBJECT_REFERENCE))
+    fa_s, floor_s = ctrl._forced_assembly_s, ctrl._watchdog_floor_s
     ctrl.tick(io)  # -> PARSING
-    ctrl.state = State.EXPLORE_EXECUTE  # pretend still exploring at T-90
-    clk.set(511.0)
+    ctrl.state = State.EXPLORE_EXECUTE  # pretend still exploring past forced-assembly
+    clk.set(fa_s + 1.0)
     ctrl.tick(io)  # forced_assembly should push toward VERIFY
     assert ctrl.state in (State.VERIFY, State.ANSWER, State.DONE)
-    # ends with a published answer once we keep ticking (still before floor)
-    clk.set(515.0)
+    # ends with a published answer once we keep ticking (still before the watchdog floor)
+    clk.set(0.5 * (fa_s + floor_s))
     for _ in range(4):
         ctrl.tick(io)
     assert io.publish_count == 1
@@ -431,6 +437,77 @@ def test_happy_path_verify_answer_unchanged():
     assert io.published_markers == [ret]
 
 
+# --------------------------------------------------------------------------- qtype correction
+# The intake seed is a regex guess; a successful parse carrying a different QType must correct
+# controller.qtype AND budget.qtype so floor selection + budget gates use the authoritative type.
+
+
+def test_qtype_corrected_from_plan_overrides_intake_seed():
+    """A motion-verbed OR question seeds IF at intake; the OR plan must correct it."""
+    from core.fsm.controller import _infer_qtype
+
+    clk = FakeClock(0.0)
+    # "walk past" makes _infer_qtype seed INSTRUCTION_FOLLOWING...
+    q = Question(text="the picture you walk past near the door", t_received=0.0)
+    assert _infer_qtype(q) is QType.INSTRUCTION_FOLLOWING  # the seed genuinely misfires
+    # ...but the parse produces an object-reference plan.
+    or_plan = make_plan(QType.OBJECT_REFERENCE, "picture")
+    ctrl, _ = build_controller(
+        qtype=QType.OBJECT_REFERENCE,  # governs stub verify/floor typing
+        world=WorldView(scene=FakeScene([make_instance(1, "picture")])),
+        parse_plan=or_plan,
+    )
+    io = FakeRobotIO(clk, q)
+    ctrl.tick(io)  # intake seeds IF, then parse runs in the same tick and corrects to OR
+    assert ctrl.qtype is QType.OBJECT_REFERENCE
+    assert ctrl.budget.qtype is QType.OBJECT_REFERENCE
+    events = [r.event for r in ctrl.flight_recording()]
+    assert "qtype_corrected" in events
+    # the recorded correction names both the seed and the corrected type
+    detail = next(r.detail for r in ctrl.flight_recording() if r.event == "qtype_corrected")
+    assert "instruction_following" in detail and "object_reference" in detail
+
+
+def test_qtype_not_logged_when_plan_matches_seed():
+    """When the parse agrees with the seed, no correction event is emitted."""
+    clk = FakeClock(0.0)
+    plan = make_plan(QType.NUMERICAL, "chair")
+    ctrl, _ = build_controller(
+        qtype=QType.NUMERICAL,
+        world=WorldView(scene=FakeScene([])),
+        parse_plan=plan,
+    )
+    io = FakeRobotIO(clk, q_of(QType.NUMERICAL))
+    ctrl.tick(io)
+    ctrl.tick(io)
+    assert ctrl.qtype is QType.NUMERICAL
+    events = [r.event for r in ctrl.flight_recording()]
+    assert "qtype_corrected" not in events
+
+
+def test_corrected_qtype_drives_floor_selection():
+    """After correction the watchdog floor publishes the CORRECTED type's answer, not the seed's.
+
+    Seed IF would floor a WaypointCmd on the wrong topic; the OR correction must floor a Marker.
+    """
+    clk = FakeClock(0.0)
+    q = Question(text="the picture you walk past", t_received=0.0)
+    or_plan = make_plan(QType.OBJECT_REFERENCE, "picture")
+    world = WorldView(
+        scene=FakeScene([make_instance(1, "picture", centroid=(2, 2, 2))]),
+        partial=PartialResults(first_anchor_pt=(2.0, 2.0, 2.0)),
+    )
+    ctrl, _ = build_controller(qtype=QType.OBJECT_REFERENCE, world=world, parse_plan=or_plan)
+    io = FakeRobotIO(clk, q)
+    ctrl.tick(io)  # intake seeds IF, parse corrects to OR in the same tick
+    assert ctrl.qtype is QType.OBJECT_REFERENCE
+    clk.set(ctrl._watchdog_floor_s + 1.0)  # cross the effective watchdog floor
+    ctrl.tick(io)
+    assert ctrl.state is State.DONE
+    assert len(io.published_markers) == 1  # OR floor, not an IF waypoint
+    assert io.publish_count == 1
+
+
 def test_parse_stub_invoked_and_plan_stored():
     clk = FakeClock(0.0)
     plan = make_plan(QType.NUMERICAL, "chair")
@@ -440,3 +517,128 @@ def test_parse_stub_invoked_and_plan_stored():
     ctrl.tick(io)  # parse runs
     assert calls["parse"] >= 1
     assert ctrl.plan is plan
+
+
+# --------------------------------------------------------------------------- IF-F4:
+# for INSTRUCTION_FOLLOWING the drive IS the answer — ANSWER inserts a DRIVE_OUT state that
+# keeps ticking the answer heads until the head reports drive_complete (or the watchdog
+# floor fires). NUMERICAL/OR are unaffected: they go ANSWER -> DONE. These stub tests pin
+# the FSM contract directly (fast; no A*).
+
+
+def _drive_out_controller(*, complete_after: int, qtype=QType.INSTRUCTION_FOLLOWING):
+    """Controller whose stub probe flips ``world.drive_complete`` True after
+    ``complete_after`` DRIVE_OUT explore ticks, and whose verify returns a legal answer.
+
+    Returns (ctrl, io, calls) where calls tracks explore/verify invocations. The explore
+    counter proves the heads keep being ticked during DRIVE_OUT.
+    """
+    clk = FakeClock(0.0)
+    calls = {"explore": 0, "verify": 0}
+    scene = FakeScene([make_instance(1, "chair")])
+    verify_answer = (
+        WaypointCmd(5.0, 5.0)
+        if qtype is QType.INSTRUCTION_FOLLOWING
+        else (
+            IntAnswer(1)
+            if qtype is QType.NUMERICAL
+            else MarkerBox(1, 1, 1, 1, 1, 1, label="x")
+        )
+    )
+    state = {"drive_out_ticks": 0}
+    the_world = WorldView(scene=scene)
+
+    def parse(q):
+        return make_plan(qtype)
+
+    def explore(io, plan, w):
+        calls["explore"] += 1
+        # Only count explore ticks that happen while the FSM is in DRIVE_OUT.
+        if ctrl.state is State.DRIVE_OUT:
+            state["drive_out_ticks"] += 1
+            if state["drive_out_ticks"] >= complete_after:
+                the_world.drive_complete = True
+
+    def verify(io, plan, w):
+        calls["verify"] += 1
+        return verify_answer
+
+    def probe(io):
+        return the_world
+
+    ctrl = QuestionController(parse=parse, explore=explore, verify=verify, probe=probe)
+    io = FakeRobotIO(clk, q_of(qtype))
+    return ctrl, io, clk, calls, state
+
+
+def test_if_answer_enters_drive_out_and_keeps_ticking_until_complete():
+    ctrl, io, clk, calls, state = _drive_out_controller(complete_after=4)
+    # Drive into ANSWER via the explore budget, then observe DRIVE_OUT.
+    ctrl.tick(io)  # intake -> PARSING
+    ctrl.state = State.EXPLORE_EXECUTE
+    clk.set(300.0)  # past the IF explore budget (270 s)
+    saw_drive_out = False
+    for _ in range(12):
+        ctrl.tick(io)
+        if ctrl.state is State.DRIVE_OUT:
+            saw_drive_out = True
+        clk.advance(0.5)
+        if ctrl.state is State.DONE:
+            break
+    assert saw_drive_out, "IF ANSWER did not enter DRIVE_OUT"
+    assert ctrl.state is State.DONE
+    # exactly one waypoint answer, published once at ANSWER (not re-published in DRIVE_OUT).
+    assert io.publish_count == 1
+    assert len(io.published_waypoints) == 1
+    # the heads WERE ticked during DRIVE_OUT (the whole point of the fix).
+    assert state["drive_out_ticks"] >= 4
+    # transitions recorded: answer->drive_out then drive_out->done.
+    trail = "|".join(r.detail for r in ctrl.flight_recording() if r.event == "transition")
+    assert "answer->drive_out" in trail
+    assert "drive_out->done" in trail
+    assert trail.index("answer->drive_out") < trail.index("drive_out->done")
+
+
+@pytest.mark.parametrize("qtype", [QType.NUMERICAL, QType.OBJECT_REFERENCE])
+def test_non_if_answer_goes_straight_to_done_no_drive_out(qtype):
+    """NUMERICAL/OR must NOT enter DRIVE_OUT — they answer and finish exactly as before."""
+    ctrl, io, clk, calls, state = _drive_out_controller(complete_after=1, qtype=qtype)
+    ctrl.tick(io)  # intake -> PARSING
+    ctrl.state = State.VERIFY
+    clk.set(300.0)
+    saw_drive_out = False
+    for _ in range(8):
+        ctrl.tick(io)
+        if ctrl.state is State.DRIVE_OUT:
+            saw_drive_out = True
+        clk.advance(0.5)
+        if ctrl.state is State.DONE:
+            break
+    assert not saw_drive_out, f"{qtype} wrongly entered DRIVE_OUT"
+    assert ctrl.state is State.DONE
+    assert io.publish_count == 1
+    trail = "|".join(r.detail for r in ctrl.flight_recording() if r.event == "transition")
+    assert "drive_out" not in trail
+    assert "answer->done" in trail
+
+
+def test_if_drive_out_watchdog_floor_terminates_a_hung_drive():
+    """If the drive never completes (drive_complete stays False), the watchdog floor still
+    fires from DRIVE_OUT — the continue-drive state cannot shadow or delay the overlay."""
+    # complete_after huge => drive_complete never flips in the tick budget below.
+    ctrl, io, clk, calls, state = _drive_out_controller(complete_after=10_000)
+    ctrl.tick(io)  # intake -> PARSING
+    ctrl.state = State.EXPLORE_EXECUTE
+    clk.set(300.0)
+    # step into DRIVE_OUT
+    for _ in range(6):
+        ctrl.tick(io)
+        clk.advance(0.5)
+        if ctrl.state is State.DRIVE_OUT:
+            break
+    assert ctrl.state is State.DRIVE_OUT
+    # jump past the watchdog floor: overlay must force DONE regardless of drive_complete.
+    clk.set(ctrl._watchdog_floor_s + 1.0)
+    ctrl.tick(io)
+    assert ctrl.state is State.DONE
+    assert io.publish_count == 1  # the ANSWER waypoint; watchdog publish is a latched no-op

@@ -56,6 +56,40 @@ def test_present_with_out_of_range_tile_treated_absent():
     assert out.action == "absent"
 
 
+def test_out_of_tile_bbox_rejected_or_f8():
+    """OR-F8: a bbox_hint beyond the tile dimensions fails validation -> absent (no fuse).
+
+    The attack: the VLM pattern-matches and returns x2=700 for a 640px tile; the cast ray
+    would land on a wall. With tile dims supplied the box is rejected and we fall to the
+    honest-miss ladder rather than fusing a phantom instance on empty space.
+    """
+    stub = text_stub('{"present": true, "tile": 2, "bbox_hint": [630,10,700,90], "confidence": 0.9}')
+    run = build_miss_recovery(stub, make_ledger(), FakeClock(), cfg={"tile_w": 640, "tile_h": 480})
+    out = run("hookah", "hookah", _tiles())
+    assert out.action == "absent"
+
+
+def test_in_tile_bbox_accepted_when_dims_supplied():
+    stub = text_stub('{"present": true, "tile": 2, "bbox_hint": [100,10,200,90], "confidence": 0.9}')
+    run = build_miss_recovery(stub, make_ledger(), FakeClock(), cfg={"tile_w": 640, "tile_h": 480})
+    out = run("hookah", "hookah", _tiles())
+    assert out.action == "provisional"
+    assert out.bbox_hint == [100.0, 10.0, 200.0, 90.0]
+
+
+def test_misordered_bbox_rejected_without_dims_or_f8():
+    """OR-F8: a misordered box (x1>=x2) is rejected even without tile dims."""
+    out = _run(text_stub('{"present": true, "tile": 0, "bbox_hint": [50,50,10,10], "confidence": 0.9}'))
+    assert out.action == "absent"
+
+
+def test_low_confidence_provisional_floored_to_absent_or_f8():
+    """OR-F8: a present hit below the 0.5 confidence floor is not worth a detour -> absent."""
+    out = _run(text_stub('{"present": true, "tile": 0, "bbox_hint": [1,1,3,3], "confidence": 0.3}'))
+    assert out.action == "absent"
+    assert out.confidence == 0.3
+
+
 def test_malformed_then_repair_present():
     stub = text_stub(
         "present yes",

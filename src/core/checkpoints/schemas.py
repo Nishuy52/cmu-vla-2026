@@ -104,7 +104,15 @@ def _opt_str(v: Any) -> bool:
 
 
 def validate_verification(d: dict[str, Any]) -> list[str]:
-    """CP4: {verdict: confirm|runner_up|neither, missed_constraint: str|null, reason: str}."""
+    """CP4: {verdict: confirm|runner_up|neither, missed_constraint: str|null, reason: str}.
+
+    ``missed_constraint`` (OR-F5) is expected to be a parseable ``"<pred_word> <anchor
+    noun>"`` phrase copied from the question (e.g. ``"closest_to folding screen"``) so the
+    head can synthesize a real clause from it. It is validated only as ``str|null`` here —
+    the re-resolve hook parses the pred word through the regex tier's relation tokens and
+    falls back to keep-winner when the string does not parse, so a free-form value degrades
+    gracefully rather than being rejected.
+    """
     errs: list[str] = []
     verdict = d.get("verdict")
     if verdict not in ("confirm", "runner_up", "neither"):
@@ -116,8 +124,19 @@ def validate_verification(d: dict[str, Any]) -> list[str]:
     return errs
 
 
-def validate_miss_recovery(d: dict[str, Any]) -> list[str]:
-    """CP2: {present: bool, tile: 0-3|null, bbox_hint: [x1,y1,x2,y2]|null, confidence: 0-1}."""
+def validate_miss_recovery(
+    d: dict[str, Any],
+    *,
+    tile_w: int | None = None,
+    tile_h: int | None = None,
+) -> list[str]:
+    """CP2: {present: bool, tile: 0-3|null, bbox_hint: [x1,y1,x2,y2]|null, confidence: 0-1}.
+
+    OR-F8 bbox hardening: when ``tile_w``/``tile_h`` are supplied, a non-null ``bbox_hint``
+    must be ordered (x1<x2, y1<y2), non-negative, and lie within the tile
+    (``0 <= x <= tile_w``, ``0 <= y <= tile_h``). Without dims we still reject a misordered
+    or negative box (bounds-free ordering check), so a garbage box never fuses.
+    """
     errs: list[str] = []
     if not _is_bool(d.get("present")):
         errs.append("present must be bool")
@@ -128,6 +147,17 @@ def validate_miss_recovery(d: dict[str, Any]) -> list[str]:
     if bbox is not None:
         if not (isinstance(bbox, list) and len(bbox) == 4 and all(_is_num(x) for x in bbox)):
             errs.append("bbox_hint must be [x1,y1,x2,y2] numbers or null")
+        else:
+            x1, y1, x2, y2 = (float(v) for v in bbox)
+            if not (x1 < x2 and y1 < y2):
+                errs.append("bbox_hint must satisfy x1<x2 and y1<y2")
+            elif min(x1, y1, x2, y2) < 0:
+                errs.append("bbox_hint coordinates must be non-negative")
+            elif tile_w is not None and tile_h is not None:
+                if x2 > tile_w or y2 > tile_h:
+                    errs.append(
+                        f"bbox_hint must lie within the {tile_w}x{tile_h} tile"
+                    )
     if not _is_conf(d.get("confidence")):
         errs.append("confidence must be a number in [0,1]")
     return errs
@@ -146,11 +176,16 @@ def validate_anchor_confirm(d: dict[str, Any]) -> list[str]:
 
 
 def validate_frontier_select(d: dict[str, Any], *, n_choices: int = 5) -> list[str]:
-    """CP5: {choice: 1-n, reason: str}."""
+    """CP5: {choice: 0-n, reason: str}.
+
+    OR-F10 abstain: ``choice == 0`` means "no direction clearly helps" and routes to the
+    geometric fallback. Accepting 0 as valid (rather than out-of-range) lets a model that
+    honestly abstains pass validation instead of being coerced into picking a random disc.
+    """
     errs: list[str] = []
     choice = d.get("choice")
-    if not (isinstance(choice, int) and not isinstance(choice, bool) and 1 <= choice <= n_choices):
-        errs.append(f"choice must be int 1-{n_choices}, got {choice!r}")
+    if not (isinstance(choice, int) and not isinstance(choice, bool) and 0 <= choice <= n_choices):
+        errs.append(f"choice must be int 0-{n_choices}, got {choice!r}")
     if not isinstance(d.get("reason", ""), str):
         errs.append("reason must be str")
     return errs
