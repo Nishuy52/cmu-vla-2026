@@ -44,12 +44,19 @@ autonomously, do not block on questions):
       gradient (held-reason was flatness); ceiling claim must become a
       committed reproducible artifact before calibration ADOPTION leans
       on it; report corrected before merge.
-- [ ] Executor follow-up (running): fix report attribution + disclose
-      hotel_room_1 near-leg regression (0.333->0.0, `_near_thresh`
-      shrink — VIA_NEAR watch-item), correct stall-guard claim, emit
-      committed `gt_leg_ceiling.json` artifact, commit postT11 reports
-- [ ] Full gate: previous detached run exited unconfirmed; run ONCE
-      detached after the executor follow-up commits, before/with sweep
+- [x] Executor follow-up DONE (`9e29366` perf fix + ceiling tool,
+      `ba1abb0` report corrections): movers re-derived (2 gains,
+      1 disclosed regression — mechanism corrected: GOTO
+      reachable-snap past the 0.8 m band, NOT `_near_thresh`;
+      watch-item), stall-guard claim fixed, **30/72 ceiling REPRODUCED
+      via committed `gt_leg_ceiling.py` + artifacts (verifier C6
+      resolved)**. BONUS: caught+fixed a perf regression the fast tier
+      missed — original full gate had 5 failures (per-leg-per-tick
+      BFS re-flood, 242 s test); memoised `reachable_mask`; also fixed
+      pre-existing `our_n_waypoints` wave failure. Fast tier 1035 green.
+- [ ] Full gate: run ONCE detached AFTER endogeneity fix lands
+      (executor #2 touches cvsweep.py); must confirm the 5 formerly
+      failing tests + no new failures. Then sweep launch.
 - [x] Fable critics done + committed: `critique/architecture_strategy.md`
       (perception unmeasured = CRITICAL; questions.pdf answer keys =
       1 human hour; Gate-0 unchecked; 10min-per-scene-vs-question
