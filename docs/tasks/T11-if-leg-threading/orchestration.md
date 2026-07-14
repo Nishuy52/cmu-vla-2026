@@ -50,12 +50,27 @@ autonomously, do not block on questions):
       committed `gt_leg_ceiling.json` artifact, commit postT11 reports
 - [ ] Full gate: previous detached run exited unconfirmed; run ONCE
       detached after the executor follow-up commits, before/with sweep
+- [x] Fable critics done + committed: `critique/architecture_strategy.md`
+      (perception unmeasured = CRITICAL; questions.pdf answer keys =
+      1 human hour; Gate-0 unchecked; 10min-per-scene-vs-question
+      ambiguity) and `critique/methodology_process.md` (CRITICAL:
+      cvsweep IF scorer endogeneity — VERIFIED against cvsweep.py by
+      orchestrator; thin gradient; adoption gate; machine-generated
+      report tooling; provenance hole)
+- [ ] Endogeneity fix (executor #2 running, disjoint files): freeze
+      rubric geometry/alignment at defaults in cvsweep.py; swept
+      thresholds reach only the driven pipeline. SWEEP LAUNCH IS GATED
+      ON THIS + the full gate.
 - [ ] CV sweep launched detached (`docs/cvsweep_rerun_brief.md`;
-      objective already re-pointed: rubric x6 / strict x1 / IoU x2,
-      disk-resume cache). Output: `reports/cvsweep_<date>/`
-- [ ] Fable critique agents spawned + adjudicated into a written record
-      (put outputs under `docs/tasks/T11-if-leg-threading/critique/` or
-      `docs/redteam/` follow-on — adjudicator's choice, record where)
+      objective rubric x6 / strict x1 / IoU x2, disk-resume cache).
+      Output: `reports/cvsweep_<date>/`. ADOPTION gate (from critique,
+      adopted by orchestrator): modal consensus AND whole-config eval
+      beats baseline by >1 six-pt-question-equivalent AND no per-type
+      regression AND identical instrument footprint; IF-driven keys
+      provisional-until-real-sim.
+- [ ] Adjudication of both critiques -> `critique/adjudication.md`
+      (orchestrator writes; inputs are the committed drafts +
+      verification.md)
 - [ ] LOG one-liner(s), ledger row in `docs/redteam/hardening_backlog.md`
       (threading item + sweep HELD status), commit, push, PR to main
 
