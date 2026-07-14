@@ -12,6 +12,18 @@ def test_singularize():
     assert vocab.singularize("glass") == "glass"  # no -ss stripping
 
 
+def test_singularize_e_final_stem_keeps_e():
+    # "-es" plural of an e-final stem must drop only the "s" (T11 sig-3: studio's
+    # "vases" leg wrongly singularised to "vas" -> no match -> route never grounded).
+    assert vocab.singularize("vases") == "vase"
+    assert vocab.singularize("houses") == "house"
+    assert vocab.singularize("nurses") == "nurse"
+    # genuine sibilant-stem "-es" plurals still strip the full "es".
+    assert vocab.singularize("foxes") == "fox"
+    assert vocab.singularize("dishes") == "dish"
+    assert vocab.singularize("watches") == "watch"
+
+
 def test_refridgerator_typo_canonicalises():
     assert vocab.canonical_word("refridgerator") == "refrigerator"
     assert vocab.canonical_word("fridge") == "refrigerator"

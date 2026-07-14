@@ -75,6 +75,38 @@ def test_object_footprint_raises_intensity():
     assert np.all(under[:, 3] >= 0.7 - 1e-6)
 
 
+def test_elevated_object_is_not_a_floor_obstacle():
+    # A tabletop object (base above the terrain slab, e.g. a plant ON a cabinet) must
+    # NOT stamp its footprint as a floor obstacle: the terrain stack filters overhangs
+    # out, so the floor under/beside it reads FREE (T11 sig-1/2 root cause — every AABB
+    # was stamped floor-to-top, sealing floor near most leg anchors).
+    s = SyntheticScene(0)
+    obj = s.place_box("potted plant", 2.5, 2.5, sx=0.3, sy=0.3, sz=0.2, cz=0.83)
+    patch = s.terrain_patch()
+    under = patch.points[
+        (np.abs(patch.points[:, 0] - obj.cx) < 0.05)
+        & (np.abs(patch.points[:, 1] - obj.cy) < 0.05)
+    ]
+    assert len(under) >= 1
+    assert np.all(under[:, 3] == 0.0)  # free floor under the overhang
+    # its AABB still carries the true base/top so resolvers + overhead layer see it.
+    assert np.isclose(obj.aabb_min[2], 0.83)
+    assert np.isclose(obj.aabb_max[2], 0.83 + 0.2)
+
+
+def test_floor_mounted_object_still_blocks():
+    # A floor-mounted object (base below the slab) stays a hard floor obstacle.
+    s = SyntheticScene(0)
+    obj = s.place_box("cabinet", 2.5, 2.5, sx=0.6, sy=0.6, sz=0.8, cz=0.0)
+    patch = s.terrain_patch()
+    under = patch.points[
+        (np.abs(patch.points[:, 0] - obj.cx) < 0.05)
+        & (np.abs(patch.points[:, 1] - obj.cy) < 0.05)
+    ]
+    assert len(under) >= 1
+    assert np.all(under[:, 3] > TerrainPatch.FREE_MAX)
+
+
 def test_walls_are_obstacles():
     s = SyntheticScene(0)
     patch = s.terrain_patch()
