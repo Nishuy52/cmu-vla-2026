@@ -407,3 +407,20 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
   **If this session died mid-pipeline: resume from
   `docs/tasks/T11-if-leg-threading/orchestration.md`** (queue: executor
   fix -> verifier -> CV sweep -> Fable critique -> commit/push/PR).
+
+## 2026-07-15 (session 13 close) - task milestones
+
+- Finished task: IF intermediate-leg threading fix (T11) - rubric
+  0.061->0.100, toplines held, verifier-hardened record; full detail at
+  `docs/tasks/T11-if-leg-threading/` (executor_report, verification,
+  gt_leg_ceiling artifact).
+- Frontier critique of approach + architecture adjudicated -
+  `docs/tasks/T11-if-leg-threading/critique/adjudication.md` (binding
+  sweep-adoption gate; clock semantics resolved per-question from
+  upstream README; cvsweep instrument-endogeneity fixed pre-launch;
+  user decisions pending: answers.json transcription, Gate 0,
+  local-VLM tier posture).
+- CV sweep RUNNING since 15 Jul -> `reports/cvsweep_2026-07-15/`
+  (disk-resume; BelowNormal priority; adoption gated per adjudication).
+  Full gate 1090 passed / 5 skipped. Stale 11-Jul sweep artifacts
+  deleted per adjudication meth-F10.

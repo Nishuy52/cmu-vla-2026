@@ -62,7 +62,7 @@ at object centroids may be unreachable within 0.8 m for large objects).
 - [x] Battery rerun + report (reports/gt_battery_postT11_2026-07-14/)
 - [x] Verifier pass (REFUTED narrowly — see verification.md; corrections below)
 - [x] Post-verification corrections + perf/gate fix
-- [ ] LOG one-liner, commit, PR
+- [x] LOG one-liner, commit, PR
 
 ## Notes
 

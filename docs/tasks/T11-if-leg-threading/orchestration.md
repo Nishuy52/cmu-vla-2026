@@ -75,8 +75,9 @@ autonomously, do not block on questions):
       verdicts; clock semantics resolved per-question from upstream;
       user decisions pending: local-VLM tier posture, answers.json
       transcription, Gate 0)
-- [ ] Full gate (task b1qg4a1bd): running, 98%+, zero failures so far;
-      must confirm the 5 formerly-failing tests
+- [x] Full gate GREEN: **1090 passed, 5 skipped** in 9:25 — the 5
+      formerly-failing tests confirmed fixed, both executors' changes
+      covered together
 - [ ] **CV SWEEP RUNNING** since 2026-07-15 (launched by orchestrator;
       task bciag7e9z + liveness watchdog bjlsyz4wb):
       `python -m core.runner.cvsweep --groundtruth ..\data\vla3d\Unity
@@ -87,8 +88,22 @@ autonomously, do not block on questions):
       AND no per-type regression AND identical instrument footprint AND
       per-key ablation >=2 questions; IF-driven keys
       provisional-until-real-sim.
-- [ ] LOG one-liner(s), ledger row in `docs/redteam/hardening_backlog.md`
-      (threading item + sweep HELD status), commit, push, PR to main
+- [x] LOG one-liners, ledger rows updated (threading LANDED, sweep
+      RUNNING+adoption-gated), stale 11-Jul sweep artifacts deleted
+      (meth-F10), commit, push, PR opened.
+
+## Post-session state (2026-07-15)
+
+T11 pipeline COMPLETE except the sweep itself, which runs detached at
+BelowNormal priority with a liveness watchdog. When it finishes:
+read `reports/cvsweep_2026-07-15/{report.md,results.json,
+recommended_calibration.json}` and apply the ADOPTION GATE above —
+do not adopt wholesale. Open user decisions: answers.json
+transcription (arch-F3), Gate 0 execution (arch-F7), local-VLM tier
+posture (arch-F5, recommendation in adjudication.md). Next agent work
+queue (adjudicated): battery_diff tool + provenance stamps, leg-count
+census, --no-spawn-hint battery run, 3-unaligned-scenes manual fit,
+topline honesty edits, cluster detector benchmarking.
 
 ## Resume point (update on every stage transition)
 
