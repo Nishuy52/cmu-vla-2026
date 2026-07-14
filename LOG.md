@@ -397,3 +397,13 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 ---
 
 *(Merge note, session 11: PR #6's bridged CP2 test variant was superseded by this branch's version, which was written and verified against the integrated H15b head; PR #7's wiring-summary line fix is applied in this merge commit.)*
+
+---
+
+## 2026-07-14 (session 13) - task milestone
+
+- Started task: IF intermediate-leg threading fix (T11) - record at
+  `docs/tasks/T11-if-leg-threading/`; branch `fix/if-leg-threading`.
+  **If this session died mid-pipeline: resume from
+  `docs/tasks/T11-if-leg-threading/orchestration.md`** (queue: executor
+  fix -> verifier -> CV sweep -> Fable critique -> commit/push/PR).
