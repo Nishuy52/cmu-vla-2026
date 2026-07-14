@@ -60,7 +60,8 @@ at object centroids may be unreachable within 0.8 m for large objects).
 - [x] Diagnosis (executor) — see notes + executor_report.md
 - [x] Fix + tests (executor)
 - [x] Battery rerun + report (reports/gt_battery_postT11_2026-07-14/)
-- [ ] Verifier pass (final full gate delegated to orchestrator/verifier)
+- [x] Verifier pass (REFUTED narrowly — see verification.md; corrections below)
+- [x] Post-verification corrections + perf/gate fix
 - [ ] LOG one-liner, commit, PR
 
 ## Notes
@@ -170,3 +171,39 @@ STILL HARNESS-BOUND (not fixed — mirror fidelity, needs real walls/terrain):
   the mirror; no planner can cross them.
 - Many GOTO/near legs whose anchor is sealed by neighbouring furniture AABBs
   (livingroom_4 chair reachable by the GT path but boxed in our mirror).
+
+### 2026-07-14 — Post-verification corrections (verifier REFUTED narrowly)
+
+Verifier `verification.md` confirmed C2,C3,C4,C5-safety,C7,C8 and REFUTED
+three record claims. Corrections landed:
+
+1. **Per-question movers fixed.** The report's "office_2 q4 0.00→0.50 / q5
+   0.00→0.33" were fabricated (no such rows). Re-derived from the two report
+   JSONs — the three IF rows that actually changed:
+   - hotel_room_1 "Go to the bedside table closest to the window…" 0.000→0.500
+     (legs 0/2→1/2, GAIN)
+   - office_2 "First, go to the trash can near the cabinet…" 0.000→0.667
+     (legs 0/3→2/3, GAIN)
+   - hotel_room_1 "First, go near the bedside table closest to the bench…"
+     ordered-leg 0.333→0.000 (legs 1/3→0/3, PER-QUESTION REGRESSION) — now
+     disclosed. Mechanism: this leg is GOTO ("go near X" parses GOTO, not
+     VIA_NEAR — verified), so the `_goto_point` reachable-projection moved the
+     goal to a farther reachable cell past the scorer's 0.8 m centroid band;
+     NOT the `_near_thresh` shrink. Watch-item for pocketed GOTO/near legs.
+2. **Stall-guard claim corrected.** It catches TRANSLATIONAL wedges only; a
+   moving-but-never-arriving follower still pads to the watchdog — postT11
+   still shows poses=4002/4001 rows. No score impact. Report reworded.
+3. **30/72 ceiling now reproducible.** New `core/runner/gt_leg_ceiling.py`
+   emits per-question leg goals + GT-reference min distances;
+   `reports/gt_battery_postT11_2026-07-14/gt_leg_ceiling.{json,md}` committed
+   with the regenerate command + data root (git-ignored `data/vla3d/Unity`).
+   Re-run confirmed **30/72** (0.4167) — original number stands.
+
+Also found + fixed a REGRESSION the fast tier missed (all 3 refuted items were
+report-only; this one is code): the original `e7ce1bb` reachable-goal
+projection re-flooded the whole grid per leg per tick — the first full
+`-n auto` gate FAILED 5 tests (perf: 242 s vs 30 s wall budget; + one
+pre-existing `our_n_waypoints` gap). Fixed via `Costmap.reachable_mask`
+(memoised per start cell) + a `Costmap.blocked` bound-check for the growable
+grid + setting `our_n_waypoints` in the IF path. All 5 formerly-failing tests
+pass; fast tier 1035 passed.
