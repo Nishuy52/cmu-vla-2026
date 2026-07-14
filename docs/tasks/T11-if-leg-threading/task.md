@@ -57,10 +57,10 @@ at object centroids may be unreachable within 0.8 m for large objects).
 
 ## Todo
 
-- [ ] Diagnosis (executor)
-- [ ] Fix + tests (executor)
-- [ ] Battery rerun + report
-- [ ] Verifier pass
+- [x] Diagnosis (executor) — see notes + executor_report.md
+- [x] Fix + tests (executor)
+- [x] Battery rerun + report (reports/gt_battery_postT11_2026-07-14/)
+- [ ] Verifier pass (final full gate delegated to orchestrator/verifier)
 - [ ] LOG one-liner, commit, PR
 
 ## Notes
