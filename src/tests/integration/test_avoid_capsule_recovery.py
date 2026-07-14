@@ -19,6 +19,7 @@ published (never silence).
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from core.fsm.controller import QuestionController, State
 from core.geometry.toolbox import avoid_capsule, capsule_violated
@@ -29,13 +30,25 @@ from core.mocks.synthetic_scene import Room, SyntheticScene
 from core.perception.scene_index import BasicSceneIndex
 from core.plan_schema import Anchor, AvoidSpec
 
+from ._scaled import BUDGET_SCALE, install_scaled_budget
+
+# Full-controller capsule-recovery sims: slow even after budget-scaling (A* recovery
+# replans every tick). Fast tier skips these; run them via `pytest -m ""`.
+pytestmark = pytest.mark.slow
+
 TICK_DT = 0.2  # 5 Hz
 DRIVE_STEP_M = 0.1
 
 
 def _run(io: MockRobotIO, ctrl: QuestionController, clk: FakeClock, max_t: float = 600.0):
     """Tick the controller at 5 Hz, chasing the published waypoints. Return the odom
-    trajectory as an (N, 2) array."""
+    trajectory as an (N, 2) array.
+
+    The FSM budget/watchdog gates are compressed (see tests/integration/_scaled.py); the
+    capsule-clearance geometry these regression cases assert is driven by ticks, not by
+    sim-time, so it is unchanged."""
+    install_scaled_budget(io)
+    max_t = max_t * BUDGET_SCALE
     traj = [(io.latest_odom().x, io.latest_odom().y)]
     while ctrl.state is not State.DONE and clk.now() < max_t:
         ctrl.tick(io)

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import pytest
 
 from core.heads.instruction import InstructionHead, _is_legacy_anchor_seam
 from core.mocks.synthetic_scene import SyntheticScene
@@ -81,6 +82,7 @@ def _run(head, io, idx, max_ticks=4000):
             break
 
 
+@pytest.mark.slow
 def test_cp3_confirm_fires_and_passes_anchor_desc():
     sc, idx = _if_scene()
     seen = []
@@ -94,6 +96,7 @@ def test_cp3_confirm_fires_and_passes_anchor_desc():
     assert "sofa" in seen  # rich seam called with the anchor's noun on arrival
 
 
+@pytest.mark.slow
 def test_cp3_confirm_never_demotes():
     sc, idx = _if_scene()
     head = InstructionHead(
@@ -104,6 +107,7 @@ def test_cp3_confirm_never_demotes():
     assert head._demoted == set()
 
 
+@pytest.mark.slow
 def test_cp3_confident_mismatch_demotes_instance():
     # Two sofas: the ranked winner gets demoted on arrival -> demote set records it.
     sc = SyntheticScene(0)
@@ -121,6 +125,7 @@ def test_cp3_confident_mismatch_demotes_instance():
     assert len(head._demoted) >= 1
 
 
+@pytest.mark.slow
 def test_cp3_demote_never_blocks_drive_when_no_runner_up():
     sc, idx = _if_scene()  # single sofa -> no runner-up
     head = InstructionHead(
@@ -132,6 +137,7 @@ def test_cp3_demote_never_blocks_drive_when_no_runner_up():
     assert head.terminal_waypoint() is not None
 
 
+@pytest.mark.slow
 def test_cp3_exception_trusts_the_map():
     sc, idx = _if_scene()
 
@@ -143,6 +149,7 @@ def test_cp3_exception_trusts_the_map():
     assert head._demoted == set()  # exception == confirm (trust the map)
 
 
+@pytest.mark.slow
 def test_legacy_bool_anchor_seam_detected_and_called():
     sc, idx = _if_scene()
     seen = []

@@ -263,6 +263,7 @@ def test_bridged_agree_only_matches_whitelisted_synonyms():
 
 
 @requires_full_unity
+@pytest.mark.slow
 def test_cache_reuses_config_scene_evaluations():
     """The same (config, scene) is evaluated once; repeat requests are cache hits."""
     qbs = CV._load_questions(str(QUESTIONS_JSON), ["loft", "studio"])
@@ -279,6 +280,7 @@ def test_cache_reuses_config_scene_evaluations():
     assert ev.n_cache_misses == 3
 
 
+@pytest.mark.slow
 def test_smoke_sweep_emits_all_three_reports(tmp_path):
     """n_samples=3, 2 scenes -> report.md + results.json + recommended_calibration.json,
     all valid. Uses the full Unity root when present (>=2 scenes), else the loft sample
@@ -310,6 +312,7 @@ def test_smoke_sweep_emits_all_three_reports(tmp_path):
 
 
 @requires_full_unity
+@pytest.mark.slow
 def test_run_cv_sweep_is_deterministic_under_seed():
     """Same (seed, spec, scenes) -> identical fold scores and recommendation."""
     qbs = CV._load_questions(str(QUESTIONS_JSON), ["loft", "studio", "office_1"])

@@ -110,6 +110,7 @@ def _io(store):
 # --------------------------------------------------------------- wiring
 
 
+@pytest.mark.slow
 def test_scripted_detections_produce_tracked_instances(tmp_path):
     store, labels = _build_store_and_labels(tmp_path, "How many stools are in the room?", _boxes_two_stools())
     r = run_question(
@@ -120,6 +121,7 @@ def test_scripted_detections_produce_tracked_instances(tmp_path):
     assert r.instances_tracked == 2
 
 
+@pytest.mark.slow
 def test_count_question_answers_scripted_count(tmp_path):
     store, labels = _build_store_and_labels(tmp_path, "How many stools are in the room?", _boxes_two_stools())
     r = run_question(
@@ -132,6 +134,7 @@ def test_count_question_answers_scripted_count(tmp_path):
     assert r.floor_used is False  # answered from a real head verify, not the floor
 
 
+@pytest.mark.slow
 def test_instances_are_the_index_the_heads_resolve(tmp_path):
     """A single scripted stool -> count of 1 (proves the pipeline index feeds the heads)."""
     one = [( _col_for_az(0.0) - 20, 300, _col_for_az(0.0) + 20, 360)]
@@ -145,6 +148,7 @@ def test_instances_are_the_index_the_heads_resolve(tmp_path):
     assert r.answer.value == 1
 
 
+@pytest.mark.slow
 def test_repeated_keyframes_merge_not_multiply(tmp_path):
     """The same stool re-observed across keyframes merges (n_obs up), never doubles the
     instance count — the tracker/scene-index association is exercised end-to-end."""

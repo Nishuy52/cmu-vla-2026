@@ -58,6 +58,7 @@ class MockRobotIO:
     ) -> None:
         self.scene = scene
         self._clock = clock if clock is not None else FakeClock()
+        self._budget_clock: object | None = None
         self._question: Question | None = None
         self._x = float(start_x)
         self._y = float(start_y)
@@ -120,5 +121,23 @@ class MockRobotIO:
     def publish_int(self, ans: IntAnswer) -> None:
         self.ints.append(ans)
 
-    def clock(self) -> FakeClock:
+    def clock(self):
+        """Clock exposed to time-budget consumers (the FSM).
+
+        Normally the manually-advanced :class:`FakeClock`; when a budget-scale override is
+        installed (see :meth:`set_budget_clock`) that wrapper is returned instead so the
+        FSM's fixed budget/watchdog gates fire at scaled sim-time. The ``latest_*`` getters
+        keep stamping messages off the true clock (``self._clock``). This is the same seam
+        :class:`~core.replay.replay_io.ReplayRobotIO` already exposes, so the offline test
+        harness can compress the FSM's 570 s watchdog the way ``core.runner.single`` does for
+        replay — without touching the ``core.fsm`` gate constants.
+        """
+        return self._budget_clock if self._budget_clock is not None else self._clock
+
+    def set_budget_clock(self, clock: object | None) -> None:
+        """Override (or clear, with None) the clock returned by :meth:`clock`."""
+        self._budget_clock = clock
+
+    def raw_clock(self) -> FakeClock:
+        """The underlying true clock, regardless of any budget-clock override."""
         return self._clock

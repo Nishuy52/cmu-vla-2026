@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from core.interfaces import LidarScan, OdomState, PanoFrame
 from core.mocks.mock_io import MockRobotIO
@@ -134,6 +135,7 @@ def test_associate_greedy_nearest_pairing():
 # ------------------------------------------------------------------ pipeline: 3 frames
 
 
+@pytest.mark.slow
 def test_pipeline_three_frames_grows_n_obs():
     """Same object seen across 3 scripted frames -> one instance, n_obs == 3."""
     det = _front_det()

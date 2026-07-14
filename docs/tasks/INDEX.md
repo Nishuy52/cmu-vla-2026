@@ -26,3 +26,8 @@
   threshold priors / failure modes, adjudicate conflicts with
   architecture v1.0, fold GT-markers implication into design
   docs.
+- **T9** test-suite-tiering — split the pytest suite into a fast
+  default tier + slow milestone gate (`@pytest.mark.slow` +
+  `-m "not slow"` addopts), budget-scale the structural
+  integration tests (~363 s → ~16 s), add pytest-xdist for the
+  parallel full gate. Fast ~38 s / full ~152 s (-n auto).

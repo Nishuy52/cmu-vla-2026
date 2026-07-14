@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from core.geometry.toolbox import (
     avoid_capsule,
@@ -145,6 +146,7 @@ def _run(head: InstructionHead, io: _DriveIO, idx, max_ticks=4000):
     return np.array(traj)
 
 
+@pytest.mark.slow
 def test_drives_and_reaches_terminal():
     sc, idx = _if_scene()
     head = InstructionHead(plan=instruction_plan([_goto("sofa")]))
@@ -157,6 +159,7 @@ def test_drives_and_reaches_terminal():
     assert d < 0.3
 
 
+@pytest.mark.slow
 def test_corridor_route_threads_gate_and_respects_avoid():
     sc, idx = _if_scene()
     head = InstructionHead(
@@ -194,6 +197,7 @@ def test_via_near_leg_drives():
     assert head._follower is not None  # route built with a via leg
 
 
+@pytest.mark.slow
 def test_arrival_confirmation_checkpoint_fires():
     sc, idx = _if_scene()
     seen = []
