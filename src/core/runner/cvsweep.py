@@ -46,17 +46,26 @@ questions. Exclusion counts are reported alongside every score.
 Threshold injection
 -------------------
 The sweep moves the geometry ``Thresholds`` (all wired via function params in
-``toolbox.py``). It reaches them through a threshold-aware re-implementation of the
-gt_battery per-scene scoring (:func:`score_scene` here) that threads the swept
-``Thresholds`` into ``score_numerical`` / ``score_object_reference`` and into the
-``InstructionHead`` that drives the IF trajectory, then scores that driven trajectory
-with :func:`core.groundtruth.scoring.score_instruction_rubric`. The scoring.py functions
-are imported and reused verbatim — never forked; only the gt_battery *orchestration*
-(scene mirror, drive loop, rubric geometry) is mirrored here so the swept thresholds can
-be threaded through it (gt_battery's copies hard-wire the default thresholds and are left
-untouched). Budget/nav/fusion params that are hard module constants (no injection seam
-today — see docs/calibration.md "Phase-2 wiring TODO") are NOT in the default spec; if a
-requested key cannot be injected it is reported and skipped, never hacked in.
+``toolbox.py``) — but ONLY into the pipeline/subject under test, never into the
+measuring instrument. Concretely: swept ``Thresholds`` reach ``score_numerical`` /
+``score_object_reference`` (which use them solely to compute OUR resolver's answer —
+the GT target/independent count those answers are checked against is threshold-
+independent text/annotation matching) and the ``InstructionHead`` that drives the IF
+trajectory (:func:`_drive_if_trajectory`). The scoring.py functions are imported and
+reused verbatim — never forked; only the gt_battery *orchestration* (scene mirror,
+drive loop) is mirrored here so the swept thresholds can be threaded through the
+subject. The rubric's REFERENCE geometry — leg goals, corridor gates, avoid capsules
+(:func:`_if_rubric_geometry`) and the terminal-goal scene-alignment anchor
+(:func:`_terminal_goal_centroid`) — is the measuring instrument, not the subject: it is
+resolved with the FIXED default thresholds, identically for every candidate config, by
+delegating directly to gt_battery's own (default-threshold) copies of those two
+helpers. This closes an instrument-endogeneity hole: letting the rubric geometry or the
+alignment gate move with the swept config would let a candidate score higher by
+shrinking the rubric denominator (de-resolving legs/gates) or de-aligning a
+zero-scoring scene out of ``if_available``, rather than by driving better. Budget/nav/
+fusion params that are hard module constants (no injection seam today — see
+docs/calibration.md "Phase-2 wiring TODO") are NOT in the default spec; if a requested
+key cannot be injected it is reported and skipped, never hacked in.
 
 ``counting.min_obs`` was DROPPED from the sweep space (NUM-F7): every GT instance has
 ``n_obs=3`` so the gate is provably inert on GT data — it was dead weight, never a
@@ -114,7 +123,9 @@ _PTS_OBJECT_REFERENCE = 2.0
 _PTS_INSTRUCTION_FOLLOWING = 6.0
 
 _OR_IOU_HIT = 0.25  # IoU >= this counts as a correct object reference
-_IF_ALIGN_RESIDUAL_GATE_M = 1.0  # scenes above this fit residual are excluded (unaligned)
+# Instrument constant (frozen, never swept): scenes above this fit residual are excluded
+# (unaligned). Single-sourced from scoring.py so the gate can't drift from gt_battery's.
+_IF_ALIGN_RESIDUAL_GATE_M = S._ALIGN_RESIDUAL_GATE_M
 
 
 # --------------------------------------------------------------------------- sweep spec
@@ -353,15 +364,18 @@ def _score_if(
 ) -> SceneQScores:
     """IF scoring for a scene: fit the scene frame, drive each trajectory, rubric-score it.
 
-    A threshold-aware mirror of gt_battery's two-pass IF block, retargeted to the IF-F2
-    HEADLINE metric: resolve each terminal goal + load the GT trajectory, fit one scene
-    transform, then for each aligned question DRIVE the trajectory (constant-speed
-    kinematic follower over the planned breadcrumbs) under the swept ``thresholds`` and
-    score it with :func:`core.groundtruth.scoring.score_instruction_rubric` — ordered
-    per-leg arrival credit minus threading/avoid penalties. The planned-path coverage@1m
-    the sweep used to optimise is retired (the rubric does not pay for path shape).
-    Questions whose scene fit residual exceeds the alignment gate (or that lack a GT
-    trajectory) are excluded.
+    Retargeted to the IF-F2 HEADLINE metric: resolve each terminal goal + load the GT
+    trajectory, fit one scene transform, then for each aligned question DRIVE the
+    trajectory (constant-speed kinematic follower over the planned breadcrumbs) under
+    the swept ``thresholds`` (the SUBJECT under test) and score it with
+    :func:`core.groundtruth.scoring.score_instruction_rubric` against reference geometry
+    resolved at FIXED default thresholds (the INSTRUMENT — see module docstring
+    "Threshold injection"; delegates to gt_battery's ``_terminal_goal_centroid`` /
+    ``_if_rubric_geometry``) — ordered per-leg arrival credit minus threading/avoid
+    penalties. The planned-path coverage@1m the sweep used to optimise is retired (the
+    rubric does not pay for path shape). Questions whose scene fit residual exceeds the
+    alignment gate (or that lack a GT trajectory) are excluded; the alignment gate is
+    computed from the fixed-threshold goal, so it too cannot be gamed by ``thresholds``.
     """
     out = SceneQScores()
     if_traj: list[np.ndarray | None] = []
@@ -374,8 +388,12 @@ def _score_if(
             if cand.exists():
                 traj_arr = S.load_trajectory_ply(cand)
         if_traj.append(traj_arr)
+        # INSTRUMENT (frozen): the scene-alignment goal is reference geometry, not the
+        # system under test — resolve it with gt_battery's fixed-default helper so the
+        # alignment gate below can't be gamed by the swept `thresholds` (see module
+        # docstring "Threshold injection").
         if_goal.append(
-            _terminal_goal_centroid(text, idx, thresholds) if traj_arr is not None else None
+            GB._terminal_goal_centroid(text, idx) if traj_arr is not None else None
         )
 
     pairs = [(t, g) for t, g in zip(if_traj, if_goal) if t is not None and t.shape[0] > 0]
@@ -403,10 +421,14 @@ def _score_if(
         if traj_path is None or not aligned:
             out.if_excluded += 1
             continue
+        # SUBJECT (swept): the pipeline under test drives with the candidate thresholds.
         driven = _drive_if_trajectory(text, gt, idx, thresholds, start_xy=spawn_xy)
-        leg_goals, corridor_gates, avoid_caps = _if_rubric_geometry(
-            text, gt, idx, thresholds
-        )
+        # INSTRUMENT (frozen): the rubric's reference geometry (leg goals / gates /
+        # avoid capsules) must be identical for every candidate config, or a config can
+        # shrink the rubric denominator by de-resolving anchors instead of driving
+        # better (see module docstring "Threshold injection"). Delegate to gt_battery's
+        # copy, which hard-wires the default Thresholds.
+        leg_goals, corridor_gates, avoid_caps = GB._if_rubric_geometry(text, gt, idx)
         rub = S.score_instruction_rubric(
             driven,
             leg_goals,
@@ -418,91 +440,6 @@ def _score_if(
         out.if_available += _PTS_INSTRUCTION_FOLLOWING
         out.if_earned += _PTS_INSTRUCTION_FOLLOWING * float(rub.rubric_score)
     return out
-
-
-def _terminal_goal_centroid(text: str, idx, thresholds) -> np.ndarray | None:
-    """Threshold-aware mirror of gt_battery._terminal_goal_centroid (resolve with th)."""
-    from core.parsing.regex_tier import parse_regex
-    from core.geometry.toolbox import TargetSpec, resolve
-    from core.plan_schema import LegKind
-
-    plan = parse_regex(text)
-    if not plan.route:
-        return None
-    goto_legs = [leg for leg in plan.route if leg.kind is LegKind.GOTO and leg.anchors]
-    if not goto_legs:
-        return None
-    anchor = goto_legs[-1].anchors[0]
-    spec = TargetSpec(
-        noun=anchor.noun,
-        raw=anchor.raw,
-        attributes=list(anchor.attributes),
-        clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
-    )
-    res = resolve(spec, idx, thresholds)
-    if not res.candidates_ranked:
-        return None
-    c = res.candidates_ranked[0].centroid
-    return np.asarray(c, dtype=float).reshape(-1)[:2]
-
-
-def _if_rubric_geometry(text: str, gt: GTScene, idx, thresholds):
-    """Threshold-aware mirror of gt_battery._if_rubric_geometry.
-
-    Returns ``(leg_goals, corridor_gates, avoid_capsules)`` in the GT (object) frame for
-    :func:`core.groundtruth.scoring.score_instruction_rubric`, resolving every anchor with
-    the swept ``thresholds`` (gt_battery's copy hard-wires the defaults). Legs/avoids whose
-    anchors don't resolve are skipped (unscored, not wrong).
-    """
-    from core.parsing.regex_tier import parse_regex
-    from core.geometry.toolbox import (
-        TargetSpec,
-        avoid_capsule,
-        corridor_gate,
-        resolve,
-    )
-    from core.geometry import primitives as P
-    from core.plan_schema import LegKind
-
-    plan = parse_regex(text)
-    leg_goals: list[tuple[str, tuple[float, float]]] = []
-    corridor_gates: list[tuple[int, object]] = []
-    avoid_capsules: list[object] = []
-    if not plan.route:
-        return leg_goals, corridor_gates, avoid_capsules
-
-    def _resolve_anchor_rec(anchor):
-        spec = TargetSpec(
-            noun=anchor.noun, raw=anchor.raw, attributes=list(anchor.attributes),
-            clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
-        )
-        res = resolve(spec, idx, thresholds)
-        return res.candidates_ranked[0] if res.candidates_ranked else None
-
-    for i, leg in enumerate(plan.route):
-        if leg.kind is LegKind.CORRIDOR_BETWEEN and len(leg.anchors) == 2:
-            r0 = _resolve_anchor_rec(leg.anchors[0])
-            r1 = _resolve_anchor_rec(leg.anchors[1])
-            if r0 is None or r1 is None:
-                continue
-            gate = corridor_gate(r0, r1)
-            mid = (float(gate.midpoint[0]), float(gate.midpoint[1]))
-            leg_goals.append(("corridor_between", mid))
-            corridor_gates.append((i, gate))
-        else:
-            rec = _resolve_anchor_rec(leg.anchors[0]) if leg.anchors else None
-            if rec is None:
-                continue
-            c = P._as3(rec.centroid)
-            kind = "via_near" if leg.kind is LegKind.VIA_NEAR else "goto"
-            leg_goals.append((kind, (float(c[0]), float(c[1]))))
-
-    for spec in plan.avoid:
-        try:
-            avoid_capsules.append(avoid_capsule(spec, idx, thresholds))
-        except ValueError:
-            continue
-    return leg_goals, corridor_gates, avoid_capsules
 
 
 def _drive_if_trajectory(text, gt, idx, thresholds, *, start_xy=None) -> np.ndarray:
