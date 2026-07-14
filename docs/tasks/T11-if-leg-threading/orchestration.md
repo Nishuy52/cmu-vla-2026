@@ -31,9 +31,15 @@ autonomously, do not block on questions):
       `reports/gt_battery_postT11_2026-07-14/` — IF rubric 0.061->0.100,
       ordered-leg 0.094->0.122, violations 9->8; numerical 56% and
       OR 0.875 hold (no regression)
-- [ ] Executor final report received; milestone commits made on branch
-- [ ] Fresh-context VERIFIER pass — probe hardest the claim "remaining
-      IF gap is mirror-fidelity (harness), not pipeline"; that claim
+- [x] Executor final report received; commits `e7ce1bb` + `1a5549c` on
+      branch; full write-up in `executor_report.md`. Full gate launched
+      once, detached, result outstanding (executor wakes + relays when
+      it lands; targeted subsets + fast tier were green: 1035 passed)
+- [ ] Fresh-context VERIFIER pass — probe hardest: (a) "remaining IF
+      gap is mirror-fidelity (harness) + scorer centroid property, not
+      pipeline" incl. the load-bearing "GT reference trajectories reach
+      only 30/72 leg goals within 0.8 m" claim; (b) the harness edits
+      (overhang stamping, stall guard) don't flatter scores; that pair
       justifies un-holding the sweep
 - [ ] CV sweep launched detached (`docs/cvsweep_rerun_brief.md`;
       objective already re-pointed: rubric x6 / strict x1 / IoU x2,
@@ -46,14 +52,14 @@ autonomously, do not block on questions):
 
 ## Resume point (update on every stage transition)
 
-2026-07-14 ~20:45 SGT: executor (resumed once after an API stall) is in
-final verification — full gate `pytest -m "" -n auto` + `tests/runner`
-pass running. All code changes on disk uncommitted. If resuming cold:
-check `git log origin/main..fix/if-leg-threading` and `git status`; if
-no commits exist, the executor died pre-commit — its changes are the
-modified files in the tree (instruction.py, synthetic_scene.py,
-vocab.py, gt_battery.py + tests); re-dispatch an executor to finish
-per `task.md` acceptance criteria before verifying.
+2026-07-14 ~22:15 SGT: executor DONE (report in `executor_report.md`;
+commits `e7ce1bb`+`1a5549c`). IF rubric 0.061->0.100 confirmed-by-agent,
+toplines hold. Full gate still running detached on the machine (single
+final run; fast tier + targeted subsets were green). NEXT STAGE:
+verifier dispatched — writes `verification.md` per-claim. After
+CONFIRMED: launch CV sweep detached + Fable critique agents (see
+checklist). If resuming cold: check `verification.md` for verdicts;
+missing verdicts -> re-dispatch verifier for those claims only.
 
 ## Agent restart-proofing (applies to every agent in this pipeline)
 
