@@ -343,3 +343,13 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 - Post-merge verification on final main: fast tier 687 passed / 47 deselected in ~51 s (3 setup errors are this worktree's missing git-ignored `data/` fixtures, identical pre-merge — not regressions).
 
 **Next:** session-9 backlog items 1, 3, 4 — read/commit the CV sweep results + adopt calibration, red-team design review over GT-battery + sweep numbers, and the over-count/unaligned-scene/vocab-drift investigations (T7's diagnosis now gates the sweep adoption).
+
+---
+
+## 2026-07-14 (session 11) — Calibration-ledger drift check (tracker decay_k)
+
+- Investigated the reported `test_field_counts_per_subsystem` failure (`tracker: 2 != 1`). Not reproducible on main-derived branches: the H15 `decay_k` change lives only in the concurrent red-team worktree (`claude/nostalgic-mccarthy-3bb3ea`, uncommitted). That session had already fixed the test pin (`tracker: 2`, `nav: 21`), the `tracker.decay_k` doc row, and the tracker section header; its calibration test passes 17/17.
+- Residual drift was only the two hand-maintained header lines in that worktree's `docs/calibration.md`. Fixed the nav section header (20 → 21 fields). The wiring-summary line could not be edited from this session (permission boundary on another session's active worktree) and **still reads `59 fields total (… tracker 1 … nav 20 …) / wireable 45`; correct values are `61 total (tracker 2, nav 21) / wireable 47` (TODO stays 14; 47+14=61)** — H15 session: fold this one-line fix into your commit. Note the five `overhead_*` band rows in the nav table are OverheadConfig/module-constant documentation, not NavTunables fields, and are correctly excluded from all tallies.
+- No code changes on this branch; no test-gate run needed (LOG-only commit).
+
+**Next:** H15 session applies the wiring-summary line fix above and commits it with the rest of its calibration.md edits.
