@@ -11,6 +11,23 @@ Four defects dominate everything else: (1) the `/challenge_question` QoS mismatc
 
 ---
 
+## Status ledger (updated 14 Jul — implementation day 1)
+
+| Item | Status |
+|---|---|
+| H1 QoS | **LANDED** `4bcf18b` (dual-sub, VOLATILE primary), verified |
+| H2 scorers | **LANDED** `4bcf18b` (driven-trajectory rubric, strict counts; walls: no usable source, no-spawn-hint knob shipped instead), verified |
+| H3 IF explore | **LANDED** `8a8c78d`, verified (deadlock broken end-to-end) |
+| H4a/b ladder policies | **LANDED** `4bcf18b` + scope-clause follow-up, verified |
+| H4c provisional terminal | **LANDED** `8a8c78d`, verified — gate inert until `budget_frac` seam wired (see H8) |
+| H5 predicate forms | **LANDED** `0863294` per the T8-reconciled spec, verified (92.3% recall vs real GT on-edges) |
+| H8 pack | **PARTIAL**: qtype correction + 480/540 gates + sim-time guard landed `4bcf18b`; **seam wiring (ladder, checkpoints, budget_frac) + off-tick-thread checkpoints still open** |
+| H6 perception gate | **PARTIAL**: stub-index shout landed; PerceptionPipeline seam + playbook gate item open |
+| H10 vocab | **LANDED** `4bcf18b`, verified |
+| IF-F6 pair anchors | **LANDED** `8a8c78d`, verified |
+| H7, H9, H11–H15 | Open |
+| CV sweep | Still HELD — un-holds after the post-fix battery baseline is read and the sweep objective re-pointed (note in cvsweep_rerun_brief) |
+
 ## Tier 0 — run-killers (fix before anything else; all cheap)
 
 ### H1. `/challenge_question` subscription QoS: match the publisher or receive nothing — **51 pts, p≈0.85, cost S, Windows-now**

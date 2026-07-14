@@ -55,3 +55,12 @@ executor-ready task specs for the top items).
   session. Wrote `docs/redteam/hardening_backlog.md` (adjudication of all
   five reports: 4 dominant defects, tiered items H1–H15, sequencing incl.
   CV-sweep hold) + `docs/redteam/README.md` index.
+- 14 Jul (implementation day 1): backlog execution began — batches A
+  (H1/H2/H4a-b/H8-partial/H10, commit `4bcf18b`), B (H3/H4c/IF-F6,
+  `8a8c78d`), H5 (`0863294`), each independently verified CONFIRMED.
+  Merged main (tiering T9 + colored map + T7/T8 records); this task
+  renumbered T5→T10 (pre-merge commit messages say "T5"). **T8-vs-DD
+  verdict conflicts reconciled before H5 was coded** (appendix in
+  dossier_deltas.md; the above() reversal was the big one — our own
+  NUM-F2 empirics sided with T8 against our dossier agent). Post-fix
+  GT battery rerun in progress; status ledger added to the backlog.
