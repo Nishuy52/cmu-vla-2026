@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from core.runner.battery import DEFAULT_QUESTIONS, aggregate, run_battery, write_report
+
+# Each test drives a 10-question multi-scene battery end-to-end (>40 s each). These assert
+# report-file / aggregate / determinism semantics tied to the battery's own sim_elapsed and
+# answered_before_watchdog fields, so they run at real budget scale. Fast tier skips them.
+pytestmark = pytest.mark.slow
 
 _SUBSET = ["arabic_room", "chinese_room"]
 

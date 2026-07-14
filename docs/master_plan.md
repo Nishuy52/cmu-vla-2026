@@ -38,6 +38,11 @@ Highest-leverage thinking while Fable is cheap. All outputs are docs/code in thi
 - [ ] Native Ubuntu 24.04 install, Docker + repo setup, run sim end-to-end
 - [ ] Port the Windows-developed core into the real `ai_module` ROS node (thin adapter — designed for this from day one)
 - [ ] Iterate on all 15 training scenes; measure score + wall-clock per question type
+- [ ] Perception-difficulty recalibration: 2025 top-3 results
+      leaned on the ground-truth /object_markers topic (absent in
+      2026) - treat 2025 scores as non-comparable; prioritize
+      detector recall + attribute extraction accordingly (see
+      docs/prior_art/, architecture.md section 8).
 - [ ] Tune the 10-minute budget: exploration cutoff, early-answer bonus strategy
 
 ## Phase 3 — Hardening + submission (5–15 Aug)

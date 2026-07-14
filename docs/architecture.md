@@ -150,6 +150,16 @@ geometry, parse fallback ladder.
 3. Egocentric or implicature-laden phrasing absent from training but possible at test — the
    verification checkpoint is the only line of defense; monitored, not solved.
 
+**2025-results calibration note:** two of the 2025 top three
+(ReasonX 2nd, CopyPasta 3rd; URL-KAIST 4th likewise) answered
+semantic questions from the sim's ground-truth `/object_markers`
+topic - legal in 2025, absent from the 2026 I/O list. 2025 scores
+are not a calibration baseline for 2026 perception difficulty:
+the open-vocab stack faces a categorically harder job than the
+2025 methods imply, raising (not lowering) the priority of
+detector recall and attribute extraction. Evidence:
+`docs/prior_art/`, `docs/organizer_playbook.md`.
+
 ## 9. Attribution & originality
 
 Concepts adopted from published work, cited here and at point of use: object-centric text scene
@@ -162,8 +172,10 @@ open-vocab 3D scene graphs — ConceptGraphs ([arXiv:2309.16650](https://arxiv.o
 VLM counting weakness — OpenEQA (Majumdar et al., CVPR 2024, [site](https://open-eqa.github.io/));
 dataset & question provenance — VLA-3D ([arXiv:2411.03540](https://arxiv.org/abs/2411.03540));
 detector/tracker/captioner components — GroundingDINO, SAM/MobileSAM, ByteTrack, Qwen2.5-VL (cited in
-the proposals). The 2025 third-place configuration is known only from a CMU MRSD newsletter item and
-is cited in `organizer_playbook.md`.
+the proposals). The full 2025 leaderboard and per-team method
+dossiers (1st NROS, 2nd ReasonX, 3rd CopyPasta, 4th URL-KAIST)
+are documented under `docs/prior_art/` with primary-source
+citations.
 
 **License note:** the SORT3D repository carries no license. No code is taken from it — all components
 here are clean-room implementations of *cited concepts*, plus original work: the checkpointed-reasoning

@@ -1,4 +1,4 @@
-# T5 — Red-team design review (Fable batch)
+# T10 — Red-team design review (numbered T5 pre-merge; renumbered, id claimed by colored-cloud-tool) (Fable batch)
 
 **Started:** 12 Jul 2026
 **Status:** done (14 Jul 2026)

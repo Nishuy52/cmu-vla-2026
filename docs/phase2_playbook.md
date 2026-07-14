@@ -1,6 +1,6 @@
 # Phase 2 Playbook — Ubuntu Day One to First Scored Dry-Run
 
-*Written 11 Jul 2026, for the Ubuntu reinstall (~15 Jul). This is the ORDER OF OPERATIONS; the
+*Written 11 Jul 2026, for the Ubuntu reinstall (Thu 16 Jul). This is the ORDER OF OPERATIONS; the
 detailed commands live in `ubuntu_setup.md` (install) and `sim_verification.md` (verification
 ladder). Work through the gates in sequence — each gate is a hard prerequisite for the next.
 Estimated total: 2–3 focused days to Gate 5, then calibration until the Aug 3 MVS submission.*

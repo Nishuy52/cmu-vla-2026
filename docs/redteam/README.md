@@ -2,7 +2,7 @@
 
 Adversarial review batch over the whole system, run against real measured
 baselines (GT battery, real-data replay, 2025 dossiers). Task record:
-`docs/tasks/T5-redteam-review/`.
+`docs/tasks/T10-redteam-review/`.
 
 **Read `hardening_backlog.md` first** — it is the adjudicated, deduplicated,
 ranked output; the five facet reports are the evidence base.

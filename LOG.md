@@ -308,6 +308,44 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
 
 ---
 
-## 2026-07-14 — Task milestones
+## 2026-07-11 — task milestones
 
-- Wrapped up task: red-team design review (five-facet frontier batch + adjudication) — record at `docs/tasks/T5-redteam-review/`, output at `docs/redteam/` (**start at `hardening_backlog.md`**: 4 dominant defects incl. a QoS run-killer and the IF exploration deadlock; CV-sweep rerun is now HELD until Tier-0 fixes + scorer repairs land — supersedes the standing "rerun cvsweep" next-step until then)
+- Started + finished task: colored point-cloud reconstruction debug tool (T5) —
+  `tools/` package, validated on real jingfan data; record at
+  `docs/tasks/T5-colored-cloud-tool/`. Spec file
+  `docs/next_task_colored_reconstruction.md` deleted per its lifecycle note
+  (decisions preserved in the task record; full text in git history). PR from
+  `tool/colored-cloud`.
+- Started + finished task: live colored voxel map + RViz robot-in-map debug
+  view (T6) — record at `docs/tasks/T6-live-colored-map/`; stacked PR from
+  `feat/live-colored-map`. Debug layer only; scored path untouched.
+
+---
+
+## 2026-07-14 (task milestones) - one-liners
+
+- Finished task: GT-battery numerical count diagnosis - record at `docs/tasks/T7-numerical-count-diagnosis/` (headline: not a calibration problem - 4 resolver code defects + 3 scorer-side measurement artifacts; k-fold sweep gated on the fixes)
+- Finished task: 2025-dossier adjudication vs architecture v1.0 - record at `docs/tasks/T8-2025-dossier-adjudication/` (7 conflict verdicts; two dossier priors rejected on instance-level GT evidence; GT-markers implication folded into `architecture.md` section 8 + `master_plan.md` Phase 2)
+
+---
+
+## 2026-07-12 (task milestone one-liner)
+
+- Finished task: test-suite tiering (fast default tier + slow milestone gate, budget-scaled integration tests, pytest-xdist full gate) — record at `docs/tasks/T9-test-suite-tiering/`
+
+---
+
+## 2026-07-14 (session 10) — PR review round: #2–#5 all merged
+
+- Reviewed and merged all four open PRs in stack order: #2 (T5 colored-cloud tool), #3 (T6 live colored map — retargeted to main after #2's branch deletion auto-closed it), #4 (T7/T8 diagnosis + adjudication docs), #5 (T9 test-suite tiering).
+- Review method: parallel finder passes (correctness / removed-behavior / cross-file / reuse / conventions) + fresh-context verification per PR; findings posted as PR comments. Net: no merge blockers; 5 CONFIRMED non-blocking defects recorded on #2/#3 (all in debug-only paths — pano shape guard, NaN voxel-guard bypass, colored-map lock contract, `colored_cloud_period` 0.0 coercion, whole-scan abort on one out-of-range point) for a later hardening pass; scored answer path verified untouched.
+- Conflict resolutions: #4 vs main (LOG/INDEX chronological interleave of T5/T6 with T7/T8); #5 vs main (same two files + task record renumbered T7 → T9, id was claimed by the merged numerical-count diagnosis).
+- Post-merge verification on final main: fast tier 687 passed / 47 deselected in ~51 s (3 setup errors are this worktree's missing git-ignored `data/` fixtures, identical pre-merge — not regressions).
+
+**Next:** session-9 backlog items 1, 3, 4 — read/commit the CV sweep results + adopt calibration, red-team design review over GT-battery + sweep numbers, and the over-count/unaligned-scene/vocab-drift investigations (T7's diagnosis now gates the sweep adoption).
+
+---
+
+## 2026-07-14 — task milestone (parallel stream, merged after session 10)
+
+- Wrapped up task: red-team design review (five-facet frontier batch + adjudication) — record at `docs/tasks/T10-redteam-review/`, output at `docs/redteam/` (**start at `hardening_backlog.md`**: 4 dominant defects incl. a QoS run-killer and the IF exploration deadlock; CV-sweep rerun is now HELD until Tier-0 fixes + scorer repairs land — supersedes the standing "rerun cvsweep" next-step until then)

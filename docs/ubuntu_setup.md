@@ -51,8 +51,8 @@ sudo apt install -y git git-lfs python3.12-venv
 git clone <your-remote-or-copy> ~/vla            # or rsync the Windows workspace over
 cd ~/vla
 python3 -m venv .venv && source .venv/bin/activate
-pip install numpy pytest rosbags               # rosbags = pure-Python ROS 2 bag read/write for the offline replay harness (no ROS needed)
-cd src && pytest -q                              # the whole core suite must pass on Linux
+pip install numpy pytest pytest-xdist rosbags   # rosbags = pure-Python ROS 2 bag read/write for the offline replay harness (no ROS needed); pytest-xdist parallelises the full gate
+cd src && pytest -m "" -n auto                    # the whole core suite must pass on Linux (full gate — plain `pytest` runs only the fast tier; see src/README.md "Test tiers")
 ```
 
 If copying from Windows rather than cloning: copy the repo folder EXCLUDING `.venv/`, `data/`,
