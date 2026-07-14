@@ -64,20 +64,29 @@ autonomously, do not block on questions):
       cvsweep IF scorer endogeneity — VERIFIED against cvsweep.py by
       orchestrator; thin gradient; adoption gate; machine-generated
       report tooling; provenance hole)
-- [ ] Endogeneity fix (executor #2 running, disjoint files): freeze
-      rubric geometry/alignment at defaults in cvsweep.py; swept
-      thresholds reach only the driven pipeline. SWEEP LAUNCH IS GATED
-      ON THIS + the full gate.
-- [ ] CV sweep launched detached (`docs/cvsweep_rerun_brief.md`;
-      objective rubric x6 / strict x1 / IoU x2, disk-resume cache).
-      Output: `reports/cvsweep_<date>/`. ADOPTION gate (from critique,
-      adopted by orchestrator): modal consensus AND whole-config eval
-      beats baseline by >1 six-pt-question-equivalent AND no per-type
-      regression AND identical instrument footprint; IF-driven keys
+- [x] Endogeneity fix LANDED (`81f2a2a`): rubric geometry/alignment
+      frozen at defaults (delegates to gt_battery helpers, duplicates
+      deleted); numerical/OR yardsticks audited clean; invariant
+      regression test. NOTE: executor #2's session died silently
+      post-tests; orchestrator finalized from disk
+      (`critique/endogeneity_fix_note.md`). PROCESS FIX: every
+      background agent now gets its own liveness watchdog at dispatch.
+- [x] Adjudication written: `critique/adjudication.md` (binding
+      verdicts; clock semantics resolved per-question from upstream;
+      user decisions pending: local-VLM tier posture, answers.json
+      transcription, Gate 0)
+- [ ] Full gate (task b1qg4a1bd): running, 98%+, zero failures so far;
+      must confirm the 5 formerly-failing tests
+- [ ] **CV SWEEP RUNNING** since 2026-07-15 (launched by orchestrator;
+      task bciag7e9z + liveness watchdog bjlsyz4wb):
+      `python -m core.runner.cvsweep --groundtruth ..\data\vla3d\Unity
+      --n-samples 60 --out ..\reports\cvsweep_2026-07-15` from `src/`.
+      Disk-resume cache: relaunching the same command RESUMES.
+      ADOPTION gate (binding, from adjudication): modal consensus AND
+      whole-config eval beats baseline by >1 six-pt-question-equivalent
+      AND no per-type regression AND identical instrument footprint AND
+      per-key ablation >=2 questions; IF-driven keys
       provisional-until-real-sim.
-- [ ] Adjudication of both critiques -> `critique/adjudication.md`
-      (orchestrator writes; inputs are the committed drafts +
-      verification.md)
 - [ ] LOG one-liner(s), ledger row in `docs/redteam/hardening_backlog.md`
       (threading item + sweep HELD status), commit, push, PR to main
 
