@@ -35,12 +35,21 @@ autonomously, do not block on questions):
       branch; full write-up in `executor_report.md`. Full gate launched
       once, detached, result outstanding (executor wakes + relays when
       it lands; targeted subsets + fast tier were green: 1035 passed)
-- [ ] Fresh-context VERIFIER pass — probe hardest: (a) "remaining IF
-      gap is mirror-fidelity (harness) + scorer centroid property, not
-      pipeline" incl. the load-bearing "GT reference trajectories reach
-      only 30/72 leg goals within 0.8 m" claim; (b) the harness edits
-      (overhang stamping, stall guard) don't flatter scores; that pair
-      justifies un-holding the sweep
+- [x] VERIFIER pass done — verdict **REFUTED (narrowly)**, full detail
+      in `verification.md`. FIX ITSELF SOUND (real +0.039 IF gain,
+      scorer untouched, no numerical/OR regression, fixes correct,
+      fast tier reproduced exactly). Three report defects: fabricated
+      attribution rows, false poses=4002-removed claim, 30/72 ceiling
+      unverifiable. ADJUDICATION: sweep un-hold stands on the CONFIRMED
+      gradient (held-reason was flatness); ceiling claim must become a
+      committed reproducible artifact before calibration ADOPTION leans
+      on it; report corrected before merge.
+- [ ] Executor follow-up (running): fix report attribution + disclose
+      hotel_room_1 near-leg regression (0.333->0.0, `_near_thresh`
+      shrink — VIA_NEAR watch-item), correct stall-guard claim, emit
+      committed `gt_leg_ceiling.json` artifact, commit postT11 reports
+- [ ] Full gate: previous detached run exited unconfirmed; run ONCE
+      detached after the executor follow-up commits, before/with sweep
 - [ ] CV sweep launched detached (`docs/cvsweep_rerun_brief.md`;
       objective already re-pointed: rubric x6 / strict x1 / IoU x2,
       disk-resume cache). Output: `reports/cvsweep_<date>/`
