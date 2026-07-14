@@ -366,3 +366,85 @@ def test_single_relation_resolve_unchanged():
     res = T.resolve(spec, idx)
     assert [c.instance_id for c in res.candidates_ranked] == [2]
     assert res.audit == []
+
+
+# ------------------------------------------------- H5 DD-A5: next_to routes to near
+
+
+def test_next_to_clause_uses_near_predicate():
+    # DD-A5: Pred.NEXT_TO must evaluate through near() (the tight 0.75 m next_to
+    # would reject this). Chair at a 1.0 m AABB gap from a small lamp: near's 1.2 m
+    # floor keeps it, the tight next_to (0.75 m) would drop it.
+    lamp = rec(1, "lamp", (0, 0, 0), (0.2, 0.2, 0.4))  # small -> near floor 1.2 m
+    chair = rec(2, "chair", (1.1, 0, 0), (0.2, 0.2, 1.0))  # centre 1.1 -> gap ~0.9 m
+    idx = FakeIndex([lamp, chair])
+    from core.geometry import primitives as PR
+
+    gap = PR.aabb_gap(chair.aabb_min, chair.aabb_max, lamp.aabb_min, lamp.aabb_max)
+    assert 0.75 < gap < 1.2  # rejected by tight next_to, accepted by near
+    spec = _spec("chair", clauses=[Clause(Pred.NEXT_TO, [Anchor(noun="lamp")])])
+    res = T.resolve(spec, idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [2]  # kept via near
+    assert res.audit == []  # no relaxation needed
+    # and the toolbox routing table itself points NEXT_TO at near, not next_to
+    assert T._BINARY_PREDS[Pred.NEXT_TO] is T.near
+
+
+# ------------------------------------------------- H5 DD-A6: with == inverse-on
+
+
+def test_with_clause_is_inverse_on():
+    # DD-A6: "the table with the lamp on it" == on(lamp, table) with the new
+    # support semantics. Only the table that actually supports a lamp survives.
+    table_with = rec(1, "table", (0, 0, 0.4), (1.5, 1.5, 0.8))  # top z=0.8
+    table_bare = rec(2, "table", (10, 0, 0.4), (1.5, 1.5, 0.8))
+    lamp = rec(3, "lamp", (0, 0, 0.85), (0.3, 0.3, 0.4))  # bottom z=0.65, on table_with's surface
+    idx = FakeIndex([table_with, table_bare, lamp])
+    spec = _spec("table", clauses=[Clause(Pred.WITH, [Anchor(noun="lamp")])])
+    res = T.resolve(spec, idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [1]
+
+
+def test_with_hanging_lamp_not_supported():
+    # DD-A6 negative: a lamp HANGING above the table (not resting on it) does not
+    # count as "with" under inverse-on. The strict inverse-on primary fails; the
+    # relaxation rung (footprint pad, z-ignored) would still link them, so we require
+    # the strict form here.
+    table = rec(1, "table", (0, 0, 0.4), (1.5, 1.5, 0.8))  # top z=0.8
+    hanging = rec(2, "lamp", (0, 0, 2.5), (0.3, 0.3, 0.4))  # bottom z=2.3, far above
+    r = T.with_feature(table, hanging, allow_pad_rung=False)
+    assert not r.passed
+
+
+# ------------------------------------------------- H5 DD-A12: relative size in resolve
+
+
+def test_resolve_big_table_relative_per_class():
+    # "the big table": relative per-class largest-face ranking picks the >=1.2x table.
+    big = rec(1, "table", (0, 0, 0), (2.0, 2.0, 0.1))  # face 4.0
+    small = rec(2, "table", (5, 0, 0), (1.0, 1.0, 0.1))  # face 1.0
+    idx = FakeIndex([big, small])
+    res = T.resolve(_spec("table", attributes=["big"]), idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [1]
+    assert res.audit == []
+
+
+def test_resolve_size_no_separation_relaxes():
+    # When no extreme is >=1.2x separated, the size attribute matches nothing -> the
+    # strict filter empties and the ladder relaxes the attribute (honest: the size
+    # qualifier could not be honoured).
+    a = rec(1, "table", (0, 0, 0), (1.1, 1.0, 0.1))  # face 1.1
+    b = rec(2, "table", (5, 0, 0), (1.0, 1.0, 0.1))  # face 1.0 -> ratio 1.1 < 1.2
+    idx = FakeIndex([a, b])
+    res = T.resolve(_spec("table", attributes=["big"]), idx)
+    assert [x.step for x in res.audit] == ["relax_attributes"]
+
+
+def test_counting_big_table_relative():
+    # counting() honours the same relative size filter (no relaxation): exactly one
+    # 'big' table when separated, else 0 (never the category total).
+    big = rec(1, "table", (0, 0, 0), (2.0, 2.0, 0.1))
+    small = rec(2, "table", (5, 0, 0), (1.0, 1.0, 0.1))
+    idx = FakeIndex([big, small])
+    res = T.counting(_spec("table", attributes=["big"]), idx)
+    assert res.count == 1 and res.ids == {1}

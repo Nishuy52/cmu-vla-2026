@@ -18,31 +18,35 @@ is the sweep checklist.
 - **Sensitivity** — H/M/L judgement of how much sweeping this field moves behaviour,
   from reading the consuming code. Guides sweep priority, not a hard claim.
 
-**Wiring summary:** 55 fields total (geometry 11 · fusion 5 · tracker 1 · keyframe 3 ·
-nav 20 · budget 15). **Wireable today (constructor arg or function param): 41.**
+**Wiring summary:** 59 fields total (geometry 15 · fusion 5 · tracker 1 · keyframe 3 ·
+nav 20 · budget 15). **Wireable today (constructor arg or function param): 45.**
 **Wiring TODO (module constant, needs a setter/param before a sweep can move it): 14.**
 
 ---
 
-## geometry (`core.geometry.toolbox.Thresholds`) — 11 fields, all wireable
+## geometry (`core.geometry.toolbox.Thresholds`) — 15 fields, all wireable
 
 Composed live: `default_calibration().geometry is-equal DEFAULT_THRESHOLDS`. Every
 predicate in `toolbox.py` takes `th: Thresholds = DEFAULT_THRESHOLDS`, so passing a
-swept `Thresholds` at the call site wires all 11 with no code change.
+swept `Thresholds` at the call site wires all 15 with no code change.
 
 | Field | Default | Unit | Controls | Evidence / source | How wired | Sens |
 |---|---|---|---|---|---|---|
 | geometry.near_floor | 1.2 | m | Floor of the scale-adaptive `near` radius: `max(near_floor, near_scale·diag)` | Spec-fixed "near" value | function param (`near`, `near_thresh`) | H |
 | geometry.near_scale | 0.6 | — | Slope of `near` radius vs anchor footprint diagonal | Spec-fixed | function param | H |
-| geometry.next_to_gap | 0.75 | m | Max AABB gap counting as adjacency (`next_to`) | Spec-fixed "next_to" | function param | H |
-| geometry.on_vert_tol | 0.15 | m | Vertical tolerance for `on` (a.bottom vs b.top) | Invented (docstring) | function param | M |
-| geometry.on_min_overlap_frac | 0.30 | frac | Min footprint-overlap fraction for `on` | Invented | function param | M |
+| geometry.next_to_gap | 0.75 | m | Max AABB gap for the tight `next_to` (unrouted; `Pred.NEXT_TO`→`near`, DD-A5) | Spec-fixed "next_to" | function param | L |
+| geometry.on_min_overlap_frac | 0.50 | frac | `on` footprint intersection-over-min gate (was 0.30 over-target; H5/T8-C2) | VLA-3D gen [V] IoM>0.5 | function param | M |
+| geometry.on_upper_span_frac | 0.25 | frac | `on` upper z-band starts at `zmin + this·height` (support semantics, H5/T8-C3/D3) | VLA-3D gen (reconciled) | function param | M |
+| geometry.on_top_tol | 0.15 | m | `on` allows `a.bottom` up to this far above b's AABB top | Invented (sweepable) | function param | M |
 | geometry.in_containment_frac | 0.60 | frac | Min footprint fraction inside b for `in_` | Invented | function param | M |
 | geometry.in_vert_slack | 0.10 | m | Z-span slack for `in_` vertical containment | Invented | function param | L |
-| geometry.above_gap_max | 3.0 | m | Cap on above/under vertical gap | Invented (declared; not yet consumed in `above`/`under`) | function param | L |
-| geometry.with_feature_pad | 0.30 | m | "near" pad for possession test (`with_feature`) | Invented | function param | M |
+| geometry.above_lateral_infl | 0.50 | m | `above` anchor-footprint inflation for the lateral-offset gate (replaces overlap, H5/T8-C4/D4) | VLA-3D evidence (reversed) | function param | M |
+| geometry.under_iom_min | 0.50 | frac | `under`/`below` footprint IoM-over-min gate (both branches, DD-A7) | VLA-3D gen [V] IoM>0.5 | function param | M |
+| geometry.under_tuck_tol | 0.15 | m | `under` tuck-under floor tolerance (`a.min_z ≤ b.zmin + this`) + strict-branch slack | VLA-3D `under_thres`=0.01 (sweepable) | function param | M |
+| geometry.with_feature_pad | 0.30 | m | "near" pad for the `with_feature` RELAXATION rung (primary is `on(feature,a)`, DD-A6) | Invented | function param | L |
 | geometry.avoid_inflate | 0.25 | m | Capsule/disc inflation for avoid geometry | Spec-fixed avoid inflation | function param (`avoid_capsule`) | H |
 | geometry.superlative_margin_frac | 0.25 | frac | Early-answer winner-margin gate for superlatives | Invented | function param (carried on `Thresholds`; read by the answer path) | M |
+| geometry.size_sep_gap | 1.20 | ratio | Size resolver: min largest-face-area ratio for a "small"/"big"/"largest" extreme (DD-A12) | VLA-3D gen 1.2× | function param (via `_attrs_match`) | M |
 
 ---
 

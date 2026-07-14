@@ -45,7 +45,12 @@ _REL_TOKENS: list[tuple[str, Pred | None]] = [
     (r"farthest\s+from", Pred.FARTHEST_FROM),
     (r"furthest\s+from", Pred.FARTHEST_FROM),
     (r"farthest\s+away\s+from", Pred.FARTHEST_FROM),
-    (r"next\s+to", Pred.NEXT_TO),
+    # DD-A5: near-synonyms ("next to", "beside", "adjacent to", "close to") are
+    # generated with the `near` threshold, so they route to Pred.NEAR — not the
+    # tighter Pred.NEXT_TO, which nothing routes to any more.
+    (r"next\s+to", Pred.NEAR),
+    (r"adjacent\s+to", Pred.NEAR),
+    (r"close\s+to", Pred.NEAR),
     (r"on\s+top\s+of", Pred.ON),
     (r"between", Pred.BETWEEN),
     (r"near", Pred.NEAR),
@@ -53,7 +58,7 @@ _REL_TOKENS: list[tuple[str, Pred | None]] = [
     (r"below", Pred.UNDER),
     (r"underneath", Pred.UNDER),
     (r"under", Pred.UNDER),
-    (r"beside", Pred.NEXT_TO),
+    (r"beside", Pred.NEAR),
     (r"inside", Pred.IN),
     (r"with", Pred.WITH),
     (r"on", Pred.ON),
@@ -257,7 +262,12 @@ def _leg_kind(token: str) -> LegKind:
 
 def _split_continuation(body: str) -> tuple[str, str]:
     """Split a corridor/via leg body at a bare ' to ' continuation ('...the bed to the picture...')."""
-    masked = body.replace("closest to", "closest\x00").replace("next to", "next\x00")
+    masked = (
+        body.replace("closest to", "closest\x00")
+        .replace("next to", "next\x00")
+        .replace("adjacent to", "adjacent\x00")
+        .replace("close to", "close\x00")
+    )
     parts = masked.split(" to ", 1)
     unmask = lambda s: s.replace("\x00", " to")  # noqa: E731
     if len(parts) == 2:

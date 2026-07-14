@@ -156,10 +156,14 @@ def default_sweep_spec() -> SweepSpec:
             # near radius = max(near_floor, near_scale * footprint_diag)
             "geometry.near_floor": [0.8, 1.0, 1.2, 1.5, 2.0],
             "geometry.near_scale": [0.4, 0.5, 0.6, 0.75, 0.9],
-            # adjacency / support
+            # adjacency / support. on() is the H5 support-semantics form: IoM-over-min
+            # gate + upper z-span band (on_vert_tol is gone). above() uses the H5
+            # lateral-offset inflation (footprint-overlap gate replaced).
             "geometry.next_to_gap": [0.5, 0.75, 1.0, 1.25],
-            "geometry.on_vert_tol": [0.10, 0.15, 0.20, 0.30],
-            "geometry.on_min_overlap_frac": [0.15, 0.30, 0.45, 0.60],
+            "geometry.on_min_overlap_frac": [0.30, 0.45, 0.50, 0.60],
+            "geometry.on_upper_span_frac": [0.0, 0.15, 0.25, 0.40],
+            "geometry.on_top_tol": [0.10, 0.15, 0.20, 0.30],
+            "geometry.above_lateral_infl": [0.25, 0.50, 0.75, 1.0],
             # containment
             "geometry.in_containment_frac": [0.45, 0.60, 0.75],
             # numerical counting observation gate (GT is fully observed at n_obs=3)

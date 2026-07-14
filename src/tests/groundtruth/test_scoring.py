@@ -14,6 +14,44 @@ from core.groundtruth.scoring import Frame2D, align_scene_trajectories, fit_fram
 from tests.groundtruth.conftest import requires_loft, LOFT_DIR
 
 
+# --------------------------------------------------------------------------- scene-graph between pairs (T7-S2)
+
+
+def _sg_with_between_pair():
+    """Minimal VLA-3D-shaped scene graph: a chair BETWEEN two tables.
+
+    ``between`` stores each entry as an [id, id] PAIR (T7 #5a): the scorer must
+    expand the pair into its member anchor ids, not str()-garble it into "[t1, t2]".
+    """
+    return {
+        "regions": {
+            "0": {
+                "objects": [
+                    {"object_id": "c1", "raw_label": "chair"},
+                    {"object_id": "t1", "raw_label": "table"},
+                    {"object_id": "t2", "raw_label": "table"},
+                ],
+                "relationships": {
+                    # target c1 is between the pair (t1, t2) -> nested [id, id]
+                    "between": {"c1": [["t1", "t2"]]},
+                },
+            }
+        }
+    }
+
+
+def test_scene_graph_between_pair_not_garbled():
+    # The chair between two tables must be counted once when the question names the
+    # 'table' anchor: the pair members expand to t1/t2 (both label 'table'), so the
+    # anchor-agreement check finds a match. If the pair were str()-flattened into a
+    # single "['t1', 'table']"-style token the anchor labels would never resolve and
+    # the count would collapse to the class-only fallback.
+    sg = _sg_with_between_pair()
+    n, src = S._scene_graph_count("How many chairs are between the tables?", sg)
+    assert n == 1
+    assert src == "scene_graph"  # relation-aware, not the class-only fallback
+
+
 # --------------------------------------------------------------------------- 3D IoU
 
 

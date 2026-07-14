@@ -84,3 +84,31 @@ Dossier claims with weak provenance (per `docs/prior_art/README.md`'s conflict r
 - **SORT3D's `on_thres`/`under_thres` = 0.01 call sites.** `sort3d.md` flags these constants as "present in the class but their call sites were not found … dead or used elsewhere." §A treated the SORT3D `on`/`under` thresholds as `[S]` priors of low weight for exactly this reason; the authoritative form is the VLA-3D generation code `[V]`, not SORT3D's possibly-dead constants.
 - **Whether any sibling-report file:line drifted.** §B's "our coverage" cites lean on the four sibling reports' line numbers (e.g. `toolbox.py:358-367`, `explore_step.py:107-113`); those were read as of 12 Jul 2026 and are inputs, not re-verified against the current tree here. If the tree moved, the finding *classes* stand but exact lines may need a re-scan.
 - **Real-perception magnitudes.** Every exposure whose severity depends on detector miss/latency behaviour on unseen Unity scenes (B2, B4, B10) is a code-level argument, not a measurement — no sim is available on Windows, consistent with the sibling reports' own "what I could not verify" sections.
+
+---
+
+## Reconciliation with T8 (appended 14 Jul, post-merge)
+
+A parallel stream (`docs/tasks/T8-2025-dossier-adjudication/docs/verdicts.md`)
+adjudicated the same priors with instance-level GT evidence from the T7 count
+diagnosis. Where the two disagree, **evidence beats generator formulas** (T8's
+general ruling, adopted here). Deltas to §A:
+
+- **A1 (on z-band): superseded in part by T8-C3.** T8 shows the generator's
+  own 1 cm band is as blind as our top-face band (the sg `on` edge set omits
+  pillows→sofa yet the questions ask it). Reconciled form: support semantics —
+  footprint gate + target bottom within the supporter's **upper z-span**, band
+  bounds sweepable. Same restructure direction as A1, tighter lower bound.
+- **A8 (above IoM ≥ 0.5): REVERSED by T8-C4 + our own NUM-F2.** GT counts
+  wall-hung pictures "above the bed" with zero footprint overlap; NUM-F2
+  measured 0/5 passing for exactly this reason. Adding an IoM gate would make
+  it worse. Reconciled form: replace the overlap gate with a lateral-offset
+  tolerance (XY centre within the inflated anchor footprint), inflation
+  sweepable.
+- **A4 (between): narrowed toward T8-C5.** Pin only strict-betweenness
+  (0 < t < 1) on the existing capsule; defer the symmetry gate and IoM
+  parameterisation to the sweep. Companion item: the scorer garbles sg
+  between-pairs (T7 S2) — fix scorer-side first.
+- **A2, A3, A5–A7, A12 stand** (T8 concurs where it overlaps: C2 = A2,
+  C1 = A3, C6 = A12). A11 (colour) landed in hardening batch A; T8's "loft
+  black matches no scheme colour" stays an open investigation.

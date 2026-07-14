@@ -31,15 +31,33 @@ def test_on_negative_no_overlap():
     assert not T.on(book, table).passed
 
 
-def test_on_boundary_vert_tol():
+def test_on_boundary_top_tol():
+    # H5 support-band form: a.bottom may sit up to on_top_tol above b's AABB top.
     table = rec(1, "table", (0, 0, 0.5), (1.0, 1.0, 1.0))  # top z=1.0
-    # bottom exactly on_vert_tol above the top -> still on
-    book = rec(2, "book", (0, 0, 1.0 + TH.on_vert_tol + 0.05), (0.3, 0.3, 0.1))
-    assert book.aabb_min[2] == 1.0 + TH.on_vert_tol
+    # bottom exactly on_top_tol above the top -> still on (upper band's top edge)
+    book = rec(2, "book", (0, 0, 1.0 + TH.on_top_tol + 0.05), (0.3, 0.3, 0.1))
+    assert book.aabb_min[2] == 1.0 + TH.on_top_tol
     assert T.on(book, table).passed
-    # a hair further -> off
-    book2 = rec(3, "book", (0, 0, 1.0 + TH.on_vert_tol + 0.05 + 0.02), (0.3, 0.3, 0.1))
+    # a hair further above the band -> off
+    book2 = rec(3, "book", (0, 0, 1.0 + TH.on_top_tol + 0.05 + 0.02), (0.3, 0.3, 0.1))
     assert not T.on(book2, table).passed
+
+
+def test_on_lower_band_edge_rejects_floor_object():
+    # Support semantics: an object resting near b's FLOOR (below the upper z-band)
+    # is not "on" b — only the upper span counts (H5/T8-C3/D3).
+    table = rec(1, "table", (0, 0, 0.5), (1.0, 1.0, 1.0))  # zmin 0, top 1.0, height 1.0
+    # object bottom just below zmin + on_upper_span_frac*height (band lower edge)
+    low = rec(2, "book", (0, 0, TH.on_upper_span_frac - 0.06 + 0.05), (0.3, 0.3, 0.1))
+    assert low.aabb_min[2] < TH.on_upper_span_frac * 1.0
+    assert not T.on(low, table).passed
+
+
+def test_on_anchor_larger_gate():
+    # A big supporter cannot be "on" a small object even with full IoM + z overlap.
+    cushion = rec(1, "cushion", (0, 0, 0.55), (0.4, 0.4, 0.1))  # small, top 0.6
+    sofa = rec(2, "sofa", (0, 0, 0.5), (2.0, 1.0, 1.0))  # large, bottom sits in cushion band
+    assert not T.on(sofa, cushion).passed  # anchor-larger gate fails (sofa > cushion)
 
 
 # --------------------------------------------------------------------------- in
@@ -141,12 +159,13 @@ def test_between_negative_off_axis():
     assert not T.between(a, b1, b2).passed
 
 
-def test_between_collinear_endpoints():
-    # a sitting exactly at b1's centroid: t=0, dist=0 -> inside capsule
+def test_between_at_endpoint_fails_strict():
+    # H5/T8-C5 strict betweenness: a sitting exactly at b1's centroid projects to
+    # t=0 (the segment end) and must FAIL — "between" excludes the anchor positions.
     b1 = rec(1, "post", (0, 0, 0), (1.0, 1.0, 1.0))
     b2 = rec(2, "post", (5, 0, 0), (1.0, 1.0, 1.0))
     a = rec(3, "dot", (0, 0, 0), (0.1, 0.1, 0.1))
-    assert T.between(a, b1, b2).passed
+    assert not T.between(a, b1, b2).passed
 
 
 def test_between_radius_is_max_halfwidth():
@@ -243,3 +262,128 @@ def test_superlative_tie_break_by_id():
     r = T.closest_to([c1, c2], anchor)
     assert r.order == [3, 5]  # tie broken by ascending id
     assert r.margin == 0.0
+
+
+# ----------------------------------------------------- H5 NUM-F2 regressions
+
+
+def test_on_pillow_on_sofa_num_f2():
+    # NUM-F2: a pillow resting among sofa cushions sits 0.2-1.1 m BELOW the sofa's
+    # AABB top (the backrest raises the top above the seat) with 100% footprint
+    # overlap. The old top-face-only on() rejected it; the H5 support-band form must
+    # accept it (on() TRUE).
+    sofa = rec(1, "sofa", (0, 0, 0.45), (2.0, 1.0, 0.9))  # zmin 0, top 0.9 (backrest)
+    # pillow on the seat ~0.45 m: bottom 0.45 is 0.45 m below the AABB top (in-spec 0.2-1.1)
+    pillow = rec(2, "pillow", (0, 0, 0.55), (0.4, 0.4, 0.2))  # bottom z=0.45
+    vgap_below_top = sofa.aabb_max[2] - pillow.aabb_min[2]
+    assert 0.2 <= vgap_below_top <= 1.1  # NUM-F2 empirical range
+    r = T.on(pillow, sofa)
+    assert r.passed and r.score > 0
+
+
+def test_on_pillow_on_bed_num_f2():
+    # Companion NUM-F2 case: pillow on a bed with a headboard raising the AABB top.
+    bed = rec(1, "bed", (0, 0, 0.5), (2.0, 1.6, 1.0))  # zmin 0, top 1.0 (headboard)
+    pillow = rec(2, "pillow", (0, 0, 0.5), (0.5, 0.5, 0.2))  # bottom z=0.4
+    vgap_below_top = bed.aabb_max[2] - pillow.aabb_min[2]
+    assert 0.2 <= vgap_below_top <= 1.1  # pillow bottom within NUM-F2 range below AABB top
+    assert T.on(pillow, bed).passed
+
+
+def test_above_wall_picture_num_f2():
+    # NUM-F2: a wall-hung picture "above the bed" has ZERO footprint overlap with
+    # the bed (it is on the wall behind the headboard) but a small lateral offset.
+    # The H5 lateral-offset form must accept it (above() TRUE); the old overlap
+    # gate rejected all 5 such pictures.
+    bed = rec(1, "bed", (0, 0, 0.3), (2.0, 1.6, 0.6))  # top z=0.6, y in [-0.8, 0.8]
+    # picture on the wall just past the bed's y-edge, well above it
+    picture = rec(2, "picture", (0, 1.0, 1.6), (1.0, 0.1, 0.5))  # centre y=1.0, no overlap
+    from core.geometry import primitives as PR
+
+    assert not PR.footprints_overlap(
+        picture.aabb_min, picture.aabb_max, bed.aabb_min, bed.aabb_max
+    )
+    assert T.above(picture, bed).passed  # within above_lateral_infl (0.5 m) + above bed
+
+
+def test_above_far_picture_still_rejected():
+    # Guard the lateral tolerance is not unbounded: a picture 3 m to the side of the
+    # bed is NOT above it.
+    bed = rec(1, "bed", (0, 0, 0.3), (2.0, 1.6, 0.6))
+    far = rec(2, "picture", (0, 3.0, 1.6), (1.0, 0.1, 0.5))
+    assert not T.above(far, bed).passed
+
+
+# ----------------------------------------------------- H5 tuck-under (DD-A7)
+
+
+def test_under_stool_tucked_under_table():
+    # A stool tucked under a table: its top rises above the table's AABB min_z
+    # (~floor), so the STRICT branch can never pass. Branch (ii) tuck-under fires
+    # because 'table' is an UNDER_RELATION anchor and the stool sits at floor level
+    # with its top below the table's AABB top.
+    table = rec(1, "table", (0, 0, 0.4), (1.2, 1.2, 0.8))  # zmin 0, top 0.8
+    stool = rec(2, "stool", (0, 0, 0.25), (0.4, 0.4, 0.5))  # zmin 0, top 0.5 < table top
+    assert stool.aabb_max[2] > table.aabb_min[2]  # top above table floor -> strict fails
+    r = T.under(stool, table)
+    assert r.passed and "tuck-under" in r.explanation
+
+
+def test_under_tuck_gated_to_under_relation_class():
+    # The tuck-under branch is class-gated: the SAME geometry under a non-UNDER
+    # anchor (e.g. a 'picture') must NOT pass tuck-under (only strict below counts).
+    picture = rec(1, "picture", (0, 0, 0.4), (1.2, 1.2, 0.8))  # not an UNDER_RELATION class
+    stool = rec(2, "stool", (0, 0, 0.25), (0.4, 0.4, 0.5))
+    assert not T.under(stool, picture).passed
+
+
+def test_under_strict_branch_still_works():
+    # Branch (i) strict below is unchanged in spirit: a rug directly under a table
+    # top (top <= anchor bottom + tol) with footprint IoM passes.
+    table = rec(1, "table", (0, 0, 1.0), (1.5, 1.5, 0.1))  # bottom z=0.95
+    rug = rec(2, "rug", (0, 0, 0.05), (1.4, 1.4, 0.1))  # top z=0.1 << 0.95
+    assert T.under(rug, table).passed
+
+
+# ----------------------------------------------------- H5 strict betweenness
+
+
+def test_between_off_segment_end_rejected():
+    # T8-C5 strict betweenness: a target BESIDE anchor b1, off the segment end
+    # (projects to t clamped at 0) must FAIL even inside the capsule radius.
+    b1 = rec(1, "chair", (0, 0, 0), (0.6, 0.6, 1.0))
+    b2 = rec(2, "chair", (4, 0, 0), (0.6, 0.6, 1.0))  # segment along +x
+    # target at x=-1 (before b1), y within radius: projects off the near end
+    beside = rec(3, "rug", (-1.0, 0.1, 0), (0.3, 0.3, 0.1))
+    r = T.between(beside, b1, b2)
+    assert not r.passed and "strict" in r.explanation
+
+
+# ----------------------------------------------------- H5 size resolver (DD-A12)
+
+
+def test_size_attr_match_largest_with_gap():
+    # Relative per-class largest-face ranking: the big table (>=1.2x the next) is the
+    # 'big' one; a table only 1.1x larger is NOT separated -> matches nothing.
+    from core.geometry.toolbox import _size_attr_match
+
+    big = rec(1, "table", (0, 0, 0), (2.0, 2.0, 0.1))  # face 4.0
+    mid = rec(2, "table", (5, 0, 0), (1.0, 1.0, 0.1))  # face 1.0
+    pool = [big, mid]  # ratio 4.0 -> separated
+    assert _size_attr_match(big, "big", pool, TH)
+    assert not _size_attr_match(mid, "big", pool, TH)
+
+    a = rec(1, "table", (0, 0, 0), (1.1, 1.0, 0.1))  # face 1.1
+    b = rec(2, "table", (5, 0, 0), (1.0, 1.0, 0.1))  # face 1.0, ratio 1.1 < 1.2
+    close_pool = [a, b]
+    assert not _size_attr_match(a, "big", close_pool, TH)  # honest none: not separated
+
+
+def test_size_attr_match_smallest_with_gap():
+    from core.geometry.toolbox import _size_attr_match
+
+    tiny = rec(1, "chair", (0, 0, 0), (0.5, 0.5, 0.1))  # face 0.25
+    big = rec(2, "chair", (5, 0, 0), (1.0, 1.0, 0.1))  # face 1.0, ratio 4x
+    pool = [tiny, big]
+    assert _size_attr_match(tiny, "small", pool, TH)
+    assert not _size_attr_match(big, "small", pool, TH)

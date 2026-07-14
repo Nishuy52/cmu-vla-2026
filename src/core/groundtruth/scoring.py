@@ -388,8 +388,19 @@ def _scene_graph_count(
                 continue
             bucket = edges.setdefault(relname, {})
             for tgt, anchors in tgts.items():
-                if isinstance(anchors, list):
-                    bucket.setdefault(str(tgt), set()).update(str(a) for a in anchors)
+                if not isinstance(anchors, list):
+                    continue
+                # T7-S2: `between` stores each entry as an [id, id] PAIR, not a flat
+                # anchor id. Flattening the pair with str(a) garbles it into
+                # "[3, 7]"; expand nested pairs into their member ids so between
+                # anchors are counted correctly (all other relations are flat lists).
+                flat: list[str] = []
+                for a in anchors:
+                    if isinstance(a, (list, tuple)):
+                        flat.extend(str(x) for x in a)
+                    else:
+                        flat.append(str(a))
+                bucket.setdefault(str(tgt), set()).update(flat)
 
     # NUM-F6: strict class equality for the target class (anchor linkage below still
     # uses the looser _anchor_agrees, which is correct for surface-drifting anchors).

@@ -11,8 +11,7 @@ height axis = Z. No network, no wall-clock, no RNG — fully deterministic.
 
 Calibration constants that go beyond values fixed by the spec are collected in
 :class:`Thresholds` so they can be tuned offline (see report / calibration
-config); the spec-mandated values (near, next_to, avoid inflation) are the
-defaults.
+config); the spec-mandated values (near, avoid inflation) are the defaults.
 """
 from __future__ import annotations
 
@@ -41,14 +40,25 @@ class Thresholds:
     near_floor: float = 1.2  # near_thresh = max(near_floor, near_scale * diag)
     near_scale: float = 0.6
     next_to_gap: float = 0.75  # <= this AABB gap counts as adjacency
-    on_vert_tol: float = 0.15  # a.bottom within +/- this of b.top  (invented)
-    on_min_overlap_frac: float = 0.30  # footprint overlap / a-footprint  (invented)
+    # on() support semantics (H5/T8-C2/C3, D3): footprint IoM-over-min gate +
+    # target bottom inside the supporter's UPPER z-span. The old top-face-only
+    # on_vert_tol is gone — a pillow resting among sofa cushions sits 0.2-1.1 m
+    # below the AABB top and must still count "on".
+    on_min_overlap_frac: float = 0.50  # footprint intersection-over-min gate (was 0.30 over-target)
+    on_upper_span_frac: float = 0.25  # upper z-span starts at zmin + this * height
+    on_top_tol: float = 0.15  # a.bottom may sit this far above b's AABB top
     in_containment_frac: float = 0.60  # a-footprint fraction inside b  (invented)
     in_vert_slack: float = 0.10  # a within b's z-span, this much slack  (invented)
-    above_gap_max: float = 3.0  # cap on above/under vertical gap  (invented)
-    with_feature_pad: float = 0.30  # "near" pad for possession test  (invented)
+    # above() lateral-offset form (H5/T8-C4, D4): REPLACES the footprint-overlap
+    # gate — wall-hung pictures over a bed have zero footprint overlap. XY centre
+    # of the target must fall within the anchor footprint inflated by this margin.
+    above_lateral_infl: float = 0.50  # anchor-footprint inflation for the above() lateral gate
+    under_iom_min: float = 0.50  # footprint IoM-over-min gate for both under()/below() branches
+    under_tuck_tol: float = 0.15  # tuck-under: target.min_z <= anchor.zmin + this
+    with_feature_pad: float = 0.30  # "near" pad for possession relaxation rung  (invented)
     avoid_inflate: float = 0.25  # capsule/disc inflation for avoid geometry
     superlative_margin_frac: float = 0.25  # early-answer winner-margin gate
+    size_sep_gap: float = 1.20  # size resolver: min largest-face-area ratio for a "small"/"big" extreme
 
 
 DEFAULT_THRESHOLDS = Thresholds()
@@ -162,35 +172,137 @@ def _attr_present(attr: str, text: str) -> bool:
     return attr in text
 
 
-def _attrs_match(a: InstanceRecord, attributes: Sequence[str]) -> bool:
-    """True if every requested attribute keyword appears in the record's text."""
+# Size qualifiers handled by the relative per-class resolver (DD-A12 = T8-C6).
+# "smallest"/"largest" are the argmin/argmax forms; "small"/"big"/"large" the
+# comparative forms — both rank on largest-face area within the same-class pool.
+_SIZE_LARGE: frozenset[str] = frozenset({"big", "large", "largest", "biggest"})
+_SIZE_SMALL: frozenset[str] = frozenset({"small", "smallest", "little", "tiny"})
+_SIZE_ATTRS: frozenset[str] = _SIZE_LARGE | _SIZE_SMALL
+
+
+def _size_attr_match(
+    a: InstanceRecord,
+    size_attr: str,
+    pool: Sequence[InstanceRecord],
+    th: Thresholds,
+) -> bool:
+    """Relative per-class size match (DD-A12): largest-face-area ranking + 1.2x gap.
+
+    ``a`` matches a "big"/"large"/"largest" attribute iff it is the largest-face
+    extreme of ``pool`` AND its largest-face area is at least ``size_sep_gap`` (1.2x)
+    times the next candidate's; symmetrically for "small"/"smallest" against the
+    smallest extreme. When no extreme is separated by the gap the size attribute
+    matches NOTHING (honest none) — a size qualifier is only asserted when the
+    generator would have (it assigns "small"/"big" only at a >=1.2x separation).
+
+    With fewer than two candidates the ranking is undefined; a lone candidate cannot
+    be "the small(est)/big(gest)" relative to nothing, so it does not match.
+    """
+    if size_attr not in _SIZE_ATTRS or len(pool) < 2:
+        return False
+    areas = sorted(
+        (P.largest_face_area(c.aabb_min, c.aabb_max) for c in pool), reverse=True
+    )
+    a_area = P.largest_face_area(a.aabb_min, a.aabb_max)
+    if size_attr in _SIZE_LARGE:
+        top, runner = areas[0], areas[1]
+        separated = top >= th.size_sep_gap * runner if runner > P.EPS else top > P.EPS
+        return bool(separated and a_area >= top - P.EPS)
+    # small end: smallest must be <= runner-up / gap (i.e. runner >= gap * smallest)
+    smallest, runner = areas[-1], areas[-2]
+    separated = runner >= th.size_sep_gap * smallest if smallest > P.EPS else runner > P.EPS
+    return bool(separated and a_area <= smallest + P.EPS)
+
+
+def _attrs_match(
+    a: InstanceRecord,
+    attributes: Sequence[str],
+    pool: Sequence[InstanceRecord] | None = None,
+    th: Thresholds = DEFAULT_THRESHOLDS,
+) -> bool:
+    """True if every requested attribute matches the record.
+
+    Non-size attributes go through the text/colour-bridge test. A size qualifier
+    ("small"/"big"/"largest"/...) is resolved RELATIVELY against ``pool`` (the
+    same-class candidate set) via :func:`_size_attr_match` — largest-face ranking
+    with the 1.2x separation gap (DD-A12). When ``pool`` is None (no same-class
+    context, e.g. a single-candidate disambiguator check) a size attribute cannot be
+    ranked and does not match, so callers with a pool must pass it.
+    """
     if not attributes:
         return True
     text = _label_text(a)
-    return all(_attr_present(attr, text) for attr in attributes)
+    for attr in attributes:
+        low = attr.lower()
+        if low in _SIZE_ATTRS:
+            if pool is None or not _size_attr_match(a, low, pool, th):
+                return False
+        elif not _attr_present(low, text):
+            return False
+    return True
+
+
+# Anchor classes that have an "under-space" a target can tuck into (VLA-3D
+# `special_relation_classes.UNDER_RELATION`, verbatim from docs/prior_art/vla_3d.md).
+# A stool tucked under a table sits at floor level with its top below the table's
+# AABB top, so branch (ii) of under()/below() fires only when the ANCHOR is one of
+# these. Stored space-normalised ("night stand" and "night_stand" both match).
+UNDER_RELATION: frozenset[str] = frozenset(
+    {
+        "cabinet", "counter", "table", "desk", "stool", "shelf", "drawer",
+        "dresser", "bed", "bookshelf", "tv stand", "bench", "chest",
+        "piano bench", "bar", "night stand", "coffee table",
+    }
+)
+
+
+def _under_relation_anchor(b: InstanceRecord) -> bool:
+    """True if b's class is a VLA-3D UNDER_RELATION class (underscore/space tolerant)."""
+    lbl = b.label.lower().replace("_", " ").strip()
+    return lbl in UNDER_RELATION
 
 
 # --------------------------------------------------------------------------- predicates
 
 
 def on(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHOLDS) -> PredResult:
-    """a rests on b: a's bottom within vert tol of b's top AND footprint overlap."""
+    """a is supported by b (support semantics, H5/T8-C2/C3, D3).
+
+    Three gates, matching the VLA-3D generation form as reconciled by the T8
+    instance-level evidence:
+
+    * footprint IoM-over-min >= ``on_min_overlap_frac`` (a small pillow fully on a
+      big sofa scores 1.0);
+    * anchor-larger gate: b's footprint area strictly exceeds a's (a sofa cannot be
+      "on" a cushion);
+    * vertical: a's bottom lies in the supporter's UPPER z-span,
+      ``[b.zmin + on_upper_span_frac * b_height, b.ztop + on_top_tol]`` — so a
+      pillow resting among sofa cushions (bottom 0.2-1.1 m below the AABB top, where
+      the backrest is) still counts, while an object sitting near b's floor does not.
+    """
     a_bottom = float(a.aabb_min[2])
+    b_zmin = float(b.aabb_min[2])
     b_top = float(b.aabb_max[2])
-    vgap = a_bottom - b_top  # >0 hovering above, <0 sunk into b
-    vert_ok = abs(vgap) <= th.on_vert_tol + P.EPS
-    area = P.footprint_overlap_area(a.aabb_min, a.aabb_max, b.aabb_min, b.aabb_max)
-    a_area = max(P.footprint_overlap_area(a.aabb_min, a.aabb_max, a.aabb_min, a.aabb_max), P.EPS)
-    frac = area / a_area
+    b_height = max(b_top - b_zmin, 0.0)
+    band_lo = b_zmin + th.on_upper_span_frac * b_height
+    band_hi = b_top + th.on_top_tol
+    vert_ok = (a_bottom >= band_lo - P.EPS) and (a_bottom <= band_hi + P.EPS)
+
+    frac = P.footprint_iom(a.aabb_min, a.aabb_max, b.aabb_min, b.aabb_max)
     over_ok = frac >= th.on_min_overlap_frac
-    passed = bool(vert_ok and over_ok)
-    vmargin = th.on_vert_tol - abs(vgap)
-    score = float(max(0.0, min(1.0, frac)) * (1.0 if vert_ok else 0.0))
+    a_fp = P.footprint_area(a.aabb_min, a.aabb_max)
+    b_fp = P.footprint_area(b.aabb_min, b.aabb_max)
+    anchor_larger = b_fp > a_fp + P.EPS
+
+    passed = bool(vert_ok and over_ok and anchor_larger)
+    # signed slack to the nearest z-band edge (positive = inside the band)
+    vmargin = min(a_bottom - band_lo, band_hi - a_bottom)
+    score = float(max(0.0, min(1.0, frac)) * (1.0 if (vert_ok and anchor_larger) else 0.0))
     expl = (
-        f"on: bottom {a_bottom:.2f} vs top {b_top:.2f} (vgap {vgap:+.2f}m, tol "
-        f"{th.on_vert_tol}m -> {'ok' if vert_ok else 'FAIL'}); footprint overlap "
-        f"{frac*100:.0f}% (>= {th.on_min_overlap_frac*100:.0f}% -> "
-        f"{'ok' if over_ok else 'FAIL'})"
+        f"on: bottom {a_bottom:.2f} in upper z-band [{band_lo:.2f}, {band_hi:.2f}] "
+        f"-> {'ok' if vert_ok else 'FAIL'}; footprint IoM {frac*100:.0f}% "
+        f"(>= {th.on_min_overlap_frac*100:.0f}% -> {'ok' if over_ok else 'FAIL'}); "
+        f"anchor larger ({b_fp:.2f} > {a_fp:.2f} m2 -> {'ok' if anchor_larger else 'FAIL'})"
     )
     return PredResult(passed, score, float(vmargin), expl)
 
@@ -227,7 +339,17 @@ def near(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHOL
 
 
 def next_to(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHOLDS) -> PredResult:
-    """a adjacent to b: AABB gap <= 0.75 m (tighter than near)."""
+    """a tightly adjacent to b: AABB gap <= 0.75 m (tighter than near).
+
+    DD-A5: "next to"/"beside"/"adjacent to"/"close to" are SYNONYMS of ``near`` in
+    the VLA-3D generation templates, and questions phrased with a near-synonym were
+    generated with the ``near`` threshold — so this tighter predicate is NOT the one
+    the parser routes those phrasings to (see :data:`_BINARY_PREDS`, which maps
+    ``Pred.NEXT_TO`` to :func:`near`). It is kept available under this name for any
+    future parser-level distinction, but nothing routes to it today. The tight-gap
+    behaviour lives here so a caller that genuinely wants strict adjacency can still
+    call it explicitly.
+    """
     gap = P.aabb_gap(a.aabb_min, a.aabb_max, b.aabb_min, b.aabb_max)
     passed = bool(gap <= th.next_to_gap + P.EPS)
     margin = th.next_to_gap - gap
@@ -248,61 +370,143 @@ def between(
         P.footprint_half_width(b2.aabb_min, b2.aabb_max),
     )
     dist, t = P.point_to_segment_2d(a.centroid, b1.centroid, b2.centroid)
-    passed = bool(dist <= radius + P.EPS)
+    # Strict betweenness (H5/T8-C5): the projection must land in the OPEN interval
+    # 0 < t < 1. A target sitting beside one anchor projects to a clamped t of 0 or
+    # 1 (off the segment end) and must fail even when it is within the capsule
+    # radius — "between" is exclusive of the anchor positions themselves.
+    strict_t = P.EPS < t < 1.0 - P.EPS
+    passed = bool(dist <= radius + P.EPS and strict_t)
     margin = radius - dist
-    score = float(max(0.0, min(1.0, 1.0 - dist / radius))) if radius > 0 else 0.0
+    score = (
+        float(max(0.0, min(1.0, 1.0 - dist / radius))) if (radius > 0 and strict_t) else 0.0
+    )
     expl = (
-        f"between: centroid {dist:.2f}m from b1-b2 segment (t={t:.2f}) <= capsule "
+        f"between: centroid {dist:.2f}m from b1-b2 segment (t={t:.2f}, "
+        f"strict 0<t<1 -> {'ok' if strict_t else 'FAIL'}) <= capsule "
         f"radius {radius:.2f}m -> {'ok' if passed else 'FAIL'}"
     )
     return PredResult(passed, score, float(margin), expl)
 
 
 def above(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHOLDS) -> PredResult:
-    """a above b: footprint overlap AND a's bottom above b's top (no support/contact)."""
-    over = P.footprints_overlap(a.aabb_min, a.aabb_max, b.aabb_min, b.aabb_max)
+    """a above b: lateral-offset tolerance + positive vertical gap (H5/T8-C4, D4).
+
+    The old footprint-overlap requirement is REPLACED (not gated) by a lateral
+    tolerance: the XY centre of ``a`` must fall within ``b``'s footprint inflated by
+    ``above_lateral_infl``. Wall-hung pictures "above the bed" have zero footprint
+    overlap yet a small lateral offset, so the overlap gate rejected exactly the
+    cases the questions ask about; adding an IoM gate would make it worse. The
+    positive-gap requirement (a's bottom strictly above b's top) is kept.
+
+    (The former ``above_gap_max`` cap was declared but never consumed in the body;
+    it is dropped rather than wired — an upper bound on the vertical gap has no
+    generation-spec counterpart and would spuriously reject a high picture over a
+    low headboard. See docs/redteam/dossier_deltas.md A8 / hardening_backlog.md H5.)
+    """
+    c = P._as3(a.centroid)[:2]
+    lo = P.footprint_min(b.aabb_min, b.aabb_max) - th.above_lateral_infl
+    hi = P.footprint_max(b.aabb_min, b.aabb_max) + th.above_lateral_infl
+    lat_ok = bool(np.all(c >= lo - P.EPS) and np.all(c <= hi + P.EPS))
+    # lateral slack: signed distance from a's centre to the inflated footprint edge
+    d = np.maximum.reduce([lo - c, c - hi, np.zeros(2)])
+    lat_dist = float(np.linalg.norm(d))
     gap = float(a.aabb_min[2]) - float(b.aabb_max[2])  # >0 => a strictly above
     vert_ok = gap > P.EPS
-    passed = bool(over and vert_ok)
+    passed = bool(lat_ok and vert_ok)
     score = 1.0 if passed else 0.0
     expl = (
-        f"above: footprint overlap {'ok' if over else 'FAIL'}; vertical gap "
-        f"{gap:+.2f}m (a above b -> {'ok' if vert_ok else 'FAIL'})"
+        f"above: lateral {'inside' if lat_ok else f'{lat_dist:.2f}m outside'} "
+        f"inflated footprint (infl {th.above_lateral_infl}m -> "
+        f"{'ok' if lat_ok else 'FAIL'}); vertical gap {gap:+.2f}m "
+        f"(a above b -> {'ok' if vert_ok else 'FAIL'})"
     )
     return PredResult(passed, score, float(gap), expl)
 
 
 def under(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHOLDS) -> PredResult:
-    """a under b: footprint overlap AND a's top below b's bottom (no contact required)."""
-    over = P.footprints_overlap(a.aabb_min, a.aabb_max, b.aabb_min, b.aabb_max)
-    gap = float(b.aabb_min[2]) - float(a.aabb_max[2])  # >0 => a strictly under
-    vert_ok = gap > P.EPS
-    passed = bool(over and vert_ok)
-    score = 1.0 if passed else 0.0
+    """a under/below b: two-branch form (H5/DD-A7, uncontested).
+
+    Both branches require footprint IoM-over-min >= ``under_iom_min``. Then either:
+
+    * (i) strict below: a's top <= b's bottom + ``under_tuck_tol`` — a rug under a
+      table top, an object on a lower shelf below an upper one; OR
+    * (ii) tuck-under: gated to ANCHOR classes with an under-space
+      (:data:`UNDER_RELATION`): a rests at floor level relative to b
+      (``a.min_z <= b.min_z + under_tuck_tol``) AND a's top is below b's AABB top
+      (``a.max_z <= b.max_z``). This is the ONLY way "the stool under the table"
+      resolves — the stool's top rises above the table's AABB min_z (~floor), so
+      the strict branch can never pass it.
+    """
+    a_top = float(a.aabb_max[2])
+    a_bottom = float(a.aabb_min[2])
+    b_zmin = float(b.aabb_min[2])
+    b_top = float(b.aabb_max[2])
+
+    frac = P.footprint_iom(a.aabb_min, a.aabb_max, b.aabb_min, b.aabb_max)
+    over_ok = frac >= th.under_iom_min
+
+    strict_ok = a_top <= b_zmin + th.under_tuck_tol + P.EPS
+    tuck_gated = _under_relation_anchor(b)
+    tuck_ok = tuck_gated and (
+        a_bottom <= b_zmin + th.under_tuck_tol + P.EPS and a_top <= b_top + P.EPS
+    )
+
+    passed = bool(over_ok and (strict_ok or tuck_ok))
+    which = "strict" if strict_ok else ("tuck-under" if tuck_ok else "neither")
+    gap = b_zmin - a_top  # >0 => a strictly under b's bottom (branch i slack)
+    score = float(max(0.0, min(1.0, frac))) if passed else 0.0
     expl = (
-        f"under: footprint overlap {'ok' if over else 'FAIL'}; vertical gap "
-        f"{gap:+.2f}m (a below b -> {'ok' if vert_ok else 'FAIL'})"
+        f"under: footprint IoM {frac*100:.0f}% (>= {th.under_iom_min*100:.0f}% -> "
+        f"{'ok' if over_ok else 'FAIL'}); branch={which} "
+        f"(strict gap {gap:+.2f}m; anchor '{b.label}' "
+        f"{'in' if tuck_gated else 'not in'} UNDER_RELATION) -> "
+        f"{'ok' if (strict_ok or tuck_ok) else 'FAIL'}"
     )
     return PredResult(passed, score, float(gap), expl)
 
 
 def with_feature(
-    a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHOLDS
+    a: InstanceRecord,
+    b: InstanceRecord,
+    th: Thresholds = DEFAULT_THRESHOLDS,
+    *,
+    allow_pad_rung: bool = True,
 ) -> PredResult:
-    """a possesses feature b: b's centroid inside or near a's AABB footprint."""
+    """a possesses feature b ("a with the b on it") == ``on(b, a)`` (H5/DD-A6).
+
+    The VLA-3D generator has no "with" relation: "the table with the elephant
+    figurine on it" is the INVERSE of ``on`` — the figurine is ON the table. So the
+    primary test is ``on(b, a)`` with the new support semantics. When that fails, an
+    explicitly-audited relaxation rung falls back to the old footprint-pad test
+    (b's centroid inside/near a's XY footprint, z ignored) — this is a looser
+    "contents-ish" match kept only so a mis-heighted detection still links contents
+    to their container; the PredResult explanation names which rung fired so the
+    verification checkpoint can see a relaxed match. Set ``allow_pad_rung=False`` to
+    require the strict inverse-on form.
+    """
+    primary = on(b, a, th)
+    if primary.passed or not allow_pad_rung:
+        expl = f"with (== on(feature, a)): {primary.explanation}"
+        return PredResult(primary.passed, primary.score, primary.margin, expl)
+
+    # relaxation rung: footprint-pad possession (z ignored) — audited as relaxed.
     c = P._as3(b.centroid)[:2]
     lo = P.footprint_min(a.aabb_min, a.aabb_max)
     hi = P.footprint_max(a.aabb_min, a.aabb_max)
     inside = bool(np.all(c >= lo - P.EPS) and np.all(c <= hi + P.EPS))
-    # distance from b's centroid to a's footprint (0 if inside)
     d = np.maximum.reduce([lo - c, c - hi, np.zeros(2)])
     dist = float(np.linalg.norm(d))
     passed = bool(inside or dist <= th.with_feature_pad + P.EPS)
     margin = th.with_feature_pad - dist
-    score = 1.0 if inside else float(max(0.0, min(1.0, 1.0 - dist / th.with_feature_pad)))
+    score = (
+        0.5
+        if inside
+        else float(max(0.0, min(0.5, 0.5 * (1.0 - dist / th.with_feature_pad))))
+    )  # capped below any strict-on score so inverse-on always ranks first
     expl = (
-        f"with: feature centroid {'inside' if inside else f'{dist:.2f}m from'} "
-        f"a's footprint (pad {th.with_feature_pad}m -> {'ok' if passed else 'FAIL'})"
+        f"with (RELAXED footprint-pad rung; strict on(feature,a) failed): feature "
+        f"centroid {'inside' if inside else f'{dist:.2f}m from'} a's footprint "
+        f"(pad {th.with_feature_pad}m -> {'ok' if passed else 'FAIL'})"
     )
     return PredResult(passed, score, float(margin), expl)
 
@@ -351,12 +555,16 @@ def _rank(candidates: Sequence[InstanceRecord], anchor: InstanceRecord, farthest
     return Ranked(order, dists, float(margin), float(margin_frac), expl)
 
 
-# clause-pred -> binary predicate function (BETWEEN handled separately)
+# clause-pred -> binary predicate function (BETWEEN handled separately).
+# DD-A5: Pred.NEXT_TO routes to `near`, not the tight `next_to` — near-synonyms
+# ("next to", "beside", "adjacent to", "close to") were generated with the `near`
+# threshold, so a tighter 0.75 m gate would reject true targets. The tight
+# `next_to` stays defined but nothing routes to it.
 _BINARY_PREDS = {
     Pred.ON: on,
     Pred.IN: in_,
     Pred.NEAR: near,
-    Pred.NEXT_TO: next_to,
+    Pred.NEXT_TO: near,
     Pred.ABOVE: above,
     Pred.UNDER: under,
     Pred.WITH: with_feature,
@@ -417,7 +625,8 @@ def _resolve_anchor(
     """
     cands = _match_noun(index, anchor.noun)
     if anchor.attributes:
-        cands = [c for c in cands if _attrs_match(c, anchor.attributes)]
+        _class_pool = cands  # same-class pool for relative size ranking (DD-A12)
+        cands = [c for c in cands if _attrs_match(c, anchor.attributes, _class_pool, th)]
 
     disamb = anchor.disambiguator
     if disamb is None or not cands or _depth >= _MAX_ANCHOR_DEPTH:
@@ -570,8 +779,8 @@ def resolve(
     audit: list[Relaxation] = []
     base = _match_noun(index, target.noun)
 
-    # attribute-filtered pool
-    pool = [c for c in base if _attrs_match(c, target.attributes)]
+    # attribute-filtered pool (base is the same-class pool for relative size ranking)
+    pool = [c for c in base if _attrs_match(c, target.attributes, base, th)]
     hard_clauses = [c for c in target.clauses if c.pred not in _SUPERLATIVE_PREDS]
     sup = _superlative_clause(target)
 
@@ -772,7 +981,7 @@ def counting(
     """
     audit: list[Relaxation] = []
     base = _match_noun(index, target.noun)
-    pool = [c for c in base if _attrs_match(c, target.attributes)]
+    pool = [c for c in base if _attrs_match(c, target.attributes, base, th)]
     hard_clauses = []
     for c in target.clauses:
         if c.pred in _SUPERLATIVE_PREDS:

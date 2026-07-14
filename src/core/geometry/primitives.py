@@ -71,6 +71,47 @@ def footprints_overlap(
     return footprint_overlap_area(a_min, a_max, b_min, b_max) > EPS
 
 
+def footprint_area(box_min: np.ndarray, box_max: np.ndarray) -> float:
+    """Area of an AABB's XY footprint, m^2."""
+    lo = footprint_min(box_min, box_max)
+    hi = footprint_max(box_min, box_max)
+    return float(max(hi[0] - lo[0], 0.0) * max(hi[1] - lo[1], 0.0))
+
+
+def footprint_iom(
+    a_min: np.ndarray, a_max: np.ndarray, b_min: np.ndarray, b_max: np.ndarray
+) -> float:
+    """Footprint intersection-over-min: overlap area / min(footprint areas), in [0,1].
+
+    This is the VLA-3D generation-code support gate (``on``/``below``): the
+    intersection is normalised by the SMALLER of the two footprints, so a small
+    object fully covered by a large supporter scores 1.0 regardless of the
+    supporter's size (unlike intersection-over-target, which never sees the
+    anchor's extent).
+    """
+    inter = footprint_overlap_area(a_min, a_max, b_min, b_max)
+    if inter <= 0.0:
+        return 0.0
+    denom = min(footprint_area(a_min, a_max), footprint_area(b_min, b_max))
+    if denom <= EPS:
+        return 0.0
+    return float(inter / denom)
+
+
+def largest_face_area(box_min: np.ndarray, box_max: np.ndarray) -> float:
+    """Area of the AABB's largest axis-aligned face, m^2 (VLA-3D size basis).
+
+    Size qualifiers ("small"/"big") in the generation spec rank by largest-face
+    area, not volume. For extents (dx, dy, dz) the three face areas are dx*dy,
+    dx*dz, dy*dz; the largest is returned.
+    """
+    lo = _as3(box_min)
+    hi = _as3(box_max)
+    d = np.clip(hi - lo, 0.0, None)
+    faces = (d[0] * d[1], d[0] * d[2], d[1] * d[2])
+    return float(max(faces))
+
+
 def aabb_gap(
     a_min: np.ndarray, a_max: np.ndarray, b_min: np.ndarray, b_max: np.ndarray
 ) -> float:
