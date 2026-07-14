@@ -39,16 +39,21 @@ from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.nav.breadcrumbs import BreadcrumbFollower
 from core.nav.costmap import Costmap
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
-from core.nav.planner import astar, plan_through
+from core.nav.planner import astar, free_space_via_point, plan_through
 from core.plan_schema import Anchor, LegKind, Plan, Pred, RouteLeg, TargetSpec
 
 # Flight-recorder-visible seam: recovery events are logged here so a violation-free
 # least-bad choice is auditable (architecture §1 row 4 — "never a silent geometry edit").
 _LOG = logging.getLogger("core.heads.instruction")
 
-VIA_NEAR_OFFSET_M: float = 1.2  # how far "near" the via anchor to place the waypoint
+VIA_NEAR_OFFSET_M: float = 1.2  # fallback "near" offset if free-space placement fails
 ARRIVAL_TOL_M: float = 0.8  # within this of a leg goal -> arrived (mark progress)
 MIN_GROUND_OBS: int = 3  # per architecture: grounded == confirmed with >= 3 obs
+
+# H11 / IF-F8 / SYS-F10: cap re-plans per question so a pathological stall/violation loop
+# cannot burn the whole budget replanning every tick. Each replan trigger (stall, no-LOS,
+# follower-exhausted-not-arrived, capsule tripwire) counts against this.
+MAX_REPLANS_PER_QUESTION: int = 3
 
 # H4c: fraction of the explore budget past which a PROVISIONAL terminal grounding
 # (one resolved via a relaxation rung — drop_relation/category_only/drop_disambiguator)
@@ -117,9 +122,22 @@ class InstructionHead:
     _confirmed: set[int] = field(default_factory=set)
     _terminal_xy: tuple[float, float] | None = None
     _last_wp: WaypointCmd | None = None
+    _pose: tuple[float, float] = (0.0, 0.0)  # last-known pose, for free-space via placement
     _demoted: set[int] = field(default_factory=set)  # anchors CP3 confidently rejected
     _legacy_confirm: bool = False  # anchor_confirm matches the old bool seam
     _scene: object | None = None  # live scene retained for CP3 re-resolve
+    #: H11 — the avoid Capsules currently stamped into the costmap (toolbox.Capsule
+    #: objects), retained so the per-tick runtime tripwire can test the pose/next-crumb
+    #: against them via ``toolbox.capsule_violated`` (read-only) without re-deriving them.
+    _stamped_capsules: list[object] = field(default_factory=list)
+    #: H11 (IF-F8/SYS-F10) — count of re-plans this question + a flight-recorder-visible
+    #: log of why each fired. Capped at MAX_REPLANS_PER_QUESTION.
+    _replans: int = 0
+    _replan_events: list[str] = field(default_factory=list)
+    #: H11 capsule tripwire edge-detect: True once the pose has been observed inside a
+    #: stamped capsule, so we re-plan on ENTRY (clear->violated) rather than every tick a
+    #: legitimately-engulfed start stays inside (the recovery path already drives it out).
+    _in_capsule: bool = False
 
     def __post_init__(self) -> None:
         # Backward compat: the old ``(plan, leg_index, summary) -> bool`` seam is detected
@@ -144,6 +162,7 @@ class InstructionHead:
         odom = io.latest_odom()
         pose = (float(odom.x), float(odom.y)) if odom is not None else (0.0, 0.0)
         t = float(odom.t) if odom is not None else 0.0
+        self._pose = pose
         self._ingest_terrain(io, pose)
         self._ground_legs(scene)
 
@@ -151,6 +170,10 @@ class InstructionHead:
         # A later leg grounding after the first build extends the drive (H3c); until any
         # prefix is grounded, no follower exists and we emit nothing (caller explores).
         self._maybe_build_or_extend_route(pose, scene)
+        # H11 runtime avoid tripwire (IF-F5): a stamped capsule the driven pose is entering
+        # forces a re-plan away (bounded by the replan cap). Checked before the drive so the
+        # crumb emitted this tick reflects any re-plan.
+        self._capsule_tripwire(pose, scene)
         return self._drive(io, pose, t)
 
     # ------------------------------------------------------------------ map
@@ -310,9 +333,36 @@ class InstructionHead:
         return self._project_free((float(c[0]), float(c[1])))
 
     def _via_point(self, rec) -> tuple[float, float]:
-        """A point ~VIA_NEAR_OFFSET_M from the anchor centroid, projected to free space."""
+        """A "path near the anchor" waypoint placed by free-space gradient (IF-F7).
+
+        Once a costmap exists, ``free_space_via_point`` picks the max-clearance passable
+        cell at ~``near_thresh`` from the anchor that is reachable from the current pose —
+        so the via lands on the robot's side of a wall-adjacent anchor, not inside a wall
+        and not on the unreachable side (the old fixed ``+1.2 m +x`` offset's failure
+        mode). Before a costmap exists (first grounding pass, pre-route), we fall back to
+        the fixed offset projection.
+        """
         c = TB.P._as3(rec.centroid)
-        return self._project_free((float(c[0]) + VIA_NEAR_OFFSET_M, float(c[1])))
+        anchor_xy = (float(c[0]), float(c[1]))
+        cm = self._costmap
+        if cm is not None:
+            via = free_space_via_point(cm, anchor_xy, self._pose, self._near_thresh(rec))
+            if via is not None:
+                return via
+        return self._project_free((anchor_xy[0] + VIA_NEAR_OFFSET_M, anchor_xy[1]))
+
+    def _near_thresh(self, rec) -> float:
+        """The proximity threshold for a "near" via, scaled to the anchor's footprint.
+
+        Half the anchor's footprint diagonal plus the base near margin, so the via sits
+        just outside a large anchor's shell rather than a fixed distance from its centroid.
+        """
+        try:
+            ext = rec.aabb_max - rec.aabb_min
+            half_diag = 0.5 * float((float(ext[0]) ** 2 + float(ext[1]) ** 2) ** 0.5)
+        except Exception:  # noqa: BLE001 — a malformed rec falls back to the fixed offset
+            half_diag = 0.0
+        return half_diag + VIA_NEAR_OFFSET_M
 
     def _project_free(self, xy: tuple[float, float]) -> tuple[float, float]:
         """Nudge a point off an obstacle onto the nearest passable cell (if a costmap exists)."""
@@ -381,6 +431,17 @@ class InstructionHead:
         want = self._committable_prefix_len()
         if want == 0:
             return  # nothing grounded yet — caller (ExploreHead) explores this tick
+        # IF-F5: an unresolvable avoid anchor keeps the WHOLE route uncommitted while
+        # budget remains (feeding the explore fallthrough) — committing now would drive a
+        # route the forbidden capsule can't yet be stamped into. Once we already have a
+        # follower we keep driving it (re-stamp happens on rebuild); this gate only blocks
+        # the FIRST commit.
+        if (
+            self._follower is None
+            and not self._avoids_all_resolvable(scene)
+            and not self._commit_forced()
+        ):
+            return
         if self._follower is not None and want <= self._driven_prefix:
             return  # already driving a route covering (at least) this prefix
         self._build_route(start_xy, scene, want)
@@ -462,9 +523,15 @@ class InstructionHead:
         return ("goto", leg.geom)
 
     def _stamp_avoids(self, scene) -> None:
-        """Stamp every AvoidSpec's capsule hard into the costmap once (never relaxed)."""
+        """Stamp every resolvable AvoidSpec's capsule hard into the costmap (never relaxed).
+
+        Idempotent over specs, so a re-plan / re-ground re-stamps any avoid anchor that
+        has since grounded (IF-F5). The stamped Capsules are retained in
+        ``_stamped_capsules`` for the per-tick runtime tripwire (``capsule_violated``).
+        """
         if scene is None or self._costmap is None:
             return
+        self._stamped_capsules = []
         for spec in self.plan.avoid:
             try:
                 cap = TB.avoid_capsule(spec, scene, self.thresholds)
@@ -475,25 +542,154 @@ class InstructionHead:
                 (float(cap.b[0]), float(cap.b[1])),
             )
             self._costmap.stamp_capsule(seg, cap.radius)
+            self._stamped_capsules.append(cap)
+
+    def _avoids_all_resolvable(self, scene) -> bool:
+        """True iff every AvoidSpec's anchors currently resolve (IF-F5).
+
+        Avoid grounding is a route-commit precondition of the SAME rank as leg grounding:
+        an unresolvable avoid anchor (the "TV" not yet detected) keeps the route
+        uncommitted while budget remains, so the robot keeps exploring toward the avoid
+        noun instead of committing a route that would legally cut through the (unstamped)
+        forbidden corridor. Once budget pressure forces the commit we proceed with whatever
+        capsules resolved (never strand).
+        """
+        if scene is None:
+            return True
+        for spec in self.plan.avoid:
+            try:
+                TB.avoid_capsule(spec, scene, self.thresholds)
+            except ValueError:
+                return False
+        return True
+
+    def avoid_nouns(self) -> list[str]:
+        """All distinct nouns of avoid specs (frontier-affinity bias, IF-F5).
+
+        Exposed so exploration biases toward avoid anchors too — an ungrounded avoid
+        anchor is as much a reason to keep exploring as an ungrounded leg anchor.
+        """
+        out: list[str] = []
+        if self.plan is None:
+            return out
+        for spec in self.plan.avoid:
+            anchors: list[Anchor] = []
+            if spec.between is not None:
+                anchors.extend(spec.between)
+            if spec.near is not None:
+                anchors.append(spec.near)
+            for a in anchors:
+                if a.noun and a.noun not in out:
+                    out.append(a.noun)
+        return out
+
+    # ------------------------------------------------------------------ replanning
+    def _can_replan(self) -> bool:
+        return self._replans < MAX_REPLANS_PER_QUESTION
+
+    def _replan(self, reason: str, scene) -> bool:
+        """Rebuild the costmap from the current grid snapshot, re-stamp avoids, and
+        re-plan the committed prefix from the CURRENT pose (H11 / IF-F8 / SYS-F10).
+
+        Bounded by ``MAX_REPLANS_PER_QUESTION``; each fire is recorded to
+        ``_replan_events`` (flight-recorder-visible) with its reason. Returns True iff a
+        re-plan was actually performed.
+        """
+        if not self._can_replan() or self._follower is None:
+            return False
+        self._replans += 1
+        self._replan_events.append(
+            f"replan #{self._replans} @pose={self._pose} reason={reason}"
+        )
+        _LOG.info(
+            "IF replan #%d (reason=%s): rebuilding costmap + re-planning from pose %s.",
+            self._replans,
+            reason,
+            self._pose,
+        )
+        prefix_len = max(self._driven_prefix, 1)
+        self._follower = None
+        self._driven_prefix = 0
+        self._in_capsule = False  # recomputed against the new plan next tick
+        self._build_route(self._pose, scene, prefix_len)
+        return self._follower is not None
+
+    def _capsule_tripwire(self, pose: tuple[float, float], scene) -> None:
+        """H11 / IF-F5 runtime tripwire: if the current pose (or next crumb) is entering a
+        stamped avoid capsule, re-plan away.
+
+        Edge-triggered on ENTRY (clear -> violated) so a legitimately-engulfed start — the
+        vehicle begins inside the capsule by construction and the recovery path already
+        drives it out — does not force a re-plan every tick. Counts against the replan cap.
+        """
+        if self._follower is None or not self._stamped_capsules:
+            return
+        probe = [list(pose)]
+        nxt = self._follower.current(pose)
+        if nxt is not None:
+            probe.append([float(nxt.x), float(nxt.y)])
+        traj = np.asarray(probe, dtype=float)
+        violated = any(TB.capsule_violated(traj, cap)[0] for cap in self._stamped_capsules)
+        if violated and not self._in_capsule:
+            self._in_capsule = True
+            self._replan("capsule_tripwire", scene)
+        elif not violated:
+            self._in_capsule = False
 
     # ------------------------------------------------------------------ drive
     def _drive(self, io: RobotIO, pose: tuple[float, float], t: float) -> bool:
         """Emit the next crumb (or hold at the terminal). Returns True iff a waypoint
         was published this tick — the emit-signal ExploreHead reads to decide whether to
-        fall through to frontier exploration (H3)."""
+        fall through to frontier exploration (H3).
+
+        H11 (IF-F8/SYS-F10): consume the follower's ``replan_flag`` — on a stall or a
+        no-LOS crumb we re-plan from the current pose (bounded) rather than republish a
+        wedged crumb forever. A follower that exhausts its path while the vehicle has NOT
+        reached the terminal is also a re-plan trigger.
+
+        H11 (IF-F4): the answer IS the drive. While the route is unfinished we keep
+        emitting breadcrumbs; the raw terminal coordinate is published only once the
+        follower is exhausted AND the vehicle is within reach — never a distant beeline
+        that abandons ordered/avoid compliance for the trajectory tail.
+        """
         if self._follower is None:
             return False
         wp = self._follower.advance(pose, t)
         self._mark_arrivals(pose)
+
+        # A CP3 demote inside _mark_arrivals can invalidate the route (follower
+        # reset to None). The crumb from the pre-demote route is stale — drop it;
+        # the rebuilt route emits from the next tick (explore covers this one).
+        if self._follower is None:
+            return False
+
+        # Consume the stall / no-LOS replan flag (IF-F8/SYS-F10).
+        if self._follower.replan_flag and self._can_replan():
+            if self._replan("stall_or_no_los", self._scene) and self._follower is not None:
+                wp = self._follower.advance(pose, t)
+
         if wp is None:
-            # route exhausted: hold at the terminal goal.
-            if self._terminal_xy is not None:
+            # Follower exhausted its path. If the vehicle actually reached the terminal,
+            # hold the raw terminal coordinate (the drive is complete). If it has NOT
+            # arrived, the path ran out short — re-plan from here toward the terminal
+            # (IF-F8) rather than teleport a distant terminal waypoint (IF-F4).
+            reached = self._terminal_xy is not None and (
+                _dist(pose, self._terminal_xy) <= ARRIVAL_TOL_M
+            )
+            if not reached and self._can_replan():
+                if self._replan("follower_exhausted_not_arrived", self._scene):
+                    wp = self._follower.advance(pose, t) if self._follower else None
+            if wp is None and self._terminal_xy is not None:
                 wp = WaypointCmd(float(self._terminal_xy[0]), float(self._terminal_xy[1]))
         if wp is not None:
             io.publish_waypoint(wp)
             self._last_wp = wp
             return True
         return False
+
+    def replan_events(self) -> list[str]:
+        """Flight-recorder-visible log of the re-plans this question triggered (H11)."""
+        return list(self._replan_events)
 
     def _mark_arrivals(self, pose: tuple[float, float]) -> None:
         """Confirm each leg goal as the vehicle reaches it (anchor-confirmation checkpoint)."""
@@ -522,6 +718,10 @@ class InstructionHead:
         and re-plan this leg to the runner-up (design doc §CP3). Never blocks the drive —
         a demote with no runner-up leaves the map's belief standing.
         """
+        # CONTRACT: anchor_desc must stay the BARE class noun — the CP3 seam's
+        # anchor_noun (vocab-bridge same-class test) defaults to it. If this is
+        # ever enriched to a fuller description, pass anchor_noun=leg.nouns[0]
+        # explicitly or the bridge's synonym check silently degrades.
         anchor_desc = leg.nouns[0] if leg.nouns else "object"
         try:
             outcome = self.anchor_confirm(anchor_desc, self._project_crop(leg))
@@ -610,8 +810,75 @@ class InstructionHead:
                     out.append(n)
         return out
 
+    def drive_complete(self) -> bool:
+        """True once the IF drive has nothing left to do (IF-F4 continue-drive).
+
+        Read-only signal the FSM's DRIVE_OUT state polls to decide when to stop ticking the
+        head and go DONE. The drive is complete only when the committed route covers the
+        WHOLE plan (the driven prefix reaches the final leg and every leg is grounded) AND
+        EITHER:
+
+          * the terminal is known and the vehicle is within ``ARRIVAL_TOL_M`` of it — the
+            full route was driven to its end; or
+          * the follower has exhausted its path AND cannot re-plan any further (the replan
+            cap is spent) — no more progress is possible.
+
+        Crucially, arriving at a PARTIAL prefix's terminal is NOT completion: while a later
+        leg is still ungrounded (the terminal anchor has not appeared yet), the committed
+        follower only covers the grounded prefix, so its terminal is an intermediate leg
+        goal — DRIVE_OUT must keep ticking (the explore fall-through hunts the missing
+        anchor, extending the route when it appears), and the watchdog floor remains the
+        hard backstop if the anchor never appears. Before any follower is built (nothing
+        grounded yet) the drive is likewise NOT complete. This is a pure read of existing
+        head state; it publishes nothing and mutates nothing.
+
+        Note (head-property addition, IF-F4): this property is added specifically so the FSM
+        can distinguish "arrived / holding the terminal" from "still streaming crumbs" —
+        ``advance``/``_drive`` return ``True`` in BOTH cases (a waypoint was published), so
+        the emit bool alone cannot gate DRIVE_OUT termination.
+        """
+        follower = self._follower
+        if follower is None:
+            return False
+        # The committed route must cover the entire plan — the driven prefix reaches the
+        # final leg and no leg remains ungrounded — or "arrival" is only at an intermediate
+        # leg goal while a later anchor is still being hunted.
+        n_legs = len(self.plan.route) if self.plan and self.plan.route else 0
+        route_covers_plan = (
+            n_legs > 0
+            and self._driven_prefix >= n_legs
+            and self.ungrounded_subgoals() == 0
+        )
+        if not route_covers_plan:
+            return False
+        if self._terminal_xy is not None and _dist(self._pose, self._terminal_xy) <= ARRIVAL_TOL_M:
+            return True
+        # Follower exhausted (no next crumb) and no replan budget left to extend it.
+        if follower.current(self._pose) is None and not self._can_replan():
+            return True
+        return False
+
     def terminal_waypoint(self) -> WaypointCmd | None:
-        """The WaypointCmd at the terminal goal — the FSM's IF 'answer'."""
+        """The WaypointCmd the FSM publishes as the IF 'answer'.
+
+        H11 (IF-F4): the answer IS the drive. When the FSM forces answer assembly we must
+        NOT abandon breadcrumb guidance for one distant terminal coordinate (that strands
+        the vehicle and drops ordered/avoid compliance for the trajectory tail). While the
+        route is still unfinished — the follower has a next crumb and the vehicle is not
+        yet within reach of the terminal — we return that NEXT CRUMB, so the FSM's answer
+        path keeps the vehicle threading the planned route. Only once the follower is
+        exhausted (or the vehicle is already within reach of the terminal) do we publish
+        the raw terminal coordinate.
+        """
+        follower = self._follower
+        if (
+            follower is not None
+            and self._terminal_xy is not None
+            and _dist(self._pose, self._terminal_xy) > ARRIVAL_TOL_M
+        ):
+            crumb = follower.current(self._pose)
+            if crumb is not None:
+                return crumb
         if self._terminal_xy is not None:
             return WaypointCmd(float(self._terminal_xy[0]), float(self._terminal_xy[1]))
         return self._last_wp

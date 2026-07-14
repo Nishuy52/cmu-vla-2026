@@ -65,7 +65,7 @@ and `PerceptionPipeline(fusion_cfg=...)` both accept it → constructor/param wi
 
 ---
 
-## tracker (`core.perception.tracker.TrackerConfig`) — 1 field, wireable
+## tracker (`core.perception.tracker.TrackerConfig`) — 2 fields, wireable
 
 Composed live: equals `DEFAULT_TRACKER_CONFIG`. `associate(..., cfg=...)` and
 `PerceptionPipeline(tracker_cfg=...)` accept it.
@@ -73,6 +73,7 @@ Composed live: equals `DEFAULT_TRACKER_CONFIG`. `associate(..., cfg=...)` and
 | Field | Default | Unit | Controls | Evidence / source | How wired | Sens |
 |---|---|---|---|---|---|---|
 | tracker.gate | 0.75 | m | Max centroid distance for a cross-frame association match | Invented (docstring says default 0.75) | constructor arg + function param | H |
+| tracker.decay_k | 5 | keyframes | One-frame ghosts (n_obs==1) not re-observed within this many keyframes are pruned; confirmed tracks never decay; 0 disables (redteam H15a) | Invented, conservative | constructor arg | M |
 
 ---
 
@@ -89,7 +90,7 @@ accepts it; `_is_keyframe` reads it off the instance.
 
 ---
 
-## nav (`core.calibration.NavTunables`) — 20 fields
+## nav (`core.calibration.NavTunables`) — 21 fields
 
 New mirror dataclass; **not** composed from an existing config. Mixed wiring: the
 class-level params (`Costmap`, `OccupancyGrid`, `ExplorationPolicy`, `BreadcrumbFollower`,
@@ -103,9 +104,10 @@ are hard module constants.
 | nav.observe_radius_m | 8.0 | m | Lidar footprint radius for the observed mask | `occupancy.OBSERVE_RADIUS_M` | constructor arg (`OccupancyGrid.observe_radius_m`) | M |
 | nav.grow_pad_cells | 8 | cells | Extra ring added when the grid grows | `occupancy.GROW_PAD_CELLS` | module constant — **wiring TODO (Phase 2)** (read directly in `_ensure_bounds`) | L |
 | nav.vehicle_radius_m | 0.4 | m | Obstacle inflation radius | `costmap.VEHICLE_RADIUS_M` | constructor arg (`Costmap.vehicle_radius_m` default = const) | H |
+| nav.overhead_soft_cost_mult | 4.0 | × | Intended A* penalty to cross a SOFT-overhead cell vs FREE (redteam H13). Default overhead is now a SOFT high-cost layer (`Costmap`), NOT a hard block: a false-positive overhead flag makes a route expensive, not unreachable, while a genuinely-blocked under-furniture route (no alternative) stays strongly avoided. The applied per-cell penalty on the A* path is `planner.UNKNOWN_COST_MULT` (the only per-cell cost seam A* reads without a planner change); this value records the intended weight and is the sweep handle once a Phase-2 planner seam lands. Corridor threading still HARDENS overhead (`Costmap.clone`). | `costmap.OVERHEAD_SOFT_COST_MULT` | constructor arg (`Costmap.overhead_soft_cost_mult` default = const) | M |
 | nav.overhead_min | 0.25 | m | Overhead-clearance band lower edge (height above local ground; skip near-ground returns) | `occupancy.OverheadConfig.overhead_min` | dataclass field (`OverheadConfig`, passed to `integrate_scan_overhead`) | H |
 | nav.overhead_max | 1.20 | m | Overhead-clearance band upper edge (skip walls/ceiling above furniture) | `occupancy.OverheadConfig.overhead_max` | dataclass field (`OverheadConfig`) | H |
-| nav.overhead_min_points_per_cell | 3 | points | In-band scan points a cell needs before it flags OVERHEAD (noise reject) | `occupancy.OverheadConfig.min_points_per_cell` | dataclass field (`OverheadConfig`) | M |
+| nav.overhead_min_points_per_cell | 3 | points | In-band scan points a cell needs before it flags OVERHEAD (noise reject). The decimation helper `integrate_scan_overhead_decimated` now scales this DOWN by the applied stride (`ceil(min_points/stride)`, floor 1) so a sparse-but-real overhang edge that passes at full density still passes after decimation (redteam H13 / SYS-F12). | `occupancy.OverheadConfig.min_points_per_cell` | dataclass field (`OverheadConfig`) | M |
 | nav.vehicle_sensor_height | 0.60 | m | Fallback local-ground = `vehicle_z − this` when a cell has no terrain-derived ground z (jingfan: vehicle z ≈ 0.0, floor z ≈ −0.6) | `occupancy.OverheadConfig.vehicle_sensor_height` | dataclass field (`OverheadConfig`) | M |
 | nav.overhead_scan_max_pts | 12000 | points | Per-tick decimation cap for the raw /registered_scan fed to the overhead layer | `occupancy.OVERHEAD_SCAN_MAX_PTS` | module constant (default arg to `integrate_scan_overhead_decimated`) | L |
 | nav.min_cluster_size | 5 | cells | Frontier clusters below this are noise | `frontiers.MIN_CLUSTER_SIZE` | function param (`detect_frontiers`) | M |
@@ -123,6 +125,19 @@ are hard module constants.
 | nav.reach_m | 0.8 | m | Advance to next crumb within this distance | `breadcrumbs.REACH_M` | constructor arg | M |
 | nav.stall_move_m | 0.3 | m | Movement below this over the window ⇒ stalled | `breadcrumbs.STALL_MOVE_M` | constructor arg | M |
 | nav.stall_window_s | 10.0 | s | Stall observation window | `breadcrumbs.STALL_WINDOW_S` | constructor arg | M |
+
+> **Overhead-clearance tunables — single-bag fit; multi-scene validation is an
+> Ubuntu-gate item (redteam H13 / SYS-F12).** The five overhead tunables
+> (`overhead_min`, `overhead_max`, `overhead_min_points_per_cell`,
+> `vehicle_sensor_height`, `overhead_scan_max_pts`) plus the softening weight
+> (`overhead_soft_cost_mult`) are fitted to the single jingfan bag. They are NOT
+> validated on any other scene. Softening the layer to SOFT-cost by default (H13)
+> makes a wrong flag cheap rather than route-killing, which lowers the risk of the
+> single-bag fit — but the band/point-gate values still need validation on ≥2 more
+> scenes' recorded bags at the Ubuntu gate before they are trusted (the hardening
+> backlog lists this as an open Ubuntu-gate item). The exploration-side asymmetry
+> (only IF routes use a Costmap; frontier exploration ignores overhead) is likewise
+> flagged there and deferred.
 
 ---
 

@@ -108,16 +108,33 @@ def test_composite_zero_when_nothing_available():
     assert SceneQScores().composite() == 0.0  # no scoreable/aligned questions -> 0, no div-by-zero
 
 
-def test_best_independent_prefers_referential_then_scenegraph():
+def test_strict_independent_requires_referential_source():
+    """NUM-F6/F7: only a referential (relation-aware) independent count is evidence — a
+    class-only or scene-graph-sourced count is excluded, never accepted as a fallback."""
     from core.runner.gt_battery import GTQuestionScore
-    r1 = GTQuestionScore(scene="s", qtype="numerical", question="q",
-                         gt_count_independent=4, gt_count_scenegraph=9)
-    assert CV._best_independent(r1) == 4  # referential wins
-    r2 = GTQuestionScore(scene="s", qtype="numerical", question="q",
-                         gt_count_independent=None, gt_count_scenegraph=9)
-    assert CV._best_independent(r2) == 9  # falls back to scene graph
-    r3 = GTQuestionScore(scene="s", qtype="numerical", question="q")
-    assert CV._best_independent(r3) is None  # no opinion -> excluded
+    r1 = GTQuestionScore(
+        scene="s", qtype="numerical", question="q",
+        gt_count_independent=4, independent_source="referential", gt_count_scenegraph=9,
+    )
+    assert CV._strict_independent(r1) == 4  # referential -> evidence
+
+    # NOT referential (e.g. class_only) -> excluded even though a count value is present
+    r2 = GTQuestionScore(
+        scene="s", qtype="numerical", question="q",
+        gt_count_independent=9, independent_source="class_only", gt_count_scenegraph=9,
+    )
+    assert CV._strict_independent(r2) is None
+
+    # scene-graph-only (no independent_source at all) -> excluded, never falls back
+    r3 = GTQuestionScore(
+        scene="s", qtype="numerical", question="q",
+        gt_count_independent=None, gt_count_scenegraph=9,
+    )
+    assert CV._strict_independent(r3) is None
+
+    # no opinion whatsoever -> excluded
+    r4 = GTQuestionScore(scene="s", qtype="numerical", question="q")
+    assert CV._strict_independent(r4) is None
 
 
 # --------------------------------------------------------------------------- config hash
@@ -136,9 +153,16 @@ def test_config_hash_order_independent_and_type_sensitive():
 
 def test_default_sweep_spec_keys_are_wireable():
     spec = default_sweep_spec()
-    spec.validate()  # must not raise: every geometry key is a real field, counting is special-cased
-    assert "counting.min_obs" in spec.params
+    spec.validate()  # must not raise: every geometry key is a real, live Calibration field
     assert all(len(v) >= 3 for v in spec.params.values())  # 3-5 values each
+
+
+def test_default_sweep_spec_excludes_min_obs():
+    """NUM-F7: counting.min_obs was dropped — provably inert on GT data (n_obs=3 always),
+    so it must never reappear in the default sweep space."""
+    spec = default_sweep_spec()
+    assert "counting.min_obs" not in spec.params
+    assert not any(k.startswith("counting.") for k in spec.params)
 
 
 def test_spec_validate_rejects_unknown_key():
@@ -192,6 +216,91 @@ def test_aggregate_stability_no_consensus_keeps_default():
     _stab, rec, over = _aggregate_stability(spec, folds)
     assert rec["geometry.near_floor"] == "unstable — keep default"
     assert "geometry.near_floor" not in over  # nothing moved
+
+
+# --------------------------------------------------------------------------- objective weighting
+
+
+def test_objective_weights_rubric_x6_strict_x1_iou_x2():
+    """Points-weighted composite on a synthetic mini-battery: NUMERICAL 1pt (strict
+    independent agreement), OBJECT_REFERENCE 2pt (IoU hit), INSTRUCTION_FOLLOWING 6pt
+    (rubric score), summed earned/available exactly as the challenge pays."""
+    s = SceneQScores()
+    # one numerical hit (strict-independent match) -> 1/1
+    s.numerical_earned, s.numerical_available = 1.0, 1.0
+    # one OR hit (IoU >= 0.25) -> 2/2
+    s.or_earned, s.or_available = 2.0, 2.0
+    # one IF question at rubric_score=0.5 -> 3/6 (6 * 0.5)
+    s.if_earned, s.if_available = 3.0, 6.0
+
+    assert s.earned == pytest.approx(1.0 + 2.0 + 3.0)
+    assert s.available == pytest.approx(1.0 + 2.0 + 6.0)
+    assert s.composite() == pytest.approx(6.0 / 9.0)
+
+    # weighting constants match the challenge point values used by score_scene
+    assert CV._PTS_NUMERICAL == pytest.approx(1.0)
+    assert CV._PTS_OBJECT_REFERENCE == pytest.approx(2.0)
+    assert CV._PTS_INSTRUCTION_FOLLOWING == pytest.approx(6.0)
+
+
+def test_objective_excludes_class_only_and_scenegraph_only_numerical_rows():
+    """A class-only or scene-graph-only numerical row must never enter the numerical
+    numerator/denominator — mirrors gt_battery.aggregate's referential-only filter."""
+    from core.runner.gt_battery import GTQuestionScore
+
+    class_only = GTQuestionScore(
+        scene="s", qtype="numerical", question="q1",
+        our_count=5, gt_count_independent=5, independent_source="class_only",
+    )
+    scenegraph_only = GTQuestionScore(
+        scene="s", qtype="numerical", question="q2",
+        our_count=3, gt_count_independent=None, gt_count_scenegraph=3,
+    )
+    referential = GTQuestionScore(
+        scene="s", qtype="numerical", question="q3",
+        our_count=2, gt_count_independent=2, independent_source="referential",
+    )
+    assert CV._strict_independent(class_only) is None
+    assert CV._strict_independent(scenegraph_only) is None
+    assert CV._strict_independent(referential) == 2
+
+
+# --------------------------------------------------------------------------- grid/ledger consistency
+
+
+def test_every_swept_geometry_key_is_a_live_thresholds_field():
+    """Grid-vs-ledger guard: every ``geometry.<field>`` key in the default sweep spec must
+    exist as a real field on core.geometry.toolbox.Thresholds (enumerated dynamically, no
+    hardcoded list) — this FAILS if a future rename/retirement breaks the grid."""
+    from dataclasses import fields as dc_fields
+    from core.geometry.toolbox import Thresholds
+
+    live_fields = {f.name for f in dc_fields(Thresholds)}
+    spec = default_sweep_spec()
+    geometry_keys = [k for k in spec.params if k.startswith("geometry.")]
+    assert geometry_keys, "expected at least one geometry.* key in the default spec"
+    for key in geometry_keys:
+        _, _, field_name = key.partition(".")
+        assert field_name in live_fields, (
+            f"sweep key {key!r} does not name a live Thresholds field "
+            f"(live fields: {sorted(live_fields)})"
+        )
+
+
+def test_every_swept_key_is_a_live_calibration_ledger_field():
+    """Same guard at the Calibration-subsystem level: every swept key's subsystem must be
+    a real Calibration subsystem and its field a real field on that subsystem's dataclass
+    (dynamic enumeration via apply_overrides, which raises KeyError on drift)."""
+    spec = default_sweep_spec()
+    spec.validate()  # apply_overrides raises KeyError if any key doesn't resolve
+
+
+def test_default_sweep_spec_has_no_counting_dimension():
+    """counting.min_obs (and the counting subsystem generally) must not appear in the
+    spec — it was dropped as provably inert on GT data (NUM-F7)."""
+    spec = default_sweep_spec()
+    assert "counting.min_obs" not in spec.params
+    assert not any(k.split(".")[0] == "counting" for k in spec.params)
 
 
 # --------------------------------------------------------------------------- vocab bridge
@@ -278,6 +387,88 @@ def test_cache_reuses_config_scene_evaluations():
     assert ev.n_cache_misses == 2
     ev.evaluate({}, "studio")  # new scene -> miss
     assert ev.n_cache_misses == 3
+
+
+@requires_full_unity
+@pytest.mark.slow
+def test_disk_cache_resumes_across_evaluator_instances(tmp_path):
+    """Cells written by one SceneEvaluator (cache_dir set) are picked up by a FRESH
+    SceneEvaluator over the same out dir — the resume path (n_disk_hits > 0), not merely
+    the in-memory cache."""
+    qbs = CV._load_questions(str(QUESTIONS_JSON), ["loft"])
+    cache_dir = tmp_path / "cache"
+
+    ev1 = SceneEvaluator(
+        str(FULL_UNITY_ROOT), qbs, questions_dir=str(QUESTIONS_DIR), cache_dir=cache_dir
+    )
+    ev1.evaluate({}, "loft")
+    assert ev1.n_cache_misses == 1
+    assert ev1.n_disk_hits == 0
+    # a JSON cell was written to disk
+    cells = list(cache_dir.glob("*.json"))
+    assert len(cells) == 1
+
+    # simulate interruption: a brand-new evaluator (empty in-memory cache), same out dir
+    ev2 = SceneEvaluator(
+        str(FULL_UNITY_ROOT), qbs, questions_dir=str(QUESTIONS_DIR), cache_dir=cache_dir
+    )
+    res2 = ev2.evaluate({}, "loft")
+    assert ev2.n_cache_hits == 1
+    assert ev2.n_disk_hits == 1  # served from the prior run's on-disk cell
+    assert ev2.n_cache_misses == 0
+
+    # the resumed value matches what was originally computed
+    res1 = ev1.evaluate({}, "loft")
+    assert res2.composite() == pytest.approx(res1.composite())
+
+
+@requires_full_unity
+@pytest.mark.slow
+def test_no_cache_dir_means_no_disk_persistence_or_resume():
+    """cache_dir=None (the --no-cache path) never writes to disk and never resumes — a
+    fresh evaluator always recomputes."""
+    qbs = CV._load_questions(str(QUESTIONS_JSON), ["loft"])
+    ev1 = SceneEvaluator(str(FULL_UNITY_ROOT), qbs, questions_dir=str(QUESTIONS_DIR))
+    ev1.evaluate({}, "loft")
+    assert ev1.n_cache_misses == 1
+    assert ev1.n_disk_hits == 0
+    assert ev1.cache_dir is None
+
+    ev2 = SceneEvaluator(str(FULL_UNITY_ROOT), qbs, questions_dir=str(QUESTIONS_DIR))
+    ev2.evaluate({}, "loft")
+    assert ev2.n_cache_misses == 1  # no disk cell to resume from -> recomputed
+    assert ev2.n_disk_hits == 0
+
+
+@requires_full_unity
+@pytest.mark.slow
+def test_corrupt_cache_cell_is_tolerated_and_recomputed(tmp_path):
+    """A truncated/corrupt on-disk cell (e.g. process killed mid-write) must not crash the
+    sweep — it is treated as absent and recomputed, no resume credit taken for it."""
+    qbs = CV._load_questions(str(QUESTIONS_JSON), ["loft"])
+    cache_dir = tmp_path / "cache"
+
+    ev1 = SceneEvaluator(
+        str(FULL_UNITY_ROOT), qbs, questions_dir=str(QUESTIONS_DIR), cache_dir=cache_dir
+    )
+    ev1.evaluate({}, "loft")
+    cells = list(cache_dir.glob("*.json"))
+    assert len(cells) == 1
+
+    # corrupt the cell on disk: truncate to invalid JSON
+    cells[0].write_text("{not valid json", encoding="utf-8")
+
+    ev2 = SceneEvaluator(
+        str(FULL_UNITY_ROOT), qbs, questions_dir=str(QUESTIONS_DIR), cache_dir=cache_dir
+    )
+    res2 = ev2.evaluate({}, "loft")  # must not raise
+    assert ev2.n_disk_hits == 0  # corrupt cell is not a hit
+    assert ev2.n_cache_misses == 1  # recomputed instead
+    assert res2.available > 0 or res2.composite() == 0.0  # sane result, no crash
+
+    # the corrupt cell is overwritten with a valid one after the recompute
+    payload = json.loads(cells[0].read_text(encoding="utf-8"))
+    assert "scores" in payload
 
 
 @pytest.mark.slow

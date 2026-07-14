@@ -21,12 +21,21 @@ Four defects dominate everything else: (1) the `/challenge_question` QoS mismatc
 | H4a/b ladder policies | **LANDED** `4bcf18b` + scope-clause follow-up, verified |
 | H4c provisional terminal | **LANDED** `8a8c78d`, verified — gate inert until `budget_frac` seam wired (see H8) |
 | H5 predicate forms | **LANDED** `0863294` per the T8-reconciled spec, verified (92.3% recall vs real GT on-edges) |
-| H8 pack | **PARTIAL**: qtype correction + 480/540 gates + sim-time guard landed `4bcf18b`; **seam wiring (ladder, checkpoints, budget_frac) + off-tick-thread checkpoints still open** |
-| H6 perception gate | **PARTIAL**: stub-index shout landed; PerceptionPipeline seam + playbook gate item open |
+| H8 pack | **LANDED** (wave, 14 Jul): seam wiring (ladder api→api2→regex; local tier DESCOPED; checkpoints; budget_frac/remaining_s late-bound), injection-boundary timeouts, ledger admission bound. Open remainder: worker-thread FSM restructure (Ubuntu gate) |
+| H6 perception gate | **LANDED** (wave): PerceptionPipeline seam behind `VLA_DETECTOR`, playbook gate line. Integration itself Ubuntu-gated |
 | H10 vocab | **LANDED** `4bcf18b`, verified |
 | IF-F6 pair anchors | **LANDED** `8a8c78d`, verified |
-| H7, H9, H11–H15 | Open |
-| CV sweep | Still HELD — un-holds after the post-fix battery baseline is read and the sweep objective re-pointed (note in cvsweep_rerun_brief) |
+| H7 docker | **LANDED** (wave): fork-shaped `docker/ai_module_fork/` + sync scripts; validation = compose-up from clean fork clone at the Ubuntu gate |
+| H9 checkpoints | **LANDED** (wave): CP4 keep-on-neither + real runner-up + clause-synthesizing re-resolve; CP2 bbox/conf validation + provisional-commit guard; CP3 cross-class-only demote; CP1 prompt ≤2k tokens; CP5 abstain |
+| H11 nav/drive | **LANDED** (wave): replan consumption (cap 3), avoid lifecycle + edge-triggered tripwire, forced-assembly continue-drive, explore-goal guards/clamps, CP2 latch clear, free-space via, 1 Hz frontier throttle. +2 integration fixes: CP3 mid-tick demote follower-None guard; decay clock counts detection-bearing keyframes only |
+| H12 dimension priors | **LANDED** (wave): data-derived 69-class table + clamp seam; markers in object_ref + floors routed through it |
+| H13 overhead soften | **LANDED** (wave): soft cost via is_unknown seam, clone() hardens for corridors, stride-scaled gate. Soft-cost weight applies as UNKNOWN_COST_MULT until a planner seam (Phase-2) |
+| H14 perf/hygiene | **LANDED** (wave): BFS vectorized ~10× (bit-identical, oracle-tested), CP1 trim, CP5 abstain, second-question policy, encoder assert. Reference BFS impl kept for sim bake-in, then delete |
+| H15 counting hygiene | **LANDED** (wave): detection-bearing-keyframe ghost decay, answer-time obs gating, coverage_frac seam (unwired — connect to an exploration coverage signal when chosen) |
+| cvsweep re-point | **LANDED** (wave): objective = rubric×6/strict×1/IoU×2, min_obs dropped, disk-resume cache, tests |
+| IF driven-sim | **LANDED** (wave): closed-loop harness (rewind + bounded re-tick); rubric numbers now trustworthy |
+| **NEW: IF intermediate-leg threading** | **OPEN — top remaining pipeline item (36 pts).** Post-wave battery: rubric 0.061 unchanged; planned routes reach terminals without passing within 0.8 m of intermediate leg goals (ordered-leg credit 0.094, 9 threading violations). Confirmed genuine pipeline behavior on the final tree (IF-sim agent diagnosis + post-wave rerun). Needs a dedicated diagnosis of plan_through leg-goal chaining / corridor-gate arrival / anchor-centroid reachability |
+| CV sweep | **HELD deliberately**: harness is trustworthy, but the IF term is flat ≈0 until the threading item lands — a sweep now would tune the ×6-weighted term on no gradient. Sequence: threading fix → battery → sweep |
 
 ## Tier 0 — run-killers (fix before anything else; all cheap)
 

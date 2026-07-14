@@ -3,6 +3,16 @@
 States (normal flow):
     IDLE -> PARSING -> ORIENT -> EXPLORE_EXECUTE -> VERIFY -> ANSWER -> DONE
 
+For INSTRUCTION_FOLLOWING the flow inserts one extra state before DONE:
+    ... -> VERIFY -> ANSWER -> DRIVE_OUT -> DONE
+because for IF the drive IS the answer (IF-F4). ANSWER still publishes exactly one
+waypoint (latched, unchanged), but instead of going straight to DONE the FSM enters
+DRIVE_OUT and KEEPS ticking the answer heads — breadcrumbs, re-grounding, replans — so a
+partially-grounded route's later legs are still attempted with the remaining budget
+(ordered-leg partial credit is real). DRIVE_OUT ends when the head reports the drive
+complete (arrival / exhausted-with-no-replan-budget) or the watchdog floor fires,
+whichever is first. NUMERICAL and OBJECT_REFERENCE go ANSWER -> DONE exactly as before.
+
 WATCHDOG is an *overlay*, not a state:
   * at elapsed >= 570 s (watchdog_floor): publish the FloorAnswers answer for the qtype
     and force DONE, regardless of the current state;
@@ -48,6 +58,7 @@ class State(str, Enum):
     EXPLORE_EXECUTE = "explore_execute"
     VERIFY = "verify"
     ANSWER = "answer"
+    DRIVE_OUT = "drive_out"  # IF only: keep driving the route after the answer (IF-F4)
     DONE = "done"
 
 
@@ -77,12 +88,17 @@ class WorldView:
     ungrounded_subgoals: count of IF sub-goals not yet grounded with >=3 obs
                          (0 => fully grounded; gates IF early-answer).
     stability:        numerical count stability evidence.
+    drive_complete:   IF only — the instruction head reports the route drive is finished
+                      (arrived at the terminal, or exhausted with no replan budget left).
+                      Read by the DRIVE_OUT state to decide when to stop driving and go
+                      DONE (IF-F4). Meaningless / False for NUMERICAL and OR.
     """
 
     scene: SceneIndex | None = None
     partial: PartialResults = field(default_factory=PartialResults)
     ungrounded_subgoals: int = 0
     stability: StabilitySignal = field(default_factory=StabilitySignal)
+    drive_complete: bool = False
 
 
 # Injected callables ---------------------------------------------------------
@@ -197,6 +213,7 @@ class QuestionController:
         if self.budget is not None and self.budget.forced_assembly and self.state not in (
             State.VERIFY,
             State.ANSWER,
+            State.DRIVE_OUT,  # already answered + driving out (IF-F4); do not re-assemble
             State.DONE,
         ):
             self._to(State.VERIFY, "forced_assembly>=510s")
@@ -266,7 +283,35 @@ class QuestionController:
             floor = self.floors.get(self.qtype)
             self._log("answer_from_floor", "pending answer undispatchable; using floor")
             self._publish(io, floor, reason="answer_state_floor")
-        self._to(State.DONE, "answered")
+        # IF-F4: for instruction-following the drive IS the answer. Publishing the first
+        # waypoint does not end the question — enter DRIVE_OUT to keep ticking the heads
+        # (breadcrumbs, re-grounding, replans) until the route completes or the watchdog
+        # fires. NUMERICAL/OR are terminal at ANSWER: they answer and finish as today.
+        if self.qtype is QType.INSTRUCTION_FOLLOWING:
+            self._to(State.DRIVE_OUT, "answered; continue driving the route (IF-F4)")
+        else:
+            self._to(State.DONE, "answered")
+
+    def _tick_drive_out(self, io: RobotIO) -> None:
+        """IF continue-drive (IF-F4): keep ticking the answer heads so the route's later
+        legs are still driven with the remaining budget.
+
+        The answer waypoint was already published in ANSWER (latch untouched). Here we
+        advance the heads every tick — the instruction head streams the next breadcrumb,
+        re-grounds late-appearing anchors, extends the route over newly grounded legs, and
+        replans on stalls — via the same explore callable used during EXPLORE_EXECUTE. We
+        leave DRIVE_OUT for DONE only when the head reports the drive complete (arrival, or
+        exhausted with no replan budget). The watchdog overlay (checked before this handler
+        every tick) remains the hard backstop: if the drive hangs, the >=540 s floor forces
+        DONE regardless — this state cannot shadow or delay it.
+        """
+        _safe_explore(self._explore, io, self.plan, self.world)
+        # Re-read the world AFTER driving this tick so completion is observed the moment it
+        # happens (the top-of-tick probe reflects the PRE-drive state), rather than lagging a
+        # tick and emitting one crumb past arrival.
+        self.world = _safe_probe(self._probe, io)
+        if self.world.drive_complete:
+            self._to(State.DONE, "route drive complete")
 
     _HANDLERS: dict[State, Callable[["QuestionController", RobotIO], None]] = {
         State.PARSING: _tick_parsing,
@@ -274,6 +319,7 @@ class QuestionController:
         State.EXPLORE_EXECUTE: _tick_explore,
         State.VERIFY: _tick_verify,
         State.ANSWER: _tick_answer,
+        State.DRIVE_OUT: _tick_drive_out,
     }
 
     # ------------------------------------------------------------------ early answer

@@ -180,6 +180,117 @@ def _pinch_costmap(
     return pinch
 
 
+def free_space_via_point(
+    costmap: Costmap,
+    anchor_xy: tuple[float, float],
+    start_xy: tuple[float, float],
+    near_thresh_m: float,
+    *,
+    ring_tol_m: float = 0.3,
+) -> tuple[float, float] | None:
+    """A "path near the anchor" waypoint placed by free-space gradient (IF-F7).
+
+    Replaces the fixed ``anchor + (+1.2, 0)`` offset, which ignored walls, approach
+    direction and object size and could land inside a wall or on the unreachable side.
+
+    Candidate cells are those at ~``near_thresh_m`` from ``anchor_xy`` (a ring of
+    half-width ``ring_tol_m``) that are passable and reachable from ``start_xy``. Among
+    them we pick the one with maximum clearance (distance to the nearest blocked cell) —
+    the most comfortably-open passable cell on the robot's reachable side of the anchor.
+    Returns its world centre, or None if no reachable near-cell exists (the caller then
+    falls back to the anchor centroid projection).
+    """
+    grid = costmap.grid
+    h, w = grid.shape
+    ar, ac = grid.world_to_cell(*anchor_xy)
+    near_cells = int(round(near_thresh_m / grid.cell_m))
+    tol_cells = max(1, int(round(ring_tol_m / grid.cell_m)))
+    lo = max(0, near_cells - tol_cells)
+    hi = near_cells + tol_cells
+
+    reachable = _reachable_mask(costmap, start_xy)
+    if reachable is None:
+        return None
+    clearance = _clearance_field(costmap)
+
+    best: tuple[float, float] | None = None
+    best_clear = -1.0
+    lo2, hi2 = lo * lo, hi * hi
+    for dr in range(-hi, hi + 1):
+        for dc in range(-hi, hi + 1):
+            d2 = dr * dr + dc * dc
+            if d2 < lo2 or d2 > hi2:
+                continue
+            r, c = ar + dr, ac + dc
+            if not (0 <= r < h and 0 <= c < w) or not reachable[r, c]:
+                continue
+            cl = float(clearance[r, c])
+            if cl > best_clear:
+                best_clear = cl
+                best = grid.cell_to_world(r, c)
+    return best
+
+
+def _reachable_mask(costmap: Costmap, start_xy: tuple[float, float]):
+    """Boolean (h, w) mask of passable cells reachable from ``start_xy`` (8-connected BFS).
+
+    Returns None if the start cannot be snapped to any passable cell.
+    """
+    grid = costmap.grid
+    h, w = grid.shape
+    sr, sc = grid.world_to_cell(*start_xy)
+    sr, sc = _snap_passable(costmap, sr, sc)
+    if sr is None:
+        return None
+    from collections import deque
+
+    seen = np.zeros((h, w), dtype=bool)
+    seen[sr, sc] = True
+    dq = deque([(sr, sc)])
+    steps = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
+    while dq:
+        r, c = dq.popleft()
+        for dr, dc in steps:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < h and 0 <= nc < w and not seen[nr, nc] and costmap.passable(nr, nc):
+                seen[nr, nc] = True
+                dq.append((nr, nc))
+    return seen
+
+
+def _clearance_field(costmap: Costmap) -> np.ndarray:
+    """Per-cell distance (in cells) to the nearest blocked cell — a clearance heuristic.
+
+    Multi-source BFS from every blocked cell. Passable cells far from any obstacle score
+    high; cells hugging a wall score low. Used to prefer the most-open via candidate (IF-F7).
+    """
+    grid = costmap.grid
+    h, w = grid.shape
+    from collections import deque
+
+    dist = np.full((h, w), np.inf, dtype=np.float64)
+    blocked = costmap.base_blocked | costmap.capsule_blocked
+    brs, bcs = np.nonzero(blocked)
+    dq: deque[tuple[int, int]] = deque()
+    for r, c in zip(brs.tolist(), bcs.tolist()):
+        dist[r, c] = 0.0
+        dq.append((r, c))
+    steps = ((-1, 0), (1, 0), (0, -1), (0, 1))
+    while dq:
+        r, c = dq.popleft()
+        base = dist[r, c]
+        for dr, dc in steps:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < h and 0 <= nc < w and dist[nr, nc] > base + 1.0:
+                dist[nr, nc] = base + 1.0
+                dq.append((nr, nc))
+    if not np.isfinite(dist).any():
+        dist[:] = float(max(h, w))  # all-free costmap: every cell maximally clear
+    else:
+        dist[~np.isfinite(dist)] = 0.0
+    return dist
+
+
 def plan_through(
     costmap: Costmap,
     start_xy: tuple[float, float],

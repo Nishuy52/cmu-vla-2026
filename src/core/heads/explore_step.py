@@ -67,6 +67,23 @@ PROVISIONAL_SCORE_FACTOR: float = 0.5
 #: Fraction of the explore budget that must be spent before CP2 may fire (design §CP2).
 COVERAGE_TRIGGER_FRAC: float = 0.60
 
+#: SYS-F9: never publish a raw frontier centroid further than this along the straight
+#: line toward it (gotcha 14: a distant waypoint strands the vehicle at a dead end). The
+#: clamp keeps the goal near the vehicle, exactly like the breadcrumb lookahead.
+FRONTIER_GOAL_CLAMP_M: float = 2.5
+#: SYS-F9: path_distance sentinel the frontier scorer stamps on an UNREACHABLE cluster
+#: (frontiers.py assigns pd=1e6). Such frontiers are dropped rather than commanded.
+UNREACHABLE_PD: float = 1e6
+
+#: SYS-F11: clear a CP2 provisional waypoint after this long without arrival (design §CP2).
+PROVISIONAL_TIMEOUT_S: float = 45.0
+#: SYS-F11: arrival tolerance for clearing a provisional waypoint on reach.
+PROVISIONAL_ARRIVAL_TOL_M: float = 0.8
+
+#: H14: minimum interval between frontier-detection refreshes (1 Hz). The frontier scorer
+#: (detect_frontiers) is the per-tick cost centre; nothing about frontier goals needs 5 Hz.
+FRONTIER_THROTTLE_S: float = 1.0
+
 
 def uniform_affinity(_nouns: Sequence[str]):
     """Default detector-affinity: constant 0 (purely geometric frontier scoring)."""
@@ -102,6 +119,16 @@ class ExploreHead:
     _cp2_fired: bool = False  # once-per-question head guard (ledger caps the hard limit)
     provisional: Any | None = None  # last CP2 provisional instance (navigation bias target)
     provisional_xy: tuple[float, float] | None = None
+    #: SYS-F11 — the noun the CP2 provisional stands in for, and the odom time it was set,
+    #: so the latch can be cleared on arrival / timeout / the noun appearing in the scene.
+    _provisional_noun: str | None = None
+    _provisional_t0: float | None = None
+    #: H14 — 1 Hz frontier-detection throttle. The frontier phase re-detects at most once
+    #: per FRONTIER_THROTTLE_S, reusing the last decision between refreshes (nothing about
+    #: frontiers needs 5 Hz; detect_frontiers is the tick's cost centre). The opening sweep
+    #: is NOT throttled (it needs 5 Hz waypoint advancement and does no frontier work).
+    _last_frontier_decision: Any | None = None
+    _last_frontier_t: float | None = None
 
     # ------------------------------------------------------------------ per-tick
     def advance(self, io: RobotIO, scene) -> None:
@@ -128,8 +155,14 @@ class ExploreHead:
 
     def _explore(self, io: RobotIO, scene=None) -> None:
         odom = io.latest_odom()
-        pose = (float(odom.x), float(odom.y)) if odom is not None else (0.0, 0.0)
-        t = float(odom.t) if odom is not None else 0.0
+        # SYS-F9: never construct or run the exploration policy against a pre-odom
+        # (0,0)/t=0 anchor — that seeds the sweep at the origin and, once the real odom
+        # header stamp jumps in, skips the whole orientation sweep. Publish nothing this
+        # tick and wait for the first real pose.
+        if odom is None:
+            return
+        pose = (float(odom.x), float(odom.y))
+        t = float(odom.t)
         patch = io.latest_terrain(extended=False)
         if patch is not None:
             self.grid.integrate_patch(patch)
@@ -138,18 +171,24 @@ class ExploreHead:
         # stack reads as FREE floor. Terrain first so per-cell ground_z is set.
         scan = io.latest_scan() if hasattr(io, "latest_scan") else None
         if scan is not None:
-            odom_z = float(odom.z) if odom is not None else 0.0
+            odom_z = float(odom.z)
             integrate_scan_overhead_decimated(self.grid, scan, odom_z)
         self.grid.mark_pose(pose[0], pose[1])
 
-        self._maybe_recover_miss(io, scene, pose)
+        self._maybe_recover_miss(io, scene, pose, t)
+        # SYS-F11: a stale provisional latch must not replace exploration forever — clear
+        # it on arrival / timeout / the noun appearing in the scene, then resume frontier
+        # flow this same tick.
+        self._maybe_clear_provisional(scene, pose, t)
 
         if self._policy is None:
             self._policy = ExplorationPolicy(start_xy=pose, affinity=self._affinity())
-        decision = self._policy.step(self.grid, pose, t)
+        decision = self._stepped_decision(pose, t)
         self.last_status = decision.status
         # A live CP2 provisional biases navigation: prefer driving toward it over the
-        # geometric frontier while it stands.
+        # geometric frontier while it stands. (Not distance-clamped: unlike a raw far
+        # frontier centroid, the provisional is a fixed placed target the vehicle converges
+        # on tick over tick — SYS-F9's stranding concern is the far *frontier* goal.)
         if self.provisional_xy is not None:
             io.publish_waypoint(WaypointCmd(self.provisional_xy[0], self.provisional_xy[1]))
             return
@@ -157,9 +196,64 @@ class ExploreHead:
         # top-5 frontiers (fallback = the geometric top the policy already chose).
         cp5_wp = self._maybe_cp5_frontier(pose, decision)
         if cp5_wp is not None:
-            io.publish_waypoint(cp5_wp)
+            io.publish_waypoint(self._clamp_goal(pose, (cp5_wp.x, cp5_wp.y)))
         elif decision.waypoint is not None:
-            io.publish_waypoint(decision.waypoint)
+            # SYS-F9: drop an UNREACHABLE frontier goal (pd sentinel) — commanding it just
+            # strands the vehicle; skipping lets the next tick surface a reachable one.
+            # Only frontier decisions carry a Frontier to test; sweep waypoints always go.
+            if (
+                decision.status is ExplorationStatus.FRONTIER
+                and _frontier_unreachable(decision.frontier)
+            ):
+                return
+            io.publish_waypoint(self._clamp_goal(pose, (decision.waypoint.x, decision.waypoint.y)))
+
+    # ------------------------------------------------------------------ H14 throttle
+    def _stepped_decision(self, pose: tuple[float, float], t: float):
+        """Step the exploration policy with a 1 Hz frontier-detection throttle (H14).
+
+        ``ExplorationPolicy.step`` runs ``detect_frontiers`` (the tick's cost centre) on
+        every call once past the opening sweep. Nothing about frontier goals needs 5 Hz,
+        so during the FRONTIER phase we re-step (and thus re-detect) at most once per
+        ``FRONTIER_THROTTLE_S``, reusing the last FRONTIER decision between refreshes. A
+        re-plan/avoid-stamp event does not reach here (those live in the IF head); the
+        throttle is time-based and self-refreshes each second. The sweep phase is never
+        throttled — it needs per-tick waypoint advancement and does no frontier work.
+        """
+        cached = self._last_frontier_decision
+        if (
+            cached is not None
+            and self._last_frontier_t is not None
+            and (t - self._last_frontier_t) < FRONTIER_THROTTLE_S
+        ):
+            return cached
+        decision = self._policy.step(self.grid, pose, t)
+        if decision.status is ExplorationStatus.FRONTIER:
+            self._last_frontier_decision = decision
+            self._last_frontier_t = t
+        else:
+            # Sweep / complete: no frontier work to throttle; drop any stale cache.
+            self._last_frontier_decision = None
+            self._last_frontier_t = None
+        return decision
+
+    # ------------------------------------------------------------------ SYS-F9 clamp
+    def _clamp_goal(
+        self, pose: tuple[float, float], goal: tuple[float, float]
+    ) -> WaypointCmd:
+        """Clamp a raw goal to <= FRONTIER_GOAL_CLAMP_M along the line toward it (SYS-F9).
+
+        A far frontier centroid published raw can strand the vehicle at a dead end
+        (gotcha 14). We keep the goal near the vehicle — direction preserved, distance
+        bounded — so the base stack drives toward the frontier without a long beeline.
+        """
+        gx, gy = float(goal[0]), float(goal[1])
+        dx, dy = gx - pose[0], gy - pose[1]
+        d = (dx * dx + dy * dy) ** 0.5
+        if d <= FRONTIER_GOAL_CLAMP_M or d < 1e-9:
+            return WaypointCmd(gx, gy)
+        s = FRONTIER_GOAL_CLAMP_M / d
+        return WaypointCmd(pose[0] + dx * s, pose[1] + dy * s)
 
     # ------------------------------------------------------------------ CP5
     def _maybe_cp5_frontier(self, pose: tuple[float, float], decision) -> WaypointCmd | None:
@@ -171,7 +265,11 @@ class ExploreHead:
             return None
         if not self._scene_is_multi_room(pose):
             return None
-        frontiers = detect_frontiers(self.grid, pose, self._affinity())[:CP5_TOP_FRONTIERS]
+        frontiers = [
+            f
+            for f in detect_frontiers(self.grid, pose, self._affinity())
+            if not _frontier_unreachable(f)
+        ][:CP5_TOP_FRONTIERS]
         if not frontiers:
             return None
         question = getattr(self.plan, "question_raw", "") or ""
@@ -196,7 +294,9 @@ class ExploreHead:
         return _explored_area_m2(self.grid) > self.explored_area_trigger_m2
 
     # ------------------------------------------------------------------ CP2
-    def _maybe_recover_miss(self, io: RobotIO, scene, pose: tuple[float, float]) -> None:
+    def _maybe_recover_miss(
+        self, io: RobotIO, scene, pose: tuple[float, float], t: float
+    ) -> None:
         """Fire CP2 once when a plan-critical noun has 0 instances past the coverage gate."""
         if self.miss_recoverer is None or self._cp2_fired or scene is None:
             return
@@ -216,6 +316,45 @@ class ExploreHead:
         xy = self._frontier_centroid(pose)
         self.provisional = self._fuse(noun, xy, outcome)
         self.provisional_xy = xy
+        self._provisional_noun = noun
+        self._provisional_t0 = t
+
+    def _maybe_clear_provisional(
+        self, scene, pose: tuple[float, float], t: float
+    ) -> None:
+        """Clear the CP2 provisional latch and resume frontier flow (SYS-F11).
+
+        The latch is a navigation bias, not a permanent replacement for exploration.
+        Clear it — keeping the once-per-question CP2 guard so it never re-fires — on any
+        of: (a) arrival within tolerance, (b) ~PROVISIONAL_TIMEOUT_S elapsed since it was
+        set, (c) the stood-in noun appearing in the scene index. Not cleared on the tick it
+        was set (its t0 == t) unless the vehicle is already at it.
+        """
+        if self.provisional_xy is None:
+            return
+        reason: str | None = None
+        just_set = self._provisional_t0 is not None and t <= self._provisional_t0
+        if _near(pose, self.provisional_xy, PROVISIONAL_ARRIVAL_TOL_M):
+            reason = "arrival"
+        elif (
+            not just_set
+            and self._provisional_t0 is not None
+            and (t - self._provisional_t0) >= PROVISIONAL_TIMEOUT_S
+        ):
+            reason = "timeout"
+        elif not just_set and self._provisional_noun is not None and scene is not None:
+            try:
+                found = scene.by_label(self._provisional_noun)
+            except Exception:  # noqa: BLE001
+                found = None
+            if found:
+                reason = "noun_observed"
+        if reason is None:
+            return
+        self.provisional = None
+        self.provisional_xy = None
+        self._provisional_noun = None
+        self._provisional_t0 = None
 
     def _missing_noun(self, scene) -> tuple[str | None, str]:
         """The first plan-critical noun with 0 instances in the scene (else (None, ''))."""
@@ -240,8 +379,18 @@ class ExploreHead:
             return 0.0
 
     def _frontier_centroid(self, pose: tuple[float, float]) -> tuple[float, float]:
-        """The top geometric frontier direction's centroid (CP2 provisional placement)."""
+        """Direction centroid for the CP2 provisional placement (SYS-F9 aware).
+
+        Prefer the top REACHABLE frontier; if none is reachable yet (early ticks where the
+        BFS-connected FREE region is still small) fall back to the top-scored frontier so
+        the provisional still biases toward unexplored space rather than pinning the
+        vehicle at its own pose. The published waypoint is distance-clamped downstream
+        (``_clamp_goal``), so a far centroid never becomes a stranding beeline.
+        """
         frontiers = detect_frontiers(self.grid, pose, self._affinity())
+        for f in frontiers:
+            if not _frontier_unreachable(f):
+                return f.xy
         if frontiers:
             return frontiers[0].xy
         return pose
@@ -288,10 +437,33 @@ class ExploreHead:
         for n in inst.ungrounded_nouns():
             if n not in biased:
                 biased.append(n)
+        # IF-F5: an unresolvable avoid anchor is as much a reason to explore as an
+        # ungrounded leg anchor (the route stays uncommitted until it grounds), so bias
+        # the frontier scorer toward avoid nouns too.
+        if hasattr(inst, "avoid_nouns"):
+            for n in inst.avoid_nouns():
+                if n not in biased:
+                    biased.append(n)
         for n in base:  # keep the remaining plan nouns as a fallback tail
             if n not in biased:
                 biased.append(n)
         return biased or base
+
+
+def _frontier_unreachable(f) -> bool:
+    """True if a frontier is the UNREACHABLE sentinel (SYS-F9).
+
+    ``detect_frontiers`` stamps ``path_distance = UNREACHABLE_PD`` (1e6) on a cluster with
+    no finite BFS path from the vehicle. Commanding such a goal strands the robot, so it
+    is dropped. None (no cluster) is treated as unreachable.
+    """
+    if f is None:
+        return True
+    return getattr(f, "path_distance", 0.0) >= UNREACHABLE_PD
+
+
+def _near(a: tuple[float, float], b: tuple[float, float], tol: float) -> bool:
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5 <= tol
 
 
 def _explored_area_m2(grid: OccupancyGrid) -> float:

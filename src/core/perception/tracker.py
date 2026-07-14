@@ -74,6 +74,10 @@ class TrackerConfig:
     """Association gate. Non-spec value flagged in the task report."""
 
     gate: float = 0.75  # m; max centroid distance for a match
+    # H15(a) track decay: an instance still at n_obs==1 that has not been re-observed
+    # within this many keyframes of first sighting is a one-frame ghost and is pruned.
+    # Confirmed tracks (n_obs>=2) are NEVER decayed. 0 disables decay.
+    decay_k: int = 5
 
 
 DEFAULT_TRACKER_CONFIG = TrackerConfig()
@@ -170,6 +174,41 @@ def associate(
     return touched
 
 
+def decay_singletons(
+    index: BasicSceneIndex,
+    first_seen: dict[int, int],
+    keyframe_idx: int,
+    decay_k: int,
+) -> list[int]:
+    """Prune one-frame ghosts (H15a): remove n_obs==1 instances not re-observed in time.
+
+    An instance whose ``n_obs`` is still 1 ``decay_k`` keyframes after it was first
+    seen never got a second observation — a spurious single-frame detection. It is
+    removed from the index. Instances with ``n_obs >= 2`` are confirmed tracks and are
+    NEVER decayed, regardless of age. ``first_seen`` maps instance_id -> the keyframe
+    index at which it was minted; stale entries for removed/absent ids are cleaned up.
+
+    Returns the list of pruned instance_ids. ``decay_k <= 0`` disables decay.
+    """
+    if decay_k <= 0:
+        return []
+    live = {r.instance_id: r for r in index.all_instances()}
+    pruned: list[int] = []
+    for iid in list(first_seen):
+        rec = live.get(iid)
+        if rec is None:
+            del first_seen[iid]  # already gone (merged away / previously pruned)
+            continue
+        if rec.n_obs >= 2:
+            del first_seen[iid]  # confirmed — stop tracking its age, never decays
+            continue
+        if keyframe_idx - first_seen[iid] >= decay_k:
+            if index.remove(iid):
+                pruned.append(iid)
+            del first_seen[iid]
+    return pruned
+
+
 # --------------------------------------------------------------------------- pipeline
 
 
@@ -203,6 +242,9 @@ class PerceptionPipeline:
         self.vfov = vfov
         self._frame_count = 0
         self._last_keyframe: OdomState | None = None
+        self._keyframe_idx = 0                    # keyframes processed
+        self._det_kf_idx = 0                      # DETECTION-BEARING keyframes (H15a decay clock)
+        self._first_seen: dict[int, int] = {}     # instance_id -> det-keyframe it was minted
 
     def _is_keyframe(self, odom: OdomState) -> bool:
         kf = self.keyframe_cfg
@@ -243,7 +285,24 @@ class PerceptionPipeline:
                 if fused is not None:
                     fused_dets.append((det, fused))
 
-        return associate(fused_dets, self.index, self.tracker_cfg)
+        touched = associate(fused_dets, self.index, self.tracker_cfg)
+
+        # H15a: record first sighting for any newly minted instance, then decay
+        # one-frame ghosts that never got a second look. The decay clock counts
+        # DETECTION-BEARING keyframes only: a keyframe on which the detector saw
+        # nothing at all is no evidence against a singleton (cold start, occlusion,
+        # scripted single-keyframe labels) — pruning requires decay_k keyframes on
+        # which the detector demonstrably produced detections yet never re-observed
+        # this instance.
+        for iid in touched:
+            self._first_seen.setdefault(iid, self._det_kf_idx)
+        if fused_dets:
+            self._det_kf_idx += 1
+        decay_singletons(
+            self.index, self._first_seen, self._det_kf_idx, self.tracker_cfg.decay_k
+        )
+        self._keyframe_idx += 1
+        return touched
 
     # convenience for tests / callers
     @property

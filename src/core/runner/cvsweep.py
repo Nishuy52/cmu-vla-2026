@@ -2,10 +2,10 @@
 
 This is the Phase-2 sweep harness. It searches the high-sensitivity reasoning
 calibration parameters (the geometry :class:`~core.geometry.toolbox.Thresholds`
-family + numerical counting ``min_obs``) against the ground-truth battery objective,
-under 5-fold cross-validation (5 folds x 3 held-out scenes over the 15 training
-scenes), and reports a robust per-parameter recommendation that generalises across
-folds rather than overfitting one scene split.
+family) against the ground-truth battery objective, under 5-fold cross-validation
+(5 folds x 3 held-out scenes over the 15 training scenes), and reports a robust
+per-parameter recommendation that generalises across folds rather than overfitting one
+scene split.
 
 Why CV, not a single fit
 ------------------------
@@ -17,20 +17,27 @@ on whether a value transfers. The final recommendation keeps only values that re
 across folds (modal consensus); parameters with no consensus are flagged
 ``unstable — keep default`` rather than moved on thin evidence.
 
-The objective (composite, mirrors the challenge points)
-------------------------------------------------------
-Per scene-set, per config, we score exactly what the challenge rewards:
+The objective (composite, mirrors the challenge points) — repaired (NUM-F7 / H2)
+--------------------------------------------------------------------------------
+Per scene-set, per config, we score exactly what the *repaired* scorers now emit — the
+retired artifact metrics (planned-path coverage for IF; class-only-inclusive count
+agreement) are gone:
 
-* **NUMERICAL (1 pt each):** agreement of our count with the BEST *independent* opinion
-  (referential-statement or scene-graph count) — NOT pipeline self-consistency, which is
-  circular and always 100%. Questions with no independent opinion are EXCLUDED (from both
-  numerator and denominator).
+* **NUMERICAL (1 pt each):** STRICT independent count agreement — our count equals the
+  ``referential`` independent second opinion, over questions that HAVE strict independent
+  evidence only. Relation-agnostic ``*_class_only`` rows are NOT evidence (NUM-F6/F7:
+  comparing a class-total against a relation-filtered count is a scorer artifact) and are
+  EXCLUDED from both numerator and denominator, exactly as ``gt_battery.aggregate`` now
+  does (``independent_source == "referential"``). Scene-graph counts are diagnostics, not
+  the objective target.
 * **OBJECT_REFERENCE (2 pts each):** IoU >= 0.25 against the GT target, over the
   *scoreable* questions only (a GT target was matched, honestly, via the vocab bridge /
   referential / uniqueness). Unscoreable ("none"/"ambiguous") questions are EXCLUDED.
-* **INSTRUCTION_FOLLOWING (6 pts each):** coverage@1m against the GT trajectory, over the
-  *aligned* questions only (scene frame fit residual <= 1 m). Unaligned questions are
-  EXCLUDED.
+* **INSTRUCTION_FOLLOWING (6 pts each):** the DRIVEN-trajectory RUBRIC score
+  (``score_instruction_rubric`` — ordered per-leg arrival credit minus threading/avoid
+  penalties over the *driven* trajectory, IF-F2), over the *aligned* questions only
+  (scene frame fit residual <= 1 m). This replaces the old planned-path coverage@1m,
+  which the challenge rubric does not pay for. Unaligned questions are EXCLUDED.
 
 The scene-set score is ``sum(points earned) / sum(points available)`` over the included
 questions, so a scene-set with more IF weight is not penalised for having fewer OR
@@ -38,23 +45,34 @@ questions. Exclusion counts are reported alongside every score.
 
 Threshold injection
 -------------------
-The sweep moves the geometry ``Thresholds`` (all 11 are wired via function params in
-``toolbox.py``) plus numerical ``counting(min_obs=...)``. It reaches them through a
-threshold-aware re-implementation of the gt_battery per-scene scoring (:func:`score_scene`
-here) that threads the swept ``Thresholds`` into ``score_numerical`` / ``score_object_
-reference`` and into the ``InstructionHead`` that drives the IF path. gt_battery itself is
-left untouched. Budget/nav/fusion params that are hard module constants (no injection seam
+The sweep moves the geometry ``Thresholds`` (all wired via function params in
+``toolbox.py``). It reaches them through a threshold-aware re-implementation of the
+gt_battery per-scene scoring (:func:`score_scene` here) that threads the swept
+``Thresholds`` into ``score_numerical`` / ``score_object_reference`` and into the
+``InstructionHead`` that drives the IF trajectory, then scores that driven trajectory
+with :func:`core.groundtruth.scoring.score_instruction_rubric`. The scoring.py functions
+are imported and reused verbatim — never forked; only the gt_battery *orchestration*
+(scene mirror, drive loop, rubric geometry) is mirrored here so the swept thresholds can
+be threaded through it (gt_battery's copies hard-wire the default thresholds and are left
+untouched). Budget/nav/fusion params that are hard module constants (no injection seam
 today — see docs/calibration.md "Phase-2 wiring TODO") are NOT in the default spec; if a
 requested key cannot be injected it is reported and skipped, never hacked in.
 
+``counting.min_obs`` was DROPPED from the sweep space (NUM-F7): every GT instance has
+``n_obs=3`` so the gate is provably inert on GT data — it was dead weight, never a
+tunable that could move the objective.
+
 Runtime & determinism
 ---------------------
-gt_battery per scene is fast (fully-observed, no exploration), but IF path driving
+gt_battery per scene is fast (fully-observed, no exploration), but IF trajectory driving
 dominates (~2-3 s/scene). We therefore cache each ``(config-hash, scene)`` evaluation:
 the same config is scored once per scene and the result reused across every fold that
-holds that scene in or out. All randomness (fold assignment, random search) is seeded, so
-a given ``(seed, spec, scenes)`` reproduces bit-for-bit. ``--n-samples`` and
-``--scenes-subset`` bound the work for smoke runs.
+holds that scene in or out. The cache is BOTH in-memory (per run) and ON DISK (a JSON
+file per ``(config-hash, scene)`` under ``<out>/cache/``), so an interrupted sweep
+resumes cheaply — a re-run skips every cell already computed instead of recomputing it.
+All randomness (fold assignment, random search) is seeded, so a given
+``(seed, spec, scenes)`` reproduces bit-for-bit. ``--n-samples`` and ``--scenes-subset``
+bound the work for smoke runs.
 
 Pure/offline: numpy + stdlib only, no network, no new dependencies.
 """
@@ -90,7 +108,7 @@ DEFAULT_QUESTIONS = GB.DEFAULT_QUESTIONS
 DEFAULT_QUESTIONS_ROOT = GB.DEFAULT_QUESTIONS_ROOT
 DEFAULT_OUT_ROOT = _SRC.parent / "reports"
 
-# Point weights mirroring the challenge scoring.
+# Point weights mirroring the challenge scoring (points-weighted objective).
 _PTS_NUMERICAL = 1.0
 _PTS_OBJECT_REFERENCE = 2.0
 _PTS_INSTRUCTION_FOLLOWING = 6.0
@@ -121,13 +139,18 @@ class SweepSpec:
         return sorted(self.params)
 
     def validate(self) -> None:
-        """Reject unknown keys (apply_overrides raises) and non-empty candidate lists."""
+        """Reject unknown keys (apply_overrides raises) and non-empty candidate lists.
+
+        Every swept key must be a live ``Calibration`` field (checked via
+        ``apply_overrides``, which raises ``KeyError`` on an unknown subsystem/field). This
+        is the grid-vs-ledger consistency guard: if a future rename drops or renames a
+        Thresholds field that the grid still references, ``validate`` fails loudly here
+        (and in ``tests/runner/test_cvsweep_objective.py``) instead of silently no-oping.
+        """
         cal = default_calibration()
         for key, values in self.params.items():
             if not values:
                 raise ValueError(f"sweep key {key!r} has no candidate values")
-            if key == _COUNTING_MIN_OBS_KEY:
-                continue  # out-of-band counting() param, not a Calibration field
             # apply_overrides raises KeyError on an unknown subsystem/field.
             apply_overrides(cal, {key: values[0]})
 
@@ -146,10 +169,16 @@ def default_sweep_spec() -> SweepSpec:
     """High-sensitivity reasoning params from docs/calibration.md, 3-5 values each.
 
     Chosen for the answer-path predicates the challenge questions actually exercise:
-    the ``near``/``on``/``between``/``next_to`` geometry family (H/M sensitivity) plus the
-    numerical ``counting`` observation gate. Every key is wireable today (geometry via the
-    toolbox function params; ``min_obs`` via ``counting``). Budget/nav/fusion module-
-    constant params are deliberately excluded (see docstring / calibration.md wiring TODO).
+    the ``near``/``on``/``above``/``next_to``/``in`` geometry family (H/M sensitivity).
+    Every key is a live geometry ``Thresholds`` field, wireable today via the toolbox
+    function params, and matches the CURRENT field set (H5 renamed/added
+    ``on_upper_span_frac`` / ``on_top_tol`` / ``above_lateral_infl`` and retired the old
+    ``on_vert_tol``). Budget/nav/fusion module-constant params are deliberately excluded
+    (see docstring / calibration.md wiring TODO).
+
+    The numerical ``counting.min_obs`` gate was DROPPED (NUM-F7): it is provably inert on
+    GT data (every instance has ``n_obs=3``), so it could never move the objective —
+    including it was dead weight, not a tunable.
     """
     return SweepSpec(
         params={
@@ -157,8 +186,9 @@ def default_sweep_spec() -> SweepSpec:
             "geometry.near_floor": [0.8, 1.0, 1.2, 1.5, 2.0],
             "geometry.near_scale": [0.4, 0.5, 0.6, 0.75, 0.9],
             # adjacency / support. on() is the H5 support-semantics form: IoM-over-min
-            # gate + upper z-span band (on_vert_tol is gone). above() uses the H5
-            # lateral-offset inflation (footprint-overlap gate replaced).
+            # gate + upper z-span band (the old top-face-only on_vert_tol is retired).
+            # above() uses the H5 lateral-offset inflation (footprint-overlap gate
+            # replaced) so wall-hung objects over a headboard qualify.
             "geometry.next_to_gap": [0.5, 0.75, 1.0, 1.25],
             "geometry.on_min_overlap_frac": [0.30, 0.45, 0.50, 0.60],
             "geometry.on_upper_span_frac": [0.0, 0.15, 0.25, 0.40],
@@ -166,24 +196,8 @@ def default_sweep_spec() -> SweepSpec:
             "geometry.above_lateral_infl": [0.25, 0.50, 0.75, 1.0],
             # containment
             "geometry.in_containment_frac": [0.45, 0.60, 0.75],
-            # numerical counting observation gate (GT is fully observed at n_obs=3)
-            "counting.min_obs": [1, 2, 3],
         }
     )
-
-
-#: The one non-``Calibration`` sweep key: numerical counting's ``min_obs`` gate. It is not
-#: a calibration field (it is a ``counting()`` function param), so it is handled out-of-band
-#: — pulled from the override dict before building the Calibration, and threaded straight
-#: into the numerical scorer. Kept as a named constant so the split is explicit.
-_COUNTING_MIN_OBS_KEY = "counting.min_obs"
-
-
-def _split_overrides(overrides: dict[str, Any]) -> tuple[dict[str, Any], int]:
-    """Separate calibration overrides from the ``counting.min_obs`` special key."""
-    cal_over = {k: v for k, v in overrides.items() if k != _COUNTING_MIN_OBS_KEY}
-    min_obs = int(overrides.get(_COUNTING_MIN_OBS_KEY, 1))
-    return cal_over, min_obs
 
 
 # --------------------------------------------------------------------------- config id
@@ -245,18 +259,19 @@ class SceneQScores:
         return self.earned / self.available if self.available > 0 else 0.0
 
 
-def _best_independent(rec: GB.GTQuestionScore) -> int | None:
-    """The best independent second-opinion count for a numerical question, or None.
+def _strict_independent(rec: GB.GTQuestionScore) -> int | None:
+    """The STRICT independent count for a numerical question, or None (NUM-F6/F7).
 
-    Prefers the relation-aware referential count; falls back to the scene-graph count.
-    Class-only variants are still independent evidence (coarser) and are used when no
-    relation-aware number exists. Returns None when no independent opinion is derivable —
-    the question is then excluded from the numerical objective.
+    Only a ``referential`` (relation-aware) independent count is evidence — the retired
+    behaviour of falling back to scene-graph and accepting ``*_class_only`` relation-
+    agnostic totals inflated/artifact-poisoned the agreement stat (F6/F7). This mirrors
+    ``gt_battery.aggregate``'s ``independent_source == "referential"`` filter exactly:
+    a question is included in the numerical objective only when it carries strict
+    referential evidence; otherwise it is excluded (returns None), never scored against a
+    class-only or scene-graph number.
     """
-    if rec.gt_count_independent is not None:
+    if rec.independent_source == "referential" and rec.gt_count_independent is not None:
         return rec.gt_count_independent
-    if rec.gt_count_scenegraph is not None:
-        return rec.gt_count_scenegraph
     return None
 
 
@@ -268,32 +283,36 @@ def score_scene(
     scene_graph: dict | None,
     questions_dir: os.PathLike | str | None,
     thresholds,
-    min_obs: int,
 ) -> SceneQScores:
     """Threshold-aware challenge scoring of one scene (mirrors gt_battery.score_scene).
 
-    Reuses gt_battery's per-question records but threads the swept ``thresholds`` into the
-    numerical/OR scorers and the IF path driver, then reduces each question to
-    points-earned/available under the composite objective (excluding unscoreable /
-    unaligned questions). gt_battery itself is untouched.
+    Reuses gt_battery's per-question records + scoring.py's scorers, threading the swept
+    ``thresholds`` into the numerical/OR scorers and the IF trajectory driver, then
+    reduces each question to points-earned/available under the *repaired* points-weighted
+    objective (rubric IF x6, strict count x1, IoU OR x2; unscoreable / unaligned /
+    no-strict-evidence questions excluded). gt_battery itself is untouched.
     """
     from core.perception.scene_index import BasicSceneIndex
 
     idx = BasicSceneIndex(gt.instances)
     out = SceneQScores()
 
-    # --- numerical: agreement with the best independent opinion (1 pt) ---------------
+    # --- numerical: STRICT independent count agreement (1 pt) ------------------------
+    # min_obs stays at the scorer default (1): NUM-F7 dropped it from the sweep because
+    # it is provably inert on GT data (every instance has n_obs=3), so there is nothing
+    # to thread — the scorer's own default is faithful.
     for text in questions.get("numerical", []):
         ns = S.score_numerical(
             text, idx, referential=referential, scene_graph=scene_graph,
-            thresholds=thresholds, min_obs=min_obs,
+            thresholds=thresholds,
         )
         rec = GB.GTQuestionScore(
             scene=gt.scene_name, qtype=QType.NUMERICAL.value, question=text,
             our_count=ns.our_count, gt_count_independent=ns.gt_count_independent,
+            independent_source=ns.independent_source,
             gt_count_scenegraph=ns.gt_count_scenegraph,
         )
-        indep = _best_independent(rec)
+        indep = _strict_independent(rec)
         if indep is None:
             out.numerical_excluded += 1
             continue
@@ -313,7 +332,7 @@ def score_scene(
         if ors.iou >= _OR_IOU_HIT:
             out.or_earned += _PTS_OBJECT_REFERENCE
 
-    # --- instruction following: coverage@1m on aligned questions (6 pts) -------------
+    # --- instruction following: driven-trajectory RUBRIC on aligned questions (6 pts) -
     if_texts = questions.get("instruction_following", [])
     if if_texts:
         out.add(
@@ -332,12 +351,17 @@ def _score_if(
     questions_dir: os.PathLike | str | None,
     thresholds,
 ) -> SceneQScores:
-    """IF scoring for a scene: fit the scene frame, drive each path, coverage@1m.
+    """IF scoring for a scene: fit the scene frame, drive each trajectory, rubric-score it.
 
-    A threshold-aware mirror of gt_battery's two-pass IF block: resolve each terminal
-    goal + load the GT trajectory, fit one scene transform, then drive each IF path with
-    the swept ``thresholds`` and score coverage. Questions whose scene fit residual
-    exceeds the alignment gate (or that lack a GT trajectory) are excluded.
+    A threshold-aware mirror of gt_battery's two-pass IF block, retargeted to the IF-F2
+    HEADLINE metric: resolve each terminal goal + load the GT trajectory, fit one scene
+    transform, then for each aligned question DRIVE the trajectory (constant-speed
+    kinematic follower over the planned breadcrumbs) under the swept ``thresholds`` and
+    score it with :func:`core.groundtruth.scoring.score_instruction_rubric` — ordered
+    per-leg arrival credit minus threading/avoid penalties. The planned-path coverage@1m
+    the sweep used to optimise is retired (the rubric does not pay for path shape).
+    Questions whose scene fit residual exceeds the alignment gate (or that lack a GT
+    trajectory) are excluded.
     """
     out = SceneQScores()
     if_traj: list[np.ndarray | None] = []
@@ -379,17 +403,25 @@ def _score_if(
         if traj_path is None or not aligned:
             out.if_excluded += 1
             continue
-        our_path = _drive_if_path(text, gt, idx, thresholds, start_xy=spawn_xy)
-        isc = S.score_instruction_following(
-            our_path, traj_path, frame=frame, fit_residual_m=residual
+        driven = _drive_if_trajectory(text, gt, idx, thresholds, start_xy=spawn_xy)
+        leg_goals, corridor_gates, avoid_caps = _if_rubric_geometry(
+            text, gt, idx, thresholds
+        )
+        rub = S.score_instruction_rubric(
+            driven,
+            leg_goals,
+            corridor_gates=corridor_gates,
+            avoid_capsules=avoid_caps,
+            trajectory_ply=traj_path,
+            frame=frame,
         )
         out.if_available += _PTS_INSTRUCTION_FOLLOWING
-        out.if_earned += _PTS_INSTRUCTION_FOLLOWING * float(isc.coverage_1m)
+        out.if_earned += _PTS_INSTRUCTION_FOLLOWING * float(rub.rubric_score)
     return out
 
 
 def _terminal_goal_centroid(text: str, idx, thresholds) -> np.ndarray | None:
-    """Threshold-aware copy of gt_battery._terminal_goal_centroid (resolve with th)."""
+    """Threshold-aware mirror of gt_battery._terminal_goal_centroid (resolve with th)."""
     from core.parsing.regex_tier import parse_regex
     from core.geometry.toolbox import TargetSpec, resolve
     from core.plan_schema import LegKind
@@ -414,8 +446,135 @@ def _terminal_goal_centroid(text: str, idx, thresholds) -> np.ndarray | None:
     return np.asarray(c, dtype=float).reshape(-1)[:2]
 
 
+def _if_rubric_geometry(text: str, gt: GTScene, idx, thresholds):
+    """Threshold-aware mirror of gt_battery._if_rubric_geometry.
+
+    Returns ``(leg_goals, corridor_gates, avoid_capsules)`` in the GT (object) frame for
+    :func:`core.groundtruth.scoring.score_instruction_rubric`, resolving every anchor with
+    the swept ``thresholds`` (gt_battery's copy hard-wires the defaults). Legs/avoids whose
+    anchors don't resolve are skipped (unscored, not wrong).
+    """
+    from core.parsing.regex_tier import parse_regex
+    from core.geometry.toolbox import (
+        TargetSpec,
+        avoid_capsule,
+        corridor_gate,
+        resolve,
+    )
+    from core.geometry import primitives as P
+    from core.plan_schema import LegKind
+
+    plan = parse_regex(text)
+    leg_goals: list[tuple[str, tuple[float, float]]] = []
+    corridor_gates: list[tuple[int, object]] = []
+    avoid_capsules: list[object] = []
+    if not plan.route:
+        return leg_goals, corridor_gates, avoid_capsules
+
+    def _resolve_anchor_rec(anchor):
+        spec = TargetSpec(
+            noun=anchor.noun, raw=anchor.raw, attributes=list(anchor.attributes),
+            clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
+        )
+        res = resolve(spec, idx, thresholds)
+        return res.candidates_ranked[0] if res.candidates_ranked else None
+
+    for i, leg in enumerate(plan.route):
+        if leg.kind is LegKind.CORRIDOR_BETWEEN and len(leg.anchors) == 2:
+            r0 = _resolve_anchor_rec(leg.anchors[0])
+            r1 = _resolve_anchor_rec(leg.anchors[1])
+            if r0 is None or r1 is None:
+                continue
+            gate = corridor_gate(r0, r1)
+            mid = (float(gate.midpoint[0]), float(gate.midpoint[1]))
+            leg_goals.append(("corridor_between", mid))
+            corridor_gates.append((i, gate))
+        else:
+            rec = _resolve_anchor_rec(leg.anchors[0]) if leg.anchors else None
+            if rec is None:
+                continue
+            c = P._as3(rec.centroid)
+            kind = "via_near" if leg.kind is LegKind.VIA_NEAR else "goto"
+            leg_goals.append((kind, (float(c[0]), float(c[1]))))
+
+    for spec in plan.avoid:
+        try:
+            avoid_capsules.append(avoid_capsule(spec, idx, thresholds))
+        except ValueError:
+            continue
+    return leg_goals, corridor_gates, avoid_capsules
+
+
+def _drive_if_trajectory(text, gt, idx, thresholds, *, start_xy=None) -> np.ndarray:
+    """Threshold-aware mirror of gt_battery._drive_if_trajectory (IF-F2 driven poses).
+
+    Builds + grounds the route under the swept ``thresholds`` (InstructionHead(thresholds=)),
+    then closes the loop: repeatedly asks the follower for the next crumb and advances a
+    constant-speed kinematic vehicle toward it, recording each pose. This driven pose
+    stream — not the planned path — is what the rubric scores. Mirrors gt_battery's copy
+    (which hard-wires the default thresholds); the drive-loop constants are imported from
+    gt_battery so the two stay in lock-step.
+    """
+    from core.parsing.regex_tier import parse_regex
+    from core.heads.instruction import InstructionHead
+    from core.mocks.mock_io import FakeClock, MockRobotIO
+
+    plan = parse_regex(text)
+    if plan.qtype is not QType.INSTRUCTION_FOLLOWING or not plan.route:
+        return np.empty((0, 2), dtype=float)
+
+    sc = GB._synthetic_from_gt(gt)
+    clk = FakeClock(0.0)
+    if start_xy is not None:
+        start_x, start_y = float(start_xy[0]), float(start_xy[1])
+    else:
+        start_x = float(min(r.aabb_min[0] for r in gt.instances)) + 0.5
+        start_y = float(min(r.aabb_min[1] for r in gt.instances)) + 0.5
+    io = MockRobotIO(sc, clk, start_x=start_x, start_y=start_y)
+
+    head = InstructionHead(plan=plan, thresholds=thresholds)
+    for _ in range(GB._IF_MAX_BUILD_TICKS):
+        head.advance(io, idx)
+        clk.advance(1.0)
+        if head._follower is not None and head._follower.path:
+            break
+
+    follower = head._follower
+    if follower is None or not follower.path:
+        return np.empty((0, 2), dtype=float)
+
+    odom = io.latest_odom()
+    pose = (float(odom.x), float(odom.y)) if odom is not None else (0.0, 0.0)
+    t = 0.0
+    poses: list[tuple[float, float]] = [pose]
+    for _ in range(GB._DRIVE_MAX_TICKS):
+        wp = follower.advance(pose, t)
+        if wp is None:
+            break
+        target = (float(wp.x), float(wp.y))
+        dx, dy = target[0] - pose[0], target[1] - pose[1]
+        d = (dx * dx + dy * dy) ** 0.5
+        if d <= GB._DRIVE_STEP_M:
+            pose = target
+        else:
+            pose = (pose[0] + GB._DRIVE_STEP_M * dx / d, pose[1] + GB._DRIVE_STEP_M * dy / d)
+        poses.append(pose)
+        t += 1.0
+    term = follower.path[-1]
+    if not poses or (poses[-1][0] - term[0]) ** 2 + (poses[-1][1] - term[1]) ** 2 > (
+        GB._DRIVE_STEP_M**2
+    ):
+        poses.append((float(term[0]), float(term[1])))
+    return np.array(poses, dtype=float)
+
+
 def _drive_if_path(text, gt, idx, thresholds, *, start_xy=None) -> np.ndarray:
-    """Threshold-aware copy of gt_battery._drive_if_path (InstructionHead(thresholds=))."""
+    """Retained diagnostic helper: the PLANNED breadcrumb path (not scored by the objective).
+
+    The objective now scores the DRIVEN trajectory via :func:`_drive_if_trajectory`; this
+    planned-path mirror is kept only for ad-hoc diagnostics/tests. Threshold-aware copy of
+    gt_battery._drive_if_path.
+    """
     from core.parsing.regex_tier import parse_regex
     from core.heads.instruction import InstructionHead
     from core.mocks.mock_io import FakeClock, MockRobotIO
@@ -475,12 +634,45 @@ def make_folds(
 # --------------------------------------------------------------------------- cache / eval
 
 
+#: The flat numeric/int fields of :class:`SceneQScores`, in a fixed order — the on-disk
+#: cache payload schema. Kept as a module constant so serialise/deserialise agree and a
+#: field add/remove is a one-line change with a loud round-trip test.
+_SCENEQ_FIELDS = (
+    "numerical_earned", "numerical_available", "numerical_excluded",
+    "or_earned", "or_available", "or_excluded",
+    "if_earned", "if_available", "if_excluded",
+)
+
+
+def _sceneq_to_dict(s: SceneQScores) -> dict[str, float]:
+    return {f: getattr(s, f) for f in _SCENEQ_FIELDS}
+
+
+def _sceneq_from_dict(d: dict[str, Any]) -> SceneQScores:
+    out = SceneQScores()
+    for f in _SCENEQ_FIELDS:
+        # excluded counts are ints; earned/available are floats. Coerce off the default's
+        # type so a JSON round-trip stays type-stable.
+        cur = getattr(out, f)
+        val = d[f]
+        setattr(out, f, int(val) if isinstance(cur, int) else float(val))
+    return out
+
+
 class SceneEvaluator:
     """Evaluates ``(config, scene)`` -> :class:`SceneQScores`, cached across folds.
 
     Loads each scene's GT once (lazily, cached) and each ``(config-hash, scene)`` score
     once. Folds that share a scene in/out reuse the same evaluation — the expensive IF
-    driving runs a single time per unique config+scene pair.
+    trajectory driving runs a single time per unique config+scene pair.
+
+    Two cache tiers:
+
+    * **in-memory** (``_eval_cache``): reuse within a single run across folds.
+    * **on-disk** (``cache_dir``, one JSON file per ``(config-hash, scene)``): survives an
+      interrupted process, so a re-run resumes — every cell already on disk is a hit and is
+      not recomputed. Enabled when a ``cache_dir`` is passed (the CLI points it at
+      ``<out>/cache/``); ``None`` keeps the harness memory-only (used by fast unit tests).
     """
 
     def __init__(
@@ -490,15 +682,20 @@ class SceneEvaluator:
         *,
         questions_dir: os.PathLike | str | None,
         base_cal: Calibration | None = None,
+        cache_dir: os.PathLike | str | None = None,
     ) -> None:
         self.root = Path(unity_root)
         self.questions_by_scene = questions_by_scene
         self.questions_dir = questions_dir
         self.base_cal = base_cal or default_calibration()
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else None
+        if self.cache_dir is not None:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._scene_cache: dict[str, tuple] = {}
         self._eval_cache: dict[tuple[str, str], SceneQScores] = {}
         self.n_cache_hits = 0
         self.n_cache_misses = 0
+        self.n_disk_hits = 0  # subset of misses served from a prior run's on-disk cell
 
     def _load(self, scene: str):
         if scene not in self._scene_cache:
@@ -511,15 +708,52 @@ class SceneEvaluator:
             self._scene_cache[scene] = (gt, referential, scene_graph)
         return self._scene_cache[scene]
 
+    def _disk_path(self, cfg_hash: str, scene: str) -> Path | None:
+        if self.cache_dir is None:
+            return None
+        # scene names are challenge identifiers (safe filename tokens); cfg_hash is hex.
+        return self.cache_dir / f"{cfg_hash}__{scene}.json"
+
+    def _disk_load(self, cfg_hash: str, scene: str) -> SceneQScores | None:
+        p = self._disk_path(cfg_hash, scene)
+        if p is None or not p.exists():
+            return None
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+            return _sceneq_from_dict(payload["scores"])
+        except (json.JSONDecodeError, KeyError, OSError):
+            # A truncated/corrupt cell (e.g. killed mid-write) is treated as absent and
+            # recomputed — never a crash that aborts the resume.
+            return None
+
+    def _disk_store(self, cfg_hash: str, scene: str, res: SceneQScores) -> None:
+        p = self._disk_path(cfg_hash, scene)
+        if p is None:
+            return
+        payload = {"config_hash": cfg_hash, "scene": scene, "scores": _sceneq_to_dict(res)}
+        # Atomic-ish write: tmp then replace, so an interrupt can't leave a half file that
+        # the resume would mistake for a valid cell.
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        os.replace(tmp, p)
+
     def evaluate(self, overrides: dict[str, Any], scene: str) -> SceneQScores:
-        key = (config_hash(overrides), scene)
+        cfg_hash = config_hash(overrides)
+        key = (cfg_hash, scene)
         if key in self._eval_cache:
             self.n_cache_hits += 1
             return self._eval_cache[key]
+        # On-disk resume: a cell computed by a prior (interrupted) run is a hit — load it
+        # into memory and skip recomputation.
+        disk = self._disk_load(cfg_hash, scene)
+        if disk is not None:
+            self.n_cache_hits += 1
+            self.n_disk_hits += 1
+            self._eval_cache[key] = disk
+            return disk
         self.n_cache_misses += 1
         gt, referential, scene_graph = self._load(scene)
-        cal_over, min_obs = _split_overrides(overrides)
-        cal = apply_overrides(self.base_cal, cal_over)
+        cal = apply_overrides(self.base_cal, overrides)
         res = score_scene(
             gt,
             self.questions_by_scene[scene],
@@ -527,9 +761,9 @@ class SceneEvaluator:
             scene_graph=scene_graph,
             questions_dir=self.questions_dir,
             thresholds=cal.geometry,
-            min_obs=min_obs,
         )
         self._eval_cache[key] = res
+        self._disk_store(cfg_hash, scene, res)
         return res
 
     def score_scene_set(self, overrides: dict[str, Any], scenes: Iterable[str]) -> SceneQScores:
@@ -564,6 +798,7 @@ class SweepResult:
     recommended_overrides: dict[str, Any]  # only the keys that moved off default
     cache_hits: int
     cache_misses: int
+    disk_hits: int = 0  # cache hits served from a prior run's on-disk cell (resume)
 
     def mean_holdout(self) -> float:
         return float(np.mean([f.holdout_score for f in self.folds])) if self.folds else 0.0
@@ -648,6 +883,7 @@ def run_cv_sweep(
         recommended_overrides=rec_over,
         cache_hits=evaluator.n_cache_hits,
         cache_misses=evaluator.n_cache_misses,
+        disk_hits=evaluator.n_disk_hits,
     )
 
 
@@ -666,11 +902,8 @@ def _aggregate_stability(
     cal = default_calibration()
     defaults: dict[str, Any] = {}
     for key in spec.keys():
-        if key == _COUNTING_MIN_OBS_KEY:
-            defaults[key] = 1
-        else:
-            sub, _, field_name = key.partition(".")
-            defaults[key] = getattr(getattr(cal, sub), field_name)
+        sub, _, field_name = key.partition(".")
+        defaults[key] = getattr(getattr(cal, sub), field_name)
 
     stability: dict[str, dict[str, int]] = {}
     recommendation: dict[str, Any] = {}
@@ -725,11 +958,9 @@ def write_report(result: SweepResult, out_dir: os.PathLike | str) -> tuple[Path,
     rec_path = out / "recommended_calibration.json"
 
     cal = default_calibration()
-    # The counting.min_obs key is not a Calibration field (it is a counting() param), so
-    # split it out before building the recommended Calibration — apply_overrides would
-    # reject it. It is carried in the JSON recommendation separately.
-    cal_rec_over, _rec_min_obs = _split_overrides(result.recommended_overrides)
-    recommended_cal = apply_overrides(cal, cal_rec_over)
+    # Every recommended override is a live geometry Calibration field (counting.min_obs was
+    # dropped from the sweep space, NUM-F7), so they apply directly.
+    recommended_cal = apply_overrides(cal, result.recommended_overrides)
     rec_diff = diff(cal, recommended_cal)
 
     # --- report.md -------------------------------------------------------------------
@@ -737,15 +968,18 @@ def write_report(result: SweepResult, out_dir: os.PathLike | str) -> tuple[Path,
     L.append(f"# CV calibration sweep — reasoning thresholds ({date.today().isoformat()})\n")
     L.append(
         f"5-fold leave-3-out CV over {len(result.scenes)} scenes, {result.n_samples} "
-        f"random-search samples (seed {result.seed}). Cache: {result.cache_hits} hits / "
+        f"random-search samples (seed {result.seed}). Cache: {result.cache_hits} hits "
+        f"({result.disk_hits} from a prior on-disk run — resume) / "
         f"{result.cache_misses} misses.\n"
     )
     L.append(
-        "> **Objective:** composite challenge points — NUMERICAL agreement with the best "
-        "independent opinion (1pt), OBJECT_REFERENCE IoU>=0.25 on scoreable Qs (2pt), "
-        "INSTRUCTION_FOLLOWING coverage@1m on aligned Qs (6pt); normalised by available "
-        "points, unscoreable/unaligned questions excluded from both numerator and "
-        "denominator.\n"
+        "> **Objective (repaired, NUM-F7/H2):** points-weighted challenge composite — "
+        "NUMERICAL STRICT independent (referential) count agreement (1pt; class-only / "
+        "scene-graph rows excluded, not evidence), OBJECT_REFERENCE IoU>=0.25 on scoreable "
+        "Qs (2pt), INSTRUCTION_FOLLOWING driven-trajectory RUBRIC score on aligned Qs (6pt; "
+        "the retired planned-path coverage@1m is NOT scored). Normalised by available "
+        "points; unscoreable / unaligned / no-strict-evidence questions excluded from both "
+        "numerator and denominator.\n"
     )
     L.append("## Fold scores\n")
     L.append("| Fold | Held-out scenes | Train | Holdout | Best config (diff vs default) |")
@@ -768,10 +1002,7 @@ def write_report(result: SweepResult, out_dir: os.PathLike | str) -> tuple[Path,
     L.append("| Param | Default | Value counts across folds | Recommendation |")
     L.append("|---|---|---|---|")
     for key in result.spec_keys:
-        default_v = (
-            1 if key == _COUNTING_MIN_OBS_KEY
-            else getattr(getattr(cal, key.split(".")[0]), key.split(".")[1])
-        )
+        default_v = getattr(getattr(cal, key.split(".")[0]), key.split(".")[1])
         counts = ", ".join(
             f"{v}×{n}" for v, n in sorted(result.stability[key].items(), key=lambda kv: -kv[1])
         )
@@ -780,8 +1011,6 @@ def write_report(result: SweepResult, out_dir: os.PathLike | str) -> tuple[Path,
     L.append("")
 
     def _default_of(key: str) -> Any:
-        if key == _COUNTING_MIN_OBS_KEY:
-            return 1
         sub, _, fld = key.partition(".")
         return getattr(getattr(cal, sub), fld)
 
@@ -816,6 +1045,7 @@ def write_report(result: SweepResult, out_dir: os.PathLike | str) -> tuple[Path,
         "generalization_gap": round(result.generalization_gap(), 6),
         "cache_hits": result.cache_hits,
         "cache_misses": result.cache_misses,
+        "disk_hits": result.disk_hits,
         "folds": [
             {
                 "fold": fr.fold,
@@ -870,6 +1100,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--holdout-size", type=int, default=3, help="held-out scenes per fold (default 3)"
     )
+    ap.add_argument(
+        "--no-cache", action="store_true",
+        help="disable the on-disk (config,scene) cache under <out>/cache/ (no resume)",
+    )
     args = ap.parse_args(argv)
 
     scenes_subset = (
@@ -884,20 +1118,25 @@ def main(argv: list[str] | None = None) -> int:
     n_folds, holdout = _fit_folds(len(scenes), args.n_folds, args.holdout_size)
     folds = make_folds(scenes, n_folds=n_folds, holdout_size=holdout, seed=args.seed)
 
+    # Resolve the output dir up front so the on-disk cache lives under it (<out>/cache/):
+    # an interrupted run resumes from the same --out on re-invocation.
+    out_dir = Path(args.out) if args.out else (DEFAULT_OUT_ROOT / f"cvsweep_{date.today().isoformat()}")
+    cache_dir = None if args.no_cache else out_dir / "cache"
+
     evaluator = SceneEvaluator(
-        args.groundtruth, questions_by_scene, questions_dir=args.questions_dir
+        args.groundtruth, questions_by_scene, questions_dir=args.questions_dir,
+        cache_dir=cache_dir,
     )
     spec = default_sweep_spec()
     result = run_cv_sweep(evaluator, spec, folds, n_samples=args.n_samples, seed=args.seed)
 
-    out_dir = args.out or (DEFAULT_OUT_ROOT / f"cvsweep_{date.today().isoformat()}")
     md_path, json_path, rec_path = write_report(result, out_dir)
 
     print(
         f"cvsweep: {len(scenes)} scenes / {n_folds} folds x {holdout}  "
         f"mean_holdout={result.mean_holdout():.3f}+/-{result.std_holdout():.3f} "
         f"gap={result.generalization_gap():.3f} "
-        f"cache={result.cache_hits}h/{result.cache_misses}m"
+        f"cache={result.cache_hits}h({result.disk_hits}disk)/{result.cache_misses}m"
     )
     print(f"wrote {md_path}")
     print(f"wrote {json_path}")

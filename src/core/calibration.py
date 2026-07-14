@@ -60,6 +60,7 @@ class NavTunables:
 
     # --- costmap.py -------------------------------------------------------------
     vehicle_radius_m: float = 0.4      # obstacle inflation radius (half footprint + margin)
+    overhead_soft_cost_mult: float = 4.0  # A* penalty to cross a SOFT-overhead cell (redteam H13)
 
     # --- frontiers.py -----------------------------------------------------------
     min_cluster_size: int = 5          # frontier clusters smaller than this are noise

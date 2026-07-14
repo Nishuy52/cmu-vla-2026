@@ -161,6 +161,16 @@ def _drive_if_path(
 _DRIVE_STEP_M: float = 0.25
 _DRIVE_MAX_TICKS: int = 4000  # hard cap so a stuck follower can't loop forever
 
+#: Max number of full ``head.advance`` re-ticks DURING the drive (each re-integrates
+#: terrain + re-grounds + can re-plan, ~0.5 s, so it must be bounded). The head is re-ticked
+#: only while the committed route can still grow (a later leg still ungrounded / a provisional
+#: terminal withheld); once this budget is spent — or the route covers every leg — we drive
+#: the follower directly (microseconds/step). In the fully-observed battery the route commits
+#: on tick 0, so this budget is rarely touched; it exists so a route that can NEVER fully
+#: ground (a leg unresolvable from the mirror scene) cannot make the drive loop 4000× at the
+#: head's per-tick cost. Matches the build budget: the drive gets the same extension window.
+_DRIVE_HEAD_RETICK_BUDGET: int = _IF_MAX_BUILD_TICKS
+
 
 def _run_instruction_head(
     text: str,
@@ -208,12 +218,34 @@ def _drive_if_trajectory(
     """Simulate the DRIVEN trajectory (IF-F2), returning the pose stream as (N, 2).
 
     Unlike :func:`_drive_if_path` (which returns the *planned* ``BreadcrumbFollower.path``),
-    this closes the loop: we build + ground the route, then repeatedly ask the follower
-    for the next crumb and advance a constant-speed kinematic vehicle toward it,
-    recording each pose. This is what the rubric proxy scores — an actual trajectory the
-    vehicle followed through the crumbs, so ordered arrival / gate threading / avoid
-    breaches are measured on motion, not on a plan. v1 kinematics: straight steps of
-    ``_DRIVE_STEP_M`` toward the crumb (see the constant's note).
+    this closes the loop against the instruction head: we build + ground the route, then
+    step a constant-speed kinematic vehicle toward the follower's current crumb, recording
+    each pose — and we KEEP TICKING THE HEAD between drive steps so the committed route
+    re-grounds and EXTENDS as later legs commit (H3c prefix-growth / H4c provisional-terminal
+    commit). The follower's progress index therefore advances in lockstep with the *real*
+    (moving) pose. This is what the rubric proxy scores — the actual trajectory the vehicle
+    followed through the crumbs, so ordered arrival / gate threading / avoid breaches are
+    measured on motion, not on a plan. v1 kinematics: straight steps of ``_DRIVE_STEP_M``
+    toward the crumb (see the constant's note).
+
+    HARNESS-bug history (the reason this was rewritten): the previous version ticked the
+    head ``max_build_ticks`` times from a *stationary* spawn to firm up the route, then
+    drove the SAME follower object. But every build tick already calls
+    ``head.advance -> _drive -> follower.advance`` at the spawn pose, so for a short route
+    sitting near the spawn the follower's progress index was fully consumed before the
+    drive began. The reused follower returned ``None`` on the first drive step -> a 2-pose
+    trajectory (spawn + terminal vertex) that reaches no leg -> rubric 0. That was the
+    ``poses=2..30`` signature in the report: a harness artifact, not a pipeline failure.
+    We fix it by (a) rewinding the follower's progress after the build, and (b) driving
+    closed-loop with a moving pose so progress only advances as the vehicle really moves.
+
+    Performance: re-ticking ``head.advance`` (terrain re-integration + full re-ground +
+    re-plan) costs ~0.5 s/tick, so we do it ONLY while the committed route can still grow
+    (``_committable_prefix_len`` has not reached every leg, i.e. a later leg is still
+    ungrounded or a provisional terminal is withheld). In this fully-observed battery the
+    route commits on tick 0, so we fall straight through to driving the follower directly
+    (microseconds/step). When exploration/provisional-withholding is in play the head keeps
+    ticking until the route is whole, which is exactly the general-case fidelity F2 wants.
     """
     head, io, plan = _run_instruction_head(
         text, gt, idx, start_xy=start_xy, max_build_ticks=max_build_ticks
@@ -224,11 +256,45 @@ def _drive_if_trajectory(
     if follower is None or not follower.path:
         return np.empty((0, 2), dtype=float)
 
+    # The build loop drove the follower from the stationary spawn (each _run tick calls
+    # head.advance -> _drive), so its progress index may already be advanced (or fully
+    # consumed) against the spawn pose. Rewind so the drive starts at the route's head and
+    # progresses only as the vehicle really moves.
+    follower._idx = 0
+    follower._hist = []
+
     odom = io.latest_odom()
     pose = (float(odom.x), float(odom.y)) if odom is not None else (0.0, 0.0)
     t = 0.0
     poses: list[tuple[float, float]] = [pose]
+    last_term = (float(follower.path[-1][0]), float(follower.path[-1][1]))
+    n_legs = len(head._legs) if head._legs else len(plan.route)
+    head_reticks_left = _DRIVE_HEAD_RETICK_BUDGET
+
     for _ in range(_DRIVE_MAX_TICKS):
+        # Route still growing? Re-tick the head (moving the vehicle first) so re-grounding,
+        # prefix-growth and provisional-terminal commit can extend the committed route. Once
+        # the route covers every leg — or the bounded re-tick budget is spent (a leg that
+        # never grounds must not make us pay the head's ~0.5 s/tick cost 4000×) — we stop
+        # re-ticking and drive the committed follower directly.
+        route_growing = head._driven_prefix < n_legs and head_reticks_left > 0
+        if route_growing:
+            head_reticks_left -= 1
+            io.set_pose(pose[0], pose[1])
+            head.advance(io, idx)
+            new_follower = head._follower
+            if new_follower is not None and new_follower.path:
+                if new_follower is not follower:
+                    # The route was extended/replanned: resync progress to the nearest
+                    # not-yet-passed vertex so the drive continues smoothly on the new path.
+                    follower = new_follower
+                    follower._idx = _nearest_forward_idx(follower.path, pose)
+                    follower._hist = []
+                last_term = (
+                    float(follower.path[-1][0]),
+                    float(follower.path[-1][1]),
+                )
+
         wp = follower.advance(pose, t)
         if wp is None:
             break
@@ -241,15 +307,28 @@ def _drive_if_trajectory(
             pose = (pose[0] + _DRIVE_STEP_M * dx / d, pose[1] + _DRIVE_STEP_M * dy / d)
         poses.append(pose)
         t += 1.0
-    # Ensure the planned terminal vertex is represented (the follower returns None once
-    # the progress index passes the last crumb, which can be a step short of the exact
-    # vertex under the constant-speed stepping).
-    term = follower.path[-1]
-    if not poses or (poses[-1][0] - term[0]) ** 2 + (poses[-1][1] - term[1]) ** 2 > (
-        _DRIVE_STEP_M**2
-    ):
-        poses.append((float(term[0]), float(term[1])))
+
+    # Ensure the planned terminal vertex is represented (the follower returns None once the
+    # progress index passes the last crumb, which can be a step short of the exact vertex
+    # under the constant-speed stepping).
+    if not poses or (poses[-1][0] - last_term[0]) ** 2 + (
+        poses[-1][1] - last_term[1]
+    ) ** 2 > (_DRIVE_STEP_M**2):
+        poses.append((float(last_term[0]), float(last_term[1])))
     return np.array(poses, dtype=float)
+
+
+def _nearest_forward_idx(
+    path: list[tuple[float, float]], pose: tuple[float, float]
+) -> int:
+    """Index of the path vertex nearest to ``pose`` (used to resync progress after the
+    committed route is extended/replanned mid-drive)."""
+    best_i, best_d = 0, float("inf")
+    for i, p in enumerate(path):
+        d = (p[0] - pose[0]) ** 2 + (p[1] - pose[1]) ** 2
+        if d < best_d:
+            best_d, best_i = d, i
+    return best_i
 
 
 def _if_rubric_geometry(

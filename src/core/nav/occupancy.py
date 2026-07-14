@@ -17,7 +17,7 @@ from FREE (a cell can be observed-but-obstacle or observed-but-free).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -329,7 +329,23 @@ def integrate_scan_overhead_decimated(
     pts = pts[inside]
     if pts.shape[0] == 0:
         return
+    stride = 1
     if pts.shape[0] > max_pts:
         stride = int(np.ceil(pts.shape[0] / max_pts))
         pts = pts[::stride]
+    # Stride-consistent noise gate (redteam H13 / SYS-F12 decimation-vs-min_points):
+    # the ``min_points_per_cell`` gate counts points AFTER this stride decimation, so
+    # a sparse-but-real overhang edge that just clears the gate at full density (say
+    # exactly 3 points in a cell) drops below it after a ~5x stride (≈0-1 survive) and
+    # silently stops flagging. Scale the effective threshold DOWN by the applied
+    # stride — ``ceil(min_points / stride)`` with a floor of 1 — so the decimated
+    # count is judged in stride-corrected units and the same physical edge flags at
+    # any stride. Chosen over "count in stride-corrected units" (multiplying survivor
+    # counts back up) because scaling the threshold keeps ``integrate_scan_overhead``
+    # counting real, deterministic survivors — no reconstructed fractional counts —
+    # and floor-1 preserves the "at least one real return" noise floor.
+    if stride > 1 and cfg.min_points_per_cell > 1:
+        eff_min = max(1, int(np.ceil(cfg.min_points_per_cell / stride)))
+        if eff_min != cfg.min_points_per_cell:
+            cfg = replace(cfg, min_points_per_cell=eff_min)
     grid.integrate_scan_overhead(LidarScan(t=scan.t, points=pts), vehicle_z, cfg)

@@ -143,6 +143,7 @@ def test_nav_tunables_match_live_module_constants():
     assert nav.grow_pad_cells == occupancy.GROW_PAD_CELLS
     # costmap.py
     assert nav.vehicle_radius_m == costmap.VEHICLE_RADIUS_M
+    assert nav.overhead_soft_cost_mult == costmap.OVERHEAD_SOFT_COST_MULT
     # frontiers.py
     assert nav.min_cluster_size == frontiers.MIN_CLUSTER_SIZE
     assert nav.w_size == frontiers.W_SIZE
@@ -216,9 +217,9 @@ def test_field_counts_per_subsystem():
     assert counts == {
         "geometry": 15,
         "fusion": 5,
-        "tracker": 1,
+        "tracker": 2,
         "keyframe": 3,
-        "nav": 20,
+        "nav": 21,
         "budget": 15,
     }
 

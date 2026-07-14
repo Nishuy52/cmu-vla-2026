@@ -59,8 +59,13 @@ Computed facts per clause:
 {fact_table}
 Runner-up: {runner_up}
 The parser noted: {notes}
-Check EVERY requirement in the question against the computed facts, including any the \
-clause list may have MISSED. Reply JSON only: \
+Check every requirement in the question against the computed facts. Reply `confirm` if the \
+Selected instance satisfies them all. Reply `runner_up` ONLY if the Runner-up shown above \
+clearly satisfies a requirement the Selected instance fails — never if Runner-up is (none). \
+Reply `neither` ONLY if a specific requirement is contradicted by the computed facts for BOTH \
+candidates; in that case set `missed_constraint` to the single relation word plus anchor noun \
+(e.g. `closest_to folding screen`), copied from the question. If the facts are merely \
+insufficient to decide, reply `confirm`. Reply JSON only: \
 {{"verdict": "confirm"|"runner_up"|"neither", "missed_constraint": str|null, "reason": str}}"""
 
 
@@ -259,24 +264,46 @@ def as_llm_verify_seam(
     ledger,
     clock,
     cfg: dict | None = None,
-) -> Callable[[Any, str, str], bool]:
+) -> Callable[..., bool]:
     """Adapt CP4 to the head's narrow ``LlmVerifyFn = (plan, summary, matrix) -> bool``.
 
-    The head iterates candidates and asks "keep this one?" per candidate. We map the CP4
-    verdict for the winner candidate: ``confirm`` -> True (keep); ``runner_up``/``neither``
-    -> False (demote, let the head walk to the next candidate). The missed-constraint /
-    re-resolve path cannot be expressed through this bool seam and is degraded away — see
-    the module docstring's seam-gap note. ``plan.question_raw`` supplies the question and
-    ``plan.notes`` the ambiguity flags; the head passes the winner summary + matrix text.
+    The head iterates candidates and asks "keep this one?" per candidate. Per the design's
+    fallback rule (``docs/checkpoint_design.md`` §CP4: "keep the toolbox winner ... CP4 only
+    ever improves on clause-slip") the verdict maps:
+
+    * ``confirm``   -> True  (keep this candidate).
+    * ``runner_up`` -> False (demote; let the head walk to the next candidate — the model
+      explicitly preferred a *different* candidate).
+    * ``neither``   -> True  (KEEP — OR-F4). ``neither`` means "no candidate is clearly
+      correct"; demoting would swap to an unverified sibling the model never endorsed, which
+      is strictly worse than not verifying. The design fallback is keep-winner, so a
+      non-actionable verdict must not demote.
+
+    Any unavailable/malformed reply also keeps (True). This inverts the previous
+    ``verdict == "confirm"`` seam, which demoted on ``neither`` and swapped to an unseen
+    runner-up (the OR-F4 defect).
+
+    A 4th optional positional argument ``runner_up_summary`` lets a caller pass the REAL
+    runner-up one-liner into the prompt instead of the hardcoded ``(none)`` — so the model
+    can honestly answer ``runner_up``. It defaults to ``(none)`` for the legacy 3-arg head
+    call; wiring the head to supply it is a factory-side follow-up (see report).
     """
     cfg = cfg or {}
     chat = _resolve_chat(chat_fns)
     repair = cfg.get("repair")
 
-    def seam(plan: Any, candidate_summary_text: str, pass_matrix_text: str) -> bool:
+    def seam(
+        plan: Any,
+        candidate_summary_text: str,
+        pass_matrix_text: str,
+        runner_up_summary: str = "(none)",
+    ) -> bool:
         question = getattr(plan, "question_raw", "") or ""
         notes = getattr(plan, "notes", "") or ""
-        prompt = build_prompt(question, candidate_summary_text, pass_matrix_text, "(none)", notes)
+        prompt = build_prompt(
+            question, candidate_summary_text, pass_matrix_text,
+            runner_up_summary or "(none)", notes,
+        )
         raw = guarded_call(
             CHECKPOINT_NAME, ledger, clock, lambda: chat(prompt), tier="text"
         )
@@ -285,7 +312,9 @@ def as_llm_verify_seam(
         obj, _errors = schemas.parse_with_repair(raw, schemas.validate_verification, repair)
         if obj is None:
             return True  # malformed -> keep the deterministic winner
-        return obj["verdict"] == "confirm"
+        # confirm/neither keep the winner (design fallback); only an explicit runner_up
+        # preference demotes so the head walks to the next candidate.
+        return obj["verdict"] != "runner_up"
 
     return seam
 

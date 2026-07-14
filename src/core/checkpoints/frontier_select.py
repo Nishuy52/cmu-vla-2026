@@ -8,7 +8,9 @@ directions and the question; the VLM picks which direction to explore.
 Contract: ``{"choice": 1-N, "reason": str}`` (N = number of rendered frontiers, default 5).
 
 Outcome semantics:
-* valid choice -> "choice": the caller drives toward ``frontiers[choice-1]``.
+* valid choice 1-N -> "choice": the caller drives toward ``frontiers[choice-1]``.
+* choice 0 (abstain, OR-F10) -> "fallback": the model judged no direction clearly helps;
+  use the geometric top frontier rather than a coerced random pick.
 * skip / timeout / malformed / out-of-range -> "fallback": the caller uses its geometric
   top frontier (deterministic fallback).
 
@@ -40,7 +42,8 @@ SYSTEM_PROMPT = (
 PROMPT_TEMPLATE = """\
 Robot exploring to answer: {question}
 Numbered directions (1-{n}) mark unexplored areas. Pick the direction most likely to help \
-answer the question. Reply JSON only: {{"choice": 1-{n}, "reason": str}}"""
+answer the question, or answer 0 = "no direction clearly helps — use your own heuristic". \
+Reply JSON only: {{"choice": 0-{n}, "reason": str}}"""
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,9 @@ def run_frontier_select(
         return FrontierOutcome("fallback")
 
     choice = int(obj["choice"])
+    if choice == 0:
+        # OR-F10 abstain: the model declined to pick -> geometric fallback.
+        return FrontierOutcome("fallback", reason=obj.get("reason", ""))
     return FrontierOutcome("choice", choice=choice, index=choice - 1, reason=obj.get("reason", ""))
 
 

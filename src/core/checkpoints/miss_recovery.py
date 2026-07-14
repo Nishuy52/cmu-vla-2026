@@ -38,6 +38,9 @@ PROVISIONAL_SCORE_FACTOR: float = 0.5
 PROVISIONAL_N_OBS: int = 1
 #: min_points relaxed for provisional-instance fusion (design: "min_points relaxed to 3").
 PROVISIONAL_MIN_POINTS: int = 3
+#: OR-F8: a provisional instance is only fused when the model is at least this confident;
+#: below the floor the hit is treated as absent (a low-confidence guess is not worth a detour).
+PROVISIONAL_MIN_CONFIDENCE: float = 0.5
 
 SYSTEM_PROMPT = (
     "You assist a robot searching a room. Given four camera tiles, report whether a named "
@@ -46,9 +49,13 @@ SYSTEM_PROMPT = (
 
 PROMPT_TEMPLATE = """\
 Does any of these {n} tiles contain a {noun} (also written '{raw}')?
-Tiles are numbered 0-{last} in order. Reply JSON only: \
+Tiles are numbered 0-{last} in order.{dims} If unsure, answer present=false.
+Reply JSON only: \
 {{"present": bool, "tile": 0-{last}|null, "bbox_hint": [x1,y1,x2,y2] in tile pixels|null, \
 "confidence": 0-1}}"""
+
+#: OR-F8 prompt line: tells the model the tile pixel dimensions so its bbox_hint stays in bounds.
+_DIMS_LINE = " Each tile is {w}x{h} pixels; bbox_hint coordinates must lie within the named tile."
 
 
 @dataclass(frozen=True)
@@ -72,15 +79,27 @@ class MissRecoveryOutcome:
     min_points: int = PROVISIONAL_MIN_POINTS
 
 
-def build_prompt(noun: str, raw: str, n_tiles: int) -> list[dict[str, str]]:
-    """Assemble the CP2 message from the missed noun + its raw surface form."""
+def build_prompt(
+    noun: str,
+    raw: str,
+    n_tiles: int,
+    tile_w: int | None = None,
+    tile_h: int | None = None,
+) -> list[dict[str, str]]:
+    """Assemble the CP2 message from the missed noun + its raw surface form.
+
+    When ``tile_w``/``tile_h`` are known, the OR-F8 tile-dimensions line is appended so the
+    model keeps its ``bbox_hint`` inside the tile.
+    """
     last = max(n_tiles - 1, 0)
+    dims = _DIMS_LINE.format(w=tile_w, h=tile_h) if tile_w and tile_h else ""
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": PROMPT_TEMPLATE.format(
-                n=n_tiles, noun=noun or "object", raw=raw or noun or "object", last=last
+                n=n_tiles, noun=noun or "object", raw=raw or noun or "object",
+                last=last, dims=dims,
             ),
         },
     ]
@@ -94,13 +113,22 @@ def run_miss_recovery(
     noun: str,
     raw: str,
     tiles: Sequence[Any],
+    tile_w: int | None = None,
+    tile_h: int | None = None,
     encode_fn: Callable[[Any], bytes] | None = None,
     repair: Callable[[str, list], str] | None = None,
 ) -> MissRecoveryOutcome:
-    """Run one ledger-gated, timeout-bounded CP2 recovery and classify the verdict."""
+    """Run one ledger-gated, timeout-bounded CP2 recovery and classify the verdict.
+
+    ``tile_w``/``tile_h`` (OR-F8) bound the accepted ``bbox_hint``: when supplied (or
+    inferrable from the tile arrays) an out-of-bounds/misordered box fails validation and
+    the outcome degrades to ``absent``. A provisional hit also requires
+    ``confidence >= PROVISIONAL_MIN_CONFIDENCE``.
+    """
     encode = encode_fn or default_encode_fn
     images = [encode(t) for t in tiles]
-    prompt = build_prompt(noun, raw, len(tiles))
+    w, h = tile_w, tile_h
+    prompt = build_prompt(noun, raw, len(tiles), w, h)
     reply = guarded_call(
         CHECKPOINT_NAME,
         ledger,
@@ -111,7 +139,11 @@ def run_miss_recovery(
     if reply is None:
         return MissRecoveryOutcome("absent")
 
-    obj, _errors = schemas.parse_with_repair(reply, schemas.validate_miss_recovery, repair)
+    obj, _errors = schemas.parse_with_repair(
+        reply,
+        lambda d: schemas.validate_miss_recovery(d, tile_w=w, tile_h=h),
+        repair,
+    )
     if obj is None:
         return MissRecoveryOutcome("absent")
 
@@ -127,6 +159,9 @@ def run_miss_recovery(
     bbox = obj.get("bbox_hint")
     if bbox is None or chosen is None:
         # "present" but no fusable localisation -> nothing to navigate toward; treat as absent.
+        return MissRecoveryOutcome("absent", tile=chosen, confidence=conf)
+    if conf < PROVISIONAL_MIN_CONFIDENCE:
+        # OR-F8 confidence floor: a low-confidence guess is not worth fusing / a detour.
         return MissRecoveryOutcome("absent", tile=chosen, confidence=conf)
     return MissRecoveryOutcome(
         "provisional",
@@ -147,15 +182,25 @@ def build_miss_recovery(
 ) -> Callable[..., MissRecoveryOutcome]:
     """Build the CP2 recoverer bound to a VisionChatFn, ledger, clock, config.
 
-    ``cfg`` keys: ``encode_fn`` (default raw .npy), ``repair``.
-    Returns ``run(noun, raw, tiles) -> MissRecoveryOutcome``.
+    ``cfg`` keys: ``encode_fn`` (default raw .npy), ``repair``, ``tile_w``/``tile_h``
+    (OR-F8: bound the accepted bbox_hint to the tile pixel dimensions; None disables the
+    bounds check but ordering/non-negativity is still enforced).
+    Returns ``run(noun, raw, tiles, tile_w=None, tile_h=None) -> MissRecoveryOutcome``.
     """
     cfg = cfg or {}
     vision_chat = _resolve_vision(chat_fns)
     encode_fn = cfg.get("encode_fn") or default_encode_fn
     repair = cfg.get("repair")
+    cfg_w = cfg.get("tile_w")
+    cfg_h = cfg.get("tile_h")
 
-    def run(noun: str, raw: str, tiles: Sequence[Any]) -> MissRecoveryOutcome:
+    def run(
+        noun: str,
+        raw: str,
+        tiles: Sequence[Any],
+        tile_w: int | None = None,
+        tile_h: int | None = None,
+    ) -> MissRecoveryOutcome:
         return run_miss_recovery(
             vision_chat,
             ledger,
@@ -163,6 +208,8 @@ def build_miss_recovery(
             noun=noun,
             raw=raw,
             tiles=tiles,
+            tile_w=tile_w if tile_w is not None else cfg_w,
+            tile_h=tile_h if tile_h is not None else cfg_h,
             encode_fn=encode_fn,
             repair=repair,
         )

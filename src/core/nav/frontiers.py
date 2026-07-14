@@ -94,6 +94,23 @@ def _bfs_distances(grid: OccupancyGrid, start: tuple[int, int]) -> np.ndarray:
 
     Unreachable cells stay np.inf. Cheap enough at 0.10 m resolution for the frontier
     counts we see; exact planning uses A* on the costmap, not this.
+
+    Implementation: a vectorised boolean wavefront (numpy-only; scipy is not a
+    declared dependency). On an unweighted 8-connected (king-move) grid the BFS
+    distance of a cell equals the number of dilation steps to first reach it from
+    the start, so each expansion ring is one 3x3 boolean dilation over the FREE
+    mask; we stamp the step index the first time each cell is entered. This is
+    equivalent to the previous per-cell python deque BFS (identical +1.0 per
+    king-move, identical np.inf for unreachable, identical nearest-FREE start
+    snapping) but replaces the O(free cells) python loop with O(geodesic diameter)
+    vectorised array passes — the frontier hot loop's dominant cost (H14 / F13:
+    ~340 ms -> ~15-26 ms on a 200x200 grid).
+
+    The wavefront is cropped to the FREE bounding box: every reachable cell is
+    FREE, so the wavefront can never leave that box; on a partially-explored map
+    (FREE a compact blob near the vehicle) each pass then touches the observed
+    region, not the whole arena. On a fully-explored grid the box is the array and
+    the crop is a no-op.
     """
     h, w = grid.shape
     dist = np.full((h, w), np.inf, dtype=np.float32)
@@ -103,22 +120,45 @@ def _bfs_distances(grid: OccupancyGrid, start: tuple[int, int]) -> np.ndarray:
     free = grid.state == FREE
     if not free[sr, sc]:
         # Snap start to nearest FREE cell so a vehicle sitting on a just-carved cell
-        # still yields finite distances.
+        # still yields finite distances. Same nearest-by-squared-euclidean tie-break
+        # (first in argwhere/argmin order) as the previous implementation.
         frs = np.argwhere(free)
         if frs.size == 0:
             return dist
         d2 = (frs[:, 0] - sr) ** 2 + (frs[:, 1] - sc) ** 2
         sr, sc = map(int, frs[int(np.argmin(d2))])
-    dist[sr, sc] = 0.0
-    dq = deque([(sr, sc)])
-    while dq:
-        r, c = dq.popleft()
-        base = dist[r, c]
-        for dr, dc in _NEIGH8:
-            nr, nc = r + dr, c + dc
-            if 0 <= nr < h and 0 <= nc < w and free[nr, nc] and np.isinf(dist[nr, nc]):
-                dist[nr, nc] = base + 1.0
-                dq.append((nr, nc))
+
+    fr_rows, fr_cols = np.nonzero(free)
+    r0, r1 = int(fr_rows.min()), int(fr_rows.max()) + 1
+    c0, c1 = int(fr_cols.min()), int(fr_cols.max()) + 1
+    sub_free = free[r0:r1, c0:c1]
+    sh, sw = sub_free.shape
+
+    visited = np.zeros((sh, sw), dtype=bool)
+    visited[sr - r0, sc - c0] = True
+    sub_dist = np.full((sh, sw), np.inf, dtype=np.float32)
+    sub_dist[sr - r0, sc - c0] = 0.0
+    wave = visited.copy()  # cells entered on the previous step
+    step = 0.0
+    while wave.any():
+        step += 1.0
+        # Dilate the current wavefront by one king-move; keep only new FREE cells.
+        nxt = np.zeros((sh, sw), dtype=bool)
+        nxt[1:, :] |= wave[:-1, :]
+        nxt[:-1, :] |= wave[1:, :]
+        nxt[:, 1:] |= wave[:, :-1]
+        nxt[:, :-1] |= wave[:, 1:]
+        nxt[1:, 1:] |= wave[:-1, :-1]
+        nxt[1:, :-1] |= wave[:-1, 1:]
+        nxt[:-1, 1:] |= wave[1:, :-1]
+        nxt[:-1, :-1] |= wave[1:, 1:]
+        nxt &= sub_free & ~visited
+        if not nxt.any():
+            break
+        sub_dist[nxt] = step
+        visited |= nxt
+        wave = nxt
+    dist[r0:r1, c0:c1] = sub_dist
     return dist
 
 

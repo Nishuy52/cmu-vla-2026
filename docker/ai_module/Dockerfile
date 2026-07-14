@@ -1,5 +1,17 @@
 # VLA ai_module image — our rclpy adapter + pure-Python core, replacing the dummy_vlm node.
 #
+# ============================================================================================
+# DEPRECATED (H7 / F4). DO NOT BUILD FROM THIS FILE.
+#
+# This Dockerfile uses a REPO-ROOT build context (`COPY src/` resolves against the repo root).
+# That shape CANNOT slot into the submission fork, where only ai_module/ may be modified and the
+# upstream compose builds the ai_module service from context ai_module/ using
+# ai_module/docker/Dockerfile (docs/upstream_notes.md §5B, gotcha 12).
+#
+# The fork-shaped replacement lives at:  docker/ai_module_fork/  (Dockerfile + sync scripts +
+# README). Use that. This file is kept ONLY as a historical record of the repo-root approach.
+# ============================================================================================
+#
 # UNTESTED DRAFT (Phase 2), authored on Windows. Build/validate on Ubuntu per
 # docs/ubuntu_setup.md §7a. Base image tag is taken verbatim from upstream docker/compose.yml
 # (service ai_module builds FROM this) — docs/upstream_notes.md §5.

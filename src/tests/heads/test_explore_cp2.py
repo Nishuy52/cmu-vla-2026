@@ -187,17 +187,28 @@ def test_provisional_instance_has_single_observation():
 
 
 def test_provisional_never_satisfies_early_answer_gate():
-    # A provisional (n_obs=1) instance added to a count keeps the stability signal below
-    # the FSM's min_contrib_n_obs >= 3 gate (design §CP2 "Risk note").
-    sc = scene(
+    # A provisional (n_obs=1) instance can NEVER inflate a numerical answer (design §CP2
+    # "Risk note"). The safety property now holds by EXCLUSION: answer-time observation
+    # gating drops single-observation instances from the count entirely, so a provisional
+    # ghost cannot on its own become a counted object. We verify the property directly —
+    # adding the ghost leaves the count (and its min-contributor floor) unchanged versus a
+    # scene without it.
+    confident_only = scene(inst(1, "chair", n_obs=5, centroid=(0, 0, 0)))
+    with_ghost = scene(
         inst(1, "chair", n_obs=5, centroid=(0, 0, 0)),
-        inst(2, "chair", n_obs=1, centroid=(3, 0, 0)),  # provisional-like single-obs
+        inst(2, "chair", n_obs=1, centroid=(3, 0, 0)),  # provisional-like single-obs ghost
     )
-    head = NumericalHead(plan=numerical_plan("chair"))
-    for _ in range(5):  # let the count stabilise
-        head.advance(sc)
-    sig = head.signal()
-    # count held long enough (winner_margin passes) but the single-obs contributor pins
-    # min_contrib_n_obs below 3 -> the early-answer gate stays shut.
-    assert sig.min_contrib_n_obs < 3
-    assert sig.stable is False
+
+    def _settle(sc):
+        head = NumericalHead(plan=numerical_plan("chair"))
+        for _ in range(5):  # let the count stabilise
+            head.advance(sc)
+        return head
+
+    base = _settle(confident_only)
+    ghosted = _settle(with_ghost)
+
+    # The ghost is excluded: the counted answer is identical with and without it, and no
+    # single-obs contributor is ever counted (min contributor stays >= 3).
+    assert ghosted.answer().value == base.answer().value
+    assert ghosted.signal().min_contrib_n_obs >= 3

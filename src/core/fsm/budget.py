@@ -30,6 +30,13 @@ ORIENTATION_S: float = 60.0  # in-place sweep window (architecture §5 step 1)
 # Reserve below which no discretionary checkpoint may fire — leave room for the floor path.
 LEDGER_RESERVE_S: float = 45.0
 
+# Per-call worst-case wall cost the ledger must be able to absorb ON TOP of the reserve
+# before admitting a discretionary checkpoint (SYS-F8 / OR-F7). A call admitted at
+# remaining == reserve could otherwise run its full timeout (plus a repair round) and land
+# the watchdog past the deadline. Default = 2x the per-call timeout: one primary call + one
+# repair round, both bounded by core.llm.timeout's DEFAULT_CALL_TIMEOUT_S (20 s) -> 40 s.
+DEFAULT_WORST_CASE_CALL_S: float = 2.0 * 20.0
+
 
 class BudgetState:
     """Tracks elapsed time since first-question receipt against the 600 s gates.
@@ -166,11 +173,21 @@ class CallLedger:
     discretionary calls once remaining() drops below the floor reserve.
     """
 
-    def __init__(self, budget: BudgetState, caps: dict[str, int] | None = None) -> None:
+    def __init__(
+        self,
+        budget: BudgetState,
+        caps: dict[str, int] | None = None,
+        *,
+        worst_case_call_s: float = DEFAULT_WORST_CASE_CALL_S,
+    ) -> None:
         self._budget = budget
         self._caps = dict(CHECKPOINT_MAX if caps is None else caps)
         self._counts: dict[str, int] = {}
         self._log: list[CallRecord] = []
+        # Admission headroom (SYS-F8): a discretionary call is only admitted when there is
+        # enough time left for the floor reserve PLUS one worst-case call to run to its
+        # timeout, so the watchdog floor still clears the deadline afterwards.
+        self._worst_case_call_s = float(worst_case_call_s)
 
     def cap(self, checkpoint: str) -> int | None:
         """Max allowed calls for a checkpoint, or None if uncapped by name."""
@@ -179,13 +196,21 @@ class CallLedger:
     def count(self, checkpoint: str) -> int:
         return self._counts.get(checkpoint, 0)
 
+    @property
+    def worst_case_call_s(self) -> float:
+        """The per-call worst-case wall cost the admission bound reserves on top of the floor."""
+        return self._worst_case_call_s
+
     def allow(self, checkpoint: str) -> bool:
         """True iff another call is permitted: cap not exhausted AND time reserve intact.
 
         Returns False when the checkpoint's count has reached its cap, or when
-        remaining() < LEDGER_RESERVE_S (reserve the tail for the watchdog floor path).
+        ``remaining() <= LEDGER_RESERVE_S + worst_case_call_s`` — i.e. there is not enough
+        time left for the floor reserve PLUS one worst-case call to run to its timeout. This
+        tighter bound (SYS-F8 / OR-F7) prevents admitting a call at ~reserve that then runs
+        its full timeout + repair round and strands the watchdog past the deadline.
         """
-        if self._budget.remaining() < LEDGER_RESERVE_S:
+        if self._budget.remaining() <= LEDGER_RESERVE_S + self._worst_case_call_s:
             return False
         cap = self._caps.get(checkpoint)
         if cap is not None and self.count(checkpoint) >= cap:

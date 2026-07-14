@@ -24,7 +24,7 @@ from enum import IntEnum
 
 import numpy as np
 
-from core.interfaces import InstanceRecord
+from core.interfaces import InstanceRecord, MarkerBox
 
 MERGE_IOU: float = 0.3  # 3D IoU threshold for fusing same-label instances
 TYPO_MAX_DIST: int = 2  # max Levenshtein distance for the longest length band
@@ -157,6 +157,39 @@ class BasicSceneIndex:
 
     def all_instances(self):
         return list(self._instances)
+
+    def remove(self, instance_id: int) -> bool:
+        """Drop an instance by id; return True if one was removed.
+
+        Used by track decay (H15a) to prune one-frame ghosts. No-op (returns False)
+        if the id is absent. Never mutates ``_next_id`` — freed ids are not recycled,
+        so a pruned ghost's id cannot be silently reused by a later real object.
+        """
+        for i, rec in enumerate(self._instances):
+            if rec.instance_id == instance_id:
+                del self._instances[i]
+                return True
+        return False
+
+    def marker_for(self, record: InstanceRecord) -> MarkerBox:
+        """Prior-clamped marker for a record — the H12 marker seam.
+
+        The trimmed AABB an instance carries is a single-viewpoint *under*-box; the
+        raw ``record.to_marker()`` would publish it verbatim and shed IoU against the
+        GT over-hull (red-team OR-F6). This routes the record through the per-class
+        dimension prior (:mod:`core.perception.dimension_priors`): clamp every axis to
+        the class-min, inflate the least-observed axis toward class-typical only when
+        the instance signals under-observation, centre preserved. A GT-perfect / well-
+        observed box is returned identical to ``record.to_marker()``.
+
+        Marker-path owners (``heads/object_ref.py``, ``fsm/floors.py``) should publish
+        ``index.marker_for(rec)`` in place of ``rec.to_marker()`` — the seam lives here
+        so the clamp is applied wherever the scene index is in scope. Deferred import
+        avoids a load cycle (dimension_priors imports normalize_label from this module).
+        """
+        from core.perception.dimension_priors import clamp_record_marker
+
+        return clamp_record_marker(record)
 
     def next_id(self) -> int:
         """The instance_id the next fresh (non-merged) instance would receive.

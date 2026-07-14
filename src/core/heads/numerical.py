@@ -23,6 +23,7 @@ Units: metres/`map` frame throughout (inherited from the toolbox).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 from core.fsm.controller import StabilitySignal
 from core.interfaces import IntAnswer, QType, SceneIndex
@@ -32,6 +33,17 @@ from core.plan_schema import Plan
 STABLE_TICKS: int = 3  # consecutive equal counts required before firing early
 MIN_OBS: int = 3  # per-contributor observation floor (architecture §1 row 8)
 STABLE_MARGIN: float = 0.30  # winner_margin reported once held (> the FSM's 0.25 gate)
+
+# H15(b) answer-time observation gating. Once ANY instance of the queried noun has been
+# seen this many times, the class is "established" and ghosts (n_obs==1) are dropped from
+# the count; instances with n_obs>=GATE_MIN_OBS still count. Below the establish
+# threshold (cold start) every instance counts, so a genuine cold count is not starved.
+ESTABLISH_N_OBS: int = 3  # a noun is "established" once some instance reaches this
+GATE_MIN_OBS: int = 2     # once established, count only instances with n_obs >= this
+
+# H15(c) coverage-gated early answer: minimum exploration-coverage fraction required
+# (in addition to count stability) before the head reports a firing winner_margin.
+COVERAGE_MIN_FRAC: float = 0.5
 
 
 @dataclass
@@ -47,6 +59,11 @@ class NumericalHead:
     thresholds: Thresholds = DEFAULT_THRESHOLDS
     stable_ticks: int = STABLE_TICKS
     min_obs: int = MIN_OBS
+    #: H15(c) seam — optional exploration-coverage probe returning a fraction in [0, 1].
+    #: None (default) preserves the current stability-only early-fire behaviour. The
+    #: FSM/factory owns wiring a real coverage signal here (see module note); the head
+    #: only defines and consumes the seam.
+    coverage_frac: Callable[[], float] | None = None
 
     count: int | None = None
     contrib_min_obs: int = 0
@@ -59,7 +76,8 @@ class NumericalHead:
         if scene is None or self.plan is None or self.plan.target is None:
             self._reset_run()
             return
-        n, ids = counting(self.plan.target, scene, min_obs=1, th=self.thresholds)
+        min_obs = self._answer_min_obs(scene)
+        n, ids = counting(self.plan.target, scene, min_obs=min_obs, th=self.thresholds)
         self.count = n
         self.contrib_min_obs = self._min_obs(scene, ids)
         if n == self._run_count:
@@ -67,6 +85,21 @@ class NumericalHead:
         else:
             self._run_count = n
             self._run_len = 1
+
+    def _answer_min_obs(self, scene: SceneIndex) -> int:
+        """H15(b): the observation floor to count at, given how established the noun is.
+
+        Cold start (no instance of the queried noun yet seen ESTABLISH_N_OBS times) ->
+        count everything (min_obs=1), so a genuine cold count is not starved. Once ANY
+        instance of the noun is established, drop one-frame ghosts (min_obs=GATE_MIN_OBS).
+        """
+        if self.plan is None or self.plan.target is None:
+            return 1
+        peak = 0
+        for rec in scene.by_label(self.plan.target.noun):
+            if rec.n_obs > peak:
+                peak = rec.n_obs
+        return GATE_MIN_OBS if peak >= ESTABLISH_N_OBS else 1
 
     def _min_obs(self, scene: SceneIndex, ids: set[int]) -> int:
         if not ids:
@@ -81,8 +114,16 @@ class NumericalHead:
 
     # ------------------------------------------------------------------ read-out
     def signal(self) -> StabilitySignal:
-        """Translate the stability run into the FSM's early-answer StabilitySignal."""
+        """Translate the stability run into the FSM's early-answer StabilitySignal.
+
+        H15(c): when a coverage probe is injected, count stability alone is not enough
+        to fire early — exploration must also have covered at least COVERAGE_MIN_FRAC
+        of the scene, guarding against locking in an under-count after seeing only part
+        of the scene. With no probe injected (default), behaviour is stability-only.
+        """
         held = self._run_len >= self.stable_ticks and self._run_count is not None
+        if held and self.coverage_frac is not None:
+            held = self.coverage_frac() >= COVERAGE_MIN_FRAC
         margin = STABLE_MARGIN if held else 0.0
         return StabilitySignal(
             winner_margin=margin,
