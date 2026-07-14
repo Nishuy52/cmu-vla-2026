@@ -350,13 +350,15 @@ class InstructionHead:
         cm = self._costmap
         if cm is None:
             return self._project_free(anchor_xy)
-        # A single reachable-cell BFS decides both cases: if the nearest cell reachable
-        # from the pose is the anchor's own cell it is directly reachable (use it), else
-        # that reachable cell IS the standoff we should aim for. One BFS, not two.
-        reach = cm.nearest_reachable_point(anchor_xy, self._pose)
-        if self.grid.world_to_cell(*reach) == self.grid.world_to_cell(*anchor_xy):
-            return anchor_xy
-        return reach
+        # Use the costmap's per-pose reachable mask (memoised, so a whole grounding pass
+        # over many legs floods once, not once-per-leg-per-tick): if the anchor cell is
+        # directly reachable use it, else snap to the nearest reachable cell.
+        seen = cm.reachable_mask(self._pose)
+        if seen is not None:
+            r, col = self.grid.world_to_cell(*anchor_xy)
+            if 0 <= r < seen.shape[0] and 0 <= col < seen.shape[1] and seen[r, col]:
+                return anchor_xy
+        return cm.nearest_reachable_point(anchor_xy, self._pose)
 
     def _via_point(self, rec) -> tuple[float, float]:
         """A "path near the anchor" waypoint placed by free-space gradient (IF-F7).

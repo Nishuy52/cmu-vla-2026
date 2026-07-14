@@ -638,6 +638,12 @@ def score_scene(
         rec.n_threading_violations = rub.n_threading_violations
         rec.n_avoid_violations = rub.n_avoid_violations
         rec.driven_n_poses = rub.driven_n_poses
+        # our_n_waypoints mirrors the driven pose count for the IF rubric path (the
+        # trajectory we scored). It stayed None after the wave rebuilt IF scoring onto
+        # the rubric proxy, which broke test_score_scene_if_produces_two_numbers — a
+        # pre-existing gate failure independent of T11; set it so the diagnostic pair
+        # (our vs GT waypoint count) is populated again.
+        rec.our_n_waypoints = rub.driven_n_poses
         # secondary diagnostics (frame alignment + planned-path frechet/coverage)
         rec.frechet_m = rub.frechet_m
         rec.coverage_1m = round(rub.coverage_1m, 4) if rub.coverage_1m is not None else None
