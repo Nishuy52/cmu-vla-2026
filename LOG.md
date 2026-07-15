@@ -424,3 +424,17 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
   (disk-resume; BelowNormal priority; adoption gated per adjudication).
   Full gate 1090 passed / 5 skipped. Stale 11-Jul sweep artifacts
   deleted per adjudication meth-F10.
+
+## 2026-07-15 (session 13 addendum)
+
+- CV sweep COMPLETE - verdict: keep defaults (all 5 folds chose
+  baseline; holdout 0.229+/-0.036, gap -0.010; adoption gate passed
+  trivially). `reports/cvsweep_2026-07-15/`. Re-sweep deferred to
+  real sim.
+- Numerical GT answer keys extracted from questions.pdf TEXT layer
+  (not images): `tools/extract_pdf_answers.py` ->
+  `docs/gt_answers_numerical.json`. TRUE numerical accuracy 11/15
+  (73%) vs 56%-over-9 proxy; proxies unreliable both directions.
+  4 true failures = the numerical worklist. pypdf added to dev deps
+  (ubuntu_setup updated). OR/IF keys are images - still need visual
+  transcription.

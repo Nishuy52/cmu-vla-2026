@@ -92,18 +92,27 @@ autonomously, do not block on questions):
       RUNNING+adoption-gated), stale 11-Jul sweep artifacts deleted
       (meth-F10), commit, push, PR opened.
 
-## Post-session state (2026-07-15)
+## Post-session state (2026-07-15, final)
 
-T11 pipeline COMPLETE except the sweep itself, which runs detached at
-BelowNormal priority with a liveness watchdog. When it finishes:
-read `reports/cvsweep_2026-07-15/{report.md,results.json,
-recommended_calibration.json}` and apply the ADOPTION GATE above —
-do not adopt wholesale. Open user decisions: answers.json
-transcription (arch-F3), Gate 0 execution (arch-F7), local-VLM tier
-posture (arch-F5, recommendation in adjudication.md). Next agent work
-queue (adjudicated): battery_diff tool + provenance stamps, leg-count
-census, --no-spawn-hint battery run, 3-unaligned-scenes manual fit,
-topline honesty edits, cluster detector benchmarking.
+T11 pipeline COMPLETE, including the sweep. **Sweep verdict: KEEP
+DEFAULTS** — all 5 folds picked baseline; no consensus to move any
+key; holdout 0.229±0.036, gap −0.010. Adoption gate passed trivially
+(recommendation == baseline); nothing adopted; re-sweep deferred to
+real sim.
+
+**Bonus (arch-F3, partially automated):** numerical answer keys
+extracted from the questions.pdf TEXT layer (they are not images!) —
+`tools/extract_pdf_answers.py` → `docs/gt_answers_numerical.json`.
+True numerical accuracy 11/15 (73%); proxies unreliable both ways.
+
+Open user decisions: OR/IF answer transcription from the PDF images
+(numerical part now done), Gate 0 execution (arch-F7), local-VLM tier
+posture (arch-F5). Next agent work queue (adjudicated): wire
+gt_answers_numerical.json into the battery as the numerical yardstick
++ diagnose the 4 true failures (arabic_room/loft zero-counts,
+home_building over-counts), battery_diff tool + provenance stamps,
+leg-count census, --no-spawn-hint battery run, 3-unaligned-scenes
+manual fit, topline honesty edits, cluster detector benchmarking.
 
 ## Resume point (update on every stage transition)
 

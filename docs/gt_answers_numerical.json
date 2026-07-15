@@ -1,0 +1,71 @@
+{
+ "provenance": {
+  "source": "per-scene questions.pdf text layer, upstream challenge repo",
+  "pattern": "Response:\\s*Print\\s*(\\d+)\\s*in\\s*terminal",
+  "extracted": "2026-07-15",
+  "regenerate": "python -m tools.extract_pdf_answers (from repo root)",
+  "note": "OR/IF answers are embedded images in the same PDFs; not extracted here"
+ },
+ "scenes": {
+  "arabic_room": {
+   "question_raw": "Howmanysofasarebelowawindow?",
+   "answer": 2
+  },
+  "chinese_room": {
+   "question_raw": "Count thenumber of chairswithpillowsonthem.",
+   "answer": 6
+  },
+  "home_building_1": {
+   "question_raw": "Howmanypillowsareonthesofaunder thepictures?",
+   "answer": 6
+  },
+  "home_building_2": {
+   "question_raw": "Howmanyredpillowsareonthesofa?",
+   "answer": 2
+  },
+  "hotel_room_1": {
+   "question_raw": "Howmanypillowsareonthebed?",
+   "answer": 4
+  },
+  "hotel_room_2": {
+   "question_raw": "Howmanypicturesareabovethebed?",
+   "answer": 3
+  },
+  "japanese_room": {
+   "question_raw": "Howmanycalligraphypaintingsareabovethedisplayledge?",
+   "answer": 3
+  },
+  "livingroom_1": {
+   "question_raw": "Howmanychairsarenear thetablewithavaseonit?",
+   "answer": 8
+  },
+  "livingroom_2": {
+   "question_raw": "Howmanycupsareonthecoffeetable?",
+   "answer": 2
+  },
+  "livingroom_3": {
+   "question_raw": "HowmanyphotosareontheTVcabinet?",
+   "answer": 2
+  },
+  "livingroom_4": {
+   "question_raw": "Howmanypillowsareonasofa?",
+   "answer": 6
+  },
+  "loft": {
+   "question_raw": "Howmanyblackpillowsareonthesofa?",
+   "answer": 2
+  },
+  "office_1": {
+   "question_raw": "Howmanycomputer monitorsareonthetableclosest tothemapwall decal?",
+   "answer": 6
+  },
+  "office_2": {
+   "question_raw": "Howmanypottedplantsareonatable?",
+   "answer": 1
+  },
+  "studio": {
+   "question_raw": "Howmanyframedrecordsareabovethecouch?",
+   "answer": 3
+  }
+ }
+}
