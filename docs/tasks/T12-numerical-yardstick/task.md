@@ -1,0 +1,104 @@
+# T12 — True numerical yardstick, provenance, and the pre-Ubuntu queue
+
+**Started:** 2026-07-17 · **Branch:** `feat/t12-numerical-yardstick`
+**Source of scope:** T11 adjudication "scheduled next" queue
+(`docs/tasks/T11-if-leg-threading/critique/adjudication.md` §Accepted —
+scheduled next) + session-13 close queue
+(`docs/tasks/T11-if-leg-threading/orchestration.md` post-session state).
+Priority order below is the adjudicated order given by the user.
+
+## Intent
+
+Replace the numerical proxy chain with the extracted ground-truth
+answer key as the battery's yardstick, make every battery/sweep number
+born-provenanced (meth-F7/F8), diagnose (and where tractable, fix) the
+four true numerical failures, and clear the remaining agent-doable
+pre-Ubuntu queue items.
+
+## Context
+
+- `docs/gt_answers_numerical.json` (extracted 2026-07-15 from the
+  per-scene questions.pdf text layer) holds the true integer answer
+  for all 15 numerical questions. True accuracy at postT11 state:
+  **11/15 (73%)** vs the 56%-over-9 independent-agreement proxy.
+  Proxies were unreliable in both directions.
+- The four true failures (the numerical worklist):
+  - **arabic_room** — "How many sofas are below a window?" GT 2,
+    we answer 0 (zero-count).
+  - **loft** — "How many black pillows are on the sofa?" GT 2
+    (zero/undercount).
+  - **home_building_1** — "How many pillows are on the sofa under
+    the pictures?" GT 6, we answer 11 (over-count).
+  - **home_building_2** — "How many red pillows are on the sofa?"
+    GT 2, we answer 3 (over-count).
+  Exact current per-scene answers must be re-derived from a fresh
+  battery run, not trusted from prose (meth-F8 discipline).
+- Battery: `src/core/runner/gt_battery.py` (`score_numerical()`,
+  report writer); results at `reports/gt_battery_<tag>_<date>/`
+  (`gt_battery_results.json` + `gt_battery_report.md`). Sweep:
+  `src/core/runner/cvsweep.py` → `reports/cvsweep_<date>/`.
+  Neither currently stamps provenance; `battery_diff` does not exist.
+
+## Scope (in adjudicated priority order)
+
+1. **GT yardstick wiring.** `gt_battery` loads
+   `docs/gt_answers_numerical.json`; each numerical row gains
+   `gt_answer_true` + `true_match`; topline leads with
+   `true accuracy k/15`. Fold in the meth-F4+F6 topline-honesty edits
+   (same code): drop pipeline-exact-100% from toplines (keep as
+   per-row `determinism`), numerical led by agreement/true-accuracy
+   `k/n`, OR headline renamed `instance-match k/8, IoU pending real
+   perception`, OR scoreability `n/30` tracked as a metric.
+2. **meth-F8 + meth-F7.** (a) `gt_battery`/`cvsweep` stamp commit
+   hash, dirty-tree digest, calibration snapshot, and per-question
+   `leg_goals`/per-leg outcomes into results JSON. (b) A committed
+   `tools/battery_diff.py` whose output is the only legal source of
+   before/after tables in reports. Land BOTH before the next battery
+   generation so the postT11→T12 comparison is born provenanced.
+3. **Diagnose the 4 true failures.** Fresh provenanced battery run →
+   per-question root-cause (in the T7 cause-bucket style: resolver
+   code vs calibration vs GT-index artifact) → fix what is tractable
+   without destabilizing the other 11 correct answers → re-run →
+   `battery_diff` table. A fix that flips a failure but breaks a
+   current pass is a net loss; the 11 passes are a regression gate.
+4. **Pre-Ubuntu queue (adjudication items 2–5):**
+   - meth-F5: leg-count census — hand-tally the 30 IF questions'
+     clause structure vs `plan.route`/`plan.avoid`, committed as a
+     fixture + test (closes the silent-dropped-leg class).
+   - arch-F9: one `--no-spawn-hint` battery run, committed report,
+     bounding exploration sensitivity.
+   - meth-F11: the 3 unaligned scenes — one-time frame fit attempt;
+     either they rejoin the IF battery or the exclusion is confirmed
+     as data. Closes the 20%-of-IF-rows friendly-ward bias hole.
+
+## Out of scope
+
+- Cluster detector benchmarking (arch-F2) — needs interactive SoC
+  SSH; user-driven.
+- OR/IF answer-key transcription (PDF images) — user action.
+- Gate 0 / Ubuntu execution (arch-F7), local-VLM posture (arch-F5) —
+  user decisions.
+- Any re-sweep (deferred to real sim per T11 close).
+
+## Acceptance criteria
+
+- [ ] Battery numerical topline reads `true accuracy k/15` sourced
+      from `docs/gt_answers_numerical.json`; proxy agreement demoted
+      to secondary; topline-honesty edits (meth-F4/F6) in place.
+- [ ] `gt_battery_results.json` and cvsweep results carry provenance
+      (commit hash, dirty digest, calibration snapshot, per-question
+      leg goals/outcomes); tests pin the stamp's presence and shape.
+- [ ] `tools/battery_diff.py` exists with tests; produces the
+      before/after table for this task's postT11→T12 comparison.
+- [ ] Each of the 4 true failures has a written root-cause verdict;
+      fixes (if any) verified; no regression among the 11 true
+      passes; final run's table generated by `battery_diff`.
+- [ ] Leg-count census fixture + test committed; `--no-spawn-hint`
+      report committed; unaligned-scenes verdict (rejoin or
+      confirmed-exclusion) written.
+- [ ] Full test gate green; LOG one-liner; INDEX row; ubuntu_setup
+      updated if deps change; commit + push; PR opened.
+
+## Notes
+
+(dated notes appended below as work proceeds)
