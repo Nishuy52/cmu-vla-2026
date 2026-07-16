@@ -1,0 +1,4293 @@
+{
+  "date": "2026-07-17",
+  "provenance": {
+    "tool": "gt_battery",
+    "generated_utc": "2026-07-16T19:18:42.901652+00:00",
+    "argv": [
+      "--groundtruth",
+      "../data/vla3d/Unity",
+      "--out",
+      "../reports/gt_battery_T12post_2026-07-17"
+    ],
+    "git_commit": "1f0c99e9c594d7a6f57bf42fdc99f8d5d3b0dcc4",
+    "git_branch": "feat/t12-numerical-yardstick",
+    "git_dirty": true,
+    "dirty_digest": "54dde91f4e58",
+    "calibration_sha1": "026ed8dfef31",
+    "calibration": {
+      "geometry": {
+        "near_floor": 1.2,
+        "near_scale": 0.6,
+        "next_to_gap": 0.75,
+        "on_min_overlap_frac": 0.5,
+        "on_upper_span_frac": 0.25,
+        "on_top_tol": 0.15,
+        "in_containment_frac": 0.6,
+        "in_vert_slack": 0.1,
+        "above_lateral_infl": 0.5,
+        "under_iom_min": 0.5,
+        "under_tuck_tol": 0.15,
+        "with_feature_pad": 0.3,
+        "avoid_inflate": 0.25,
+        "superlative_margin_frac": 0.25,
+        "size_sep_gap": 1.2
+      },
+      "fusion": {
+        "min_points": 5,
+        "angular_pad": 0.05235987755982989,
+        "depth_bin": 0.25,
+        "max_range": 15.0,
+        "cluster_gap": 0.5
+      },
+      "tracker": {
+        "gate": 0.75,
+        "decay_k": 5
+      },
+      "keyframe": {
+        "every_k": 1,
+        "min_translation": 0.5,
+        "min_rotation": 0.5235987755982988
+      },
+      "nav": {
+        "cell_m": 0.1,
+        "free_max": 0.15,
+        "observe_radius_m": 8.0,
+        "grow_pad_cells": 8,
+        "vehicle_radius_m": 0.4,
+        "overhead_soft_cost_mult": 4.0,
+        "min_cluster_size": 5,
+        "w_size": 1.0,
+        "w_dist": 0.5,
+        "w_affinity": 4.0,
+        "unknown_cost_mult": 3.0,
+        "pinch_disc_m": 3.0,
+        "pinch_corridor_half_w_m": 0.5,
+        "sweep_s": 60.0,
+        "sweep_side_m": 1.0,
+        "min_frontier_score": 0.0,
+        "coverage_saturated_free_frac": 0.0,
+        "lookahead_m": 2.5,
+        "reach_m": 0.8,
+        "stall_move_m": 0.3,
+        "stall_window_s": 10.0
+      },
+      "budget": {
+        "question_budget_s": 600.0,
+        "forced_assembly_s": 510.0,
+        "watchdog_floor_s": 570.0,
+        "terrain_free_max": 0.15,
+        "orientation_s": 60.0,
+        "ledger_reserve_s": 45.0,
+        "explore_budget_numerical_s": 210.0,
+        "explore_budget_object_reference_s": 240.0,
+        "explore_budget_instruction_following_s": 270.0,
+        "cap_parse": 2,
+        "cap_miss_recovery": 1,
+        "cap_anchor_confirm": 3,
+        "cap_verification": 1,
+        "cap_frontier_select": 1,
+        "cap_self_consistency": 2
+      }
+    },
+    "note": ""
+  },
+  "n_questions": 75,
+  "scenes": [
+    "arabic_room",
+    "chinese_room",
+    "home_building_1",
+    "home_building_2",
+    "hotel_room_1",
+    "hotel_room_2",
+    "japanese_room",
+    "livingroom_1",
+    "livingroom_2",
+    "livingroom_3",
+    "livingroom_4",
+    "loft",
+    "office_1",
+    "office_2",
+    "studio"
+  ],
+  "missing_scenes": [],
+  "aggregate": {
+    "numerical": {
+      "n": 15,
+      "n_with_true_answer": 15,
+      "true_accuracy": 0.8667,
+      "pipeline_determinism_rate": 1.0,
+      "n_with_independent": 9,
+      "independent_agreement_rate": 0.5556,
+      "n_with_scenegraph": 11,
+      "scenegraph_agreement_rate": 0.6364,
+      "n_no_independent_evidence": 3
+    },
+    "object_reference": {
+      "n": 30,
+      "n_scored": 8,
+      "mean_iou": 0.875,
+      "iou_at_0p25": 0.875,
+      "iou_at_0p5": 0.875,
+      "match_method_breakdown": {
+        "none": 22,
+        "relation": 7,
+        "unique": 1
+      }
+    },
+    "instruction_following": {
+      "n": 30,
+      "n_scored": 30,
+      "mean_rubric_score": 0.1167,
+      "mean_ordered_leg_credit": 0.1389,
+      "total_threading_violations": 8,
+      "total_avoid_violations": 0,
+      "n_aligned": 28,
+      "n_unaligned_scenes": 1,
+      "unaligned_scenes": [
+        "livingroom_3"
+      ],
+      "unaligned_scenes_data_confirmed": [
+        "livingroom_3"
+      ],
+      "unaligned_scenes_unexplained": [],
+      "mean_frechet_m_aligned_diag": 5.6337,
+      "mean_coverage_1m_aligned_diag": 0.3844
+    }
+  },
+  "scores": [
+    {
+      "scene": "arabic_room",
+      "qtype": "numerical",
+      "question": "How many sofas are below a window?",
+      "our_count": 2,
+      "gt_count_pipeline": 2,
+      "exact_match": true,
+      "gt_count_independent": 3,
+      "independent_source": "referential_class_only",
+      "gt_count_scenegraph": 3,
+      "scenegraph_source": "scene_graph_class_only",
+      "annotated_targets_of_class": 3,
+      "csv_instances_of_class": 3,
+      "gt_answer_true": 2,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no independent evidence (relation-agnostic class-only counts only)"
+    },
+    {
+      "scene": "arabic_room",
+      "qtype": "object_reference",
+      "question": "Find the pillow closest to the book on the stool.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 73,
+      "target_source": "ambiguous",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "arabic_room",
+      "qtype": "object_reference",
+      "question": "Find the wall lamp that is between a door frame and a window.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 41,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "arabic_room",
+      "qtype": "instruction_following",
+      "question": "Go near the stool under the picture and stop at the small table farthest from the columns.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 51,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -3.739999691864865,
+            -1.6720002847253355
+          ]
+        ],
+        [
+          "goto",
+          [
+            2.4340269033499813,
+            -0.5879844114857061
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -3.739999691864865,
+            -1.6720002847253355
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            2.4340269033499813,
+            -0.5879844114857061
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 3.295542960561886,
+      "coverage_1m": 0.2576,
+      "our_n_waypoints": 51,
+      "gt_n_waypoints": 792,
+      "frame_aligned": true,
+      "fit_residual_m": 0.574,
+      "note": ""
+    },
+    {
+      "scene": "arabic_room",
+      "qtype": "instruction_following",
+      "question": "First, go to the potted plant furthest from the hookah, then take the path between the two columns, and stop at the tray on the table.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 1,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 28,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -3.7469267938938318,
+            2.0008681648556874
+          ]
+        ],
+        [
+          "corridor_between",
+          [
+            -0.9929995681432529,
+            1.0810000116500278
+          ]
+        ],
+        [
+          "goto",
+          [
+            2.455656924593247,
+            -0.6364619708635756
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -3.7469267938938318,
+            2.0008681648556874
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -0.9929995681432529,
+            1.0810000116500278
+          ],
+          "reached_in_order": false,
+          "threaded": false
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            2.455656924593247,
+            -0.6364619708635756
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 3.460417220479202,
+      "coverage_1m": 0.3221,
+      "our_n_waypoints": 28,
+      "gt_n_waypoints": 829,
+      "frame_aligned": true,
+      "fit_residual_m": 0.574,
+      "note": "1 corridor leg(s) never threaded; leg 1: threading: trajectory never crossed the gate segment"
+    },
+    {
+      "scene": "chinese_room",
+      "qtype": "numerical",
+      "question": "Count the number of chairs with pillows on them.",
+      "our_count": 6,
+      "gt_count_pipeline": 6,
+      "exact_match": true,
+      "gt_count_independent": 1,
+      "independent_source": "referential",
+      "gt_count_scenegraph": 6,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 6,
+      "csv_instances_of_class": 6,
+      "gt_answer_true": 6,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "pipeline=6; independent=1; scene_graph=6 (disagreement)"
+    },
+    {
+      "scene": "chinese_room",
+      "qtype": "object_reference",
+      "question": "Find the bowl on the table closest to the folding screen.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": 1.0,
+      "gt_target_id": 71,
+      "our_target_id": 71,
+      "target_source": "referential",
+      "match_method": "relation",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "target matched via relation"
+    },
+    {
+      "scene": "chinese_room",
+      "qtype": "object_reference",
+      "question": "Find the pillow on the chair that is closest to the TV.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 72,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "chinese_room",
+      "qtype": "instruction_following",
+      "question": "Go near the potted plant on the table and stop at the painting near the TV.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.5,
+      "ordered_leg_credit": 0.5,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 1,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 58,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            1.7737079291413917,
+            -4.060277989054318
+          ]
+        ],
+        [
+          "goto",
+          [
+            -2.269072508489046,
+            -3.6278769843008005
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            1.7737079291413917,
+            -4.060277989054318
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            -2.269072508489046,
+            -3.6278769843008005
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 6.258435733885027,
+      "coverage_1m": 0.2651,
+      "our_n_waypoints": 58,
+      "gt_n_waypoints": 1509,
+      "frame_aligned": true,
+      "fit_residual_m": 0.6614,
+      "note": ""
+    },
+    {
+      "scene": "chinese_room",
+      "qtype": "instruction_following",
+      "question": "First, go near the tea table with the elephant figurine on it, then stop at the table with the horse figurine on it, avoiding the path between the chair and the folding screen.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 10,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -0.023072689144201186,
+            -2.1974385433261934
+          ]
+        ],
+        [
+          "goto",
+          [
+            -0.023072689144201186,
+            -2.1974385433261934
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -0.023072689144201186,
+            -2.1974385433261934
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            -0.023072689144201186,
+            -2.1974385433261934
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 6.5433401039927155,
+      "coverage_1m": 0.2889,
+      "our_n_waypoints": 10,
+      "gt_n_waypoints": 630,
+      "frame_aligned": true,
+      "fit_residual_m": 0.6614,
+      "note": ""
+    },
+    {
+      "scene": "home_building_1",
+      "qtype": "numerical",
+      "question": "How many pillows are on the sofa under the pictures?",
+      "our_count": 6,
+      "gt_count_pipeline": 6,
+      "exact_match": true,
+      "gt_count_independent": 18,
+      "independent_source": "referential_class_only",
+      "gt_count_scenegraph": 11,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 18,
+      "csv_instances_of_class": 18,
+      "gt_answer_true": 6,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "pipeline=6; scene_graph=11 (disagreement)"
+    },
+    {
+      "scene": "home_building_1",
+      "qtype": "object_reference",
+      "question": "Find the clock on the TV cabinet.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": 1.0,
+      "gt_target_id": 185,
+      "our_target_id": 185,
+      "target_source": "referential",
+      "match_method": "relation",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "target matched via relation"
+    },
+    {
+      "scene": "home_building_1",
+      "qtype": "object_reference",
+      "question": "Find the bowl closest to the knife rack near the trash can.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 96,
+      "target_source": "ambiguous",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "home_building_1",
+      "qtype": "instruction_following",
+      "question": "Go to the coffee table with the kettle on it and stop at the dining table near the big picture.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 185,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            6.434499791115681,
+            0.5399999845559064
+          ]
+        ],
+        [
+          "goto",
+          [
+            -7.091301952895905,
+            7.556638684688977
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            6.434499791115681,
+            0.5399999845559064
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            -7.091301952895905,
+            7.556638684688977
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 16.21725165931761,
+      "coverage_1m": 0.0846,
+      "our_n_waypoints": 185,
+      "gt_n_waypoints": 733,
+      "frame_aligned": true,
+      "fit_residual_m": 0.8793,
+      "note": ""
+    },
+    {
+      "scene": "home_building_1",
+      "qtype": "instruction_following",
+      "question": "First, go to the nightstand with a clock on it, then take the path between the dining table and the picture, and stop at the trash can closest to the refridgerator.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 1,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 30,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -2.1008472527943356,
+            -13.663586708891788
+          ]
+        ],
+        [
+          "corridor_between",
+          [
+            -4.120119393543372,
+            0.17926750927194757
+          ]
+        ],
+        [
+          "goto",
+          [
+            -6.753701287219143,
+            -1.7066384146413835
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -2.1008472527943356,
+            -13.663586708891788
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -4.120119393543372,
+            0.17926750927194757
+          ],
+          "reached_in_order": false,
+          "threaded": false
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            -6.753701287219143,
+            -1.7066384146413835
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 13.070148139806987,
+      "coverage_1m": 0.0293,
+      "our_n_waypoints": 30,
+      "gt_n_waypoints": 2015,
+      "frame_aligned": true,
+      "fit_residual_m": 0.8793,
+      "note": "1 corridor leg(s) never threaded; leg 1: threading: trajectory never crossed the gate segment"
+    },
+    {
+      "scene": "home_building_2",
+      "qtype": "numerical",
+      "question": "How many red pillows are on the sofa?",
+      "our_count": 3,
+      "gt_count_pipeline": 3,
+      "exact_match": true,
+      "gt_count_independent": 4,
+      "independent_source": "referential",
+      "gt_count_scenegraph": 4,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 10,
+      "csv_instances_of_class": 10,
+      "gt_answer_true": 2,
+      "true_match": false,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "pipeline=3; independent=4; scene_graph=4 (disagreement)"
+    },
+    {
+      "scene": "home_building_2",
+      "qtype": "object_reference",
+      "question": "Find the lamp on the nightstand that has the photo on it.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 46,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "home_building_2",
+      "qtype": "object_reference",
+      "question": "Find the speaker on the TV cabinet closest to the potted plant on the TV cabinet.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": 0.0,
+      "gt_target_id": 91,
+      "our_target_id": 108,
+      "target_source": "referential",
+      "match_method": "relation",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "target matched via relation"
+    },
+    {
+      "scene": "home_building_2",
+      "qtype": "instruction_following",
+      "question": "Go near the magazine on the ottoman, then go to the potted plant on the dressing table.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 40,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            1.2610146516641076,
+            4.45810909851061
+          ]
+        ],
+        [
+          "goto",
+          [
+            3.130286219107404,
+            -0.6635941391844721
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            1.2610146516641076,
+            4.45810909851061
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            3.130286219107404,
+            -0.6635941391844721
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 20.975638577964215,
+      "coverage_1m": 0.0699,
+      "our_n_waypoints": 40,
+      "gt_n_waypoints": 916,
+      "frame_aligned": true,
+      "fit_residual_m": 0.1956,
+      "note": ""
+    },
+    {
+      "scene": "home_building_2",
+      "qtype": "instruction_following",
+      "question": "Take the path between the sofa and the coffee table and go to the kettle on the dining table, then go to the potted plant between the curtain and the TV.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 1,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 242,
+      "leg_goals": [
+        [
+          "corridor_between",
+          [
+            -0.06634096150392166,
+            7.51439952650719
+          ]
+        ],
+        [
+          "goto",
+          [
+            1.1735493261216094,
+            1.4193672086698286
+          ]
+        ],
+        [
+          "goto",
+          [
+            -3.803853304009978,
+            -0.7176745735671239
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "corridor_between",
+          "goal": [
+            -0.06634096150392166,
+            7.51439952650719
+          ],
+          "reached_in_order": false,
+          "threaded": false
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            1.1735493261216094,
+            1.4193672086698286
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            -3.803853304009978,
+            -0.7176745735671239
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 18.87868888121492,
+      "coverage_1m": 0.0359,
+      "our_n_waypoints": 242,
+      "gt_n_waypoints": 1670,
+      "frame_aligned": true,
+      "fit_residual_m": 0.1956,
+      "note": "1 corridor leg(s) never threaded; leg 0: threading: trajectory never crossed the gate segment"
+    },
+    {
+      "scene": "hotel_room_1",
+      "qtype": "numerical",
+      "question": "How many pillows are on the bed?",
+      "our_count": 4,
+      "gt_count_pipeline": 4,
+      "exact_match": true,
+      "gt_count_independent": 4,
+      "independent_source": "referential",
+      "gt_count_scenegraph": 4,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 4,
+      "csv_instances_of_class": 4,
+      "gt_answer_true": 4,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": ""
+    },
+    {
+      "scene": "hotel_room_1",
+      "qtype": "object_reference",
+      "question": "Find the bedside table farthest from the window.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": 1.0,
+      "gt_target_id": 72,
+      "our_target_id": 72,
+      "target_source": "referential",
+      "match_method": "relation",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "target matched via relation"
+    },
+    {
+      "scene": "hotel_room_1",
+      "qtype": "object_reference",
+      "question": "Find the picture above the suitcase furthest from the floor.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 6,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "hotel_room_1",
+      "qtype": "instruction_following",
+      "question": "Go to the bedside table closest to the window and stop at the chair closest to the TV.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.5,
+      "ordered_leg_credit": 0.5,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 1,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 61,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            3.530299551336724,
+            -3.701136334904778
+          ]
+        ],
+        [
+          "goto",
+          [
+            -0.8551697207002308,
+            -2.034392493562975
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            3.530299551336724,
+            -3.701136334904778
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            -0.8551697207002308,
+            -2.034392493562975
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 1.228033273851248,
+      "coverage_1m": 0.9388,
+      "our_n_waypoints": 61,
+      "gt_n_waypoints": 719,
+      "frame_aligned": true,
+      "fit_residual_m": 0.1953,
+      "note": ""
+    },
+    {
+      "scene": "hotel_room_1",
+      "qtype": "instruction_following",
+      "question": "First, go near the bedside table closest to the bench, then take the path between the TV and the bed to the picture closest to the TV.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 54,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            3.5302891681562993,
+            0.18100886235272912
+          ]
+        ],
+        [
+          "corridor_between",
+          [
+            -0.34945082088684676,
+            -1.708030449842029
+          ]
+        ],
+        [
+          "goto",
+          [
+            -1.9112202547363737,
+            -3.0735329564189446
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            3.5302891681562993,
+            0.18100886235272912
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -0.34945082088684676,
+            -1.708030449842029
+          ],
+          "reached_in_order": false,
+          "threaded": true
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            -1.9112202547363737,
+            -3.0735329564189446
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 1.6120538534674147,
+      "coverage_1m": 0.7469,
+      "our_n_waypoints": 54,
+      "gt_n_waypoints": 644,
+      "frame_aligned": true,
+      "fit_residual_m": 0.1953,
+      "note": ""
+    },
+    {
+      "scene": "hotel_room_2",
+      "qtype": "numerical",
+      "question": "How many pictures are above the bed?",
+      "our_count": 3,
+      "gt_count_pipeline": 3,
+      "exact_match": true,
+      "gt_count_independent": 3,
+      "independent_source": "referential",
+      "gt_count_scenegraph": 3,
+      "scenegraph_source": "scene_graph_class_only",
+      "annotated_targets_of_class": 3,
+      "csv_instances_of_class": 5,
+      "gt_answer_true": 3,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "annotation coverage 3/5 \u2014 class under-annotated, independent count deflated"
+    },
+    {
+      "scene": "hotel_room_2",
+      "qtype": "object_reference",
+      "question": "Find the flowers near the window.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": 1.0,
+      "gt_target_id": 38,
+      "our_target_id": 38,
+      "target_source": "unique_in_scene",
+      "match_method": "unique",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": ""
+    },
+    {
+      "scene": "hotel_room_2",
+      "qtype": "object_reference",
+      "question": "Find the picture closest to the bench.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": 1.0,
+      "gt_target_id": 31,
+      "our_target_id": 31,
+      "target_source": "referential",
+      "match_method": "relation",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "target matched via relation"
+    },
+    {
+      "scene": "hotel_room_2",
+      "qtype": "instruction_following",
+      "question": "Go between the bench and the bed and stop at the lamp closest to the fireplace.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 1,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 4,
+      "leg_goals": [
+        [
+          "corridor_between",
+          [
+            -0.43276481677540773,
+            1.403682685083295
+          ]
+        ],
+        [
+          "goto",
+          [
+            0.8848910815122211,
+            1.4200463453290173
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "corridor_between",
+          "goal": [
+            -0.43276481677540773,
+            1.403682685083295
+          ],
+          "reached_in_order": false,
+          "threaded": false
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            0.8848910815122211,
+            1.4200463453290173
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 0.6063179817919504,
+      "coverage_1m": 1.0,
+      "our_n_waypoints": 4,
+      "gt_n_waypoints": 155,
+      "frame_aligned": true,
+      "fit_residual_m": 0.975,
+      "note": "1 corridor leg(s) never threaded; leg 0: threading: trajectory never crossed the gate segment"
+    },
+    {
+      "scene": "hotel_room_2",
+      "qtype": "instruction_following",
+      "question": "First, go to the picture closest to the door, then take the path between the TV cabinet and the bed, and stop by the curtain closest to the TV.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.3333,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 1,
+      "n_threading_violations": 1,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 17,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            2.6144971939508657,
+            -1.314291003592708
+          ]
+        ],
+        [
+          "corridor_between",
+          [
+            -0.16876974959572938,
+            1.9038136454935441
+          ]
+        ],
+        [
+          "goto",
+          [
+            -4.416262138073918,
+            -0.8613001156648123
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            2.6144971939508657,
+            -1.314291003592708
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -0.16876974959572938,
+            1.9038136454935441
+          ],
+          "reached_in_order": false,
+          "threaded": false
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            -4.416262138073918,
+            -0.8613001156648123
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 2.902868196367345,
+      "coverage_1m": 0.6012,
+      "our_n_waypoints": 17,
+      "gt_n_waypoints": 845,
+      "frame_aligned": true,
+      "fit_residual_m": 0.975,
+      "note": "1 corridor leg(s) never threaded; leg 1: threading: trajectory never crossed the gate segment"
+    },
+    {
+      "scene": "japanese_room",
+      "qtype": "numerical",
+      "question": "How many calligraphy paintings are above the display ledge?",
+      "our_count": 3,
+      "gt_count_pipeline": 3,
+      "exact_match": true,
+      "gt_count_independent": null,
+      "independent_source": "none",
+      "gt_count_scenegraph": 3,
+      "scenegraph_source": "scene_graph_class_only",
+      "annotated_targets_of_class": 0,
+      "csv_instances_of_class": 3,
+      "gt_answer_true": 3,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no independent evidence (relation-agnostic class-only counts only); annotation coverage 0/3 \u2014 class under-annotated, independent count deflated"
+    },
+    {
+      "scene": "japanese_room",
+      "qtype": "object_reference",
+      "question": "The lantern between the vase and the stone decoration that is closest to the vase.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 56,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "japanese_room",
+      "qtype": "object_reference",
+      "question": "The red pillow closest to the sushi.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 46,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "japanese_room",
+      "qtype": "instruction_following",
+      "question": "Go near the small table with a vase on it and then to the flowers near the jar.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 53,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            1.9880000251531613,
+            0.15199995589256088
+          ]
+        ],
+        [
+          "goto",
+          [
+            1.8580404206390866,
+            3.133694090697788
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            1.9880000251531613,
+            0.15199995589256088
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            1.8580404206390866,
+            3.133694090697788
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 4.745261923070459,
+      "coverage_1m": 0.1917,
+      "our_n_waypoints": 53,
+      "gt_n_waypoints": 339,
+      "frame_aligned": true,
+      "fit_residual_m": 0.459,
+      "note": ""
+    },
+    {
+      "scene": "japanese_room",
+      "qtype": "instruction_following",
+      "question": "Go to the lantern closest to the fan decoration, then take the path near the wardrobe doors to the flowers on the display ledge.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 96,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            1.3969999714249122,
+            -0.5210001486425236
+          ]
+        ],
+        [
+          "via_near",
+          [
+            0.1395487283988932,
+            4.485747208787377
+          ]
+        ],
+        [
+          "goto",
+          [
+            -2.347529211138802,
+            4.857188684285708
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            1.3969999714249122,
+            -0.5210001486425236
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "via_near",
+          "goal": [
+            0.1395487283988932,
+            4.485747208787377
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            -2.347529211138802,
+            4.857188684285708
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 5.147718371239248,
+      "coverage_1m": 0.2678,
+      "our_n_waypoints": 96,
+      "gt_n_waypoints": 717,
+      "frame_aligned": true,
+      "fit_residual_m": 0.459,
+      "note": ""
+    },
+    {
+      "scene": "livingroom_1",
+      "qtype": "numerical",
+      "question": "How many chairs are near the table with a vase on it?",
+      "our_count": 8,
+      "gt_count_pipeline": 8,
+      "exact_match": true,
+      "gt_count_independent": 9,
+      "independent_source": "referential",
+      "gt_count_scenegraph": 8,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 9,
+      "csv_instances_of_class": 9,
+      "gt_answer_true": 8,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "pipeline=8; independent=9; scene_graph=8 (disagreement)"
+    },
+    {
+      "scene": "livingroom_1",
+      "qtype": "object_reference",
+      "question": "Find the vase on the cabinet below the picture.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 23,
+      "target_source": "ambiguous",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "livingroom_1",
+      "qtype": "object_reference",
+      "question": "Find the pillow on the sofa that is closest to the windows.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 16,
+      "target_source": "ambiguous",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "livingroom_1",
+      "qtype": "instruction_following",
+      "question": "Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.5,
+      "ordered_leg_credit": 0.5,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 1,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 4002,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            1.781554902322501,
+            -4.2988059739525815
+          ]
+        ],
+        [
+          "goto",
+          [
+            -1.1499276868975108,
+            2.342958504160549
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            1.781554902322501,
+            -4.2988059739525815
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            -1.1499276868975108,
+            2.342958504160549
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 4.678133123261484,
+      "coverage_1m": 0.1185,
+      "our_n_waypoints": 4002,
+      "gt_n_waypoints": 751,
+      "frame_aligned": true,
+      "fit_residual_m": 0.9257,
+      "note": ""
+    },
+    {
+      "scene": "livingroom_1",
+      "qtype": "instruction_following",
+      "question": "First, go near the lamp closest to the black chair, then take the path between the sofa and the round tables, and stop at the cabinet with a picture above it.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 1,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 31,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -1.1056234649465893,
+            1.9484851126878335
+          ]
+        ],
+        [
+          "corridor_between",
+          [
+            -0.710472954142261,
+            -2.432501199342292
+          ]
+        ],
+        [
+          "goto",
+          [
+            -2.4121101308662443,
+            -6.57725900463586
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -1.1056234649465893,
+            1.9484851126878335
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -0.710472954142261,
+            -2.432501199342292
+          ],
+          "reached_in_order": false,
+          "threaded": false
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            -2.4121101308662443,
+            -6.57725900463586
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 1.5820971670719217,
+      "coverage_1m": 0.8776,
+      "our_n_waypoints": 31,
+      "gt_n_waypoints": 882,
+      "frame_aligned": true,
+      "fit_residual_m": 0.9257,
+      "note": "1 corridor leg(s) never threaded; leg 1: threading: trajectory never crossed the gate segment"
+    },
+    {
+      "scene": "livingroom_2",
+      "qtype": "numerical",
+      "question": "How many cups are on the coffee table?",
+      "our_count": 2,
+      "gt_count_pipeline": 2,
+      "exact_match": true,
+      "gt_count_independent": 2,
+      "independent_source": "referential",
+      "gt_count_scenegraph": 2,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 2,
+      "csv_instances_of_class": 2,
+      "gt_answer_true": 2,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": ""
+    },
+    {
+      "scene": "livingroom_2",
+      "qtype": "object_reference",
+      "question": "Find the stool closest to the shelf near the TV cabinet.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 56,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "livingroom_2",
+      "qtype": "object_reference",
+      "question": "Find the pillow on the sofa that is closest to the lamp.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 5,
+      "target_source": "ambiguous",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "livingroom_2",
+      "qtype": "instruction_following",
+      "question": "Go to the microwave on the kitchen counter and then go to the crystal ball decoration on the shelf near the TV.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.5,
+      "ordered_leg_credit": 0.5,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 1,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 45,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            0.5724784254825888,
+            4.513100681518323
+          ]
+        ],
+        [
+          "goto",
+          [
+            2.6284785494764606,
+            -1.3648994119319025
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            0.5724784254825888,
+            4.513100681518323
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            2.6284785494764606,
+            -1.3648994119319025
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 2.8193598093109284,
+      "coverage_1m": 0.5992,
+      "our_n_waypoints": 45,
+      "gt_n_waypoints": 791,
+      "frame_aligned": true,
+      "fit_residual_m": 0.4393,
+      "note": ""
+    },
+    {
+      "scene": "livingroom_2",
+      "qtype": "instruction_following",
+      "question": "First, go to the chair near the window, then stop at the soccer ball near the couch, avoiding the path between the TV and the tea table.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 4002,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -1.5034062120285336,
+            2.2250972017708843
+          ]
+        ],
+        [
+          "goto",
+          [
+            2.8662860309186997,
+            -6.812619596285171
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -1.5034062120285336,
+            2.2250972017708843
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            2.8662860309186997,
+            -6.812619596285171
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 4.466674599374724,
+      "coverage_1m": 0.333,
+      "our_n_waypoints": 4002,
+      "gt_n_waypoints": 928,
+      "frame_aligned": true,
+      "fit_residual_m": 0.4393,
+      "note": ""
+    },
+    {
+      "scene": "livingroom_3",
+      "qtype": "numerical",
+      "question": "How many photos are on the TV cabinet?",
+      "our_count": 2,
+      "gt_count_pipeline": 2,
+      "exact_match": true,
+      "gt_count_independent": 10,
+      "independent_source": "referential",
+      "gt_count_scenegraph": 9,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 10,
+      "csv_instances_of_class": 9,
+      "gt_answer_true": 2,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "pipeline=2; independent=10; scene_graph=9 (disagreement)"
+    },
+    {
+      "scene": "livingroom_3",
+      "qtype": "object_reference",
+      "question": "Find the potted plant near the books on the cabinet.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 31,
+      "target_source": "ambiguous",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "livingroom_3",
+      "qtype": "object_reference",
+      "question": "Find the vase between the cabinet and the stool.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 37,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "livingroom_3",
+      "qtype": "instruction_following",
+      "question": "Take the path near the TV and go to the pillow farthest from the lamp.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 68,
+      "leg_goals": [
+        [
+          "via_near",
+          [
+            1.888755196362927,
+            -5.786601070536261
+          ]
+        ],
+        [
+          "goto",
+          [
+            2.4742535424626553,
+            -2.0834784207193264
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "via_near",
+          "goal": [
+            1.888755196362927,
+            -5.786601070536261
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            2.4742535424626553,
+            -2.0834784207193264
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 6.237712839956094,
+      "coverage_1m": 0.3009,
+      "our_n_waypoints": 68,
+      "gt_n_waypoints": 585,
+      "frame_aligned": false,
+      "fit_residual_m": 1.8103,
+      "note": "frame fit unaligned \u2014 DATA-CONFIRMED unfittable (meth-F11): GT q4/q5 terminal endpoints are 1.20 m apart but every pillow x bowl pairing is >= 3.27 m apart \u2014 a frame-independent distance contradiction (rigid two-point residual floor 1.04 m > 1.0 m gate). The q4 trajectory ends in the dining-chair corner (1.04 m from a chair, 1.33 m from the nearest pillow), not at any pillow; no rigid sim->object transform can map the endpoints onto the terminal objects."
+    },
+    {
+      "scene": "livingroom_3",
+      "qtype": "instruction_following",
+      "question": "First, go near the stool, then take the path near the cabinet, and stop at the bowl on the table.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 4002,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            1.5682050516010408,
+            0.3636794793895024
+          ]
+        ],
+        [
+          "via_near",
+          [
+            3.1219996991412136,
+            -5.746000182313718
+          ]
+        ],
+        [
+          "goto",
+          [
+            6.897515144726604,
+            -3.9877566065712626
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            1.5682050516010408,
+            0.3636794793895024
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "via_near",
+          "goal": [
+            3.1219996991412136,
+            -5.746000182313718
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            6.897515144726604,
+            -3.9877566065712626
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 4.433155405884215,
+      "coverage_1m": 0.4215,
+      "our_n_waypoints": 4002,
+      "gt_n_waypoints": 548,
+      "frame_aligned": false,
+      "fit_residual_m": 1.8103,
+      "note": "frame fit unaligned \u2014 DATA-CONFIRMED unfittable (meth-F11): GT q4/q5 terminal endpoints are 1.20 m apart but every pillow x bowl pairing is >= 3.27 m apart \u2014 a frame-independent distance contradiction (rigid two-point residual floor 1.04 m > 1.0 m gate). The q4 trajectory ends in the dining-chair corner (1.04 m from a chair, 1.33 m from the nearest pillow), not at any pillow; no rigid sim->object transform can map the endpoints onto the terminal objects."
+    },
+    {
+      "scene": "livingroom_4",
+      "qtype": "numerical",
+      "question": "How many pillows are on a sofa?",
+      "our_count": 6,
+      "gt_count_pipeline": 6,
+      "exact_match": true,
+      "gt_count_independent": 6,
+      "independent_source": "referential",
+      "gt_count_scenegraph": 6,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 6,
+      "csv_instances_of_class": 6,
+      "gt_answer_true": 6,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": ""
+    },
+    {
+      "scene": "livingroom_4",
+      "qtype": "object_reference",
+      "question": "Find the picture closest to a window.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 8,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "livingroom_4",
+      "qtype": "object_reference",
+      "question": "Find the fossil decoration closest to the phone.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 94,
+      "target_source": "ambiguous",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "livingroom_4",
+      "qtype": "instruction_following",
+      "question": "Go near the chair closest to the bookcase and stop at the table with the flowers on it.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 4002,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -3.0977270184099193,
+            1.370465389459943
+          ]
+        ],
+        [
+          "goto",
+          [
+            -1.1720001679490375,
+            -1.9889507997563827
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -3.0977270184099193,
+            1.370465389459943
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            -1.1720001679490375,
+            -1.9889507997563827
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 2.2409188973489167,
+      "coverage_1m": 0.5125,
+      "our_n_waypoints": 4002,
+      "gt_n_waypoints": 521,
+      "frame_aligned": true,
+      "fit_residual_m": 0.6917,
+      "note": ""
+    },
+    {
+      "scene": "livingroom_4",
+      "qtype": "instruction_following",
+      "question": "First, go near the fireplace, then go to the window closest to the bookcase, and stop at the chair farthest from the mirror.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.3333,
+      "ordered_leg_credit": 0.3333,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 1,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 4002,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -1.2270001062362663,
+            -4.3955472286827995
+          ]
+        ],
+        [
+          "goto",
+          [
+            -4.456971258024225,
+            -1.3349409741564022
+          ]
+        ],
+        [
+          "goto",
+          [
+            -3.0977270184099193,
+            1.370465389459943
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -1.2270001062362663,
+            -4.3955472286827995
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            -4.456971258024225,
+            -1.3349409741564022
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            -3.0977270184099193,
+            1.370465389459943
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 2.5114539147782615,
+      "coverage_1m": 0.4477,
+      "our_n_waypoints": 4002,
+      "gt_n_waypoints": 889,
+      "frame_aligned": true,
+      "fit_residual_m": 0.6917,
+      "note": ""
+    },
+    {
+      "scene": "loft",
+      "qtype": "numerical",
+      "question": "How many black pillows are on the sofa?",
+      "our_count": 0,
+      "gt_count_pipeline": 0,
+      "exact_match": true,
+      "gt_count_independent": 9,
+      "independent_source": "referential_class_only",
+      "gt_count_scenegraph": 8,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 9,
+      "csv_instances_of_class": 11,
+      "gt_answer_true": 2,
+      "true_match": false,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "pipeline=0; scene_graph=8 (disagreement); annotation coverage 9/11 \u2014 class under-annotated, independent count deflated"
+    },
+    {
+      "scene": "loft",
+      "qtype": "object_reference",
+      "question": "The blue chair that is closest to the cup of coffee.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 99,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "loft",
+      "qtype": "object_reference",
+      "question": "Find the potted plant between a vase and the cabinet with a TV on it.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": 1.0,
+      "gt_target_id": 110,
+      "our_target_id": 110,
+      "target_source": "referential",
+      "match_method": "relation",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "target matched via relation"
+    },
+    {
+      "scene": "loft",
+      "qtype": "instruction_following",
+      "question": "Go to the cup near the TV remote and avoid the path near the cabinet.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 1,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 4,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            6.203529128048337,
+            0.684117738247934
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            6.203529128048337,
+            0.684117738247934
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 7.751496475528258,
+      "coverage_1m": 0.0907,
+      "our_n_waypoints": 4,
+      "gt_n_waypoints": 739,
+      "frame_aligned": true,
+      "fit_residual_m": 0.2953,
+      "note": ""
+    },
+    {
+      "scene": "loft",
+      "qtype": "instruction_following",
+      "question": "Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 4002,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -1.6460001385558578,
+            0.9700002957901653
+          ]
+        ],
+        [
+          "via_near",
+          [
+            1.8161145557947749,
+            -0.316929289683928
+          ]
+        ],
+        [
+          "goto",
+          [
+            6.877113061233509,
+            -1.6266811211170369
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -1.6460001385558578,
+            0.9700002957901653
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "via_near",
+          "goal": [
+            1.8161145557947749,
+            -0.316929289683928
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            6.877113061233509,
+            -1.6266811211170369
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 7.255682879813292,
+      "coverage_1m": 0.2685,
+      "our_n_waypoints": 4002,
+      "gt_n_waypoints": 771,
+      "frame_aligned": true,
+      "fit_residual_m": 0.2953,
+      "note": ""
+    },
+    {
+      "scene": "office_1",
+      "qtype": "numerical",
+      "question": "How many computer monitors are on the table closest to the map wall decal?",
+      "our_count": 6,
+      "gt_count_pipeline": 6,
+      "exact_match": true,
+      "gt_count_independent": 6,
+      "independent_source": "referential",
+      "gt_count_scenegraph": 6,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 6,
+      "csv_instances_of_class": 6,
+      "gt_answer_true": 6,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": ""
+    },
+    {
+      "scene": "office_1",
+      "qtype": "object_reference",
+      "question": "Find the potted plant on the file cabinet.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 55,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "office_1",
+      "qtype": "object_reference",
+      "question": "Find the paper cup on the table closest to the projector screen.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 84,
+      "target_source": "ambiguous",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "office_1",
+      "qtype": "instruction_following",
+      "question": "Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.5,
+      "ordered_leg_credit": 0.5,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 1,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 46,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            5.666429089755829,
+            1.2307388414325984
+          ]
+        ],
+        [
+          "goto",
+          [
+            -4.025037597424329,
+            -4.279957401503226
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            5.666429089755829,
+            1.2307388414325984
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            -4.025037597424329,
+            -4.279957401503226
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 4.189280263573234,
+      "coverage_1m": 0.236,
+      "our_n_waypoints": 46,
+      "gt_n_waypoints": 1339,
+      "frame_aligned": true,
+      "fit_residual_m": 0.4494,
+      "note": ""
+    },
+    {
+      "scene": "office_1",
+      "qtype": "instruction_following",
+      "question": "First, go near the potted plant on the shelf, then take the path between the two tables, and stop at the bench closest to the map wall decal.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.3333,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 1,
+      "n_threading_violations": 1,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 4002,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            -0.39833949778061584,
+            1.2797531400311621
+          ]
+        ],
+        [
+          "corridor_between",
+          [
+            -1.8379998731924685,
+            -1.882379578635478
+          ]
+        ],
+        [
+          "goto",
+          [
+            1.5929961037235056,
+            -4.59443484897624
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            -0.39833949778061584,
+            1.2797531400311621
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -1.8379998731924685,
+            -1.882379578635478
+          ],
+          "reached_in_order": false,
+          "threaded": false
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            1.5929961037235056,
+            -4.59443484897624
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 1.3557188875782347,
+      "coverage_1m": 0.8384,
+      "our_n_waypoints": 4002,
+      "gt_n_waypoints": 458,
+      "frame_aligned": true,
+      "fit_residual_m": 0.4494,
+      "note": "1 corridor leg(s) never threaded; leg 1: threading: trajectory never crossed the gate segment"
+    },
+    {
+      "scene": "office_2",
+      "qtype": "numerical",
+      "question": "How many potted plants are on a table?",
+      "our_count": 1,
+      "gt_count_pipeline": 1,
+      "exact_match": true,
+      "gt_count_independent": 3,
+      "independent_source": "referential_class_only",
+      "gt_count_scenegraph": 1,
+      "scenegraph_source": "scene_graph",
+      "annotated_targets_of_class": 3,
+      "csv_instances_of_class": 3,
+      "gt_answer_true": 1,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": ""
+    },
+    {
+      "scene": "office_2",
+      "qtype": "object_reference",
+      "question": "Find the computer monitor closest to the cabinet with a phone on it.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 75,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "office_2",
+      "qtype": "object_reference",
+      "question": "Find the box on the cabinet that is closest to the whiteboard.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 36,
+      "target_source": "none",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "office_2",
+      "qtype": "instruction_following",
+      "question": "Go near the potted plant on the cabinet and stop at the window closest to the clock.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 49,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            4.586477751151203,
+            -0.6037297346447335
+          ]
+        ],
+        [
+          "goto",
+          [
+            4.905480373619802,
+            4.174238207526733
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            4.586477751151203,
+            -0.6037297346447335
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            4.905480373619802,
+            4.174238207526733
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 2.3952046960804636,
+      "coverage_1m": 0.4611,
+      "our_n_waypoints": 49,
+      "gt_n_waypoints": 694,
+      "frame_aligned": true,
+      "fit_residual_m": 0.3851,
+      "note": ""
+    },
+    {
+      "scene": "office_2",
+      "qtype": "instruction_following",
+      "question": "First, go to the trash can near the cabinet, then go to the folder on the cabinet closest to the whiteboard, and finally, to the door near the exit sign.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.6667,
+      "ordered_leg_credit": 0.6667,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 2,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 35,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            2.891661531137774,
+            -0.5330266165326596
+          ]
+        ],
+        [
+          "goto",
+          [
+            5.903858093455036,
+            3.139529553765287
+          ]
+        ],
+        [
+          "goto",
+          [
+            6.141392347445373,
+            -1.7087482913623502
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            2.891661531137774,
+            -0.5330266165326596
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            5.903858093455036,
+            3.139529553765287
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            6.141392347445373,
+            -1.7087482913623502
+          ],
+          "reached_in_order": true,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 3.9890822301760447,
+      "coverage_1m": 0.6169,
+      "our_n_waypoints": 35,
+      "gt_n_waypoints": 1454,
+      "frame_aligned": true,
+      "fit_residual_m": 0.3851,
+      "note": ""
+    },
+    {
+      "scene": "studio",
+      "qtype": "numerical",
+      "question": "How many framed records are above the couch?",
+      "our_count": 3,
+      "gt_count_pipeline": 3,
+      "exact_match": true,
+      "gt_count_independent": null,
+      "independent_source": "none",
+      "gt_count_scenegraph": 1,
+      "scenegraph_source": "scene_graph_class_only",
+      "annotated_targets_of_class": 0,
+      "csv_instances_of_class": 3,
+      "gt_answer_true": 3,
+      "true_match": true,
+      "true_source": "questions_pdf_text",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no independent evidence (relation-agnostic class-only counts only); annotation coverage 0/3 \u2014 class under-annotated, independent count deflated"
+    },
+    {
+      "scene": "studio",
+      "qtype": "object_reference",
+      "question": "Find the vase closest to the guitar.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": 1.0,
+      "gt_target_id": 46,
+      "our_target_id": 46,
+      "target_source": "referential",
+      "match_method": "relation",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "target matched via relation"
+    },
+    {
+      "scene": "studio",
+      "qtype": "object_reference",
+      "question": "Find the beer bottle furthest from the couch.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": 72,
+      "target_source": "ambiguous",
+      "match_method": "none",
+      "rubric_score": null,
+      "ordered_leg_credit": null,
+      "n_legs": null,
+      "n_legs_reached_in_order": null,
+      "n_threading_violations": null,
+      "n_avoid_violations": null,
+      "driven_n_poses": null,
+      "leg_goals": null,
+      "leg_outcomes": null,
+      "frechet_m": null,
+      "coverage_1m": null,
+      "our_n_waypoints": null,
+      "gt_n_waypoints": null,
+      "frame_aligned": null,
+      "fit_residual_m": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "studio",
+      "qtype": "instruction_following",
+      "question": "Go to the vases on the cabinet below the TV and stop at the guitar near the couch.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 2,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 0,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 46,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            3.705153064797375,
+            2.202526369223632
+          ]
+        ],
+        [
+          "goto",
+          [
+            3.8547592466812466,
+            -2.727814610775408
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            3.705153064797375,
+            2.202526369223632
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "goto",
+          "goal": [
+            3.8547592466812466,
+            -2.727814610775408
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 3.4675882046287345,
+      "coverage_1m": 0.1449,
+      "our_n_waypoints": 46,
+      "gt_n_waypoints": 752,
+      "frame_aligned": true,
+      "fit_residual_m": 0.5586,
+      "note": ""
+    },
+    {
+      "scene": "studio",
+      "qtype": "instruction_following",
+      "question": "First, go to the vase closest to the easel, then, take the path between the couch and the table and stop at the window closest to the couch.",
+      "our_count": null,
+      "gt_count_pipeline": null,
+      "exact_match": null,
+      "gt_count_independent": null,
+      "independent_source": "",
+      "gt_count_scenegraph": null,
+      "scenegraph_source": "",
+      "annotated_targets_of_class": null,
+      "csv_instances_of_class": null,
+      "gt_answer_true": null,
+      "true_match": null,
+      "true_source": "",
+      "iou": null,
+      "gt_target_id": null,
+      "our_target_id": null,
+      "target_source": "",
+      "match_method": "",
+      "rubric_score": 0.0,
+      "ordered_leg_credit": 0.0,
+      "n_legs": 3,
+      "n_legs_reached_in_order": 0,
+      "n_threading_violations": 1,
+      "n_avoid_violations": 0,
+      "driven_n_poses": 19,
+      "leg_goals": [
+        [
+          "goto",
+          [
+            1.2770053990345342,
+            2.2815536270207084
+          ]
+        ],
+        [
+          "corridor_between",
+          [
+            3.49502793844907,
+            -1.0653839356029216
+          ]
+        ],
+        [
+          "goto",
+          [
+            3.2990000511605535,
+            -4.749018479299587
+          ]
+        ]
+      ],
+      "leg_outcomes": [
+        {
+          "i": 0,
+          "kind": "goto",
+          "goal": [
+            1.2770053990345342,
+            2.2815536270207084
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        },
+        {
+          "i": 1,
+          "kind": "corridor_between",
+          "goal": [
+            3.49502793844907,
+            -1.0653839356029216
+          ],
+          "reached_in_order": false,
+          "threaded": false
+        },
+        {
+          "i": 2,
+          "kind": "goto",
+          "goal": [
+            3.2990000511605535,
+            -4.749018479299587
+          ],
+          "reached_in_order": false,
+          "threaded": null
+        }
+      ],
+      "frechet_m": 4.100034351680412,
+      "coverage_1m": 0.1184,
+      "our_n_waypoints": 19,
+      "gt_n_waypoints": 566,
+      "frame_aligned": true,
+      "fit_residual_m": 0.5586,
+      "note": "1 corridor leg(s) never threaded; leg 1: threading: trajectory never crossed the gate segment"
+    }
+  ]
+}
