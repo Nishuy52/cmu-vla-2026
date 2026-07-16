@@ -124,5 +124,55 @@ residue · GT-index / annotation-vocabulary artifact · question-semantics.
 
 ## Fixes
 
-*(populated as fixes land — see Final tally at the bottom for the
-regression-gated numerical slice.)*
+### FIX-1 — `under()` wall-relative below (lateral inverse-`above`) branch
+
+- **Fixes:** arabic_room (0→2) and home_building_1 (11→6).
+- **Change:** `src/core/geometry/toolbox.py::under()` gains a third branch
+  (iii): `below(a, b) ≡ above(b, a)` — the anchor's XY centre within the
+  target's inflated footprint AND the anchor strictly above the target
+  (`b.min_z > a.max_z`), carrying NO footprint-IoM requirement. This is
+  the vertical mirror of the accepted D4/H5 `above()` lateral form; the
+  IoM-gated strict/tuck branches are unchanged. Because it fires only
+  when the anchor is strictly above the target, it never collides with
+  tuck-under (a table extends to the floor, so it is not strictly above a
+  stool it shelters — verified by `test_under_tuck_gated_to_under_relation_class`
+  and the new lateral tests).
+- **Test:** `src/tests/geometry/test_predicates.py::`
+  `test_under_wall_relative_below_lateral_branch` (pins the lateral pass
+  with IoM < 0.5, so it can only pass via the new branch) and
+  `test_under_lateral_branch_requires_anchor_strictly_above` (guards
+  against broadening "under" to "beside" — anchor overlapping the target
+  in z must NOT pass).
+- **Commit:** `c867fce`
+- **No calibration values were changed.** The fix is a predicate-form
+  completion, not a threshold tune.
+
+## Final numerical-slice tally
+
+Regression-gated full-battery run (`reports/scratch_t12diag_all`,
+uncommitted; `python -m core.runner.gt_battery --groundtruth
+../data/vla3d/Unity --no-drive-if`):
+
+**TRUE accuracy 13/15 (up from 11/15).** All 11 prior true passes
+remained true (hard regression gate satisfied); arabic_room and
+home_building_1 flipped to correct; home_building_2 (3 vs 2) and loft
+(0 vs 2) remain DIAGNOSED-UNFIXED as color-annotation gaps deferred to
+the sweep (rationale above).
+
+| Scene | our | true | match |
+|---|---|---|---|
+| arabic_room | 2 | 2 | ✓ (fixed) |
+| chinese_room | 6 | 6 | ✓ |
+| home_building_1 | 6 | 6 | ✓ (fixed) |
+| home_building_2 | 3 | 2 | ✗ (color annotation gap) |
+| hotel_room_1 | 4 | 4 | ✓ |
+| hotel_room_2 | 3 | 3 | ✓ |
+| japanese_room | 3 | 3 | ✓ |
+| livingroom_1 | 8 | 8 | ✓ |
+| livingroom_2 | 2 | 2 | ✓ |
+| livingroom_3 | 2 | 2 | ✓ |
+| livingroom_4 | 6 | 6 | ✓ |
+| loft | 0 | 2 | ✗ (color vocab gap) |
+| office_1 | 6 | 6 | ✓ |
+| office_2 | 1 | 1 | ✓ |
+| studio | 3 | 3 | ✓ |
