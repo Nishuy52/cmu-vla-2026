@@ -103,7 +103,7 @@ design and is reported as data-confirmed rather than a resolution gap.
   and the aggregate carry a `data_confirmed` marker so the exclusion reads as a
   data property, closing the friendly-ward bias hole as documented data.
 
-## Outcome
+## Outcome (verified — full IF slice, `reports/scratch_t12fit`)
 
 | scene | before | after | outcome |
 |---|---|---|---|
@@ -111,8 +111,38 @@ design and is reported as data-confirmed rather than a resolution gap.
 | home_building_2 | unaligned (res 2.551) | aligned (res 0.196) | **rejoined** |
 | livingroom_3 | unaligned (res 1.810) | unaligned, data-confirmed | **exclusion confirmed** |
 
+Aggregate (`aggregate.instruction_following`), pre-fix baseline
+`reports/gt_battery_T12pre_2026-07-17` → post-fix `reports/scratch_t12fit`:
+
+| field | before | after |
+|---|---|---|
+| `n_aligned` | 24 | **28** |
+| `n_unaligned_scenes` | 3 | **1** |
+| `unaligned_scenes` | chinese_room, home_building_2, livingroom_3 | **livingroom_3** |
+| `unaligned_scenes_data_confirmed` | (n/a) | **livingroom_3** |
+| `unaligned_scenes_unexplained` | (n/a) | **[]** |
+| `mean_frechet_m_aligned_diag` | 4.559 | **5.634** |
+| `mean_coverage_1m_aligned_diag` | 0.400 | **0.384** |
+
 Net: 4 of 6 IF rows rejoin the aligned diagnostic set (24 → 28 aligned
 scene-questions); the remaining 2 (livingroom_3) are a confirmed GT-data defect,
-documented rather than silently dropped. Friendly-ward bias hole closed.
+documented (`data_confirmed`) rather than silently dropped. The mean aligned
+Fréchet *rose* (4.56 → 5.63) and coverage *fell* (0.400 → 0.384) once the
+previously-excluded scenes rejoined — direct confirmation of the meth-F11 thesis
+that the unfittable scenes were the harder ones biasing IF means friendly-ward.
+Friendly-ward bias hole closed.
 
-<!-- numbers below are filled in from the scratch IF slice run once the fix lands -->
+### Regression + validation evidence
+
+- **Zero regressions** on the 24 previously-aligned scene-questions: every one
+  kept `frame_aligned=true` with an identical `fit_residual_m`. The fallback search
+  is strictly gated behind `residual > _ALIGN_RESIDUAL_GATE_M`, so gate-passing
+  scenes never enter it.
+- **Independent frame check** (constraints NOT used by the fit): under both rejoined
+  scenes' fitted frames the two trajectories' shared spawn maps to a single point
+  (separation 0.01–0.02 m), and home_building_2's intermediate anchors map onto the
+  path (magazine 0.87 m, sofa 0.52 m) — the frames are geometrically correct, not
+  spurious low-residual pairings.
+- home_building_2's large aligned Fréchet (~20 m) is a genuine planner-vs-GT
+  divergence in a large scene, not a fit artefact (residual 0.196 m, near-identity
+  θ=0°).

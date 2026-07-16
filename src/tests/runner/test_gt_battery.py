@@ -344,3 +344,79 @@ def test_cli_groundtruth_flag_delegates(tmp_path):
     ])
     assert rc == 0
     assert (tmp_path / "gt_battery_report.md").exists()
+
+
+# --------------------------------------------------------------------------- meth-F11
+# IF frame-fit fallback: candidate-search correspondence selection. These use only
+# synthetic endpoints/candidates (no dataset) so they run on the fast tier.
+
+
+def _traj(end_xy):
+    """A minimal 2-vertex GT-trajectory array (shared start at origin, given endpoint)."""
+    return np.array([[0.0, 0.0, 0.75], [end_xy[0], end_xy[1], 0.75]], dtype=float)
+
+
+def test_fit_candidates_rescues_terminal_mispick():
+    """When the top terminal candidate is wrong, a lower-ranked one restores the fit.
+
+    Two questions, true sim->object transform = identity. Question 0's terminal resolves
+    correctly (top candidate right); question 1's TOP candidate is a decoy far from the
+    true object, with the correct object at rank 1. The default top-pick fit would blow
+    the gate; the candidate search recovers the identity fit at ~0 residual.
+    """
+    trajs = [_traj((1.0, 0.0)), _traj((5.0, 0.0))]
+    # q0: single correct candidate at the endpoint; q1: decoy first, truth second.
+    cand_lists = [
+        [np.array([1.0, 0.0])],
+        [np.array([1.5, 3.0]), np.array([5.0, 0.0])],
+    ]
+    res = GB._fit_if_frame_over_candidates(trajs, cand_lists, gate_m=1.0)
+    assert res is not None
+    frame, residual = res
+    assert residual < 1e-6
+    # identity: endpoints map onto themselves
+    mapped = frame.apply(np.array([[5.0, 0.0]]))[0]
+    assert np.allclose(mapped, [5.0, 0.0], atol=1e-6)
+
+
+def test_fit_candidates_returns_none_when_distance_contradiction():
+    """No candidate pairing clears the gate when the geometry is contradictory.
+
+    Endpoints are 1.2 m apart (sim) but every candidate pairing is >= 3.3 m apart
+    (object) — a distance a rigid transform cannot reconcile (the livingroom_3 shape).
+    The two-point residual floor is (3.3-1.2)/2 = 1.05 m > gate, so the search declines.
+    """
+    trajs = [_traj((5.23, -2.98)), _traj((6.31, -2.48))]  # 1.20 m apart
+    cand_lists = [
+        [np.array([4.22, -2.11]), np.array([2.47, -2.08])],  # pillows
+        [np.array([6.90, -3.99])],  # bowl, >= 3.3 m from any pillow
+    ]
+    res = GB._fit_if_frame_over_candidates(trajs, cand_lists, gate_m=1.0)
+    assert res is None
+
+
+def test_fit_candidates_needs_two_endpoints():
+    """A single usable endpoint yields no rigid fit (yaw unidentifiable) -> None."""
+    trajs = [_traj((1.0, 0.0)), None]
+    cand_lists = [[np.array([1.0, 0.0])], []]
+    assert GB._fit_if_frame_over_candidates(trajs, cand_lists, gate_m=1.0) is None
+
+
+def test_terminal_goal_centroid_delegates_to_candidates():
+    """``_terminal_goal_centroid`` returns exactly the first candidate (k=1 wrapper)."""
+    from core.perception.scene_index import BasicSceneIndex
+
+    gt = _synthetic_gt_scene(
+        [("painting", 2.0, 1.0, 1.0, 0.4, 0.4, 0.4)], scene_name="syn"
+    )
+    idx = BasicSceneIndex(gt.instances)
+    text = "Go to the painting."
+    cands = GB._terminal_goal_candidates(text, idx, k=8)
+    top = GB._terminal_goal_centroid(text, idx)
+    if cands:
+        assert np.allclose(top, cands[0])
+    else:
+        assert top is None
+
+    _DATA = GB._DATA_UNFITTABLE_IF_SCENES
+    assert "livingroom_3" in _DATA and _DATA["livingroom_3"]

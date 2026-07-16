@@ -33,6 +33,7 @@ import os
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import date
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -432,14 +433,22 @@ def _if_rubric_geometry(
     return leg_goals, corridor_gates, avoid_capsules
 
 
-def _terminal_goal_centroid(text: str, idx: BasicSceneIndex) -> np.ndarray | None:
-    """Object-frame centroid of an IF question's terminal goal (final GOTO anchor).
+def _terminal_goal_candidates(
+    text: str, idx: BasicSceneIndex, k: int = 8
+) -> list[np.ndarray]:
+    """Object-frame XY centroids of an IF question's terminal-goal candidates.
 
     We take the LAST ``GOTO`` route leg's anchor, build a :class:`TargetSpec` from it
     (noun + attributes + disambiguating clause), resolve it on the GT index exactly as
-    the instruction head would, and return the top candidate's XY centroid — the point
-    the GT ``trajectory_qN.ply`` should end at. Returns None when the route has no GOTO
-    leg or the anchor doesn't resolve (so the scene fit simply drops that endpoint).
+    the instruction head would, and return the top-``k`` candidate XY centroids
+    (best-first) — the point the GT ``trajectory_qN.ply`` should end at is one of these.
+    Returns ``[]`` when the route has no GOTO leg or the anchor doesn't resolve (so the
+    scene fit simply drops that endpoint).
+
+    The ranked list (not just the top pick) is what the scene-level frame fit's fallback
+    correspondence search consumes (meth-F11): the resolver's disambiguator can mis-rank
+    the terminal object, but the TRUE terminal is still in the candidate set, and the
+    rigid endpoint-separation invariant identifies it.
     """
     from core.parsing.regex_tier import parse_regex
     from core.geometry.toolbox import TargetSpec, resolve
@@ -447,10 +456,10 @@ def _terminal_goal_centroid(text: str, idx: BasicSceneIndex) -> np.ndarray | Non
 
     plan = parse_regex(text)
     if not plan.route:
-        return None
+        return []
     goto_legs = [leg for leg in plan.route if leg.kind is LegKind.GOTO and leg.anchors]
     if not goto_legs:
-        return None
+        return []
     anchor = goto_legs[-1].anchors[0]
     spec = TargetSpec(
         noun=anchor.noun,
@@ -459,10 +468,80 @@ def _terminal_goal_centroid(text: str, idx: BasicSceneIndex) -> np.ndarray | Non
         clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
     )
     res = resolve(spec, idx)
-    if not res.candidates_ranked:
+    return [
+        np.asarray(c.centroid, dtype=float).reshape(-1)[:2]
+        for c in res.candidates_ranked[: max(1, k)]
+    ]
+
+
+def _terminal_goal_centroid(text: str, idx: BasicSceneIndex) -> np.ndarray | None:
+    """Object-frame centroid of an IF question's terminal goal (resolver's TOP pick).
+
+    Thin wrapper over :func:`_terminal_goal_candidates` (k=1) — returns the best
+    candidate's XY centroid, or None when nothing resolves.
+    """
+    cands = _terminal_goal_candidates(text, idx, k=1)
+    return cands[0] if cands else None
+
+
+def _fit_if_frame_over_candidates(
+    trajs: list[np.ndarray | None],
+    cand_lists: list[list[np.ndarray]],
+    *,
+    gate_m: float,
+) -> tuple[S.Frame2D, float] | None:
+    """Fallback scene-level IF frame fit: search terminal-goal candidate combinations.
+
+    The default fit feeds one ``(endpoint -> top-candidate centroid)`` correspondence
+    per question; when a resolver mis-ranks a terminal object the two correspondences
+    become distance-inconsistent and the rigid fit blows past the gate (meth-F11). Here
+    we search over the product of each question's ranked terminal candidates and keep the
+    lowest-residual rigid fit. Correspondences stay geometry-anchored — every candidate
+    is a real terminal-noun object; only the *pairing* is searched, and the rigid
+    endpoint-separation invariant (distance preserved) is what discriminates.
+
+    Returns ``(frame, residual)`` for the best pairing whose residual is within
+    ``gate_m`` (the caller only adopts a fit that actually re-aligns the scene), or None
+    when fewer than two usable endpoints exist or no pairing clears the gate.
+    """
+    ends: list[np.ndarray] = []
+    cands: list[list[np.ndarray]] = []
+    for traj, cl in zip(trajs, cand_lists):
+        if traj is None or traj.shape[0] == 0 or not cl:
+            continue
+        ends.append(np.asarray(traj, dtype=float)[-1, :2])
+        cands.append(cl)
+    if len(ends) < 2:
+        return None  # a single endpoint is translation-only (already gate-passing)
+
+    src = np.asarray(ends, dtype=float)
+    best: tuple[S.Frame2D, float] | None = None
+    for combo in product(*cands):
+        dst = np.asarray(combo, dtype=float)
+        frame, residual = S.fit_frame(src, dst)
+        if best is None or residual < best[1]:
+            best = (frame, residual)
+    if best is None or best[1] > gate_m:
         return None
-    c = res.candidates_ranked[0].centroid
-    return np.asarray(c, dtype=float).reshape(-1)[:2]
+    return best
+
+
+#: Scenes whose IF frame fit is confirmed UNFITTABLE from the GT data itself (meth-F11),
+#: not from our resolution. The two GT trajectory terminal endpoints are mutually
+#: inconsistent with any rigid sim->object transform: their sim-frame separation cannot
+#: equal the object-frame separation of ANY pairing of the resolved terminal objects, so
+#: the two-point rigid residual has a hard floor above the alignment gate — a
+#: frame-independent contradiction in the challenge trajectory data. Recorded here so the
+#: exclusion reads as a DATA property (documented) rather than a silent friendly-ward drop.
+_DATA_UNFITTABLE_IF_SCENES: dict[str, str] = {
+    "livingroom_3": (
+        "GT q4/q5 terminal endpoints are 1.20 m apart but every pillow x bowl pairing is "
+        ">= 3.27 m apart — a frame-independent distance contradiction (rigid two-point "
+        "residual floor 1.04 m > 1.0 m gate). The q4 trajectory ends in the dining-chair "
+        "corner (1.04 m from a chair, 1.33 m from the nearest pillow), not at any pillow; "
+        "no rigid sim->object transform can map the endpoints onto the terminal objects."
+    ),
+}
 
 
 # --------------------------------------------------------------------------- records
@@ -589,6 +668,7 @@ def score_scene(
     if_texts = questions.get("instruction_following", [])
     if_traj: list[np.ndarray | None] = []
     if_goal: list[np.ndarray | None] = []
+    if_cands: list[list[np.ndarray]] = []
     for i, text in enumerate(if_texts):
         traj_q = _IF_TRAJ_INDEX.get(i)
         traj_arr: np.ndarray | None = None
@@ -597,12 +677,28 @@ def score_scene(
             if cand.exists():
                 traj_arr = S.load_trajectory_ply(cand)
         if_traj.append(traj_arr)
-        if_goal.append(_terminal_goal_centroid(text, idx) if traj_arr is not None else None)
+        cand_list = (
+            _terminal_goal_candidates(text, idx) if traj_arr is not None else []
+        )
+        if_cands.append(cand_list)
+        if_goal.append(cand_list[0] if cand_list else None)
 
     pairs = [
         (t, g) for t, g in zip(if_traj, if_goal) if t is not None and t.shape[0] > 0
     ]
     frame, residual = S.align_scene_trajectories(pairs) if pairs else (None, None)
+
+    # meth-F11 fallback: when the default top-candidate fit fails the alignment gate,
+    # a resolver terminal mis-rank is the usual cause — the correct terminal object is
+    # still in the ranked candidate set. Search candidate pairings for a rigid fit that
+    # clears the gate and adopt it if found. Gate-passing scenes never reach this branch,
+    # so the aligned scenes (and their Frechet diagnostics) are left untouched.
+    if residual is not None and residual > S._ALIGN_RESIDUAL_GATE_M:
+        alt = _fit_if_frame_over_candidates(
+            if_traj, if_cands, gate_m=S._ALIGN_RESIDUAL_GATE_M
+        )
+        if alt is not None:
+            frame, residual = alt
 
     # The GT trajectory's (shared) start, mapped into the object frame, is the robot
     # spawn our planner should depart from — feed it so our path and the GT path start
@@ -691,8 +787,20 @@ def score_scene(
         rec.gt_n_waypoints = int(S.load_trajectory_ply(traj_path).shape[0])
         rec.frame_aligned = residual is None or residual <= S._ALIGN_RESIDUAL_GATE_M
         rec.fit_residual_m = round(residual, 4) if residual is not None else None
+        # meth-F11: a scene that stays unaligned AND is a confirmed GT-data defect carries
+        # the data-confirmed reason on the row, so the exclusion reads as a documented
+        # data property rather than a silent (friendly-ward) drop.
+        data_note = ""
+        if rec.frame_aligned is False and gt.scene_name in _DATA_UNFITTABLE_IF_SCENES:
+            data_note = (
+                "frame fit unaligned — DATA-CONFIRMED unfittable (meth-F11): "
+                + _DATA_UNFITTABLE_IF_SCENES[gt.scene_name]
+            )
         detail = "; ".join(
-            filter(None, [rub.note] + rub.threading_details + rub.avoid_details)
+            filter(
+                None,
+                [rub.note] + rub.threading_details + rub.avoid_details + [data_note],
+            )
         )
         rec.note = detail
         out.append(rec)
@@ -889,6 +997,17 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
     inf_scored = [s for s in inf if s.rubric_score is not None]
     inf_aligned = [s for s in inf if s.frame_aligned]
     unaligned_scenes = sorted({s.scene for s in inf if s.frame_aligned is False})
+    # meth-F11: partition the unaligned set into DATA-confirmed unfittable scenes (the GT
+    # trajectory endpoints cannot be rigidly mapped to any terminal-object pairing — a
+    # documented data defect) vs any residual unexplained gap. With the candidate-search
+    # fallback in place the only unaligned scenes should be data-confirmed; a scene
+    # appearing in ``unaligned_scenes_unexplained`` is a genuine resolution regression.
+    unaligned_data_confirmed = [
+        s for s in unaligned_scenes if s in _DATA_UNFITTABLE_IF_SCENES
+    ]
+    unaligned_unexplained = [
+        s for s in unaligned_scenes if s not in _DATA_UNFITTABLE_IF_SCENES
+    ]
     return {
         "numerical": {
             "n": len(num),
@@ -928,6 +1047,11 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
             "n_aligned": len(inf_aligned),
             "n_unaligned_scenes": len(unaligned_scenes),
             "unaligned_scenes": unaligned_scenes,
+            # meth-F11: exclusions split by cause. ``data_confirmed`` scenes are a
+            # documented GT-data defect (endpoints not rigidly mappable), NOT a
+            # friendly-ward drop; ``unexplained`` should be empty.
+            "unaligned_scenes_data_confirmed": unaligned_data_confirmed,
+            "unaligned_scenes_unexplained": unaligned_unexplained,
             "mean_frechet_m_aligned_diag": _mean([s.frechet_m for s in inf_aligned]),
             "mean_coverage_1m_aligned_diag": _mean([s.coverage_1m for s in inf_aligned]),
         },
