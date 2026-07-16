@@ -1,0 +1,362 @@
+{
+  "provenance": {
+    "source_file": "upstream/CMU-VLN-Challenge-2026/questions/questions.json",
+    "date": "2026-07-17",
+    "method": "hand tally from question text (no parser involvement, by design)",
+    "purpose": "meth-F5: independent leg/avoid counts to detect silently dropped route legs, where evaluation instrument and pipeline share the parser.",
+    "count_rules": {
+      "n_route_legs": "ordered movement clauses (go to X / go near / via / pass by / take the path near / take the path between A and B / then / after that). A 'path between A and B' corridor clause counts as ONE leg. The terminal goal counts as a leg.",
+      "n_avoid": "avoid / do-not-pass / stay-away clauses.",
+      "clauses": "one quoted fragment per counted clause (route legs then avoids); len(clauses) == n_route_legs + n_avoid."
+    }
+  },
+  "census": [
+    {
+      "scene": "arabic_room",
+      "q_index": 0,
+      "question": "Go near the stool under the picture and stop at the small table farthest from the columns.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go near the stool under the picture",
+        "stop at the small table farthest from the columns"
+      ]
+    },
+    {
+      "scene": "arabic_room",
+      "q_index": 1,
+      "question": "First, go to the potted plant furthest from the hookah, then take the path between the two columns, and stop at the tray on the table.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go to the potted plant furthest from the hookah",
+        "take the path between the two columns",
+        "stop at the tray on the table"
+      ]
+    },
+    {
+      "scene": "chinese_room",
+      "q_index": 0,
+      "question": "Go near the potted plant on the table and stop at the painting near the TV.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go near the potted plant on the table",
+        "stop at the painting near the TV"
+      ]
+    },
+    {
+      "scene": "chinese_room",
+      "q_index": 1,
+      "question": "First, go near the tea table with the elephant figurine on it, then stop at the table with the horse figurine on it, avoiding the path between the chair and the folding screen.",
+      "n_route_legs": 2,
+      "n_avoid": 1,
+      "clauses": [
+        "go near the tea table with the elephant figurine on it",
+        "stop at the table with the horse figurine on it",
+        "avoiding the path between the chair and the folding screen"
+      ]
+    },
+    {
+      "scene": "home_building_1",
+      "q_index": 0,
+      "question": "Go to the coffee table with the kettle on it and stop at the dining table near the big picture.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go to the coffee table with the kettle on it",
+        "stop at the dining table near the big picture"
+      ]
+    },
+    {
+      "scene": "home_building_1",
+      "q_index": 1,
+      "question": "First, go to the nightstand with a clock on it, then take the path between the dining table and the picture, and stop at the trash can closest to the refridgerator.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go to the nightstand with a clock on it",
+        "take the path between the dining table and the picture",
+        "stop at the trash can closest to the refridgerator"
+      ]
+    },
+    {
+      "scene": "home_building_2",
+      "q_index": 0,
+      "question": "Go near the magazine on the ottoman, then go to the potted plant on the dressing table.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go near the magazine on the ottoman",
+        "go to the potted plant on the dressing table"
+      ]
+    },
+    {
+      "scene": "home_building_2",
+      "q_index": 1,
+      "question": "Take the path between the sofa and the coffee table and go to the kettle on the dining table, then go to the potted plant between the curtain and the TV.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "Take the path between the sofa and the coffee table",
+        "go to the kettle on the dining table",
+        "go to the potted plant between the curtain and the TV"
+      ],
+      "note": "The trailing 'between the curtain and the TV' disambiguates the potted plant (which of several) rather than naming a corridor to traverse, so it is part of the third goto leg, not a fourth leg."
+    },
+    {
+      "scene": "hotel_room_1",
+      "q_index": 0,
+      "question": "Go to the bedside table closest to the window and stop at the chair closest to the TV.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go to the bedside table closest to the window",
+        "stop at the chair closest to the TV"
+      ]
+    },
+    {
+      "scene": "hotel_room_1",
+      "q_index": 1,
+      "question": "First, go near the bedside table closest to the bench, then take the path between the TV and the bed to the picture closest to the TV.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go near the bedside table closest to the bench",
+        "take the path between the TV and the bed",
+        "to the picture closest to the TV"
+      ]
+    },
+    {
+      "scene": "hotel_room_2",
+      "q_index": 0,
+      "question": "Go between the bench and the bed and stop at the lamp closest to the fireplace.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go between the bench and the bed",
+        "stop at the lamp closest to the fireplace"
+      ]
+    },
+    {
+      "scene": "hotel_room_2",
+      "q_index": 1,
+      "question": "First, go to the picture closest to the door, then take the path between the TV cabinet and the bed, and stop by the curtain closest to the TV.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go to the picture closest to the door",
+        "take the path between the TV cabinet and the bed",
+        "stop by the curtain closest to the TV"
+      ]
+    },
+    {
+      "scene": "japanese_room",
+      "q_index": 0,
+      "question": "Go near the small table with a vase on it and then to the flowers near the jar.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go near the small table with a vase on it",
+        "to the flowers near the jar"
+      ]
+    },
+    {
+      "scene": "japanese_room",
+      "q_index": 1,
+      "question": "Go to the lantern closest to the fan decoration, then take the path near the wardrobe doors to the flowers on the display ledge.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "Go to the lantern closest to the fan decoration",
+        "take the path near the wardrobe doors",
+        "to the flowers on the display ledge"
+      ]
+    },
+    {
+      "scene": "livingroom_1",
+      "q_index": 0,
+      "question": "Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go to the potted plant closest to the pyramid candle holder",
+        "stop at the vase between the TV and the door"
+      ],
+      "note": "'between the TV and the door' disambiguates the vase, not a corridor."
+    },
+    {
+      "scene": "livingroom_1",
+      "q_index": 1,
+      "question": "First, go near the lamp closest to the black chair, then take the path between the sofa and the round tables, and stop at the cabinet with a picture above it.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go near the lamp closest to the black chair",
+        "take the path between the sofa and the round tables",
+        "stop at the cabinet with a picture above it"
+      ]
+    },
+    {
+      "scene": "livingroom_2",
+      "q_index": 0,
+      "question": "Go to the microwave on the kitchen counter and then go to the crystal ball decoration on the shelf near the TV.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go to the microwave on the kitchen counter",
+        "go to the crystal ball decoration on the shelf near the TV"
+      ]
+    },
+    {
+      "scene": "livingroom_2",
+      "q_index": 1,
+      "question": "First, go to the chair near the window, then stop at the soccer ball near the couch, avoiding the path between the TV and the tea table.",
+      "n_route_legs": 2,
+      "n_avoid": 1,
+      "clauses": [
+        "go to the chair near the window",
+        "stop at the soccer ball near the couch",
+        "avoiding the path between the TV and the tea table"
+      ]
+    },
+    {
+      "scene": "livingroom_3",
+      "q_index": 0,
+      "question": "Take the path near the TV and go to the pillow farthest from the lamp.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Take the path near the TV",
+        "go to the pillow farthest from the lamp"
+      ]
+    },
+    {
+      "scene": "livingroom_3",
+      "q_index": 1,
+      "question": "First, go near the stool, then take the path near the cabinet, and stop at the bowl on the table.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go near the stool",
+        "take the path near the cabinet",
+        "stop at the bowl on the table"
+      ]
+    },
+    {
+      "scene": "livingroom_4",
+      "q_index": 0,
+      "question": "Go near the chair closest to the bookcase and stop at the table with the flowers on it.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go near the chair closest to the bookcase",
+        "stop at the table with the flowers on it"
+      ]
+    },
+    {
+      "scene": "livingroom_4",
+      "q_index": 1,
+      "question": "First, go near the fireplace, then go to the window closest to the bookcase, and stop at the chair farthest from the mirror.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go near the fireplace",
+        "go to the window closest to the bookcase",
+        "stop at the chair farthest from the mirror"
+      ]
+    },
+    {
+      "scene": "loft",
+      "q_index": 0,
+      "question": "Go to the cup near the TV remote and avoid the path near the cabinet.",
+      "n_route_legs": 1,
+      "n_avoid": 1,
+      "clauses": [
+        "Go to the cup near the TV remote",
+        "avoid the path near the cabinet"
+      ]
+    },
+    {
+      "scene": "loft",
+      "q_index": 1,
+      "question": "Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "Go near the fireplace",
+        "pass by the stairs",
+        "stop at the sphere decoration on the cabinet"
+      ]
+    },
+    {
+      "scene": "office_1",
+      "q_index": 0,
+      "question": "Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go to the potted plant furthest from the projector screen",
+        "stop at the water cooler near the window"
+      ]
+    },
+    {
+      "scene": "office_1",
+      "q_index": 1,
+      "question": "First, go near the potted plant on the shelf, then take the path between the two tables, and stop at the bench closest to the map wall decal.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go near the potted plant on the shelf",
+        "take the path between the two tables",
+        "stop at the bench closest to the map wall decal"
+      ]
+    },
+    {
+      "scene": "office_2",
+      "q_index": 0,
+      "question": "Go near the potted plant on the cabinet and stop at the window closest to the clock.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go near the potted plant on the cabinet",
+        "stop at the window closest to the clock"
+      ]
+    },
+    {
+      "scene": "office_2",
+      "q_index": 1,
+      "question": "First, go to the trash can near the cabinet, then go to the folder on the cabinet closest to the whiteboard, and finally, to the door near the exit sign.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go to the trash can near the cabinet",
+        "go to the folder on the cabinet closest to the whiteboard",
+        "to the door near the exit sign"
+      ]
+    },
+    {
+      "scene": "studio",
+      "q_index": 0,
+      "question": "Go to the vases on the cabinet below the TV and stop at the guitar near the couch.",
+      "n_route_legs": 2,
+      "n_avoid": 0,
+      "clauses": [
+        "Go to the vases on the cabinet below the TV",
+        "stop at the guitar near the couch"
+      ]
+    },
+    {
+      "scene": "studio",
+      "q_index": 1,
+      "question": "First, go to the vase closest to the easel, then, take the path between the couch and the table and stop at the window closest to the couch.",
+      "n_route_legs": 3,
+      "n_avoid": 0,
+      "clauses": [
+        "go to the vase closest to the easel",
+        "take the path between the couch and the table",
+        "stop at the window closest to the couch"
+      ]
+    }
+  ]
+}
