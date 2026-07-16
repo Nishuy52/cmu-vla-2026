@@ -259,8 +259,8 @@ def test_run_gt_battery_emits_report(tmp_path):
     assert payload["n_questions"] == 5
     assert "loft" in payload["scenes"]
     assert "numerical" in payload["aggregate"]
-    # report mentions the honest circularity caveat
-    assert "Circularity" in md_path.read_text(encoding="utf-8")
+    # report mentions the honest yardstick caveat (TRUE accuracy primary, meth-F4/F6)
+    assert "Yardstick note" in md_path.read_text(encoding="utf-8")
     # provenance stamp is present and names this tool (meth-F7/F8)
     assert payload["provenance"]["tool"] == "gt_battery"
     # IF rows carry the per-leg rubric geometry + outcomes
