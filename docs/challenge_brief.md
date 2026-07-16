@@ -13,7 +13,7 @@
 
 ## The Task
 
-A wheeled robot (mecanum platform) in unknown indoor Unity scenes receives a natural-language question on ROS topic `/challenge_question` (String, republished at 1 Hz) and must respond within **10 minutes per scene** (exploration + answering combined; system relaunches per question — no state carries over). Early finish earns bonus points; overtime is penalised.
+A wheeled robot (mecanum platform) in unknown indoor Unity scenes receives a natural-language question on ROS topic `/challenge_question` (String, republished at 1 Hz) and must respond within **10 minutes per question** (exploration + answering combined, timed from system startup; system relaunches per question — no state carries over). Early finish earns bonus points (tie-break); overtime is penalised. *(Wording corrected 2026-07-14 against the upstream README "Timing" section — "Each question has a total time limit of 10 minutes for exploration and question answering combined"; an earlier revision here said "per scene". The per-question reading, which `architecture.md` §5 already budgets for, is confirmed correct.)*
 
 Three question types:
 

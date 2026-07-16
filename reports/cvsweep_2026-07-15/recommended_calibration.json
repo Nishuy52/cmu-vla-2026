@@ -1,0 +1,75 @@
+{
+  "geometry": {
+    "near_floor": 1.2,
+    "near_scale": 0.6,
+    "next_to_gap": 0.75,
+    "on_min_overlap_frac": 0.5,
+    "on_upper_span_frac": 0.25,
+    "on_top_tol": 0.15,
+    "in_containment_frac": 0.6,
+    "in_vert_slack": 0.1,
+    "above_lateral_infl": 0.5,
+    "under_iom_min": 0.5,
+    "under_tuck_tol": 0.15,
+    "with_feature_pad": 0.3,
+    "avoid_inflate": 0.25,
+    "superlative_margin_frac": 0.25,
+    "size_sep_gap": 1.2
+  },
+  "fusion": {
+    "min_points": 5,
+    "angular_pad": 0.05235987755982989,
+    "depth_bin": 0.25,
+    "max_range": 15.0,
+    "cluster_gap": 0.5
+  },
+  "tracker": {
+    "gate": 0.75,
+    "decay_k": 5
+  },
+  "keyframe": {
+    "every_k": 1,
+    "min_translation": 0.5,
+    "min_rotation": 0.5235987755982988
+  },
+  "nav": {
+    "cell_m": 0.1,
+    "free_max": 0.15,
+    "observe_radius_m": 8.0,
+    "grow_pad_cells": 8,
+    "vehicle_radius_m": 0.4,
+    "overhead_soft_cost_mult": 4.0,
+    "min_cluster_size": 5,
+    "w_size": 1.0,
+    "w_dist": 0.5,
+    "w_affinity": 4.0,
+    "unknown_cost_mult": 3.0,
+    "pinch_disc_m": 3.0,
+    "pinch_corridor_half_w_m": 0.5,
+    "sweep_s": 60.0,
+    "sweep_side_m": 1.0,
+    "min_frontier_score": 0.0,
+    "coverage_saturated_free_frac": 0.0,
+    "lookahead_m": 2.5,
+    "reach_m": 0.8,
+    "stall_move_m": 0.3,
+    "stall_window_s": 10.0
+  },
+  "budget": {
+    "question_budget_s": 600.0,
+    "forced_assembly_s": 510.0,
+    "watchdog_floor_s": 570.0,
+    "terrain_free_max": 0.15,
+    "orientation_s": 60.0,
+    "ledger_reserve_s": 45.0,
+    "explore_budget_numerical_s": 210.0,
+    "explore_budget_object_reference_s": 240.0,
+    "explore_budget_instruction_following_s": 270.0,
+    "cap_parse": 2,
+    "cap_miss_recovery": 1,
+    "cap_anchor_confirm": 3,
+    "cap_verification": 1,
+    "cap_frontier_select": 1,
+    "cap_self_consistency": 2
+  }
+}

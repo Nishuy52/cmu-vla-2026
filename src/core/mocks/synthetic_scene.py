@@ -22,6 +22,15 @@ FLOOR_SPACING: float = 0.1  # m between terrain samples
 WALL_HEIGHT: float = 2.4  # m; intensity stamped for wall/border cells
 DEFAULT_OBJ_HEIGHT: float = 0.5  # m; footprint intensity when box extent z unknown
 
+#: Base-height (m) at or above which an object's underside is treated as an OVERHANG
+#: rather than a floor obstacle in the terrain mirror. Mirrors the real terrain stack:
+#: terrainAnalysis.cpp filters /registered_scan to a thin slab (~0.2 m above the
+#: vehicle) so tabletop/shelf/wall-mounted objects (a plant on a cabinet, a vase on a
+#: shelf) are ABSENT from /terrain_map — the floor under/beside them reads FREE. Kept in
+#: step with occupancy.OverheadConfig.overhead_min so mirror terrain and the overhead
+#: layer agree on where "floor obstacle" ends and "drive-beside overhang" begins.
+TERRAIN_SLAB_MAX_Z: float = 0.25
+
 
 @dataclass(frozen=True)
 class Room:
@@ -54,17 +63,22 @@ class GTObject:
     sx: float
     sy: float
     sz: float
+    #: base height (z of the object's underside above the floor). 0.0 = floor-mounted
+    #: (the default, so pre-existing callers are unchanged). A tabletop object (a plant
+    #: on a cabinet, a vase on a shelf) carries its real base, so the terrain mirror can
+    #: tell floor obstacles from overhangs the vehicle drives beside/under (IF-F2/H13).
+    cz: float = 0.0
 
     @property
     def aabb_min(self) -> np.ndarray:
         return np.array(
-            [self.cx - self.sx / 2, self.cy - self.sy / 2, 0.0], dtype=float
+            [self.cx - self.sx / 2, self.cy - self.sy / 2, self.cz], dtype=float
         )
 
     @property
     def aabb_max(self) -> np.ndarray:
         return np.array(
-            [self.cx + self.sx / 2, self.cy + self.sy / 2, self.sz], dtype=float
+            [self.cx + self.sx / 2, self.cy + self.sy / 2, self.cz + self.sz], dtype=float
         )
 
     def footprint_contains(self, x: float, y: float) -> bool:
@@ -121,13 +135,15 @@ class SyntheticScene:
         sx: float = 0.5,
         sy: float = 0.5,
         sz: float = DEFAULT_OBJ_HEIGHT,
+        cz: float = 0.0,
     ) -> GTObject:
         """Place a labeled box centred at (x, y) with full extents (sx, sy, sz).
 
-        Returns the created :class:`GTObject` and records it on the scene.
+        ``cz`` is the base height (z of the underside above the floor); 0.0 keeps the
+        legacy floor-mounted behaviour. Returns the created :class:`GTObject`.
         """
         obj = GTObject(label=label.strip().lower(), cx=float(x), cy=float(y),
-                       sx=float(sx), sy=float(sy), sz=float(sz))
+                       sx=float(sx), sy=float(sy), sz=float(sz), cz=float(cz))
         self.objects.append(obj)
         return obj
 
@@ -266,6 +282,12 @@ class SyntheticScene:
                 else:
                     intensity = 0.0
                     for obj in self.objects:
+                        # An elevated object (base above the terrain slab) is an overhang,
+                        # not a floor obstacle: the terrain stack filters it out, so the
+                        # cell under/beside it reads FREE. Its surface points still feed the
+                        # overhead layer (via mock lidar) so the planner soft-avoids it.
+                        if obj.cz >= TERRAIN_SLAB_MAX_Z:
+                            continue
                         if obj.footprint_contains(x, y):
                             intensity = max(intensity, obj.sz)
                 rows.append((x, y, 0.0, intensity))

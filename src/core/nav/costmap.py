@@ -152,6 +152,14 @@ class Costmap:
         """True if the cell is hard-blocked (obstacle, inflation, or capsule)."""
         if not self.grid.in_bounds(row, col):
             return True
+        # ``base_blocked`` is snapshotted at construction; the underlying grid can GROW
+        # afterwards (terrain integration), so grid.in_bounds may admit a cell beyond the
+        # snapshot. Treat any cell outside the snapshot extent as blocked (unmapped at
+        # build time) rather than IndexError. Cheap guard, covers every blocked() caller
+        # incl. the reachable-mask flood.
+        bh, bw = self.base_blocked.shape
+        if not (0 <= row < bh and 0 <= col < bw):
+            return True
         return bool(self.base_blocked[row, col] or self.capsule_blocked[row, col])
 
     def passable(self, row: int, col: int) -> bool:
@@ -207,6 +215,39 @@ class Costmap:
         return cm
 
     # ------------------------------------------------------------- recovery
+    def reachable_mask(self, start_xy: tuple[float, float]) -> np.ndarray | None:
+        """Boolean (h, w) mask of cells reachable from ``start`` over passable cells.
+
+        Memoised per start CELL for this costmap instance: a grounding pass projects
+        many leg goals against the same costmap+pose, so re-flooding the whole grid per
+        call is an O(cells × legs × ticks) blow-up (the instruction head calls this per
+        leg per tick). The costmap is rebuilt whenever the map changes, which discards
+        the cache, so it can never go stale. Returns None if the map is fully impassable.
+        """
+        sr, sc = self.grid.world_to_cell(*start_xy)
+        h, w = self.grid.shape
+        if not (0 <= sr < h and 0 <= sc < w) or self.blocked(sr, sc):
+            snapped = self._nearest_passable_cell(sr, sc)
+            if snapped[0] is None:
+                return None
+            sr, sc = snapped
+        key = (sr, sc)
+        cached = getattr(self, "_reach_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        seen = np.zeros((h, w), dtype=bool)
+        seen[sr, sc] = True
+        dq = deque([(sr, sc)])
+        while dq:
+            r, c = dq.popleft()
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < h and 0 <= nc < w and not seen[nr, nc] and self.passable(nr, nc):
+                    seen[nr, nc] = True
+                    dq.append((nr, nc))
+        self._reach_cache = (key, seen)
+        return seen
+
     def nearest_reachable_point(
         self, goal_xy: tuple[float, float], start_xy: tuple[float, float]
     ) -> tuple[float, float]:
@@ -216,34 +257,14 @@ class Costmap:
         place (adjudication row 4): capsules are NEVER relaxed here. Returns the
         world-frame centre of the reachable cell closest (Euclidean) to the goal.
         """
-        h, w = self.grid.shape
-        sr, sc = self.grid.world_to_cell(*start_xy)
-        # Snap start into a passable cell if needed.
-        if not (0 <= sr < h and 0 <= sc < w) or self.blocked(sr, sc):
-            sr, sc = self._nearest_passable_cell(sr, sc)
-            if sr is None:
-                return start_xy
-
-        seen = np.zeros((h, w), dtype=bool)
-        seen[sr, sc] = True
-        dq = deque([(sr, sc)])
-        reachable: list[tuple[int, int]] = [(sr, sc)]
-        while dq:
-            r, c = dq.popleft()
-            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)):
-                nr, nc = r + dr, c + dc
-                if 0 <= nr < h and 0 <= nc < w and not seen[nr, nc] and self.passable(nr, nc):
-                    seen[nr, nc] = True
-                    dq.append((nr, nc))
-                    reachable.append((nr, nc))
-
-        gx, gy = goal_xy
-        best = min(
-            reachable,
-            key=lambda rc: (self.grid.cell_to_world(*rc)[0] - gx) ** 2
-            + (self.grid.cell_to_world(*rc)[1] - gy) ** 2,
-        )
-        return self.grid.cell_to_world(*best)
+        seen = self.reachable_mask(start_xy)
+        if seen is None:
+            return start_xy
+        reachable = np.argwhere(seen)
+        gr, gc = self.grid.world_to_cell(*goal_xy)
+        d2 = (reachable[:, 0] - gr) ** 2 + (reachable[:, 1] - gc) ** 2
+        br, bc = reachable[int(np.argmin(d2))]
+        return self.grid.cell_to_world(int(br), int(bc))
 
     def _nearest_passable_cell(self, r0: int, c0: int):
         h, w = self.grid.shape

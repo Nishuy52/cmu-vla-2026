@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from core.runner import cvsweep as CV
+from core.runner import gt_battery as GB
 from core.runner.cvsweep import (
     SceneEvaluator,
     SceneQScores,
@@ -301,6 +302,103 @@ def test_default_sweep_spec_has_no_counting_dimension():
     spec = default_sweep_spec()
     assert "counting.min_obs" not in spec.params
     assert not any(k.split(".")[0] == "counting" for k in spec.params)
+
+
+# --------------------------------------------------------------------------- IF instrument endogeneity
+
+
+@requires_full_unity
+@pytest.mark.slow
+def test_if_scoring_uses_frozen_rubric_geometry_across_configs():
+    """Instrument-endogeneity regression: score_scene's IF path must resolve the rubric's
+    REFERENCE geometry (leg goals, corridor gates, avoid capsules) and the alignment
+    terminal-goal at FIXED default thresholds — identical across candidate configs — even
+    though the DRIVEN trajectory (the subject under test) is threaded with the swept
+    ``thresholds`` and may differ. If a swept ``thresholds`` value reached the rubric
+    geometry, a candidate config could shrink the rubric denominator (de-resolve legs/
+    gates) or de-align a zero-scoring scene out of ``if_available`` — scoring higher
+    without driving better.
+    """
+    import numpy as np
+
+    from core.geometry.toolbox import Thresholds
+    from core.groundtruth.loader import load_scene
+    from core.perception.scene_index import BasicSceneIndex
+
+    def _rubric_geom_plain(geom):
+        """(leg_goals, corridor_gates, avoid_capsules) -> plain, array-free, comparable
+        tuple (Capsule/Gate hold numpy arrays, whose == is elementwise, not a bool)."""
+        leg_goals, corridor_gates, avoid_capsules = geom
+        legs = [(kind, tuple(round(v, 9) for v in xy)) for kind, xy in leg_goals]
+        gates = [
+            (i, tuple(np.asarray(g.a).round(9).tolist()), tuple(np.asarray(g.b).round(9).tolist()))
+            for i, g in corridor_gates
+        ]
+        avoids = [
+            (
+                tuple(np.asarray(c.a).round(9).tolist()),
+                tuple(np.asarray(c.b).round(9).tolist()),
+                round(float(c.radius), 9),
+            )
+            for c in avoid_capsules
+        ]
+        return legs, gates, avoids
+
+    scene = "loft"
+    folder = FULL_UNITY_ROOT / scene
+    gt = load_scene(folder, scene_name=scene)
+    idx = BasicSceneIndex(gt.instances)
+
+    qbs = CV._load_questions(str(QUESTIONS_JSON), [scene])
+    if_texts = qbs[scene]["instruction_following"]
+    assert if_texts, "expected loft to carry IF questions for this regression test"
+
+    # Two starkly different candidate configs from the sweep grid's extremes.
+    cfg_a = Thresholds(near_floor=0.8, near_scale=0.4, on_min_overlap_frac=0.30)
+    cfg_b = Thresholds(near_floor=2.0, near_scale=0.9, on_min_overlap_frac=0.60)
+
+    for text in if_texts:
+        # The rubric geometry cvsweep's IF scoring actually consumes (via GB's
+        # fixed-default helper) must be threshold-independent by construction: calling
+        # it directly never even accepts a thresholds arg, so it cannot vary.
+        geom_a = GB._if_rubric_geometry(text, gt, idx)
+        geom_b = GB._if_rubric_geometry(text, gt, idx)
+        assert _rubric_geom_plain(geom_a) == _rubric_geom_plain(geom_b)
+
+        goal_a = GB._terminal_goal_centroid(text, idx)
+        goal_b = GB._terminal_goal_centroid(text, idx)
+        if goal_a is None or goal_b is None:
+            assert goal_a is goal_b
+        else:
+            assert goal_a.tolist() == goal_b.tolist()
+
+    # And cvsweep's _score_if must delegate to exactly these frozen functions, not a
+    # threshold-aware near-duplicate — pin the delegation itself so a future edit can't
+    # silently reintroduce a swept-thresholds copy.
+    import inspect
+
+    src = inspect.getsource(CV._score_if)
+    assert "GB._if_rubric_geometry(text, gt, idx)" in src
+    assert "GB._terminal_goal_centroid(text, idx)" in src
+    assert "_if_rubric_geometry(text, gt, idx, thresholds)" not in src
+    assert "_terminal_goal_centroid(text, idx, thresholds)" not in src
+
+    # Sanity: score_scene runs end-to-end under both configs without raising, and the
+    # IF availability (how many questions counted, i.e. the rubric denominator) is
+    # identical across configs even though the driven trajectories differ.
+    referential = GB._load_referential(folder, scene)
+    scene_graph = GB._load_scene_graph(folder, scene)
+
+    res_a = CV.score_scene(
+        gt, qbs[scene], referential=referential, scene_graph=scene_graph,
+        questions_dir=str(QUESTIONS_DIR), thresholds=cfg_a,
+    )
+    res_b = CV.score_scene(
+        gt, qbs[scene], referential=referential, scene_graph=scene_graph,
+        questions_dir=str(QUESTIONS_DIR), thresholds=cfg_b,
+    )
+    assert res_a.if_available == pytest.approx(res_b.if_available)
+    assert res_a.if_excluded == res_b.if_excluded
 
 
 # --------------------------------------------------------------------------- vocab bridge

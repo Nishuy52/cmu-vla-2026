@@ -120,7 +120,15 @@ def singularize(word: str) -> str:
         return word
     if word.endswith("ies") and len(word) > 4:
         return word[:-3] + "y"
-    if word.endswith("es") and word[:-2].endswith(("s", "x", "z", "ch", "sh")):
+    # "-es" plural of a sibilant stem (box->boxes, church->churches, glass->glasses).
+    # But a stem already ending in silent "e" also pluralises with "-es" through a
+    # bare "s" ("vase"->"vases", "house"->"houses", "nurse"->"nurses"): stripping "es"
+    # there yields a bogus "vas"/"hous"/"nurs". Only strip "-es" when the stem does NOT
+    # look like an "e"-final word (i.e. dropping just the "s" would leave a sibilant
+    # cluster, not a clean "-se"). Concretely: keep the "-es" strip for x/z/ch/sh and
+    # doubled-s ("glasses"->"glass"), but for a single "-ses" prefer dropping just "s"
+    # ("vases"->"vase") — the false-strip that dropped studio's "vases" leg (T11 sig-3).
+    if word.endswith("es") and word[:-2].endswith(("x", "z", "ch", "sh", "ss")):
         return word[:-2]
     if word.endswith("s") and not word.endswith("ss"):
         return word[:-1]

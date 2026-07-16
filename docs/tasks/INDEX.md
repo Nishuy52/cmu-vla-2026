@@ -36,3 +36,7 @@
   adjudication) run as a parallel frontier-agent batch in the
   closing Fable window; adjudicated into
   docs/redteam/hardening_backlog.md.
+- **T11** if-leg-threading — diagnose + fix IF intermediate-leg
+  threading (rubric flat at 0.061; routes reach terminals without
+  passing within 0.8 m of intermediate leg goals); gates the
+  HELD CV sweep.

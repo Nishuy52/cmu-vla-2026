@@ -1,0 +1,139 @@
+{
+  "date": "2026-07-15",
+  "n_samples": 60,
+  "seed": 0,
+  "scenes": [
+    "arabic_room",
+    "chinese_room",
+    "home_building_1",
+    "home_building_2",
+    "hotel_room_1",
+    "hotel_room_2",
+    "japanese_room",
+    "livingroom_1",
+    "livingroom_2",
+    "livingroom_3",
+    "livingroom_4",
+    "loft",
+    "office_1",
+    "office_2",
+    "studio"
+  ],
+  "spec_keys": [
+    "geometry.above_lateral_infl",
+    "geometry.in_containment_frac",
+    "geometry.near_floor",
+    "geometry.near_scale",
+    "geometry.next_to_gap",
+    "geometry.on_min_overlap_frac",
+    "geometry.on_top_tol",
+    "geometry.on_upper_span_frac"
+  ],
+  "mean_holdout": 0.229367,
+  "std_holdout": 0.03618,
+  "mean_train": 0.219375,
+  "generalization_gap": -0.009992,
+  "cache_hits": 2760,
+  "cache_misses": 915,
+  "disk_hits": 0,
+  "folds": [
+    {
+      "fold": 0,
+      "holdout": [
+        "chinese_room",
+        "livingroom_4",
+        "livingroom_3"
+      ],
+      "train_score": 0.210526,
+      "holdout_score": 0.294118,
+      "best_overrides": {},
+      "best_config_hash": "bf21a9e8fbc5"
+    },
+    {
+      "fold": 1,
+      "holdout": [
+        "hotel_room_2",
+        "loft",
+        "home_building_1"
+      ],
+      "train_score": 0.225806,
+      "holdout_score": 0.2,
+      "best_overrides": {},
+      "best_config_hash": "bf21a9e8fbc5"
+    },
+    {
+      "fold": 2,
+      "holdout": [
+        "home_building_2",
+        "livingroom_1",
+        "livingroom_2"
+      ],
+      "train_score": 0.214286,
+      "holdout_score": 0.241379,
+      "best_overrides": {},
+      "best_config_hash": "bf21a9e8fbc5"
+    },
+    {
+      "fold": 3,
+      "holdout": [
+        "hotel_room_1",
+        "arabic_room",
+        "studio"
+      ],
+      "train_score": 0.226562,
+      "holdout_score": 0.195122,
+      "best_overrides": {},
+      "best_config_hash": "bf21a9e8fbc5"
+    },
+    {
+      "fold": 4,
+      "holdout": [
+        "office_1",
+        "japanese_room",
+        "office_2"
+      ],
+      "train_score": 0.219697,
+      "holdout_score": 0.216216,
+      "best_overrides": {},
+      "best_config_hash": "bf21a9e8fbc5"
+    }
+  ],
+  "stability": {
+    "geometry.above_lateral_infl": {
+      "0.5": 5
+    },
+    "geometry.in_containment_frac": {
+      "0.6": 5
+    },
+    "geometry.near_floor": {
+      "1.2": 5
+    },
+    "geometry.near_scale": {
+      "0.6": 5
+    },
+    "geometry.next_to_gap": {
+      "0.75": 5
+    },
+    "geometry.on_min_overlap_frac": {
+      "0.5": 5
+    },
+    "geometry.on_top_tol": {
+      "0.15": 5
+    },
+    "geometry.on_upper_span_frac": {
+      "0.25": 5
+    }
+  },
+  "recommendation": {
+    "geometry.above_lateral_infl": 0.5,
+    "geometry.in_containment_frac": 0.6,
+    "geometry.near_floor": 1.2,
+    "geometry.near_scale": 0.6,
+    "geometry.next_to_gap": 0.75,
+    "geometry.on_min_overlap_frac": 0.5,
+    "geometry.on_top_tol": 0.15,
+    "geometry.on_upper_span_frac": 0.25
+  },
+  "recommended_overrides": {},
+  "recommended_diff_vs_default": []
+}

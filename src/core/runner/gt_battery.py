@@ -90,7 +90,12 @@ def _synthetic_from_gt(gt: GTScene, pad: float = 1.5) -> SyntheticScene:
         sx = float(max(rec.aabb_max[0] - rec.aabb_min[0], 0.05))
         sy = float(max(rec.aabb_max[1] - rec.aabb_min[1], 0.05))
         sz = float(max(rec.aabb_max[2] - rec.aabb_min[2], 0.05))
-        sc.place_box(rec.label, cx, cy, sx, sy, sz)
+        # Carry the true base height so the terrain mirror can distinguish floor
+        # obstacles from tabletop/wall-mounted overhangs (a plant ON a cabinet has
+        # base ~0.83 m; the floor beside it is drivable). Without this every AABB was
+        # stamped floor-to-top, sealing floor near most leg anchors (T11 sig-1/2).
+        cz = float(rec.aabb_min[2])
+        sc.place_box(rec.label, cx, cy, sx, sy, sz, cz=cz)
     return sc
 
 
@@ -160,6 +165,12 @@ def _drive_if_path(
 #: waypoint-snapping (those are Ubuntu-sim concerns).
 _DRIVE_STEP_M: float = 0.25
 _DRIVE_MAX_TICKS: int = 4000  # hard cap so a stuck follower can't loop forever
+#: Net-progress stall guard for the driven-sim: if the vehicle moves less than
+#: ``_DRIVE_STALL_EPS_M`` over ``_DRIVE_STALL_TICKS`` consecutive steps it is wedged and
+#: the drive ends (score what was driven). Sized so a genuinely slow-but-moving vehicle
+#: (>= one step every ~40 ticks) is never cut, but a true wedge stops promptly.
+_DRIVE_STALL_EPS_M: float = 0.05
+_DRIVE_STALL_TICKS: int = 40
 
 #: Max number of full ``head.advance`` re-ticks DURING the drive (each re-integrates
 #: terrain + re-grounds + can re-plan, ~0.5 s, so it must be bounded). The head is re-ticked
@@ -270,6 +281,13 @@ def _drive_if_trajectory(
     last_term = (float(follower.path[-1][0]), float(follower.path[-1][1]))
     n_legs = len(head._legs) if head._legs else len(plan.route)
     head_reticks_left = _DRIVE_HEAD_RETICK_BUDGET
+    # Stall guard: if the vehicle makes no net progress over a window of steps it is wedged
+    # against an obstacle (the crumb sits across a corner the straight kinematic step can't
+    # round) — driving on cannot help, so stop and score the trajectory so far instead of
+    # padding it to the watchdog length. Without this a wedge produced watchdog-length
+    # (poses=4002) rows that only inflated runtime, never arrival.
+    stall_ref = pose
+    stall_ticks = 0
 
     for _ in range(_DRIVE_MAX_TICKS):
         # Route still growing? Re-tick the head (moving the vehicle first) so re-grounding,
@@ -307,6 +325,17 @@ def _drive_if_trajectory(
             pose = (pose[0] + _DRIVE_STEP_M * dx / d, pose[1] + _DRIVE_STEP_M * dy / d)
         poses.append(pose)
         t += 1.0
+
+        # Net-progress stall guard (see stall_ref note above).
+        if ((pose[0] - stall_ref[0]) ** 2 + (pose[1] - stall_ref[1]) ** 2) > (
+            _DRIVE_STALL_EPS_M**2
+        ):
+            stall_ref = pose
+            stall_ticks = 0
+        else:
+            stall_ticks += 1
+            if stall_ticks >= _DRIVE_STALL_TICKS:
+                break
 
     # Ensure the planned terminal vertex is represented (the follower returns None once the
     # progress index passes the last crumb, which can be a step short of the exact vertex
@@ -609,6 +638,12 @@ def score_scene(
         rec.n_threading_violations = rub.n_threading_violations
         rec.n_avoid_violations = rub.n_avoid_violations
         rec.driven_n_poses = rub.driven_n_poses
+        # our_n_waypoints mirrors the driven pose count for the IF rubric path (the
+        # trajectory we scored). It stayed None after the wave rebuilt IF scoring onto
+        # the rubric proxy, which broke test_score_scene_if_produces_two_numbers — a
+        # pre-existing gate failure independent of T11; set it so the diagnostic pair
+        # (our vs GT waypoint count) is populated again.
+        rec.our_n_waypoints = rub.driven_n_poses
         # secondary diagnostics (frame alignment + planned-path frechet/coverage)
         rec.frechet_m = rub.frechet_m
         rec.coverage_1m = round(rub.coverage_1m, 4) if rub.coverage_1m is not None else None
