@@ -518,6 +518,7 @@ class ObjectRefScore:
     gt_target_id: int | None
     target_source: str  # "referential" | "unique_in_scene" | "ambiguous" | "none"
     match_method: str = "none"  # "exact" | "fuzzy" | "relation" | "unique" | "none"
+    our_target_id: int | None = None  # instance id of our top resolver pick, if any
     note: str = ""
 
 
@@ -668,11 +669,13 @@ def score_object_reference(
     """
     plan = parse_regex(text)
     our_marker: MarkerBox | None = None
+    our_target_id: int | None = None
     unique_target_id: int | None = None
     if plan.target is not None:
         res = T.resolve(plan.target, index, thresholds)
         if res.candidates_ranked:
             our_marker = res.candidates_ranked[0].to_marker()
+            our_target_id = res.candidates_ranked[0].instance_id
         # Category-level uniqueness: if the scene has exactly ONE instance of the
         # target noun, no disambiguation is possible or needed — that instance is the
         # ground-truth target unambiguously (a defensible GT independent of the
@@ -690,14 +693,18 @@ def score_object_reference(
     if our_marker is None:
         return ObjectRefScore(
             iou=0.0, our_marker=None, gt_target_id=gt_id, target_source=source,
-            match_method=method, note="our resolver returned no candidate",
+            match_method=method, our_target_id=our_target_id,
+            note="our resolver returned no candidate",
         )
 
     if gt_id is not None and gt_id in by_id:
         gt = by_id[gt_id]
         iou = aabb_iou_3d(our_marker, gt.aabb_min, gt.aabb_max)
         note = "" if method in ("exact", "unique") else f"target matched via {method}"
-        return ObjectRefScore(iou, our_marker, gt_id, source, method, note)
+        return ObjectRefScore(
+            iou, our_marker, gt_id, source, method,
+            our_target_id=our_target_id, note=note,
+        )
 
     # No trustworthy GT target: report self-IoU (1.0) but flag it clearly.
     return ObjectRefScore(
@@ -706,6 +713,7 @@ def score_object_reference(
         gt_target_id=None,
         target_source="ambiguous" if source != "none" else "none",
         match_method="none",
+        our_target_id=our_target_id,
         note="no GT target matched; IoU undefined (flagged, not guessed)",
     )
 

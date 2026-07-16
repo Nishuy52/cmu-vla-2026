@@ -148,6 +148,80 @@ def test_score_scene_numerical_has_real_count():
 
 
 @requires_loft
+def test_numerical_true_answer_from_key():
+    """The true numerical yardstick anchors loft's key answer (2) under the guard."""
+    gt = load_scene(LOFT_DIR)
+    with open(QUESTIONS_JSON, encoding="utf-8") as fh:
+        data = json.load(fh)
+    entry = next(e for e in data if e["scene"] == "loft")
+    answers = json.loads(Path(GB.DEFAULT_ANSWERS).read_text(encoding="utf-8"))
+    scores = GB.score_scene(
+        gt, entry["questions"], questions_dir=QUESTIONS_DIR, answers=answers,
+        drive_if=False,
+    )
+    num = next(s for s in scores if s.qtype == QType.NUMERICAL.value)
+    assert num.gt_answer_true == 2
+    assert num.true_source == "questions_pdf_text"
+    assert num.true_match == (num.our_count == 2)
+
+
+@requires_loft
+def test_numerical_true_answer_mismatch_guard():
+    """A key whose question text doesn't match is refused (null + note), never mis-anchored."""
+    gt = load_scene(LOFT_DIR)
+    with open(QUESTIONS_JSON, encoding="utf-8") as fh:
+        data = json.load(fh)
+    entry = next(e for e in data if e["scene"] == "loft")
+    tampered = {"scenes": {"loft": {"question_raw": "How many zebras stand here?", "answer": 2}}}
+    scores = GB.score_scene(
+        gt, entry["questions"], questions_dir=QUESTIONS_DIR, answers=tampered,
+        drive_if=False,
+    )
+    num = next(s for s in scores if s.qtype == QType.NUMERICAL.value)
+    assert num.gt_answer_true is None
+    assert num.true_match is None
+    assert num.true_source == ""
+    assert "answer-key question mismatch" in num.note
+
+
+def test_aggregate_true_accuracy_math():
+    """true_accuracy is the mean of true_match over keyed rows; keyless rows excluded."""
+    from core.runner.gt_battery import GTQuestionScore, aggregate
+
+    rows = [
+        GTQuestionScore(scene="a", qtype=QType.NUMERICAL.value, question="q",
+                        our_count=2, gt_answer_true=2, true_match=True,
+                        true_source="questions_pdf_text"),
+        GTQuestionScore(scene="b", qtype=QType.NUMERICAL.value, question="q",
+                        our_count=2, gt_answer_true=2, true_match=True,
+                        true_source="questions_pdf_text"),
+        GTQuestionScore(scene="c", qtype=QType.NUMERICAL.value, question="q",
+                        our_count=1, gt_answer_true=3, true_match=False,
+                        true_source="questions_pdf_text"),
+        GTQuestionScore(scene="d", qtype=QType.NUMERICAL.value, question="q",
+                        our_count=5),  # keyless: excluded from true_accuracy
+    ]
+    agg = aggregate(rows)["numerical"]
+    assert agg["n_with_true_answer"] == 3
+    assert agg["true_accuracy"] == 0.6667
+    # determinism rate is renamed and retained; the old name is gone
+    assert "pipeline_determinism_rate" in agg
+    assert "exact_match_rate_pipeline" not in agg
+
+
+def test_aggregate_true_accuracy_none_without_key():
+    """No keyed rows -> true_accuracy None, n_with_true_answer 0 (topline reads n/a)."""
+    from core.runner.gt_battery import GTQuestionScore, aggregate
+
+    rows = [
+        GTQuestionScore(scene="a", qtype=QType.NUMERICAL.value, question="q", our_count=2),
+    ]
+    agg = aggregate(rows)["numerical"]
+    assert agg["n_with_true_answer"] == 0
+    assert agg["true_accuracy"] is None
+
+
+@requires_loft
 @pytest.mark.slow
 def test_score_scene_if_produces_two_numbers():
     gt = load_scene(LOFT_DIR)

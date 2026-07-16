@@ -51,6 +51,10 @@ DEFAULT_QUESTIONS = (
 )
 DEFAULT_QUESTIONS_ROOT = DEFAULT_QUESTIONS.parent
 DEFAULT_OUT_ROOT = _SRC.parent / "reports"
+#: True numerical answer key (arch-F3): the human answers extracted from each scene's
+#: questions.pdf text layer — the PRIMARY numerical yardstick, replacing the
+#: pipeline-self-consistency proxy. Absent file -> battery still runs, true fields null.
+DEFAULT_ANSWERS = _SRC.parent / "docs" / "gt_answers_numerical.json"
 
 # The instruction-following trajectory files sit at questions/<scene>/trajectory_q{4,5}.ply.
 # questions.json order is 1 numerical, 2 object_reference, 2 instruction_following, so the
@@ -481,9 +485,16 @@ class GTQuestionScore:
     scenegraph_source: str = ""
     annotated_targets_of_class: int | None = None
     csv_instances_of_class: int | None = None
+    #: TRUE numerical yardstick (arch-F3): the human answer from questions.pdf, whether
+    #: our count matches it, and the source tag. ``gt_answer_true``/``true_match`` stay
+    #: None when no answer key is present or the key's question text fails the guard.
+    gt_answer_true: int | None = None
+    true_match: bool | None = None
+    true_source: str = ""  # "questions_pdf_text" on a guarded match, else ""
     # object_reference
     iou: float | None = None
     gt_target_id: int | None = None
+    our_target_id: int | None = None  # instance id our resolver picked (instance-match)
     target_source: str = ""
     match_method: str = ""
     # instruction_following — HEADLINE: rubric proxy over the DRIVEN trajectory (IF-F2)
@@ -520,6 +531,7 @@ def score_scene(
     referential: dict | None = None,
     scene_graph: dict | None = None,
     questions_dir: os.PathLike | str | None = None,
+    answers: dict | None = None,
     drive_if: bool = True,
     no_spawn_hint: bool = False,
 ) -> list[GTQuestionScore]:
@@ -540,6 +552,10 @@ def score_scene(
 
     for text in questions.get("numerical", []):
         ns = S.score_numerical(text, idx, referential=referential, scene_graph=scene_graph)
+        gt_true, true_match, true_source, key_note = _true_numerical(
+            answers, gt.scene_name, text, ns.our_count
+        )
+        note = "; ".join(filter(None, [ns.note, key_note]))
         out.append(
             GTQuestionScore(
                 scene=gt.scene_name, qtype=QType.NUMERICAL.value, question=text,
@@ -550,7 +566,8 @@ def score_scene(
                 scenegraph_source=ns.scenegraph_source,
                 annotated_targets_of_class=ns.annotated_targets_of_class,
                 csv_instances_of_class=ns.csv_instances_of_class,
-                note=ns.note,
+                gt_answer_true=gt_true, true_match=true_match, true_source=true_source,
+                note=note,
             )
         )
 
@@ -560,7 +577,8 @@ def score_scene(
             GTQuestionScore(
                 scene=gt.scene_name, qtype=QType.OBJECT_REFERENCE.value, question=text,
                 iou=(None if ors.iou != ors.iou else round(ors.iou, 4)),
-                gt_target_id=ors.gt_target_id, target_source=ors.target_source,
+                gt_target_id=ors.gt_target_id, our_target_id=ors.our_target_id,
+                target_source=ors.target_source,
                 match_method=ors.match_method, note=ors.note,
             )
         )
@@ -703,6 +721,63 @@ def _find_scene_folder(unity_root: Path, scene_name: str) -> Path | None:
     return None
 
 
+def _load_answers(answers_path: os.PathLike | str | None) -> dict | None:
+    """Load the true numerical answer key (arch-F3); return None when absent/unreadable.
+
+    A missing key file is a soft condition — the battery still runs and every true
+    field stays null — so we swallow read/parse errors rather than abort.
+    """
+    if answers_path is None:
+        return None
+    p = Path(answers_path)
+    if not p.exists():
+        return None
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _squash_ws(s: str) -> str:
+    """Whitespace-stripped, casefolded form for guard comparison.
+
+    The answer-key ``question_raw`` lost its spaces during PDF text extraction, so the
+    guard compares question text with ALL whitespace removed and case folded.
+    """
+    return "".join(str(s).split()).casefold()
+
+
+def _true_numerical(
+    answers: dict | None,
+    scene_name: str,
+    question_text: str,
+    our_count: int | None,
+) -> tuple[int | None, bool | None, str, str]:
+    """Resolve the true numerical answer for one question against the answer key.
+
+    Returns ``(gt_answer_true, true_match, true_source, note)``. Matching is by scene
+    (exactly one numerical question per scene) and then GUARDED: the key's
+    ``question_raw`` must equal the battery question text under
+    :func:`_squash_ws`. A mismatch never mis-anchors — it returns nulls plus the note
+    ``"answer-key question mismatch"``. A scene absent from the key returns nulls with
+    no note (soft miss); no key at all returns nulls with no note.
+    """
+    if not answers:
+        return None, None, "", ""
+    entry = (answers.get("scenes") or {}).get(scene_name)
+    if not isinstance(entry, dict):
+        return None, None, "", ""
+    if _squash_ws(entry.get("question_raw", "")) != _squash_ws(question_text):
+        return None, None, "", "answer-key question mismatch"
+    try:
+        answer = int(entry["answer"])
+    except (KeyError, TypeError, ValueError):
+        return None, None, "", "answer-key answer unreadable"
+    match = None if our_count is None else (our_count == answer)
+    return answer, match, "questions_pdf_text", ""
+
+
 def _load_referential(folder: Path, scene_name: str) -> dict | None:
     p = folder / f"{scene_name}_referential_statements.json"
     if p.exists():
@@ -724,6 +799,7 @@ def run_gt_battery(
     *,
     questions_path: os.PathLike | str = DEFAULT_QUESTIONS,
     questions_dir: os.PathLike | str = DEFAULT_QUESTIONS_ROOT,
+    answers_path: os.PathLike | str | None = DEFAULT_ANSWERS,
     scenes: list[str] | None = None,
     drive_if: bool = True,
     no_spawn_hint: bool = False,
@@ -735,6 +811,7 @@ def run_gt_battery(
     root = Path(unity_root)
     with open(questions_path, encoding="utf-8") as fh:
         data = json.load(fh)
+    answers = _load_answers(answers_path)
 
     scores: list[GTQuestionScore] = []
     missing: list[str] = []
@@ -756,6 +833,7 @@ def run_gt_battery(
                 referential=referential,
                 scene_graph=scene_graph,
                 questions_dir=questions_dir,
+                answers=answers,
                 drive_if=drive_if,
                 no_spawn_hint=no_spawn_hint,
             )
@@ -777,6 +855,9 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
         return round(float(np.mean(vals)), 4) if vals else None
 
     num_exact = [1.0 if s.exact_match else 0.0 for s in num]
+    # TRUE accuracy (arch-F3): mean of true_match over rows that HAVE a true answer.
+    num_true_rows = [s for s in num if s.gt_answer_true is not None]
+    num_true = [1.0 if s.true_match else 0.0 for s in num_true_rows]
     # NUM-F6(b): a ``*_class_only`` count is relation-agnostic, NOT independent evidence
     # for the relation-filtered question — exclude those rows from the agreement stat
     # (report them separately as "no independent evidence"), leaving only strict
@@ -811,7 +892,12 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
     return {
         "numerical": {
             "n": len(num),
-            "exact_match_rate_pipeline": _mean(num_exact),
+            # TRUE accuracy is the primary yardstick; determinism is a secondary signal.
+            "n_with_true_answer": len(num_true_rows),
+            "true_accuracy": _mean(num_true) if num_true else None,
+            # Renamed from ``exact_match_rate_pipeline``: it measures pipeline
+            # determinism (our count == our count over GT geometry), NOT accuracy.
+            "pipeline_determinism_rate": _mean(num_exact),
             "n_with_independent": len(num_agree),
             "independent_agreement_rate": _mean(num_agree) if num_agree else None,
             "n_with_scenegraph": len(num_sg_agree),
@@ -927,10 +1013,13 @@ def write_report(
         f"Missing/skipped scenes: {', '.join(missing) or 'none'}.\n"
     )
     lines.append(
-        "> **Circularity note (numerical):** the primary `pipeline_gt` count is OUR "
-        "resolver run over the ground-truth geometry, so exact-match validates "
-        "*pipeline self-consistency*, not absolute truth. The `indep` column is an "
-        "independent second opinion from the referential-statement annotations "
+        "> **Yardstick note (numerical):** the PRIMARY yardstick is now `TRUE accuracy` "
+        "— our count vs the human answer extracted from each scene's questions.pdf "
+        "(`gt_answer_true`, source `questions_pdf_text`), matched by scene under a "
+        "whitespace-insensitive question-text guard (a mismatch is left null, never "
+        "mis-anchored). The `pipeline_gt` exact-match is DEMOTED to a self-consistency "
+        "signal (our resolver over GT geometry — measures determinism, not truth). The "
+        "`indep` column is a second opinion from the referential-statement annotations "
         "(distinct annotated target instances); `referential_class_only` means the "
         "count is relation-agnostic (coarser). Disagreements are the informative "
         "signal.\n"
@@ -968,17 +1057,36 @@ def write_report(
     method_str = ", ".join(
         f"{k}={v}" for k, v in sorted(o["match_method_breakdown"].items())
     ) or "none"
+
+    # TRUE-accuracy leader (arch-F3): k correct / n questions that had a true answer.
+    num_rows = [s for s in scores if s.qtype == QType.NUMERICAL.value]
+    n_true = n["n_with_true_answer"]
+    k_true = sum(1 for s in num_rows if s.true_match)
+    true_lead = (
+        f"TRUE accuracy {k_true}/{n_true} (answer key: questions.pdf)"
+        if n_true
+        else "true accuracy n/a (no answer key)"
+    )
+    # Instance-match (arch-F3): resolved instance id == gt_target_id, over the OR
+    # questions where a GT target was matched (scoreable). Real-perception IoU pending.
+    obj_rows = [s for s in scores if s.qtype == QType.OBJECT_REFERENCE.value]
+    or_scored = [s for s in obj_rows if s.gt_target_id is not None]
+    or_instance_match = sum(
+        1
+        for s in or_scored
+        if s.our_target_id is not None and s.our_target_id == s.gt_target_id
+    )
+
     lines.append("## Topline (per type)\n")
     lines.append(
-        f"- **Numerical** (n={n['n']}): pipeline exact-match "
-        f"{_pct(n['exact_match_rate_pipeline'])}; independent (referential) agreement "
+        f"- **Numerical** (n={n['n']}): {true_lead}; independent (referential) agreement "
         f"{_pct(n['independent_agreement_rate'])} over {n['n_with_independent']} with "
         f"strict evidence; scene-graph agreement {_pct(n['scenegraph_agreement_rate'])} "
         f"over {n['n_with_scenegraph']}; {n['n_no_independent_evidence']} question(s) had "
         f"no independent evidence (class-only counts excluded from agreement).\n"
-        f"- **Object reference** (n={o['n']}, scored={o['n_scored']}): mean 3D IoU "
-        f"{_num(o['mean_iou'])}; IoU>=0.25 {_pct(o['iou_at_0p25'])}; IoU>=0.5 "
-        f"{_pct(o['iou_at_0p5'])}. Match method: {method_str}.\n"
+        f"- **Object reference** (n={o['n']}): instance-match {or_instance_match}/"
+        f"{len(or_scored)} scored (scoreability {len(or_scored)}/{o['n']}); IoU pending "
+        f"real perception. Match method: {method_str}.\n"
         f"- **Instruction following** (n={i['n']}, scored={i['n_scored']}): HEADLINE "
         f"mean rubric-proxy score {_num(i['mean_rubric_score'])} (mean ordered-leg "
         f"credit {_num(i['mean_ordered_leg_credit'])}; {i['total_threading_violations']} "
@@ -1032,6 +1140,10 @@ def main(argv: list[str] | None = None) -> int:
         "--questions-dir", default=str(DEFAULT_QUESTIONS_ROOT),
         help="dir holding <scene>/trajectory_q*.ply (default: the challenge questions dir)",
     )
+    ap.add_argument(
+        "--answers", default=str(DEFAULT_ANSWERS),
+        help="true numerical answer key (arch-F3); missing file -> true fields left null",
+    )
     ap.add_argument("--out", default=None, help="output dir (default reports/gt_battery_<date>/)")
     ap.add_argument("--scenes", default=None, help="comma-separated scene subset")
     ap.add_argument(
@@ -1052,6 +1164,7 @@ def main(argv: list[str] | None = None) -> int:
         args.groundtruth,
         questions_path=args.questions,
         questions_dir=args.questions_dir,
+        answers_path=args.answers,
         scenes=scenes,
         drive_if=not args.no_drive_if,
         no_spawn_hint=args.no_spawn_hint,
@@ -1065,9 +1178,14 @@ def main(argv: list[str] | None = None) -> int:
 
     agg = aggregate(scores)
     n, o, i = agg["numerical"], agg["object_reference"], agg["instruction_following"]
+    num_true_str = (
+        f"{_pct(n['true_accuracy'])} ({n['n_with_true_answer']} keyed)"
+        if n["n_with_true_answer"]
+        else "n/a"
+    )
     print(
         f"gt_battery: {len(scores)} questions / {len({s.scene for s in scores})} scenes  "
-        f"num_exact={_pct(n['exact_match_rate_pipeline'])} "
+        f"num_true={num_true_str} "
         f"or_iou={_num(o['mean_iou'])} "
         f"if_rubric={_num(i['mean_rubric_score'])} "
         f"if_thread_viol={i['total_threading_violations']} "
