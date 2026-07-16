@@ -187,6 +187,15 @@ def test_run_gt_battery_emits_report(tmp_path):
     assert "numerical" in payload["aggregate"]
     # report mentions the honest circularity caveat
     assert "Circularity" in md_path.read_text(encoding="utf-8")
+    # provenance stamp is present and names this tool (meth-F7/F8)
+    assert payload["provenance"]["tool"] == "gt_battery"
+    # IF rows carry the per-leg rubric geometry + outcomes
+    if_rows = [s for s in payload["scores"] if s["qtype"] == QType.INSTRUCTION_FOLLOWING.value]
+    assert if_rows
+    assert all(r["leg_goals"] is not None for r in if_rows)
+    assert all(r["leg_outcomes"] is not None for r in if_rows)
+    a_leg = next(o for r in if_rows for o in r["leg_outcomes"])
+    assert {"i", "kind", "goal", "reached_in_order", "threaded"} <= set(a_leg)
 
 
 @requires_loft

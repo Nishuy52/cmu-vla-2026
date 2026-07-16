@@ -43,6 +43,7 @@ from core.interfaces import QType, WaypointCmd
 from core.mocks.mock_io import FakeClock, MockRobotIO
 from core.mocks.synthetic_scene import Room, SyntheticScene
 from core.perception.scene_index import BasicSceneIndex
+from core.runner.provenance import collect_provenance
 
 _SRC = Path(__file__).resolve().parents[2]
 DEFAULT_QUESTIONS = (
@@ -493,6 +494,12 @@ class GTQuestionScore:
     n_threading_violations: int | None = None
     n_avoid_violations: int | None = None
     driven_n_poses: int | None = None
+    #: Per-leg rubric geometry + outcomes (meth-F7/F8). ``leg_goals`` is
+    #: ``[[kind, [x, y]], ...]`` from :func:`_if_rubric_geometry`; ``leg_outcomes`` is
+    #: one dict per leg — ``{"i", "kind", "goal", "reached_in_order", "threaded"}`` —
+    #: read straight off the rubric scorer (never recomputed here).
+    leg_goals: list | None = None
+    leg_outcomes: list | None = None
     # instruction_following — SECONDARY diagnostics only (never headline)
     frechet_m: float | None = None
     coverage_1m: float | None = None
@@ -638,6 +645,22 @@ def score_scene(
         rec.n_threading_violations = rub.n_threading_violations
         rec.n_avoid_violations = rub.n_avoid_violations
         rec.driven_n_poses = rub.driven_n_poses
+        # Per-leg rubric geometry + outcomes into the row (meth-F7/F8): the resolved
+        # ordered leg goals and the scorer's per-leg arrival/threading verdicts, read
+        # straight off ``rub`` (not recomputed) so results carry per-leg provenance.
+        rec.leg_goals = [
+            [kind, [float(gx), float(gy)]] for kind, (gx, gy) in leg_goals
+        ]
+        rec.leg_outcomes = [
+            {
+                "i": o.index,
+                "kind": o.kind,
+                "goal": [float(o.goal_xy[0]), float(o.goal_xy[1])],
+                "reached_in_order": bool(o.reached_in_order),
+                "threaded": o.threaded,
+            }
+            for o in rub.leg_outcomes
+        ]
         # our_n_waypoints mirrors the driven pose count for the IF rubric path (the
         # trajectory we scored). It stayed None after the wave rebuilt IF scoring onto
         # the rubric proxy, which broke test_score_scene_if_produces_two_numbers — a
@@ -881,7 +904,12 @@ def _md_table(scores: list[GTQuestionScore]) -> str:
 
 
 def write_report(
-    scores: list[GTQuestionScore], missing: list[str], out_dir: os.PathLike | str
+    scores: list[GTQuestionScore],
+    missing: list[str],
+    out_dir: os.PathLike | str,
+    *,
+    argv: list[str] | None = None,
+    cal=None,
 ) -> tuple[Path, Path]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -968,6 +996,7 @@ def write_report(
 
     payload = {
         "date": date.today().isoformat(),
+        "provenance": collect_provenance("gt_battery", argv, cal),
         "n_questions": len(scores),
         "scenes": scenes,
         "missing_scenes": missing,
@@ -1030,7 +1059,9 @@ def main(argv: list[str] | None = None) -> int:
     if not scores:
         print(f"gt_battery: no scenes found under {args.groundtruth} (missing={missing})")
         return 1
-    md_path, json_path = write_report(scores, missing, out_dir)
+    # Stamp the actual invocation argv (fall back to the process args for a bare CLI run).
+    stamp_argv = list(argv) if argv is not None else sys.argv[1:]
+    md_path, json_path = write_report(scores, missing, out_dir, argv=stamp_argv)
 
     agg = aggregate(scores)
     n, o, i = agg["numerical"], agg["object_reference"], agg["instruction_following"]

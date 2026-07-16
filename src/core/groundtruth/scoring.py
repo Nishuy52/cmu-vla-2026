@@ -1062,6 +1062,9 @@ class IFLegOutcome:
     goal_xy: tuple[float, float]
     reached: bool  # some driven pose came within tolerance...
     reached_in_order: bool  # ...AND after the previous ordered leg's arrival
+    #: Corridor legs only: whether the driven trajectory threaded the gate
+    #: (True/False). ``None`` for non-corridor legs (threading does not apply).
+    threaded: bool | None = None
 
 
 @dataclass
@@ -1168,11 +1171,18 @@ def score_instruction_rubric(
     # (c) threading + avoid penalties over the DRIVEN trajectory.
     threading_details: list[str] = []
     n_thread_viol = 0
+    threaded_by_leg: dict[int, bool] = {}
     for leg_i, gate in corridor_gates:
         ok, msg = threading_check(traj, gate)
+        threaded_by_leg[leg_i] = ok
         if not ok:
             n_thread_viol += 1
             threading_details.append(f"leg {leg_i}: {msg}")
+    # Fold the per-corridor-leg threading result back onto its leg outcome (leaves
+    # non-corridor legs' ``threaded`` at None).
+    for o in outcomes:
+        if o.index in threaded_by_leg:
+            o.threaded = threaded_by_leg[o.index]
 
     avoid_details: list[str] = []
     n_avoid_viol = 0

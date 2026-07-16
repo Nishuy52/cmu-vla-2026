@@ -111,6 +111,7 @@ from core.groundtruth import scoring as S
 from core.groundtruth.loader import GTScene, load_scene
 from core.interfaces import QType
 from core.runner import gt_battery as GB
+from core.runner.provenance import collect_provenance
 
 _SRC = Path(__file__).resolve().parents[2]
 DEFAULT_QUESTIONS = GB.DEFAULT_QUESTIONS
@@ -886,7 +887,12 @@ def _load_questions(
     return out
 
 
-def write_report(result: SweepResult, out_dir: os.PathLike | str) -> tuple[Path, Path, Path]:
+def write_report(
+    result: SweepResult,
+    out_dir: os.PathLike | str,
+    *,
+    argv: list[str] | None = None,
+) -> tuple[Path, Path, Path]:
     """Write report.md, results.json, recommended_calibration.json; return their paths."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -972,6 +978,9 @@ def write_report(result: SweepResult, out_dir: os.PathLike | str) -> tuple[Path,
     # --- results.json ----------------------------------------------------------------
     payload = {
         "date": date.today().isoformat(),
+        # The swept subject varies thresholds per-config, but the sweep *instrument* and
+        # its reported identity are the default calibration — stamp that (meth-F7/F8).
+        "provenance": collect_provenance("cvsweep", argv, cal),
         "n_samples": result.n_samples,
         "seed": result.seed,
         "scenes": result.scenes,
@@ -1067,7 +1076,8 @@ def main(argv: list[str] | None = None) -> int:
     spec = default_sweep_spec()
     result = run_cv_sweep(evaluator, spec, folds, n_samples=args.n_samples, seed=args.seed)
 
-    md_path, json_path, rec_path = write_report(result, out_dir)
+    stamp_argv = list(argv) if argv is not None else sys.argv[1:]
+    md_path, json_path, rec_path = write_report(result, out_dir, argv=stamp_argv)
 
     print(
         f"cvsweep: {len(scenes)} scenes / {n_folds} folds x {holdout}  "
