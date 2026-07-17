@@ -16,18 +16,19 @@
        "noun": "suitcase",
        "raw": "suitcase",
        "attributes": [],
-       "disambiguator": {
-        "pred": "farthest_from",
-        "anchors": [
-         {
-          "noun": "floor",
-          "raw": "floor",
-          "attributes": [],
-          "disambiguator": null
-         }
-        ],
-        "negated": false
-       }
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    },
+    {
+     "pred": "farthest_from",
+     "anchors": [
+      {
+       "noun": "floor",
+       "raw": "floor",
+       "attributes": [],
+       "disambiguator": null
       }
      ],
      "negated": false
@@ -36,7 +37,7 @@
   },
   "route": [],
   "avoid": [],
-  "notes": "'furthest from the floor' = the elevated suitcase (vertical superlative)",
+  "notes": "two top-level clauses: the bare trailing superlative ranks the TARGET (the pictures above the suitcase) by distance from the floor — it does not disambiguate the suitcase (see #20; matches the home_building_2 speaker construction). A right-branching parse would nest farthest_from under the suitcase anchor",
   "parse_tier": "golden"
  }
 }

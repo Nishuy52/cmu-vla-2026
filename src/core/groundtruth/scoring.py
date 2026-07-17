@@ -92,6 +92,16 @@ def _pred_relations(pred) -> tuple[str, ...]:
     return _PRED_TO_RELATIONS.get(str(val), ())
 
 
+#: Parsed predicate values that express a ranked (superlative) relation.
+_SUPERLATIVE_PRED_VALUES = frozenset({"closest_to", "farthest_from"})
+
+
+def _is_superlative_clause(clause) -> bool:
+    """True if a parsed clause's predicate is a superlative ("closest"/"farthest")."""
+    pred = getattr(clause, "pred", None)
+    return str(getattr(pred, "value", pred)) in _SUPERLATIVE_PRED_VALUES
+
+
 def _norm_stmt(s: str) -> str:
     """Whitespace/case/punctuation-normalised statement or question string."""
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", s.lower())).strip()
@@ -604,6 +614,24 @@ def _gt_target_from_referential(
     anchor_nouns = {
         normalize_label(a.noun) for cl in plan.target.clauses for a in cl.anchors
     }
+    # Superlative honesty (#20): when the question carries a superlative ("closest to
+    # Z" / "farthest from Z"), the discriminating constraint IS that superlative — a
+    # genuine referential match must be a superlative statement about the SAME anchor
+    # Z, not any generically-related statement that merely shares a head-noun. Restrict
+    # the relation and anchor filters to the superlative clause(s) alone, so a "near
+    # the small cabinet" statement can no longer stand in for "closest to the potted
+    # plant" (the question's real ask), and a modified anchor ("tv cabinet") is no
+    # longer satisfied by a bare head-noun cousin ("cabinet") — mirroring the modified-
+    # anchor tier discipline in geometry.toolbox._match_anchor_noun. With no genuine
+    # speaker-to-potted-plant statement in the scene, the honest result is ambiguous.
+    superl_clauses = [c for c in plan.target.clauses if _is_superlative_clause(c)]
+    if superl_clauses:
+        q_rels = set()
+        for c in superl_clauses:
+            q_rels.update(_pred_relations(getattr(c, "pred", None)))
+        anchor_nouns = {
+            normalize_label(a.noun) for c in superl_clauses for a in c.anchors
+        }
     id_best_j: dict[int, float] = {}
     for stmt, ann in _iter_statements(referential):
         if not _anchor_agrees(tgt_noun, str(ann.get("target_class", ""))):

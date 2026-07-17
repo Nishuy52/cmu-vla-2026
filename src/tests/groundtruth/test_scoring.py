@@ -433,6 +433,64 @@ def test_or_no_match_flagged_not_guessed(loft_referential):
     assert np.isnan(r.iou)
 
 
+def test_or_superlative_requires_superlative_statement():
+    """A superlative question does NOT match a merely-related statement (#20).
+
+    "the speaker ... closest to the potted plant" must be validated by a genuine
+    "closest to (potted) plant" statement — a "near the small cabinet" statement (same
+    target class, generically-related, head-noun-overlapping anchor) is NOT evidence for
+    it. With no speaker-to-plant statement present, the honest result is no match.
+    """
+    ref = {
+        "regions": {
+            "0": {
+                # generically related, wrong relation + wrong anchor (bare head-noun)
+                "the black speaker that is near the small cabinet": [
+                    {"target_index": "91", "target_class": "speaker", "relation": "near",
+                     "anchors": {"anchor_1": {"class": "cabinet"}}},
+                ],
+                # superlative, but ranked against an unrelated anchor
+                "the speaker that is closest to the ashtray": [
+                    {"target_index": "108", "target_class": "speaker", "relation": "closest",
+                     "anchors": {"anchor_1": {"class": "ashtray"}}},
+                ],
+            }
+        }
+    }
+    q = "Find the speaker on the TV cabinet closest to the potted plant on the TV cabinet."
+    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    assert tid is None
+    assert method == "none"
+
+
+def test_or_superlative_genuine_statement_still_matches():
+    """Control: a genuine superlative-bearing statement still matches under the gate.
+
+    The superlative-aware guard must not over-reject: when a statement DOES express the
+    question's superlative against the question's anchor, it is accepted as before.
+    """
+    ref = {
+        "regions": {
+            "0": {
+                "the vase that is closest to the guitar": [
+                    {"target_index": "46", "target_class": "vase", "relation": "closest",
+                     "anchors": {"anchor_1": {"class": "guitar"}}},
+                ],
+                # distractor: same class, different (non-superlative) relation/anchor
+                "the vase that is on the shelf": [
+                    {"target_index": "50", "target_class": "vase", "relation": "on",
+                     "anchors": {"anchor_1": {"class": "shelf"}}},
+                ],
+            }
+        }
+    }
+    tid, source, method = S._gt_target_from_referential(
+        "Find the vase closest to the guitar.", ref, []
+    )
+    assert tid == 46
+    assert method == "relation"
+
+
 # --------------------------------------------------------------------------- 3rd opinion
 
 
