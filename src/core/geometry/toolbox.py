@@ -424,9 +424,9 @@ def above(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHO
 
 
 def under(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHOLDS) -> PredResult:
-    """a under/below b: two-branch form (H5/DD-A7, uncontested).
+    """a under/below b: three-branch form (H5/DD-A7 + the below/above lateral mirror).
 
-    Both branches require footprint IoM-over-min >= ``under_iom_min``. Then either:
+    Branches (i) and (ii) require footprint IoM-over-min >= ``under_iom_min``. Then:
 
     * (i) strict below: a's top <= b's bottom + ``under_tuck_tol`` — a rug under a
       table top, an object on a lower shelf below an upper one; OR
@@ -435,7 +435,18 @@ def under(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHO
       (``a.min_z <= b.min_z + under_tuck_tol``) AND a's top is below b's AABB top
       (``a.max_z <= b.max_z``). This is the ONLY way "the stool under the table"
       resolves — the stool's top rises above the table's AABB min_z (~floor), so
-      the strict branch can never pass it.
+      the strict branch can never pass it; OR
+    * (iii) wall-relative below (lateral-offset, inverse of :func:`above`):
+      ``below(a, b) == above(b, a)`` — b's XY centre lies within a's inflated
+      footprint AND b is strictly above a (``b.min_z > a.max_z``). This is the
+      vertical mirror of the accepted D4/H5 ``above()`` lateral form and carries NO
+      footprint-IoM requirement: a sofa "below a window" (or under wall-hung
+      pictures) has ~0% footprint overlap with the wall-mounted anchor, so the
+      IoM-gated branches (i)/(ii) are blind to exactly the case the questions ask
+      about — the same wall-hung blindness D4 removed from ``above()``. Because it
+      fires only when the anchor is STRICTLY above the target, it never collides
+      with tuck-under (a table extends to the floor, so it is not strictly above a
+      stool it shelters).
     """
     a_top = float(a.aabb_max[2])
     a_bottom = float(a.aabb_min[2])
@@ -450,17 +461,28 @@ def under(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHO
     tuck_ok = tuck_gated and (
         a_bottom <= b_zmin + th.under_tuck_tol + P.EPS and a_top <= b_top + P.EPS
     )
+    iom_branch = over_ok and (strict_ok or tuck_ok)
 
-    passed = bool(over_ok and (strict_ok or tuck_ok))
-    which = "strict" if strict_ok else ("tuck-under" if tuck_ok else "neither")
+    # branch (iii): wall-relative below == above(anchor, target), no IoM gate.
+    lateral_ok = above(b, a, th).passed
+
+    passed = bool(iom_branch or lateral_ok)
+    if iom_branch:
+        which = "strict" if strict_ok else "tuck-under"
+    elif lateral_ok:
+        which = "lateral (inverse-above)"
+    else:
+        which = "neither"
     gap = b_zmin - a_top  # >0 => a strictly under b's bottom (branch i slack)
-    score = float(max(0.0, min(1.0, frac))) if passed else 0.0
+    score = 1.0 if lateral_ok and not iom_branch else (
+        float(max(0.0, min(1.0, frac))) if passed else 0.0
+    )
     expl = (
         f"under: footprint IoM {frac*100:.0f}% (>= {th.under_iom_min*100:.0f}% -> "
         f"{'ok' if over_ok else 'FAIL'}); branch={which} "
         f"(strict gap {gap:+.2f}m; anchor '{b.label}' "
-        f"{'in' if tuck_gated else 'not in'} UNDER_RELATION) -> "
-        f"{'ok' if (strict_ok or tuck_ok) else 'FAIL'}"
+        f"{'in' if tuck_gated else 'not in'} UNDER_RELATION; lateral "
+        f"{'ok' if lateral_ok else 'FAIL'}) -> {'ok' if passed else 'FAIL'}"
     )
     return PredResult(passed, score, float(gap), expl)
 

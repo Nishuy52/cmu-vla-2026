@@ -14,6 +14,14 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 2. **No AI/tooling attribution anywhere** — not in documents, not in commit messages, not in code comments.
 3. **`docs/ubuntu_setup.md` must stay current** — any change affecting installation/deployment (dependency, model weight, env var, container) updates it in the same session.
 4. **Commit and push (`origin` = github.com/Nishuy52/cmu-vla-2026, private) at every milestone and session end.**
+5. **Detected issues become GitHub issues.** Any defect, failure, or
+   open problem detected (by review, verification, battery/diagnosis
+   runs, or agents) that is not fixed in the same session gets filed
+   as a GitHub issue on `origin` (`gh issue create`) — one issue per
+   defect, with file/line refs and reproduction context — so PRs can
+   be opened against them and close them (`Fixes #N`). Known-defect
+   lists in docs/reports still get written, but the issue tracker is
+   the actionable queue.
 
 ## Session protocol (every session)
 

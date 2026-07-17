@@ -438,3 +438,34 @@ User asleep; ran autonomously per standing directive. **605 tests passed + 3 ski
   4 true failures = the numerical worklist. pypdf added to dev deps
   (ubuntu_setup updated). OR/IF keys are images - still need visual
   transcription.
+
+---
+
+## 2026-07-17 (session 14) - task milestones
+
+- Started + finished task: T12 numerical yardstick, provenance, and the
+  pre-Ubuntu queue - record at `docs/tasks/T12-numerical-yardstick/`
+  (task.md, plan.md, diagnosis.md, unaligned_scenes.md, postT11_to_T12.md).
+  Branch `feat/t12-numerical-yardstick`, spec+plan+subagent execution
+  (8 tasks + 2 verifier gates), both gates CONFIRMED, full gate ~1140
+  passed. Headlines: TRUE numerical accuracy 11/15 -> 13/15 (`under()`
+  wall-relative branch fixes arabic_room + home_building_1; 11 passes
+  held); every battery/sweep number now born-provenanced (meth-F7/F8)
+  and diffable via `tools/battery_diff.py`; battery topline led by TRUE
+  accuracy k/15 (meth-F4/F6); IF frame-alignment coverage 24 -> 28/30
+  (meth-F11, friendly-ward bias hole closed, livingroom_3 exclusion
+  data-confirmed); IF leg census 0/30 dropped (meth-F5); first committed
+  `--no-spawn-hint` run (arch-F9, IF rubric shown spawn-artifact-sensitive).
+- New standing rule 5 (CLAUDE.md `59f858e`): unfixed detected issues get
+  filed as GitHub issues. Applied this session: **#10** (battery_diff
+  test fixture stale key), **#11** (loft black-pillow count - no raw RGB
+  in InstanceRecord), **#12** (home_building_2 red-pillow color-salience,
+  sweep-deferred), **#13** (terminal-goal resolver mis-ranking - affects
+  object-ref + real-sim GOTO, only worked around by the frame-fit).
+
+**Next:** open PR to main for the T12 branch. Then the residual
+adjudicated/user items: OR/IF image answer-key visual transcription
+(arch-F3 residual), Gate 0 execution (arch-F7), local-VLM tier posture
+(arch-F5), SoC cluster detector benchmarking (arch-F2), Ubuntu day-one
+(phase2_playbook Gate 0). Issues #11/#12/#13 are the actionable code
+follow-up queue (PRs to close them).

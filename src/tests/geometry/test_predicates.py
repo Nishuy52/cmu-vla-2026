@@ -345,6 +345,32 @@ def test_under_strict_branch_still_works():
     assert T.under(rug, table).passed
 
 
+def test_under_wall_relative_below_lateral_branch():
+    # Branch (iii): a sofa "below a window" (T12 arabic_room). The wall-mounted
+    # window sits well above the sofa with ~0% footprint overlap, so the IoM-gated
+    # branches are blind to it; the lateral inverse-above form must pass. This is
+    # the vertical mirror of the D4/H5 above() lateral fix.
+    sofa = rec(1, "sofa", (2.0, -2.0, 0.34), (2.0, 1.0, 0.68))  # floor, top ~0.68
+    # wall-mounted window: high on the wall (zmin ~1.36), footprint only partly
+    # overlapping the sofa (mirrors the real arabic_room geometry, IoM well below
+    # the 0.5 gate) so the IoM-gated branches cannot fire.
+    window = rec(2, "window", (3.2, -2.45, 1.81), (1.0, 0.1, 0.9))  # x in [2.7,3.7]
+    import core.geometry.primitives as _P
+    assert _P.footprint_iom(sofa.aabb_min, sofa.aabb_max,
+                            window.aabb_min, window.aabb_max) < 0.5
+    r = T.under(sofa, window)
+    # can ONLY have passed via the lateral (inverse-above) branch.
+    assert r.passed and "lateral" in r.explanation
+
+
+def test_under_lateral_branch_requires_anchor_strictly_above():
+    # A window laterally offset but NOT above the sofa (overlapping in z) must not
+    # trigger the lateral branch — guards against broadening "under" to "beside".
+    sofa = rec(1, "sofa", (2.0, -2.0, 0.34), (2.0, 1.0, 0.68))  # top 0.68
+    lamp = rec(2, "lamp", (2.3, -2.45, 0.40), (0.2, 0.2, 0.8))  # zmin 0.0, overlaps sofa z
+    assert not T.under(sofa, lamp).passed
+
+
 # ----------------------------------------------------- H5 strict betweenness
 
 

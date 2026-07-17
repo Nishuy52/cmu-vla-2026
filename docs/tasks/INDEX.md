@@ -40,3 +40,11 @@
   threading (rubric flat at 0.061; routes reach terminals without
   passing within 0.8 m of intermediate leg goals); gates the
   HELD CV sweep.
+- **T12** numerical-yardstick — wire the extracted true answer key
+  into the battery as the numerical yardstick (true accuracy k/15
+  leads the topline, meth-F4/F6 honesty edits); provenance stamps +
+  `tools/battery_diff.py` (meth-F7/F8); diagnose the 4 true numerical
+  failures (11/15→13/15: `under()` wall-relative branch; 2 color gaps
+  → issues #11/#12); IF leg-count census (meth-F5, 0/30 dropped);
+  `--no-spawn-hint` run (arch-F9); unaligned-scene frame fit (meth-F11,
+  aligned 24→28/30). New resolver-mispick bug → issue #13.

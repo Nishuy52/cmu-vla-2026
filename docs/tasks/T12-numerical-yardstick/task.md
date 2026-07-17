@@ -1,0 +1,177 @@
+# T12 — True numerical yardstick, provenance, and the pre-Ubuntu queue
+
+**Started:** 2026-07-17 · **Branch:** `feat/t12-numerical-yardstick`
+**Source of scope:** T11 adjudication "scheduled next" queue
+(`docs/tasks/T11-if-leg-threading/critique/adjudication.md` §Accepted —
+scheduled next) + session-13 close queue
+(`docs/tasks/T11-if-leg-threading/orchestration.md` post-session state).
+Priority order below is the adjudicated order given by the user.
+
+## Intent
+
+Replace the numerical proxy chain with the extracted ground-truth
+answer key as the battery's yardstick, make every battery/sweep number
+born-provenanced (meth-F7/F8), diagnose (and where tractable, fix) the
+four true numerical failures, and clear the remaining agent-doable
+pre-Ubuntu queue items.
+
+## Context
+
+- `docs/gt_answers_numerical.json` (extracted 2026-07-15 from the
+  per-scene questions.pdf text layer) holds the true integer answer
+  for all 15 numerical questions. True accuracy at postT11 state:
+  **11/15 (73%)** vs the 56%-over-9 independent-agreement proxy.
+  Proxies were unreliable in both directions.
+- The four true failures (the numerical worklist):
+  - **arabic_room** — "How many sofas are below a window?" GT 2,
+    we answer 0 (zero-count).
+  - **loft** — "How many black pillows are on the sofa?" GT 2
+    (zero/undercount).
+  - **home_building_1** — "How many pillows are on the sofa under
+    the pictures?" GT 6, we answer 11 (over-count).
+  - **home_building_2** — "How many red pillows are on the sofa?"
+    GT 2, we answer 3 (over-count).
+  Exact current per-scene answers must be re-derived from a fresh
+  battery run, not trusted from prose (meth-F8 discipline).
+- Battery: `src/core/runner/gt_battery.py` (`score_numerical()`,
+  report writer); results at `reports/gt_battery_<tag>_<date>/`
+  (`gt_battery_results.json` + `gt_battery_report.md`). Sweep:
+  `src/core/runner/cvsweep.py` → `reports/cvsweep_<date>/`.
+  Neither currently stamps provenance; `battery_diff` does not exist.
+
+## Scope (in adjudicated priority order)
+
+1. **GT yardstick wiring.** `gt_battery` loads
+   `docs/gt_answers_numerical.json`; each numerical row gains
+   `gt_answer_true` + `true_match`; topline leads with
+   `true accuracy k/15`. Fold in the meth-F4+F6 topline-honesty edits
+   (same code): drop pipeline-exact-100% from toplines (keep as
+   per-row `determinism`), numerical led by agreement/true-accuracy
+   `k/n`, OR headline renamed `instance-match k/8, IoU pending real
+   perception`, OR scoreability `n/30` tracked as a metric.
+2. **meth-F8 + meth-F7.** (a) `gt_battery`/`cvsweep` stamp commit
+   hash, dirty-tree digest, calibration snapshot, and per-question
+   `leg_goals`/per-leg outcomes into results JSON. (b) A committed
+   `tools/battery_diff.py` whose output is the only legal source of
+   before/after tables in reports. Land BOTH before the next battery
+   generation so the postT11→T12 comparison is born provenanced.
+3. **Diagnose the 4 true failures.** Fresh provenanced battery run →
+   per-question root-cause (in the T7 cause-bucket style: resolver
+   code vs calibration vs GT-index artifact) → fix what is tractable
+   without destabilizing the other 11 correct answers → re-run →
+   `battery_diff` table. A fix that flips a failure but breaks a
+   current pass is a net loss; the 11 passes are a regression gate.
+4. **Pre-Ubuntu queue (adjudication items 2–5):**
+   - meth-F5: leg-count census — hand-tally the 30 IF questions'
+     clause structure vs `plan.route`/`plan.avoid`, committed as a
+     fixture + test (closes the silent-dropped-leg class).
+   - arch-F9: one `--no-spawn-hint` battery run, committed report,
+     bounding exploration sensitivity.
+   - meth-F11: the 3 unaligned scenes — one-time frame fit attempt;
+     either they rejoin the IF battery or the exclusion is confirmed
+     as data. Closes the 20%-of-IF-rows friendly-ward bias hole.
+
+## Out of scope
+
+- Cluster detector benchmarking (arch-F2) — needs interactive SoC
+  SSH; user-driven.
+- OR/IF answer-key transcription (PDF images) — user action.
+- Gate 0 / Ubuntu execution (arch-F7), local-VLM posture (arch-F5) —
+  user decisions.
+- Any re-sweep (deferred to real sim per T11 close).
+
+## Acceptance criteria
+
+- [x] Battery numerical topline reads `true accuracy k/15` sourced
+      from `docs/gt_answers_numerical.json`; proxy agreement demoted
+      to secondary; topline-honesty edits (meth-F4/F6) in place.
+      (commit `c88fa62`; Gate A CONFIRMED)
+- [x] `gt_battery_results.json` and cvsweep results carry provenance
+      (commit hash, dirty digest, calibration snapshot, per-question
+      leg goals/outcomes); tests pin the stamp's presence and shape.
+      (commit `8e3e903`; Gate A CONFIRMED incl. non-raising degradation)
+- [x] `tools/battery_diff.py` exists with tests; produces the
+      before/after table for this task's postT11→T12 comparison.
+      (commit `fb70a90`; `postT11_to_T12.md` committed `cb6614b`)
+- [x] Each of the 4 true failures has a written root-cause verdict
+      (`diagnosis.md`); 2 fixed (arabic_room, home_building_1 via the
+      `under()` wall-relative branch `c867fce`), 2 diagnosed-unfixed
+      color gaps → issues #11/#12; no regression among the 11 passes
+      (Gate B CONFIRMED 13/15); final table from `battery_diff`.
+- [x] Leg-count census fixture + test committed (`3c9b35c`, 0/30
+      xfail); `--no-spawn-hint` report committed (`ef58b07`);
+      unaligned-scenes verdict written (`unaligned_scenes.md`, `1f0c99e`:
+      2 rejoined, livingroom_3 exclusion data-confirmed).
+- [x] Full test gate green (Gate B: ~1140 passed, 0 fail/err); LOG
+      one-liner; INDEX row; ubuntu_setup unchanged (no dep change —
+      battery_diff is stdlib); commit + push; PR opened.
+
+## Notes
+
+**2026-07-17 — wave 1 + Gate A + T12pre baseline.** Tasks 1–3 landed
+(provenance `8e3e903`, yardstick `c88fa62`, battery_diff `fb70a90`,
+census `3c9b35c`). Gate A verifier: claims 1/3/4 CONFIRMED outright;
+claim 2 surfaced one merge-blocker — a slow-tier test still asserted
+the removed "Circularity" report wording — fixed in `a7ce9c1` (asserts
+the new "Yardstick note" invariant). Non-blocking defect (battery_diff
+test fixtures use the retired aggregate key) filed as GitHub issue #10
+per standing rule 5. Census headline: 0 of 30 IF questions xfail — the
+hand tally agrees with the parser everywhere; no silent-dropped-leg
+problem today; fixture stands as a tripwire.
+
+T12pre baseline (`reports/gt_battery_T12pre_2026-07-17/`, commit
+`8f7333e`): TRUE accuracy 11/15 (0.7333) reproduces; the 4 false rows
+are exactly arabic_room (0 vs 2), home_building_1 (11 vs 6),
+home_building_2 (3 vs 2), loft (0 vs 2). battery_diff vs postT11:
+headline aggregates identical (rubric 0.100, agreement 0.5556,
+violations 8/0); new keys appear one-sided as designed.
+
+*Instrument-drift caveat (secondary diagnostics only):* postT11→T12pre
+shows small drift in `frechet_m`/`coverage_1m` and `driven_n_poses`
+(e.g. 4002 → 51–63) on some IF rows. The T12 branch diff touches no
+driven-pose logic (verified: no `driven` lines in
+`git diff main..HEAD -- src/core/runner/gt_battery.py`; scoring.py
+changes additive-only), and the same class of drift already existed
+between the two committed pre-branch runs (postT11 vs postwave, 19 IF
+rows). Attribution: post-postT11 main-side changes + run-to-run drive
+variation, not T12 instrumentation. Headline rubric fields are
+identical row-for-row. Gate B verifier: sanity-check this attribution.
+
+**2026-07-17 — arch-F9 no-spawn-hint run** (first committed use of the
+knob). Machine table: `nospawnhint_diff.md` beside this file
+(T12pre → nospawnhint, generated by `tools.battery_diff`). Reading:
+numerical and object-reference aggregates are unchanged to four
+decimals, so the knob isolates cleanly to IF. The IF rubric RISES
+without the GT-matched spawn (mean_rubric_score 0.1000 → 0.1889,
+ordered-leg credit 0.1222 → 0.2222) while shape diagnostics worsen
+(coverage_1m 0.3998 → 0.2657, Fréchet 4.5593 → 5.3427 m) — i.e. spawn
+choice swings the rubric by roughly its own magnitude, so mirror IF
+absolute levels are spawn-artifact-sensitive and must be read
+relatively (the exploration-sensitivity bound arch-F9 asked for).
+
+**2026-07-17 — Gate B + close-out.** Both wave-2 claims CONFIRMED by
+fresh-context verifier (numerical fix collision-safe, the 11 passes
+held row-for-row; frame-fit fallback provably inert on the 24 aligned
+scene-questions; livingroom_3 exclusion a real frame-independent
+distance contradiction). Full gate exit 0 (~1140 passed, 0 fail/err).
+Final battery `reports/gt_battery_T12post_2026-07-17/` (commit
+`cb6614b`): TRUE numerical 13/15 (0.8667), IF aligned 28/30, OR IoU
+0.875 unchanged. Born-provenanced postT11→T12 diff:
+`postT11_to_T12.md`.
+
+Three GitHub issues filed per standing rule 5: #11 (loft black
+pillows — no raw RGB in InstanceRecord), #12 (home_building_2 red
+pillows — color-salience knob, sweep-deferred), #13 (NEW: terminal-goal
+resolver mis-ranking in chinese_room/home_building_2 — a latent bug the
+IF frame-fit only works around; affects object-ref + real-sim GOTO).
+Note: scenegraph_agreement dropped 0.7273→0.6364 in the diff — that is
+the `under()` fix correcting home_building_1's count away from the
+scene-graph proxy toward the TRUE answer, not a regression (the true
+key, not the proxy, is the yardstick).
+
+**Net for T12:** numerical 11/15→13/15, IF alignment coverage
+24→28/30 with the friendly-ward bias hole closed, every battery number
+now born-provenanced and diffable, and the two deferred numerical gaps
++ one new resolver bug are tracked as issues rather than buried in a
+doc. Two GitHub issues (#11/#12) and one (#13) are the actionable
+follow-up queue.
