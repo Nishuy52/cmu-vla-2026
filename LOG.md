@@ -469,3 +469,28 @@ adjudicated/user items: OR/IF image answer-key visual transcription
 (arch-F5), SoC cluster detector benchmarking (arch-F2), Ubuntu day-one
 (phase2_playbook Gate 0). Issues #11/#12/#13 are the actionable code
 follow-up queue (PRs to close them).
+
+---
+
+## 2026-07-17 (session 15) - PR #14 merged
+
+- Reviewed and merged PR #14 (T12 branch) into main (`5b6e5ba`);
+  review verdict approve - load-bearing claims (under() lateral branch
+  as faithful inverse-above, answer-key guard, frame-fit fallback
+  inertness on aligned scenes, non-raising provenance) all verified
+  against code; targeted fast tests green (91 src + 33 tools).
+  Polish-level review findings filed per standing rule 5: **#15**
+  (write_report `cal` param never wired - provenance always stamps
+  default calibration), **#16** (corrupt answer key indistinguishable
+  from missing), **#17** (CLI or_iou summary vs instance-match report
+  headline), **#18** (dirty_digest excludes untracked contents,
+  docstring overclaims), **#19** (test-hygiene: unrelated
+  _DATA_UNFITTABLE_IF_SCENES assertion tacked onto terminal-goal test).
+- Housekeeping: removed 4 stale worktrees (3 detached `.claude/worktrees`
+  + `vla-tiering`; all clean) and deleted 8 merged local branches
+  (6 `claude/*` session branches, `feat/live-colored-map`,
+  `test/suite-tiering`). Local state now just main.
+
+**Next:** unchanged from session 14 - OR/IF image answer-key visual
+transcription (arch-F3 residual), Gate 0 execution, issues #11-#13
+(now plus #15-#19 polish queue) as the actionable code follow-ups.
