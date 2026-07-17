@@ -448,3 +448,45 @@ def test_counting_big_table_relative():
     idx = FakeIndex([big, small])
     res = T.counting(_spec("table", attributes=["big"]), idx)
     assert res.count == 1 and res.ids == {1}
+
+
+# ---------------------------------------------------- #13: anchored-disambiguator tier
+# A disambiguator anchor names a SPECIFIC object ("the table WITH the horse figurine
+# on it"). A differently-modified head-noun cousin ("elephant figurine") must NOT be
+# allowed to satisfy that anchor when the exact referent exists, or the clause passes
+# for the wrong same-noun candidate and ranking collapses to instance-id order — the
+# earlier-leg distractor then out-ranks the true terminal goal (#13). These use the
+# live BasicSceneIndex so the real head-noun match tier (which pools "X figurine" /
+# "X table" cousins) is exercised — a plain FakeIndex has no head-noun tier.
+
+
+def test_resolve_specific_figurine_anchor_beats_headnoun_cousin():
+    from core.perception.scene_index import BasicSceneIndex
+
+    # Two tables; a horse figurine sits on the FAR one, an elephant figurine on the
+    # near one. "the table with the horse figurine on it" must resolve to the far
+    # table, never the near (elephant) table.
+    tea_table = rec(1, "tea table", (0, 0, 0.25), (2.0, 2.0, 0.5))  # near, lower id
+    table = rec(2, "table", (6, 0, 0.25), (2.0, 2.0, 0.5))  # far
+    elephant = rec(3, "elephant figurine", (0, 0, 0.55), (0.1, 0.1, 0.2))
+    horse = rec(4, "horse figurine", (6, 0, 0.55), (0.1, 0.1, 0.2))
+    idx = BasicSceneIndex([tea_table, table, elephant, horse])
+    spec = _spec("table", clauses=[Clause(Pred.WITH, [Anchor(noun="horse figurine")])])
+    res = T.resolve(spec, idx)
+    assert res.candidates_ranked[0].instance_id == 2
+
+
+def test_resolve_specific_table_anchor_beats_headnoun_cousin():
+    from core.perception.scene_index import BasicSceneIndex
+
+    # Two potted plants; the "dressing table" is far, a "side table" near. "the potted
+    # plant on the dressing table" must resolve to the plant on the dressing table,
+    # not the plant on the (head-noun cousin) side table.
+    side_table = rec(1, "side table", (0, 0, 0.25), (2.0, 2.0, 0.5))  # near, lower id
+    dressing_table = rec(2, "dressing table", (6, 0, 0.25), (2.0, 2.0, 0.5))  # far
+    plant_near = rec(3, "potted plant", (0, 0, 0.55), (0.3, 0.3, 0.4))
+    plant_far = rec(4, "potted plant", (6, 0, 0.55), (0.3, 0.3, 0.4))
+    idx = BasicSceneIndex([side_table, dressing_table, plant_near, plant_far])
+    spec = _spec("potted plant", clauses=[Clause(Pred.ON, [Anchor(noun="dressing table")])])
+    res = T.resolve(spec, idx)
+    assert res.candidates_ranked[0].instance_id == 4

@@ -602,6 +602,37 @@ def _match_noun(index: SceneIndex, noun: str) -> list[InstanceRecord]:
     return list(index.by_label(noun))
 
 
+def _match_anchor_noun(index: SceneIndex, noun: str) -> list[InstanceRecord]:
+    """Anchor-noun lookup that keeps only the STRONGEST non-empty match tier.
+
+    A disambiguator/relation anchor names a specific referent ("the table WITH the
+    *horse figurine* on it", "the potted plant ON the *dressing table*"). The index's
+    label matcher deliberately pools head-noun cousins so a bare-noun query still
+    generalises ("figurine" -> every X figurine, "table" -> every X table). But when a
+    *modified* anchor noun has an exact/synonym referent, the differently-modified
+    cousins it also drags in ("elephant figurine", "side table") are the WRONG object:
+    an existential relation clause then passes for a same-noun target sitting by the
+    cousin, and the true target (by the exact referent) no longer uniquely survives —
+    ranking collapses to instance-id order and an earlier-leg distractor wins (#13).
+
+    So for anchor resolution we honour the index's own tier ranking: take the best
+    (lowest :class:`MatchTier`) tier that produced any hit and drop the weaker tiers.
+    This keeps the bare-noun generalisation intact (a bare query's cousins live in the
+    same head-noun tier and are all kept) while stopping a specific anchor from being
+    satisfied by a head-noun cousin when its exact referent is present. Indexes that
+    don't expose :meth:`by_label_tiered` (minimal test doubles) fall back to the flat
+    :meth:`by_label` result unchanged.
+    """
+    tiered = getattr(index, "by_label_tiered", None)
+    if tiered is None:
+        return list(index.by_label(noun))
+    hits = list(tiered(noun))
+    if not hits:
+        return []
+    best_tier = min(tier for _, tier in hits)
+    return [rec for rec, tier in hits if tier == best_tier]
+
+
 # Recursion guard for nested-disambiguator resolution: an anchor's disambiguator
 # may itself reference an anchored clause, so cap the nesting depth defensively.
 _MAX_ANCHOR_DEPTH: int = 4
@@ -645,7 +676,7 @@ def _resolve_anchor(
     ``Relaxation`` so the drop is never silent. ``_depth`` guards against a
     disambiguator that (transitively) references another anchored clause.
     """
-    cands = _match_noun(index, anchor.noun)
+    cands = _match_anchor_noun(index, anchor.noun)
     if anchor.attributes:
         _class_pool = cands  # same-class pool for relative size ranking (DD-A12)
         cands = [c for c in cands if _attrs_match(c, anchor.attributes, _class_pool, th)]
