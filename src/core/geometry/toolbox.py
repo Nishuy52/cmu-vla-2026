@@ -661,7 +661,8 @@ def _match_noun(index: SceneIndex, noun: str) -> list[InstanceRecord]:
 
 
 def _match_anchor_noun(index: SceneIndex, noun: str) -> list[InstanceRecord]:
-    """Anchor-noun lookup that keeps only the STRONGEST non-empty match tier.
+    """Anchor-noun lookup: MODIFIED anchors keep only the STRONGEST non-empty match
+    tier; BARE-noun anchors merge all tiers (see #21 note at the end).
 
     A disambiguator/relation anchor names a specific referent ("the table WITH the
     *horse figurine* on it", "the potted plant ON the *dressing table*"). The index's
@@ -687,6 +688,23 @@ def _match_anchor_noun(index: SceneIndex, noun: str) -> list[InstanceRecord]:
     hits = list(tiered(noun))
     if not hits:
         return []
+    # Bare-noun anchors are exempt from tier discipline (#21). Detected with the same
+    # machinery the index tiering uses: a query whose normalised form equals its own
+    # head noun carries no modifiers, so a bare "table" legitimately refers to ANY
+    # table — its exact/synonym referent and its head-noun cousins ("coffee table")
+    # are all the SAME class word and must all be admitted (pre-#13 flat behaviour).
+    # Narrowing to the strongest tier would drop supporters on the cousins.
+    from core.perception.scene_index import normalize_label
+    from core.perception.vocab import head_noun
+
+    query = normalize_label(noun)
+    if query == head_noun(query):
+        return [rec for rec, _ in hits]
+
+    # Modified anchor ("horse figurine", "dressing table"): keep the #13 behaviour —
+    # honour the index's tier ranking and take the best (lowest MatchTier) non-empty
+    # tier only, so a differently-modified cousin cannot satisfy a specific anchor
+    # when its exact referent is present.
     best_tier = min(tier for _, tier in hits)
     return [rec for rec, tier in hits if tier == best_tier]
 

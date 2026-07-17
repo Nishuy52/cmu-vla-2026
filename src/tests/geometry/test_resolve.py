@@ -490,3 +490,22 @@ def test_resolve_specific_table_anchor_beats_headnoun_cousin():
     spec = _spec("potted plant", clauses=[Clause(Pred.ON, [Anchor(noun="dressing table")])])
     res = T.resolve(spec, idx)
     assert res.candidates_ranked[0].instance_id == 4
+
+
+def test_resolve_bare_table_anchor_admits_headnoun_cousin():
+    # Dual to the #13 tests (#21): a BARE-noun anchor must NOT get tier discipline.
+    # Scene has an exact "table" AND a head-noun cousin "coffee table"; a bowl sits on
+    # the coffee table. "the bowl on the table" — a bare "table" legitimately means any
+    # table — must admit the coffee table and find the bowl on it, not narrow the anchor
+    # to the exact-label "table" alone (which would collapse to a category-only fallback).
+    from core.perception.scene_index import BasicSceneIndex
+
+    table = rec(1, "table", (0, 0, 0.25), (2.0, 2.0, 0.5))  # exact label, empty
+    coffee_table = rec(2, "coffee table", (6, 0, 0.25), (2.0, 2.0, 0.5))  # head-noun cousin
+    bowl_off = rec(3, "bowl", (12, 0, 0.55), (0.3, 0.3, 0.4))  # on nothing
+    bowl_on = rec(4, "bowl", (6, 0, 0.55), (0.3, 0.3, 0.4))  # on the coffee table
+    idx = BasicSceneIndex([table, coffee_table, bowl_off, bowl_on])
+    spec = _spec("bowl", clauses=[Clause(Pred.ON, [Anchor(noun="table")])])
+    res = T.resolve(spec, idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [4]
+    assert res.audit == []
