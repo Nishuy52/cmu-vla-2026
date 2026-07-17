@@ -206,6 +206,35 @@ COLOUR_BRIDGE: dict[str, tuple[str, ...]] = {
 }
 
 
+#: Cross-hue colour bridges: a query hue the 15-bin quantiser also emits under a
+#: *different* scheme name (dark reds land in ``maroon``, blues in ``navy``, ...).
+#: These are the subset of :data:`COLOUR_BRIDGE` values that are a DIFFERENT hue
+#: from the query word — so a cross-hue bin should count for the query only when it
+#: is a DOMINANT component of the object (issue #12: an 18% 3rd-bin maroon on a
+#: gray-dominant pillow must NOT make it "red"). Spelling/synonym bridges
+#: (``grey``->``gray``, ``cyan``->``aqua``) are the SAME hue and are deliberately
+#: NOT here — they always count, with no dominance floor.
+COLOUR_CROSS_HUE: dict[str, frozenset[str]] = {
+    "red": frozenset({"maroon"}),
+    "blue": frozenset({"navy"}),
+    "purple": frozenset({"navy"}),
+    "green": frozenset({"olive"}),
+}
+
+#: Neutral (achromatic) scheme bins. A ``black``/``white`` query reaches a dark /
+#: light ``gray`` bin through a LUMINANCE cutoff (issue #11): VLA-3D bins a
+#: near-black dark-slate-gray object (RGB 47,79,79) as ``gray``, not ``black``, so
+#: the scheme name cannot separate it from lighter grays — only its RGB luminance
+#: can. The luminance thresholds themselves are calibration knobs (geometry
+#: ``Thresholds``), applied at the match site; this set names the bins eligible.
+COLOUR_NEUTRAL: frozenset[str] = frozenset({"gray", "black", "white"})
+
+
+def colour_cross_hue(colour: str) -> frozenset[str]:
+    """Scheme names that are a cross-hue (dominance-gated) bridge of ``colour``."""
+    return COLOUR_CROSS_HUE.get(colour.strip().lower(), frozenset())
+
+
 @lru_cache(maxsize=256)
 def colour_synonyms(colour: str) -> frozenset[str]:
     """Scheme-name colour bins a question colour word may legitimately match.
@@ -230,5 +259,8 @@ __all__ = [
     "head_noun",
     "COLOUR_SCHEME",
     "COLOUR_BRIDGE",
+    "COLOUR_CROSS_HUE",
+    "COLOUR_NEUTRAL",
     "colour_synonyms",
+    "colour_cross_hue",
 ]
