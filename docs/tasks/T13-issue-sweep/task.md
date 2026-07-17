@@ -90,3 +90,47 @@ Ubuntu phase. One PR to main closing all of them.
 - 2026-07-18: close-out — scratch battery dirs removed, all 9 issues
   (#10-#13, #15-#19) fixed on this branch; follow-ups #20/#21 filed.
   PR opened to main.
+- 2026-07-18: scope extended per user — fix #20/#21 too. Stale
+  LibreOffice lock in data/vla3d/Unity/home_building_2/ deleted (no
+  soffice process; dated 11 Jul).
+- 2026-07-18: #21 fixed (cbfd548): bare-noun anchors merge exact+
+  head-noun tiers, modified anchors keep #13 tier discipline. Hard
+  gate tripped by ONE row — livingroom_3 ambiguous OR (ungraded,
+  gt=null) our 58->31 — adjudicated ACCEPT: it is the intended
+  bare-"cabinet"-includes-"tv cabinet" correction on a scene the
+  issue thought unaffected; all scored aggregates bit-identical.
+- 2026-07-18: #20 diagnosis (executor, no code change): GT=91 was a
+  spurious step-3 fuzzy match to unrelated "black speaker near small
+  cabinet" statements; semantically correct target is 122 (0.52 m to
+  plant-220 vs 91's 0.87); our 108 came from right-branching parse
+  attachment (contradicting the committed hb2 golden fixture) +
+  cabinet-centroid ranking. Verdict: two real defects (parse
+  attachment, GT-matcher honesty), fixed next.
+- 2026-07-18: #20 fixed (554f927): _split_trailing_superlative
+  surfaces bare trailing superlatives to the head target (OR only;
+  relative-pronoun + counting guards); GT matcher step 3 requires
+  superlative agreement + anchor tier discipline. Parse blast radius
+  4/75 questions, all the target construction. Battery T13b vs
+  T13post: numerical 15/15 + IF byte-identical; OR none22/relation7 ->
+  none24/relation5, mean_iou 0.875 -> 1.0 over 6 scored. Golden-test
+  gap found: harness compares noun multisets, not clause structure —
+  new structural test added. ADJUDICATION (chinese_room bowl iou
+  1.0 -> n/a + two golden-note flips to target-reading): ACCEPTED —
+  VLA-3D source semantics (docs/prior_art/vla_3d.md, relate_ordered)
+  rank the TARGET's class against the anchor, so "closest to" ranks
+  bowls/speakers, not tables/cabinets; the old 1.0 was two errors
+  cancelling (tablecloth-statement GT + right-branching parse both
+  landing on bowl 71); hb2 corroborates (anchor-reading leaves 4
+  speakers, no unique referent). Reference rebaselined:
+  reports/gt_battery_T13b_2026-07-18.
+- 2026-07-18: #20+#21 combined verifier gate CONFIRMED — fast tier 1087
+  passed / full gate exit 0 reproduced; independent battery re-run diffs
+  T13b at 0 fields; exactly the 4 claimed parse changes across the 75-Q
+  corpus, no silent head-drops; genuine superlative GT matches survive
+  the tightened matcher (hotel_room_2 31, studio 46, hotel_room_1 72 —
+  over-tightening refuted); geometry recomputed (bowl 91 @1.792 m vs 71
+  @2.080; speaker 122 @0.525 m vs 91 @0.868); counting/IF/relative-
+  pronoun guards all hold (office_1 monitor count still 6). Anomalies:
+  AABB footprint containment approximate for hb2 speakers (documented
+  OBB->AABB caveat, unique-cabinet argument unaffected); pre-existing
+  leading-superlative parse quirk -> filed as #23.
