@@ -134,3 +134,15 @@ Ubuntu phase. One PR to main closing all of them.
   AABB footprint containment approximate for hb2 speakers (documented
   OBB->AABB caveat, unique-cabinet argument unaffected); pre-existing
   leading-superlative parse quirk -> filed as #23.
+- 2026-07-18: PR #22 five-agent review (code/tests/comments/silent-
+  failure/type-design). Verdict: no merge-blocking functional bugs.
+  Applied follow-ups in 86f0c41 (calibration.md wiring counts 61/47 ->
+  64/50, scoring.py comment mechanism accuracy, loader/_colour_present
+  docstring precision, ColorBin __post_init__ validation, provenance
+  OSError-narrowing + 16 MiB size guard + degradation notes,
+  answer_key_status in JSON payload + CLI line, threshold boundary
+  tests, flat-fallback modified-anchor test, superlative-pred set now
+  derived parser->scorer). Fast tier 1100 passed / 28 skipped.
+  Architectural findings filed: #24 (SceneIndex Protocol lacks
+  by_label_tiered), #25 (relclause guard gaps), #26 (plan.notes not
+  surfaced in battery reports), #27 (loader partial-CSV color desync).

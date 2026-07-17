@@ -538,3 +538,7 @@ light_luma_min) join the CV-sweep surface.
 #10-#13, #15-#21. Residual queue: #23, OR/IF image answer-key
 transcription (arch-F3), Gate 0 execution, local-VLM tier (arch-F5),
 SoC detector benchmarking (arch-F2).
+
+- (session 16b cont.) PR #22 reviewed via pr-review-toolkit (5 agents):
+  no merge blockers; follow-up polish applied (86f0c41, fast tier 1100
+  passed); architectural findings filed as #24-#27. PR ready to merge.
