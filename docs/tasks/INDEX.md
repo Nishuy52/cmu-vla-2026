@@ -48,3 +48,11 @@
   → issues #11/#12); IF leg-count census (meth-F5, 0/30 dropped);
   `--no-spawn-hint` run (arch-F9); unaligned-scene frame fit (meth-F11,
   aligned 24→28/30). New resolver-mispick bug → issue #13.
+- **T13** issue-sweep — clear all nine open GitHub issues
+  (#10–#13, #15–#19) on branch `fix/issue-sweep`: battery-diff
+  fixture schema, provenance untracked-content digest, gt_battery
+  cal/answer-key/CLI polish + test split, anchored-disambiguator
+  terminal-goal fix (#13, verifier-CONFIRMED), and the two color
+  failures via ColorBin RGB + luminance/dominance salience knobs
+  (#11/#12, numerical 13/15 → 15/15, OR/IF byte-identical,
+  verifier-CONFIRMED). Follow-ups filed: #20, #21.

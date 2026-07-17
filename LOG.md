@@ -494,3 +494,25 @@ follow-up queue (PRs to close them).
 **Next:** unchanged from session 14 - OR/IF image answer-key visual
 transcription (arch-F3 residual), Gate 0 execution, issues #11-#13
 (now plus #15-#19 polish queue) as the actionable code follow-ups.
+
+---
+
+## 2026-07-18 (session 16) - task milestones
+
+- Started + finished task: T13 issue-sweep - record at
+  `docs/tasks/T13-issue-sweep/`. Branch `fix/issue-sweep`; all nine
+  open issues (#10-#13, #15-#19) fixed, two verifier gates CONFIRMED,
+  numerical TRUE accuracy 13/15 -> 15/15, full gate exit 0. Follow-up
+  issues filed: #20 (pre-existing hb2 speaker OR mismatch), #21
+  (anchor-tier latent caveat). PR to main opened closing all nine.
+- Environment fix: git-ignored `upstream/` clone found empty (casualty
+  of session-15 cleanup) - re-cloned Yuxin916/CMU-VLN-Challenge-2026
+  (shallow); parsing tests green again. No ubuntu_setup.md change
+  needed (no new deps; upstream clone step already documented).
+
+**Next:** merge the T13 PR; then the residual queue unchanged from
+session 15 - OR/IF image answer-key visual transcription (arch-F3),
+Gate 0 execution, local-VLM tier posture (arch-F5), SoC cluster
+detector benchmarking (arch-F2); #20/#21 now head the code follow-up
+queue. New color knobs (colour_dominance_floor, dark_luma_max,
+light_luma_min) join the CV-sweep surface.
