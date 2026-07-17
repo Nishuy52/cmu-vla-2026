@@ -43,6 +43,45 @@ def _git(args: list[str]) -> str:
     return out.stdout.strip()
 
 
+def _untracked_content_digest(status_porcelain: str) -> str:
+    """Deterministic digest input for the CONTENTS of untracked paths.
+
+    ``status_porcelain`` is the stripped ``git status --porcelain`` output.
+    Untracked entries are the lines starting with ``"?? "``. For each such path,
+    in sorted order, we fold in the file bytes so two trees that differ only
+    inside an untracked file get distinct digests (issue #18).
+
+    Untracked *directories* appear in porcelain collapsed to a single ``dir/``
+    entry (git does not expand their contents), so we deliberately hash the
+    directory name only — walking them could be arbitrarily large (e.g. an
+    untracked ``reports/`` tree) and is a performance hazard for a stamp that
+    runs on every battery. This is a documented, bounded trade-off: content
+    changes strictly *inside* an untracked directory are not distinguished.
+
+    Never raises: an unreadable path (deleted mid-flight, permission error, a
+    path that resolves to a directory) degrades to hashing its name only.
+    """
+    parts: list[str] = []
+    for line in sorted(status_porcelain.splitlines()):
+        if not line.startswith("?? "):
+            continue
+        rel = line[3:]
+        # Porcelain quotes paths with special characters (core.quotePath);
+        # such a path won't resolve on disk, so its hash falls back to the
+        # raw (quoted) name below — still deterministic.
+        if rel.endswith("/"):
+            # Untracked directory: hash the name only (see docstring).
+            parts.append(f"{rel}\0dir")
+            continue
+        try:
+            data = (_REPO_ROOT / rel).read_bytes()
+            parts.append(f"{rel}\0" + hashlib.sha1(data).hexdigest())
+        except Exception:  # noqa: BLE001 — provenance must never raise
+            # Unreadable / vanished / directory: degrade to name only.
+            parts.append(f"{rel}\0?")
+    return "\n".join(parts)
+
+
 def collect_provenance(
     tool: str,
     argv: list[str] | None = None,
@@ -84,11 +123,17 @@ def collect_provenance(
         status = _git(["status", "--porcelain"])
         git_dirty = bool(status)
         if git_dirty:
-            # Digest of the full working-tree state (staged + unstaged vs HEAD) so a
-            # dirty run is identifiable without dumping the diff into the payload.
+            # Digest identifying the dirty working tree without dumping it into
+            # the payload. Covers: the porcelain status line set (tracked path
+            # changes + untracked path names), the staged+unstaged diff vs HEAD
+            # for tracked files, and the CONTENTS of untracked files (issue #18)
+            # — since `git diff HEAD` omits untracked files, their bytes are
+            # folded in separately (untracked dirs by name only; see
+            # _untracked_content_digest).
             diff_text = _git(["diff", "HEAD"])
+            untracked_text = _untracked_content_digest(status)
             dirty_digest = hashlib.sha1(
-                (status + diff_text).encode("utf-8")
+                (status + "\0" + diff_text + "\0" + untracked_text).encode("utf-8")
             ).hexdigest()[:12]
     except Exception as exc:  # noqa: BLE001
         notes.append(f"git status unavailable ({exc.__class__.__name__})")
