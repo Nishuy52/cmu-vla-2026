@@ -418,5 +418,100 @@ def test_terminal_goal_centroid_delegates_to_candidates():
     else:
         assert top is None
 
+
+def test_livingroom_3_registered_as_data_unfittable():
+    """livingroom_3 is registered (with a reason) in the DATA-confirmed unfittable set."""
     _DATA = GB._DATA_UNFITTABLE_IF_SCENES
     assert "livingroom_3" in _DATA and _DATA["livingroom_3"]
+
+
+# --------------------------------------------------------------------------- #16
+# Corrupt vs absent answer key: a present-but-unreadable key must be LOUD and must
+# read differently in the report topline than a legitimately absent one — the
+# TRUE-accuracy yardstick can't be allowed to vanish silently.
+
+
+def test_load_answers_missing_is_silent(tmp_path, capsys):
+    """An absent key file is a soft miss: None, no warning."""
+    assert GB._load_answers(tmp_path / "does_not_exist.json") is None
+    assert GB._load_answers(None) is None
+    assert capsys.readouterr().err == ""
+
+
+def test_load_answers_corrupt_warns_and_returns_none(tmp_path, capsys):
+    """A present-but-unreadable key returns None but emits a loud stderr warning that
+    distinguishes 'unreadable' from 'missing' — and never raises."""
+    bad = tmp_path / "gt_answers_numerical.json"
+    bad.write_text("{ this is not valid json ", encoding="utf-8")
+    assert GB._load_answers(bad) is None
+    err = capsys.readouterr().err
+    assert "UNREADABLE" in err
+    assert "yardstick" in err
+
+
+def test_answer_key_status_classifies(tmp_path):
+    """_answer_key_status separates ok / missing / unreadable."""
+    assert GB._answer_key_status(None) == "missing"
+    assert GB._answer_key_status(tmp_path / "nope.json") == "missing"
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    assert GB._answer_key_status(bad) == "unreadable"
+    good = tmp_path / "good.json"
+    good.write_text('{"scenes": {}}', encoding="utf-8")
+    assert GB._answer_key_status(good) == "ok"
+
+
+def _numerical_row_without_true_answer():
+    """A keyless numerical row -> n_with_true_answer == 0 (topline reads n/a)."""
+    from core.runner.gt_battery import GTQuestionScore
+
+    return GTQuestionScore(
+        scene="loft", qtype=QType.NUMERICAL.value, question="How many chairs?",
+        our_count=2,
+    )
+
+
+def test_report_topline_says_unreadable_not_absent(tmp_path):
+    """With no keyed rows AND an unreadable key, the topline says UNREADABLE, not 'no key'."""
+    scores = [_numerical_row_without_true_answer()]
+    md_path, _ = GB.write_report(
+        scores, [], tmp_path, answer_key_status="unreadable"
+    )
+    text = md_path.read_text(encoding="utf-8")
+    assert "UNREADABLE" in text
+    assert "no answer key" not in text
+
+
+def test_report_topline_says_no_key_when_absent(tmp_path):
+    """With no keyed rows and a missing key, the topline keeps the 'no answer key' wording."""
+    scores = [_numerical_row_without_true_answer()]
+    md_path, _ = GB.write_report(scores, [], tmp_path, answer_key_status="missing")
+    text = md_path.read_text(encoding="utf-8")
+    assert "no answer key" in text
+    assert "UNREADABLE" not in text
+
+
+# --------------------------------------------------------------------------- #15
+# The write_report `cal` parameter was never wired from main() (provenance always
+# stamped the default calibration). gt_battery has no non-default calibration path,
+# so the param was dropped: the default fallback is the single documented path.
+
+
+def test_write_report_has_no_cal_param():
+    """The dead `cal` parameter is gone from write_report's signature (#15)."""
+    import inspect
+
+    params = inspect.signature(GB.write_report).parameters
+    assert "cal" not in params
+
+
+def test_write_report_stamps_default_calibration(tmp_path):
+    """Provenance still records the (default) calibration identity without a cal param."""
+    scores = [_numerical_row_without_true_answer()]
+    _, json_path = GB.write_report(scores, [], tmp_path)
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    prov = payload["provenance"]
+    assert prov["tool"] == "gt_battery"
+    # default calibration is stamped via collect_provenance's own fallback
+    assert prov["calibration_sha1"] is not None
+    assert prov["calibration"] is not None

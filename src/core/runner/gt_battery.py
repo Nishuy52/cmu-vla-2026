@@ -832,8 +832,12 @@ def _find_scene_folder(unity_root: Path, scene_name: str) -> Path | None:
 def _load_answers(answers_path: os.PathLike | str | None) -> dict | None:
     """Load the true numerical answer key (arch-F3); return None when absent/unreadable.
 
-    A missing key file is a soft condition — the battery still runs and every true
-    field stays null — so we swallow read/parse errors rather than abort.
+    A *missing* key file is a soft condition — the battery still runs and every true
+    field stays null. A *present-but-unreadable* key (corrupt/unparseable) is NOT soft:
+    it silently vanishes the TRUE-accuracy yardstick, which is the exact failure the
+    yardstick exists to prevent, so we emit a loud stderr warning (distinct from the
+    silent missing case) before degrading to null. Either way we never abort the run —
+    see :func:`_answer_key_status` for the classification surfaced in the report topline.
     """
     if answers_path is None:
         return None
@@ -843,8 +847,35 @@ def _load_answers(answers_path: os.PathLike | str | None) -> dict | None:
     try:
         with open(p, encoding="utf-8") as fh:
             return json.load(fh)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"gt_battery: WARNING answer key present but UNREADABLE at {p} "
+            f"({exc.__class__.__name__}: {exc}) — TRUE-accuracy yardstick unavailable; "
+            "this is a corrupt key, NOT a legitimately absent one",
+            file=sys.stderr,
+        )
         return None
+
+
+def _answer_key_status(answers_path: os.PathLike | str | None) -> str:
+    """Classify the answer key for the report topline: ``"ok"`` | ``"missing"`` | ``"unreadable"``.
+
+    ``"missing"`` = no file (soft, expected before the key is extracted); ``"unreadable"``
+    = the file is present but corrupt/unparseable (the yardstick has silently vanished —
+    surfaced loudly in the topline so it can't pass for a legitimately absent key). Pure
+    classification only: the loud stderr warning lives in :func:`_load_answers`.
+    """
+    if answers_path is None:
+        return "missing"
+    p = Path(answers_path)
+    if not p.exists():
+        return "missing"
+    try:
+        with open(p, encoding="utf-8") as fh:
+            json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return "unreadable"
+    return "ok"
 
 
 def _squash_ws(s: str) -> str:
@@ -1119,7 +1150,7 @@ def write_report(
     out_dir: os.PathLike | str,
     *,
     argv: list[str] | None = None,
-    cal=None,
+    answer_key_status: str | None = None,
 ) -> tuple[Path, Path]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -1186,11 +1217,17 @@ def write_report(
     num_rows = [s for s in scores if s.qtype == QType.NUMERICAL.value]
     n_true = n["n_with_true_answer"]
     k_true = sum(1 for s in num_rows if s.true_match)
-    true_lead = (
-        f"TRUE accuracy {k_true}/{n_true} (answer key: questions.pdf)"
-        if n_true
-        else "true accuracy n/a (no answer key)"
-    )
+    if n_true:
+        true_lead = f"TRUE accuracy {k_true}/{n_true} (answer key: questions.pdf)"
+    elif answer_key_status == "unreadable":
+        # A corrupt/unparseable key silently degrades to zero keyed rows — same shape as
+        # a legitimately absent key. Say so loudly here so the yardstick can't vanish
+        # unnoticed (issue #16).
+        true_lead = (
+            "true accuracy n/a (answer key present but UNREADABLE — corrupt/unparseable)"
+        )
+    else:
+        true_lead = "true accuracy n/a (no answer key)"
     # Instance-match (arch-F3): resolved instance id == gt_target_id, over the OR
     # questions where a GT target was matched (scoreable). Real-perception IoU pending.
     obj_rows = [s for s in scores if s.qtype == QType.OBJECT_REFERENCE.value]
@@ -1228,7 +1265,12 @@ def write_report(
 
     payload = {
         "date": date.today().isoformat(),
-        "provenance": collect_provenance("gt_battery", argv, cal),
+        # gt_battery has no non-default calibration path (score_scene never threads a
+        # Thresholds/Calibration — every scorer uses DEFAULT_THRESHOLDS, i.e. the default
+        # calibration's geometry — and there is no --calibration flag), so provenance
+        # stamps the default calibration via collect_provenance's own fallback. This is
+        # the single documented calibration path for this tool.
+        "provenance": collect_provenance("gt_battery", argv),
         "n_questions": len(scores),
         "scenes": scenes,
         "missing_scenes": missing,
@@ -1296,9 +1338,15 @@ def main(argv: list[str] | None = None) -> int:
     if not scores:
         print(f"gt_battery: no scenes found under {args.groundtruth} (missing={missing})")
         return 1
+    # Classify the answer key so the report topline distinguishes a corrupt key from a
+    # legitimately absent one (issue #16). The loud stderr warning already fired inside
+    # run_gt_battery's _load_answers; this is the pure classification for the report.
+    answer_key_status = _answer_key_status(args.answers)
     # Stamp the actual invocation argv (fall back to the process args for a bare CLI run).
     stamp_argv = list(argv) if argv is not None else sys.argv[1:]
-    md_path, json_path = write_report(scores, missing, out_dir, argv=stamp_argv)
+    md_path, json_path = write_report(
+        scores, missing, out_dir, argv=stamp_argv, answer_key_status=answer_key_status
+    )
 
     agg = aggregate(scores)
     n, o, i = agg["numerical"], agg["object_reference"], agg["instruction_following"]
@@ -1307,9 +1355,19 @@ def main(argv: list[str] | None = None) -> int:
         if n["n_with_true_answer"]
         else "n/a"
     )
+    # Object-reference headline is instance-match / scoreability (same metric naming as the
+    # markdown report), with IoU kept as a secondary diagnostic (issue #17).
+    obj_rows = [s for s in scores if s.qtype == QType.OBJECT_REFERENCE.value]
+    or_scored = [s for s in obj_rows if s.gt_target_id is not None]
+    or_instance_match = sum(
+        1
+        for s in or_scored
+        if s.our_target_id is not None and s.our_target_id == s.gt_target_id
+    )
     print(
         f"gt_battery: {len(scores)} questions / {len({s.scene for s in scores})} scenes  "
         f"num_true={num_true_str} "
+        f"or_instance_match={or_instance_match}/{len(or_scored)} "
         f"or_iou={_num(o['mean_iou'])} "
         f"if_rubric={_num(i['mean_rubric_score'])} "
         f"if_thread_viol={i['total_threading_violations']} "
