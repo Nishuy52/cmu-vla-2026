@@ -70,6 +70,8 @@ _REL_ALTERNATION = "|".join(pat for pat, _ in _REL_TOKENS)
 # Superlative predicates ("closest to"/"farthest from" family) and the alternation of
 # their surface tokens — used to surface a *trailing* superlative to the head target
 # (see `_split_trailing_superlative`).
+# Canonical superlative-predicate set. core.groundtruth.scoring imports this to derive
+# its _SUPERLATIVE_PRED_VALUES (value-strings) — keep this the single source of truth.
 _SUPERLATIVE_PREDS = {Pred.CLOSEST_TO, Pred.FARTHEST_FROM}
 _SUPERLATIVE_ALTERNATION = "|".join(
     pat for pat, pred in _REL_TOKENS if pred in _SUPERLATIVE_PREDS

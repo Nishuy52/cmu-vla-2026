@@ -131,6 +131,18 @@ class ColorBin:
     rgb: tuple[int, int, int]
     fraction: float
 
+    def __post_init__(self) -> None:
+        rgb = self.rgb
+        if len(rgb) != 3:
+            raise ValueError(f"ColorBin.rgb must have 3 channels, got {len(rgb)}: {rgb!r}")
+        for ch, v in zip(("r", "g", "b"), rgb):
+            if not isinstance(v, int) or isinstance(v, bool):
+                raise ValueError(f"ColorBin.rgb.{ch} must be an int, got {v!r}")
+            if not 0 <= v <= 255:
+                raise ValueError(f"ColorBin.rgb.{ch} must be in [0, 255], got {v!r}")
+        if not 0.0 <= self.fraction <= 1.0:
+            raise ValueError(f"ColorBin.fraction must be in [0.0, 1.0], got {self.fraction!r}")
+
     @property
     def luma(self) -> float:
         """Rec. 601 luminance (0-255 scale) of the bin's representative RGB."""

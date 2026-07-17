@@ -169,7 +169,10 @@ def _color_bins(row: dict[str, str]) -> tuple[ColorBin, ...]:
     ``object_color_scheme_percentage{i}`` columns. Carries the raw RGB and fraction
     the scheme name alone loses, so colour matching can apply luminance / dominance
     salience (issues #11/#12). A bin is included only when it has a scheme name AND
-    parseable RGB (kept in lock-step with :func:`_dominant_colors`)."""
+    parseable RGB. This does NOT stay in lock-step with :func:`_dominant_colors`: a
+    row with a valid scheme name but corrupt/unparseable RGB diverges — the name still
+    survives as an alias in ``_dominant_colors``, but the bin is dropped here. (The
+    behaviour itself is unchanged; a separate issue tracks the signal mechanism.)"""
     bins: list[ColorBin] = []
     for i in (1, 2, 3):
         name = (row.get(f"object_color_scheme{i}") or "").strip().lower()

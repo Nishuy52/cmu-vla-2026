@@ -56,6 +56,7 @@ from core.geometry.toolbox import (
 )
 from core.groundtruth.vocab_bridge import bridge_synonyms, bridged_agree
 from core.interfaces import InstanceRecord, MarkerBox, SceneIndex
+from core.parsing.regex_tier import _SUPERLATIVE_PREDS as _PARSER_SUPERLATIVE_PREDS
 from core.parsing.regex_tier import parse_regex
 from core.perception.scene_index import BasicSceneIndex, normalize_label
 
@@ -92,8 +93,11 @@ def _pred_relations(pred) -> tuple[str, ...]:
     return _PRED_TO_RELATIONS.get(str(val), ())
 
 
-#: Parsed predicate values that express a ranked (superlative) relation.
-_SUPERLATIVE_PRED_VALUES = frozenset({"closest_to", "farthest_from"})
+#: Parsed predicate values that express a ranked (superlative) relation. Derived from
+#: the parser's canonical Pred set (:data:`core.parsing.regex_tier._SUPERLATIVE_PREDS`)
+#: so there is a single source of truth — adding a superlative predicate there flows
+#: through to this scorer automatically instead of drifting out of sync.
+_SUPERLATIVE_PRED_VALUES = frozenset(p.value for p in _PARSER_SUPERLATIVE_PREDS)
 
 
 def _is_superlative_clause(clause) -> bool:
@@ -616,13 +620,16 @@ def _gt_target_from_referential(
     }
     # Superlative honesty (#20): when the question carries a superlative ("closest to
     # Z" / "farthest from Z"), the discriminating constraint IS that superlative — a
-    # genuine referential match must be a superlative statement about the SAME anchor
-    # Z, not any generically-related statement that merely shares a head-noun. Restrict
-    # the relation and anchor filters to the superlative clause(s) alone, so a "near
-    # the small cabinet" statement can no longer stand in for "closest to the potted
-    # plant" (the question's real ask), and a modified anchor ("tv cabinet") is no
-    # longer satisfied by a bare head-noun cousin ("cabinet") — mirroring the modified-
-    # anchor tier discipline in geometry.toolbox._match_anchor_noun. With no genuine
+    # genuine referential match must be about the anchor the superlative names, not an
+    # anchor pulled in from some other, non-superlative clause. So we restrict the
+    # relation and anchor filters to the superlative clause(s) ALONE: a non-superlative
+    # clause's anchor no longer participates in the filter at all, so a "near the small
+    # cabinet" clause can no longer stand in for "closest to the potted plant" (the
+    # question's real ask). Note the per-anchor comparison below is still ``_anchor_agrees``,
+    # which is unchanged and deliberately loose (head-noun-level) — this fix narrows WHICH
+    # anchors are filtered on, not how strictly each is compared. That is related to but
+    # distinct from the MatchTier ranking in geometry.toolbox._match_anchor_noun, which
+    # grades modified-vs-bare anchor matches; we do no such grading here. With no genuine
     # speaker-to-potted-plant statement in the scene, the honest result is ambiguous.
     superl_clauses = [c for c in plan.target.clauses if _is_superlative_clause(c)]
     if superl_clauses:

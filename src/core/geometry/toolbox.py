@@ -182,10 +182,12 @@ def _colour_present(a: InstanceRecord, colour: str, th: Thresholds) -> bool:
     * *cross-hue bridged bin* (``red``->``maroon``, ``blue``->``navy``): counts only
       when it is the object's majority component (fraction >= ``colour_dominance_floor``)
       — rejects a minor off-hue bin (issue #12).
-    * *black / white via luminance*: a neutral ``gray`` bin counts as ``black`` when
-      its RGB luma <= ``dark_luma_max`` (``white`` when >= ``light_luma_min``), still
-      dominance-gated — separates a near-black gray-binned object from lighter grays
-      (issue #11) without a blanket black<->gray name merge.
+    * *black / white via luminance*: a neutral (``gray``/``black``/``white``) bin
+      counts as ``black`` when its RGB luma <= ``dark_luma_max`` (``white`` when >=
+      ``light_luma_min``), still dominance-gated — separates a near-black neutral-binned
+      object from lighter ones (issue #11) without a blanket black<->gray name merge.
+      (The cross-name case is inert in practice: a same-named bin — e.g. a ``black``
+      bin queried for ``black`` — hits the identity branch above first.)
 
     When the record has NO colour bins (mocks, perception without quantisation), it
     falls back to the legacy scheme-name substring test over the record text, so

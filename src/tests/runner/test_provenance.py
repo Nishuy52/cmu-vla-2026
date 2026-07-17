@@ -114,6 +114,67 @@ def test_dirty_digest_untracked_unreadable_does_not_raise(tmp_path, monkeypatch)
     assert re.fullmatch(r"[0-9a-f]{12}", st["dirty_digest"])
 
 
+def test_dirty_digest_untracked_read_failure_degrades_with_note(tmp_path, monkeypatch):
+    """An untracked file whose read raises OSError degrades to a name-only marker,
+    still produces a digest, and records one degradation note in the payload."""
+    _init_temp_repo(tmp_path)
+    monkeypatch.setattr(prov, "_REPO_ROOT", tmp_path)
+    (tmp_path / "top.txt").write_text("y\n", encoding="utf-8")
+
+    real_read_bytes = prov.Path.read_bytes
+
+    def boom_read(self, *args, **kwargs):
+        if self.name == "top.txt":
+            raise OSError("simulated read failure")
+        return real_read_bytes(self, *args, **kwargs)
+
+    monkeypatch.setattr(prov.Path, "read_bytes", boom_read)
+
+    st = prov.collect_provenance("gt_battery")
+    assert set(st) == SCHEMA_KEYS
+    assert st["git_dirty"] is True
+    assert re.fullmatch(r"[0-9a-f]{12}", st["dirty_digest"])
+    assert "unreadable" in st["note"]
+
+
+def test_dirty_digest_untracked_oversized_degrades_with_note(tmp_path, monkeypatch):
+    """An untracked file over the size threshold is digested by name+size only
+    (never read) and records a degradation note — without writing a huge file."""
+    _init_temp_repo(tmp_path)
+    monkeypatch.setattr(prov, "_REPO_ROOT", tmp_path)
+    # Shrink the threshold instead of writing 16 MiB.
+    monkeypatch.setattr(prov, "_MAX_UNTRACKED_DIGEST_BYTES", 4)
+    (tmp_path / "big.txt").write_text("way more than four bytes\n", encoding="utf-8")
+
+    # Guard: read_bytes must NOT be called on the oversized file.
+    real_read_bytes = prov.Path.read_bytes
+
+    def guard_read(self, *args, **kwargs):
+        assert self.name != "big.txt", "oversized file must not be read"
+        return real_read_bytes(self, *args, **kwargs)
+
+    monkeypatch.setattr(prov.Path, "read_bytes", guard_read)
+
+    st = prov.collect_provenance("gt_battery")
+    assert set(st) == SCHEMA_KEYS
+    assert st["git_dirty"] is True
+    assert re.fullmatch(r"[0-9a-f]{12}", st["dirty_digest"])
+    assert "oversized" in st["note"]
+
+
+def test_oversized_untracked_digest_is_deterministic(tmp_path, monkeypatch):
+    """The name+size marker for an oversized untracked file is stable across runs
+    when its size is unchanged."""
+    _init_temp_repo(tmp_path)
+    monkeypatch.setattr(prov, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(prov, "_MAX_UNTRACKED_DIGEST_BYTES", 4)
+    (tmp_path / "big.txt").write_text("way more than four bytes\n", encoding="utf-8")
+
+    st_a = prov.collect_provenance("gt_battery")
+    st_b = prov.collect_provenance("gt_battery")
+    assert st_a["dirty_digest"] == st_b["dirty_digest"]
+
+
 def test_graceful_degradation_when_git_unavailable(monkeypatch):
     """Any subprocess failure degrades git fields to None + a note, never raising."""
 

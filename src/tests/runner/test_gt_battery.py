@@ -491,6 +491,38 @@ def test_report_topline_says_no_key_when_absent(tmp_path):
     assert "UNREADABLE" not in text
 
 
+def test_json_payload_carries_answer_key_status(tmp_path):
+    """The status is surfaced in the JSON payload, not only the markdown (issue #16)."""
+    scores = [_numerical_row_without_true_answer()]
+    _, json_path = GB.write_report(scores, [], tmp_path, answer_key_status="unreadable")
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["answer_key_status"] == "unreadable"
+
+    _, json_path2 = GB.write_report(
+        scores, [], tmp_path / "b", answer_key_status="missing"
+    )
+    payload2 = json.loads((json_path2).read_text(encoding="utf-8"))
+    assert payload2["answer_key_status"] == "missing"
+
+
+def test_main_stdout_marks_unreadable_key(tmp_path, monkeypatch, capsys):
+    """main()'s stdout summary distinguishes an unreadable key from an absent one (issue #16)."""
+    scores = [_numerical_row_without_true_answer()]
+    monkeypatch.setattr(GB, "run_gt_battery", lambda *a, **k: (scores, []))
+
+    monkeypatch.setattr(GB, "_answer_key_status", lambda p: "unreadable")
+    rc = GB.main(["--groundtruth", str(tmp_path), "--out", str(tmp_path / "u")])
+    assert rc == 0
+    assert "num_true=n/a[UNREADABLE]" in capsys.readouterr().out
+
+    monkeypatch.setattr(GB, "_answer_key_status", lambda p: "missing")
+    rc = GB.main(["--groundtruth", str(tmp_path), "--out", str(tmp_path / "m")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "num_true=n/a " in out
+    assert "UNREADABLE" not in out
+
+
 # --------------------------------------------------------------------------- #15
 # The write_report `cal` parameter was never wired from main() (provenance always
 # stamped the default calibration). gt_battery has no non-default calibration path,

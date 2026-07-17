@@ -7,6 +7,7 @@ both at the map level and wired through toolbox._attrs_match.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from core.geometry.toolbox import _attrs_match
 from core.interfaces import ColorBin, InstanceRecord
@@ -206,3 +207,57 @@ def test_bins_absent_falls_back_to_text():
     # no colour bins -> legacy scheme-name substring test (mocks / perception path)
     assert _attrs_match(_rec("pillow", caption="maroon medium"), ["red"])
     assert not _attrs_match(_rec("pillow", caption="gray medium"), ["black"])
+
+
+# ------------------------------------------- ColorBin construction-time validation
+
+
+def test_colorbin_valid_construction_ok():
+    # a well-formed bin constructs without error
+    assert ColorBin("gray", (47, 79, 79), 0.5).rgb == (47, 79, 79)
+
+
+def test_colorbin_rejects_bad_rgb_shape():
+    with pytest.raises(ValueError):
+        ColorBin("gray", (10, 20), 0.5)  # only 2 channels
+    with pytest.raises(ValueError):
+        ColorBin("gray", (10, 20, 30, 40), 0.5)  # 4 channels
+
+
+def test_colorbin_rejects_rgb_out_of_range():
+    with pytest.raises(ValueError):
+        ColorBin("gray", (256, 0, 0), 0.5)  # channel above 255
+    with pytest.raises(ValueError):
+        ColorBin("gray", (0, -1, 0), 0.5)  # channel below 0
+
+
+def test_colorbin_rejects_bad_fraction():
+    with pytest.raises(ValueError):
+        ColorBin("gray", (10, 20, 30), 1.5)  # above 1.0
+    with pytest.raises(ValueError):
+        ColorBin("gray", (10, 20, 30), -0.1)  # below 0.0
+
+
+# ---------------------------- boundary semantics of the three colour-salience knobs
+# Pins the inclusive comparisons in _colour_present: fraction >= colour_dominance_floor
+# (0.50), luma <= dark_luma_max (96.0), luma >= light_luma_min (220.0).
+
+
+def test_dominance_floor_boundary_inclusive():
+    # cross-hue maroon-as-red is dominance-gated at 0.50: 0.500 accepts, 0.499 rejects
+    assert _attrs_match(_rec_bins("pillow", [ColorBin("maroon", (165, 42, 42), 0.500)]), ["red"])
+    assert not _attrs_match(_rec_bins("pillow", [ColorBin("maroon", (165, 42, 42), 0.499)]), ["red"])
+
+
+def test_dark_luma_boundary_inclusive():
+    # gray bin reads black at luma <= 96.0: (96,96,96)=96.0 accepts;
+    # (96,96,97)=96.114 (just above) rejects
+    assert _attrs_match(_rec_bins("pillow", [ColorBin("gray", (96, 96, 96), 1.0)]), ["black"])
+    assert not _attrs_match(_rec_bins("pillow", [ColorBin("gray", (96, 96, 97), 1.0)]), ["black"])
+
+
+def test_light_luma_boundary_inclusive():
+    # gray bin reads white at luma >= 220.0: (220,220,220)=220.0 accepts;
+    # (220,220,219)=219.886 (just below) rejects
+    assert _attrs_match(_rec_bins("wall", [ColorBin("gray", (220, 220, 220), 1.0)]), ["white"])
+    assert not _attrs_match(_rec_bins("wall", [ColorBin("gray", (220, 220, 219), 1.0)]), ["white"])

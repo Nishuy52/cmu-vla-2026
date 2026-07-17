@@ -509,3 +509,18 @@ def test_resolve_bare_table_anchor_admits_headnoun_cousin():
     res = T.resolve(spec, idx)
     assert [c.instance_id for c in res.candidates_ranked] == [4]
     assert res.audit == []
+
+
+def test_match_anchor_noun_flat_fallback_ignores_tier_discipline():
+    # Fallback contract (#13/#21): a minimal index that exposes no `by_label_tiered`
+    # (e.g. FakeIndex) must return the flat `by_label` result UNCHANGED — even for a
+    # MODIFIED anchor noun, where a tiered index would narrow to the strongest tier and
+    # drop head-noun cousins. Without the tiered API there is no tier signal to act on,
+    # so tier discipline is a no-op and both the exact referent and the cousin survive.
+    exact = rec(1, "dressing table", (0, 0, 0))
+    cousin = rec(2, "side table", (5, 0, 0), aliases=("dressing table",))
+    idx = FakeIndex([exact, cousin])
+    assert not hasattr(idx, "by_label_tiered")
+    got = T._match_anchor_noun(idx, "dressing table")
+    assert got == list(idx.by_label("dressing table"))
+    assert {r.instance_id for r in got} == {1, 2}

@@ -1271,6 +1271,7 @@ def write_report(
         # stamps the default calibration via collect_provenance's own fallback. This is
         # the single documented calibration path for this tool.
         "provenance": collect_provenance("gt_battery", argv),
+        "answer_key_status": answer_key_status,
         "n_questions": len(scores),
         "scenes": scenes,
         "missing_scenes": missing,
@@ -1350,11 +1351,14 @@ def main(argv: list[str] | None = None) -> int:
 
     agg = aggregate(scores)
     n, o, i = agg["numerical"], agg["object_reference"], agg["instruction_following"]
-    num_true_str = (
-        f"{_pct(n['true_accuracy'])} ({n['n_with_true_answer']} keyed)"
-        if n["n_with_true_answer"]
-        else "n/a"
-    )
+    if n["n_with_true_answer"]:
+        num_true_str = f"{_pct(n['true_accuracy'])} ({n['n_with_true_answer']} keyed)"
+    elif answer_key_status == "unreadable":
+        # Distinguish a corrupt/unparseable key from a legitimately absent one so the
+        # yardstick can't vanish unnoticed in the stdout summary too (issue #16).
+        num_true_str = "n/a[UNREADABLE]"
+    else:
+        num_true_str = "n/a"
     # Object-reference headline is instance-match / scoreability (same metric naming as the
     # markdown report), with IoU kept as a secondary diagnostic (issue #17).
     obj_rows = [s for s in scores if s.qtype == QType.OBJECT_REFERENCE.value]
