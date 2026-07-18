@@ -66,6 +66,15 @@ _REL_TOKENS: list[tuple[str, Pred | None]] = [
 ]
 
 _REL_ALTERNATION = "|".join(pat for pat, _ in _REL_TOKENS)
+
+# Leading-superlative NP shape: the superlative adjective precedes its own head noun
+# instead of trailing it ("the CLOSEST speaker TO the plant" vs "the speaker closest to
+# the plant"). Captured non-greedily so the head noun phrase stops at the first to/from.
+_LEADING_CLOSEST_RE = re.compile(r"^(?:the\s+)?(?:closest|nearest)\s+(.+?)\s+to\s+(.+)$")
+_LEADING_FARTHEST_RE = re.compile(
+    r"^(?:the\s+)?(?:farthest|furthest)(?:\s+away)?\s+(.+?)\s+from\s+(.+)$"
+)
+
 # Boundary between a noun phrase and its trailing relation chain ('is/are/that is' included).
 _REL_BOUNDARY_RE = re.compile(
     rf"\b(that\s+is|that\s+are|which\s+is|is|are|{_REL_ALTERNATION})\b"
@@ -197,9 +206,41 @@ def _split_pair(text: str, ctx: _Ctx, what: str) -> list[Anchor]:
     return [a, copy.deepcopy(a)]
 
 
+def _split_leading_superlative(text: str) -> tuple[str, str, Pred] | None:
+    """Detect a superlative-first NP: 'the closest/nearest X to Y' or 'the farthest/
+    furthest X from Y' — the relation token precedes its own head noun instead of
+    trailing it. Returns (head noun phrase, anchor text, predicate), or None.
+    """
+    m = _LEADING_CLOSEST_RE.match(text)
+    if m is not None:
+        return m.group(1), m.group(2), Pred.CLOSEST_TO
+    m = _LEADING_FARTHEST_RE.match(text)
+    if m is not None:
+        return m.group(1), m.group(2), Pred.FARTHEST_FROM
+    return None
+
+
 def _parse_target(text: str, ctx: _Ctx) -> TargetSpec:
-    """Parse '<NP> <relation chain>' into a TargetSpec with at most one top-level clause."""
-    np_part, rel_part = _split_at_relation(_clean_segment(text))
+    """Parse '<NP> <relation chain>' into a TargetSpec with at most one top-level clause.
+
+    A leading superlative-first NP ("the closest speaker to the plant") is always
+    normalized to a single top-level superlative clause on the target — the surface
+    order of adjective and head noun doesn't change what's being asked (issue #23).
+    """
+    s = _clean_segment(text)
+    leading = _split_leading_superlative(s)
+    if leading is not None:
+        np_text, anchor_text, pred = leading
+        noun, attrs, raw, indefinite = vocab.match_noun(np_text.split())
+        if indefinite:
+            ctx.note(f"indefinite article on target '{raw}'")
+        ctx.note("leading superlative normalized to top-level target clause")
+        anchor = _parse_anchor(anchor_text, ctx)
+        return TargetSpec(
+            noun=noun, raw=raw, attributes=attrs,
+            clauses=[Clause(pred=pred, anchors=[anchor], negated=False)],
+        )
+    np_part, rel_part = _split_at_relation(s)
     noun, attrs, raw, indefinite = vocab.match_noun(np_part.split())
     if indefinite:
         ctx.note(f"indefinite article on target '{raw}'")
