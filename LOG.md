@@ -651,3 +651,46 @@ before Gate 5: LLM API keys (user), Docker Hub account (user), reboot.
 
 **Next:** remaining two validation-scene bags after relaunch permission,
 then Gate 4 - real perception (unchanged from session 16 Next).
+
+## 2026-07-18 (session 16, continued) - Gate 4 build side COMPLETE (live tests deferred)
+
+All Gate 4 work that can be done without the sim/GPU is done, verified,
+and pushed (bag recording ran in a parallel session throughout; the
+containers, topics, and GPU were never touched by this session's agents).
+
+- **Detector implemented** (87fe3b7): real GroundingDinoDetector.__call__
+  (lazy torch, batched 4-tile forward + per-tile fallback, precision
+  constructor>env>default with fp16-on-CUDA), vision_encode.py JPEG
+  encoder wired into CP2/CP3/CP5 seams. PerceptionPipeline seam was
+  already wired (87c16b3). 37 tests. Verifier confirmed 5/6 claims and
+  REFUTED unclamped box math -> fixed below.
+- **Weights baked** (9c150c5): image 6.76 GB with SwinB checkpoint
+  (938 MB) + matching SwinB config (GDINO_CONFIG_PATH - without it the
+  SwinT fallback would state-dict-mismatch) + hidden bert-base-uncased
+  fetch pre-baked (441 MB) with HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE
+  runtime guards; PIP_CONSTRAINT numpy==1.26.4 (opencv>=4.12 trap);
+  build-time assertion layer. Running containers untouched - new image
+  waits as docker-ai_module:latest.
+- **#34 fixed + clamp** (this commit): prompt refresh in HeadState.bind
+  (shared seam, fires once on plan latch, question nouns + 116-noun
+  standing vocab); tile-box clamping with inversion reorder. 15 tests.
+  Both independently verified (e2e repro incl. adversarial clamp cases).
+- Full gate now **1157 passed, 46 skipped**.
+
+**DEFERRED - post-recording live checklist (run when bag session done):**
+1. Swap container to new image (docker compose up -d ai_module from
+   /tmp/fork-clean/docker) - watch boot log for perception=True and
+   GDINO paths resolving to the baked SwinB config/checkpoint.
+2. GPU load test on the 4060 (cu13 torch wheels vs host driver 595.71).
+3. fp16 VRAM measurement vs 8 GB (architecture §6: 10-14 GB on 4090).
+4. Batched forward vs per-tile fallback against the REAL model (the
+   captions-list batch call is the one unverified design assumption).
+5. Offline check: from_pretrained resolves from baked cache network-less.
+6. RVIZ smoke: object_reference question -> Marker on the right object.
+7. Clean-clone packaging gate: docker compose up --build from a fresh
+   fork clone (§7a definition of done).
+8. VLA_DETECTOR=grounding_dino must be set in compose env for the swap
+   (default none = stub index + SUBMISSION-BLOCKER boot line).
+
+Gate 0 residuals: LLM API keys, Docker Hub account, host reboot.
+Open issues: #30 (rates), #33 (confidence gating - needs adjudication).
