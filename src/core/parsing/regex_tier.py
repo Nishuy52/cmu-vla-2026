@@ -75,6 +75,24 @@ _LEADING_FARTHEST_RE = re.compile(
     r"^(?:the\s+)?(?:farthest|furthest)(?:\s+away)?\s+(.+?)\s+from\s+(.+)$"
 )
 
+# Canonical superlative-predicate set: the "closest to"/"farthest from" family, whose
+# surface tokens can also TRAIL an anchor NP ("the Y closest to Z" — see
+# `_split_trailing_superlative`) instead of leading their own NP (above).
+_SUPERLATIVE_PREDS = {Pred.CLOSEST_TO, Pred.FARTHEST_FROM}
+_SUPERLATIVE_ALTERNATION = "|".join(
+    pat for pat, pred in _REL_TOKENS if pred in _SUPERLATIVE_PREDS
+)
+_SUPERLATIVE_AT_START_RE = re.compile(rf"^({_SUPERLATIVE_ALTERNATION})\b")
+_SUPERLATIVE_SEARCH_RE = re.compile(rf"\b({_SUPERLATIVE_ALTERNATION})\b")
+# A relative-clause connector ("that is"/"which are"/"it is", optionally followed by
+# trailing punctuation from a paused/comma'd delivery) right before a superlative binds
+# it to the preceding anchor, not the head target — the superlative is NOT surfaced.
+_RELCLAUSE_TAIL_RE = re.compile(r"\b(that|which|it)\s+(is|are)\s*,?\s*$")
+# A trailing superlative immediately inside a bare WITH-anchor ("pillow WITH a lamp
+# closest to the window") binds to that anchor too — WITH introduces a possessed/
+# co-located sub-object, and the superlative disambiguates *it*, not the head target.
+_WITH_AT_START_RE = re.compile(r"^with\b")
+
 # Boundary between a noun phrase and its trailing relation chain ('is/are/that is' included).
 _REL_BOUNDARY_RE = re.compile(
     rf"\b(that\s+is|that\s+are|which\s+is|is|are|{_REL_ALTERNATION})\b"
@@ -220,12 +238,56 @@ def _split_leading_superlative(text: str) -> tuple[str, str, Pred] | None:
     return None
 
 
-def _parse_target(text: str, ctx: _Ctx) -> TargetSpec:
-    """Parse '<NP> <relation chain>' into a TargetSpec with at most one top-level clause.
+def _split_trailing_superlative(rel_part: str) -> tuple[str, str]:
+    """Split a target relation chain 'on the Y closest to Z' into (head, superlative).
+
+    A superlative that TRAILS an earlier relation ranks the head TARGET, not the
+    intervening anchor: "the speaker on the tv cabinet closest to the potted plant"
+    ranks the speakers by distance to the plant — it is not "the cabinet closest to
+    the plant". The default right-branching NP grammar would nest 'closest to Z' as a
+    disambiguator of Y; here we peel it off so it surfaces as a second top-level clause
+    on the target. Returns ``(head, "")`` when there is nothing to surface — no
+    superlative, the superlative already *leads* the chain (then it is the target's own
+    single relation and stays as one clause), an explicit relative pronoun ("that is
+    closest to Z", tolerating a trailing comma/"it is") binds it to Y, or the head is a
+    bare WITH-anchor ("with a lamp closest to Z") whose possessed sub-object is the
+    natural antecedent (issue #25).
+    """
+    lead = rel_part.lstrip(" ,.;")
+    m = _CONNECTOR_RE.match(lead)  # skip a leading copula/relative pronoun
+    if m is not None:
+        lead = lead[m.end() :].lstrip(" ,")
+    if _SUPERLATIVE_AT_START_RE.match(lead):
+        return rel_part, ""  # superlative already heads the chain — leave as one clause
+    sm = _SUPERLATIVE_SEARCH_RE.search(rel_part)
+    if sm is None or not rel_part[: sm.start()].strip(" ,.;"):
+        return rel_part, ""  # no trailing superlative with preceding relation content
+    head = rel_part[: sm.start()]
+    # An explicit relative pronoun binds the superlative to the immediately preceding
+    # anchor Y ("on the sofa THAT IS closest to Z" = the sofa closest to Z), NOT the
+    # head target — only the *bare* "on the Y closest to Z" surfaces to the target.
+    if _RELCLAUSE_TAIL_RE.search(head):
+        return rel_part, ""
+    # A bare WITH-anchor ("pillow WITH a lamp closest to Z") binds the superlative to
+    # the possessed sub-object (the lamp), not the head target.
+    if _WITH_AT_START_RE.match(head.strip(" ,.;")):
+        return rel_part, ""
+    return head, rel_part[sm.start() :]
+
+
+def _parse_target(text: str, ctx: _Ctx, *, surface_superlative: bool = False) -> TargetSpec:
+    """Parse '<NP> <relation chain>' into a TargetSpec (usually one top-level clause).
 
     A leading superlative-first NP ("the closest speaker to the plant") is always
     normalized to a single top-level superlative clause on the target — the surface
     order of adjective and head noun doesn't change what's being asked (issue #23).
+
+    When ``surface_superlative`` is also set (object-reference selection), a trailing
+    superlative ("... on the Y closest to Z") surfaces to the head target as a second
+    top-level clause instead of nesting under the anchor Y — see
+    :func:`_split_trailing_superlative`. Counting questions leave it OFF: a superlative
+    cannot rank a *cardinality*, so there it disambiguates the anchor Y and must stay
+    nested (else the count would drop the anchor filter and over-count).
     """
     s = _clean_segment(text)
     leading = _split_leading_superlative(s)
@@ -246,9 +308,17 @@ def _parse_target(text: str, ctx: _Ctx) -> TargetSpec:
         ctx.note(f"indefinite article on target '{raw}'")
     clauses: list[Clause] = []
     if rel_part:
-        c = _parse_clause(rel_part, ctx)
+        head, superl = (
+            _split_trailing_superlative(rel_part) if surface_superlative else (rel_part, "")
+        )
+        c = _parse_clause(head, ctx)
         if c is not None:
             clauses.append(c)
+        if superl:
+            sc = _parse_clause(superl, ctx)
+            if sc is not None:
+                clauses.append(sc)
+                ctx.note("trailing superlative surfaced to head target")
     return TargetSpec(noun=noun, raw=raw, attributes=attrs, clauses=clauses)
 
 
@@ -272,7 +342,9 @@ def _parse_numerical(text: str, ctx: _Ctx) -> TargetSpec:
 def _parse_object_reference(text: str, ctx: _Ctx) -> TargetSpec:
     """Parse a 'Find the ...' / bare-NP object-reference question into its TargetSpec."""
     m = _FIND_RE.match(text)
-    return _parse_target(m.group(1) if m is not None else text, ctx)
+    return _parse_target(
+        m.group(1) if m is not None else text, ctx, surface_superlative=True
+    )
 
 
 # ---- instruction-following ------------------------------------------------------
