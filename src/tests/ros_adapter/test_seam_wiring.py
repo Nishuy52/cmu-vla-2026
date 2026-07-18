@@ -105,6 +105,14 @@ def test_budget_frac_and_remaining_late_bound(src: str):
     assert "if not self._llm_configured:" in src
 
 
+def test_forced_assembly_late_bound(src: str):
+    # forced_assembly (issue #33) is a late-bound closure over the controller's BudgetState
+    # T-90 gate, wired on BOTH the configured + offline paths (same pattern as budget_frac).
+    assert "def _forced_assembly(" in src
+    assert "forced_assembly=_forced_assembly" in src
+    assert src.count("forced_assembly=_forced_assembly") >= 2  # both build_callables calls
+
+
 def test_local_tier_descoped(src: str):
     # The dark-network local tier is explicitly descoped (comment), api->api2->regex shipped.
     low = src.lower()

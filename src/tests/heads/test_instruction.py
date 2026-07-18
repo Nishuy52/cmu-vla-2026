@@ -137,6 +137,78 @@ def test_ungrounded_when_low_nobs():
     assert head.ungrounded_subgoals() == 1  # present but under-observed
 
 
+# --------------------------------------------------------------- issue #33 commit gate
+def test_single_obs_leg_planned_but_not_committed():
+    """A leg backed by only n_obs == 1 is PLANNED (geometry computed) but withheld from
+    the COMMITTED route while no forced-assembly pressure has been injected."""
+    sc = scene(inst(1, "sofa", n_obs=1, centroid=(2.0, 2.0, 0.0)))
+    head = InstructionHead(plan=instruction_plan([_goto("sofa")]))
+    io = _DriveIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert head._legs[0].geom is not None  # PLANNED: geometry already resolved
+    assert head._follower is None  # NOT COMMITTED: no route built to drive
+    assert head.terminal_waypoint() is None
+
+
+def test_two_obs_leg_commits_without_forced_assembly():
+    """n_obs == 2 clears the MIN_COMMIT_OBS floor and commits immediately — no forced-
+    assembly pressure needed (distinct from the stricter 3-obs 'grounded' report gate)."""
+    sc = scene(inst(1, "sofa", n_obs=2, centroid=(2.0, 2.0, 0.0)))
+    head = InstructionHead(plan=instruction_plan([_goto("sofa")]))
+    io = _DriveIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert head._follower is not None  # COMMITTED at n_obs == 2
+    assert head.terminal_waypoint() is not None
+
+
+def test_single_obs_leg_commits_under_forced_assembly():
+    """Once the T-90 forced-assembly gate is reached, even a single-observation leg
+    commits — late-stage expected points favor acting over stalling further."""
+    sc = scene(inst(1, "sofa", n_obs=1, centroid=(2.0, 2.0, 0.0)))
+    head = InstructionHead(
+        plan=instruction_plan([_goto("sofa")]),
+        forced_assembly=lambda: True,
+    )
+    io = _DriveIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert head._follower is not None  # forced-assembly pressure commits it anyway
+    assert head.terminal_waypoint() is not None
+
+
+def test_committable_prefix_stops_before_single_obs_leg():
+    """A multi-leg route with a well-observed first leg and a single-obs second leg
+    commits only the leading (well-observed) prefix, not the whole grounded run."""
+    sc = scene(
+        inst(1, "table", n_obs=3, centroid=(3.0, 2.0, 0.0)),
+        inst(2, "sofa", n_obs=1, centroid=(6.0, 3.0, 0.0)),
+    )
+    head = InstructionHead(plan=instruction_plan([_goto("table"), _goto("sofa")]))
+    io = _DriveIO(SyntheticScene(0))
+    head.advance(io, sc)
+    # both legs PLANNED (geometry present)...
+    assert head._legs[0].geom is not None
+    assert head._legs[1].geom is not None
+    # ...but only the first (n_obs=3) leg is COMMITTED.
+    assert head._committable_prefix_len() == 1
+    assert head._follower is not None
+
+
+def test_forced_assembly_hook_exception_does_not_strand_route():
+    """A broken forced_assembly hook must not strand the route: treated as not-forced,
+    same as an unconfigured hook (the strict n_obs >= 2 floor still applies)."""
+    def _boom() -> bool:
+        raise RuntimeError("broken signal")
+
+    sc = scene(inst(1, "sofa", n_obs=2, centroid=(2.0, 2.0, 0.0)))
+    head = InstructionHead(
+        plan=instruction_plan([_goto("sofa")]),
+        forced_assembly=_boom,
+    )
+    io = _DriveIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert head._follower is not None  # n_obs == 2 already clears the floor regardless
+
+
 def test_first_anchor_pt_reported():
     sc, idx = _if_scene()
     head = InstructionHead(plan=instruction_plan([_goto("sofa")]))

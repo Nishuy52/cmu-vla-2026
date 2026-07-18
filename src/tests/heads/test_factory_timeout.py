@@ -103,6 +103,22 @@ def test_budget_frac_forwarded_to_instruction_head():
     assert st.explore.budget_frac is frac
 
 
+def test_forced_assembly_forwarded_to_instruction_head():
+    """forced_assembly injected into build_callables reaches InstructionHead.forced_assembly
+    (issue #33). Unwired, the single-observation route-prefix commit gate stays STRICT, so
+    the factory must forward it verbatim (fast local read, NOT timeout-wrapped)."""
+
+    def forced():
+        return True
+
+    sc = _idx(inst(1, "chair"))
+    plan = instruction_plan([RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="chair")])])
+    st = HeadState(scene=sc, forced_assembly=forced)
+    st.bind(plan)
+    assert st.instruction is not None
+    assert st.instruction.forced_assembly is forced  # forwarded verbatim
+
+
 def test_support_hooks_not_timeout_wrapped():
     """budget_frac / remaining_s reach the head as the SAME object (fast local reads)."""
     sc = _idx(inst(1, "chair"))

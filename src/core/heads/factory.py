@@ -78,6 +78,7 @@ class HeadState:
     #: CP-support hooks the seams need (all optional).
     remaining_s: Callable[[], float] | None = None  # CP4 90 s re-resolve rule
     budget_frac: Callable[[], float] | None = None  # CP2 >=60% coverage trigger
+    forced_assembly: Callable[[], bool] | None = None  # issue #33 T-90 commit-obs gate
     tiles_fn: Callable[[], object] | None = None  # CP2 tile supplier
     fuse_hint: FuseHintFn | None = None  # CP2 provisional-instance fusion
     #: Issue #34 — the live perception detector (GroundingDinoDetector / FakeDetector),
@@ -125,6 +126,7 @@ class HeadState:
                 thresholds=self.thresholds,
                 anchor_confirm=self.anchor_confirm,
                 budget_frac=self.budget_frac,  # H4c provisional-terminal commit gate
+                forced_assembly=self.forced_assembly,  # issue #33 single-obs commit gate
             )
         # The explore head is always built (it may delegate to the IF head).
         self.explore = ExploreHead(
@@ -152,6 +154,7 @@ def build_callables(
     frontier_selector: FrontierSelectFn | None = None,
     remaining_s: Callable[[], float] | None = None,
     budget_frac: Callable[[], float] | None = None,
+    forced_assembly: Callable[[], bool] | None = None,
     tiles_fn: Callable[[], object] | None = None,
     fuse_hint: FuseHintFn | None = None,
     detector: DetectorFn | None = None,
@@ -179,17 +182,20 @@ def build_callables(
     * ``frontier_selector`` — CP5 frontier selection (multi-room scenes).
 
     CP-support hooks: ``remaining_s`` (CP4 90 s re-resolve rule), ``budget_frac`` (CP2
-    >=60% coverage trigger), ``tiles_fn`` (CP2 tile supplier), ``fuse_hint`` (CP2 fusion).
+    >=60% coverage trigger), ``forced_assembly`` (issue #33 — zero-arg -> True once the
+    T-90 forced-assembly gate is reached; feeds the IF head's single-observation
+    route-prefix commit gate), ``tiles_fn`` (CP2 tile supplier), ``fuse_hint`` (CP2 fusion).
 
     Off-tick-thread safety (SYS-F8): every seam that can trigger a *provider call* (``parse``,
     ``llm_verify``, ``anchor_confirm``/``anchor_confirmer``, ``verifier``, ``miss_recoverer``,
     ``frontier_selector``) is wrapped with a hard per-call timeout (``call_timeout_s``, default
     20 s) HERE, at the injection boundary — so a hung network can never stall the 5 Hz tick
     past that bound regardless of whether the individual call site remembered to wrap its
-    ChatFn. The fast local support hooks (``budget_frac``, ``remaining_s``, ``tiles_fn``,
-    ``fuse_hint``, ``affinity_fn``) are NOT wrapped: they are synchronous map/clock reads, not
-    provider calls, and wrapping them would only add thread-handoff overhead. Unconfigured
-    (``None``) seams pass through untouched so the offline path stays deterministic.
+    ChatFn. The fast local support hooks (``budget_frac``, ``forced_assembly``, ``remaining_s``,
+    ``tiles_fn``, ``fuse_hint``, ``affinity_fn``) are NOT wrapped: they are synchronous
+    map/clock reads, not provider calls, and wrapping them would only add thread-handoff
+    overhead. Unconfigured (``None``) seams pass through untouched so the offline path
+    stays deterministic.
     """
     # Wrap only the provider-triggering seams (None -> None; see wrap_call_timeout).
     def _tw(fn):
@@ -214,6 +220,7 @@ def build_callables(
         frontier_selector=frontier_selector,
         remaining_s=remaining_s,
         budget_frac=budget_frac,
+        forced_assembly=forced_assembly,
         tiles_fn=tiles_fn,
         fuse_hint=fuse_hint,
         detector=detector,
