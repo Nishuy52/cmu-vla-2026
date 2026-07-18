@@ -6,7 +6,7 @@ Mirrors the test-time ROS topic contract (docs/upstream_notes.md §3) without im
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import Protocol, Sequence, runtime_checkable
 
 import numpy as np
@@ -179,6 +179,21 @@ class InstanceRecord:
         return MarkerBox(*map(float, c), *map(float, e), label=self.label)
 
 
+class MatchTier(IntEnum):
+    """Label-match provenance, ordered best-first (lower value = stronger match).
+
+    Lives here (rather than in :mod:`core.perception.scene_index`, the sole current
+    producer) so the :class:`SceneIndex` Protocol can name it in
+    :meth:`SceneIndex.by_label_tiered` without a core -> perception import cycle.
+    """
+
+    EXACT = 0
+    SYNONYM = 1
+    HEAD_NOUN = 2
+    TYPO = 3
+
+
+@runtime_checkable
 class SceneIndex(Protocol):
     """Read view over the instance map used by the toolbox and answer heads."""
 
@@ -186,6 +201,20 @@ class SceneIndex(Protocol):
 
     def by_label(self, noun: str) -> Sequence[InstanceRecord]:
         """Typo/plural/synonym-tolerant lookup ('refridgerator' -> fridge instances)."""
+        ...
+
+    def by_label_tiered(self, noun: str) -> Sequence[tuple[InstanceRecord, MatchTier]]:
+        """Like :meth:`by_label` but pairs each hit with its :class:`MatchTier`.
+
+        Required (issue #24): anchor resolution (``geometry.toolbox._match_anchor_noun``)
+        depends on tier provenance to keep a modified anchor's exact/synonym referent
+        from being satisfied by a differently-modified head-noun cousin (#13). Declaring
+        it only on :class:`~core.perception.scene_index.BasicSceneIndex` let a future
+        conforming index (a caching wrapper, a ROS-adapter-native index) type-check
+        while silently reintroducing that bug with no exception, test failure, or log
+        line. Promoting it into the Protocol makes the absence a structural/type error
+        instead — every conforming :class:`SceneIndex` must expose real tier provenance.
+        """
         ...
 
 

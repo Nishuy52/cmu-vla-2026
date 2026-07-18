@@ -513,13 +513,28 @@ def test_resolve_bare_table_anchor_admits_headnoun_cousin():
 
 def test_match_anchor_noun_flat_fallback_ignores_tier_discipline():
     # Fallback contract (#13/#21): a minimal index that exposes no `by_label_tiered`
-    # (e.g. FakeIndex) must return the flat `by_label` result UNCHANGED — even for a
-    # MODIFIED anchor noun, where a tiered index would narrow to the strongest tier and
-    # drop head-noun cousins. Without the tiered API there is no tier signal to act on,
-    # so tier discipline is a no-op and both the exact referent and the cousin survive.
+    # must return the flat `by_label` result UNCHANGED — even for a MODIFIED anchor
+    # noun, where a tiered index would narrow to the strongest tier and drop
+    # head-noun cousins. Without the tiered API there is no tier signal to act on, so
+    # tier discipline is a no-op and both the exact referent and the cousin survive.
+    #
+    # Since #24 the SceneIndex Protocol REQUIRES by_label_tiered, so the shared
+    # FakeIndex now implements it (it must, to remain a conforming SceneIndex); this
+    # test uses a deliberately non-conforming local double to keep exercising the
+    # toolbox's defensive fallback path for indexes that still omit it.
+    class _UntieredIndex:
+        def __init__(self, records):
+            self._inner = FakeIndex(records)
+
+        def all_instances(self):
+            return self._inner.all_instances()
+
+        def by_label(self, noun):
+            return self._inner.by_label(noun)
+
     exact = rec(1, "dressing table", (0, 0, 0))
     cousin = rec(2, "side table", (5, 0, 0), aliases=("dressing table",))
-    idx = FakeIndex([exact, cousin])
+    idx = _UntieredIndex([exact, cousin])
     assert not hasattr(idx, "by_label_tiered")
     got = T._match_anchor_noun(idx, "dressing table")
     assert got == list(idx.by_label("dressing table"))

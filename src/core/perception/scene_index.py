@@ -20,25 +20,19 @@ first, and :meth:`by_label_tiered` surfaces which tier each hit came from):
 """
 from __future__ import annotations
 
-from enum import IntEnum
-
 import numpy as np
 
-from core.interfaces import InstanceRecord, MarkerBox
+from core.interfaces import InstanceRecord, MarkerBox, MatchTier
+
+# Re-exported for backward compatibility: this module used to define MatchTier
+# itself; it now lives on core.interfaces (see SceneIndex.by_label_tiered, #24) so
+# the Protocol can name it without a core -> perception import cycle.
+__all__ = ["BasicSceneIndex", "MatchTier", "normalize_label", "singularize"]
 
 MERGE_IOU: float = 0.3  # 3D IoU threshold for fusing same-label instances
 TYPO_MAX_DIST: int = 2  # max Levenshtein distance for the longest length band
 TRIM_LO_PCT: float = 2.0
 TRIM_HI_PCT: float = 98.0
-
-
-class MatchTier(IntEnum):
-    """Label-match provenance, ordered best-first (lower value = stronger match)."""
-
-    EXACT = 0
-    SYNONYM = 1
-    HEAD_NOUN = 2
-    TYPO = 3
 
 
 def _typo_budget(query: str, candidate: str) -> int:

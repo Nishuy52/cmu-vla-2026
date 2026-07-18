@@ -10,7 +10,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.interfaces import InstanceRecord
+from core.interfaces import InstanceRecord, MatchTier
 
 
 def rec(
@@ -68,3 +68,11 @@ class FakeIndex:
             if any(difflib.SequenceMatcher(None, n, c).ratio() >= 0.8 for c in cands):
                 out.append(r)
         return out
+
+    def by_label_tiered(self, noun: str) -> list[tuple[InstanceRecord, MatchTier]]:
+        """No real tier ladder here (see the module docstring); every hit reported at
+        :attr:`MatchTier.EXACT` so tier-discipline filtering in
+        ``geometry.toolbox._match_anchor_noun`` is a no-op over the flat :meth:`by_label`
+        result, matching this fake's pre-#24 (untiered) behaviour.
+        """
+        return [(r, MatchTier.EXACT) for r in self.by_label(noun)]

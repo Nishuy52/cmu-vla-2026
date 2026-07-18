@@ -10,6 +10,7 @@ from core.interfaces import (
     InstanceRecord,
     IntAnswer,
     MarkerBox,
+    MatchTier,
     Question,
     WaypointCmd,
 )
@@ -45,6 +46,11 @@ class FakeScene:
     def by_label(self, noun: str) -> Sequence[InstanceRecord]:
         n = (noun or "").lower()
         return [r for r in self._inst if n and (n in r.label.lower() or r.label.lower() in n)]
+
+    def by_label_tiered(self, noun: str) -> list[tuple[InstanceRecord, MatchTier]]:
+        """No real tier ladder here; every hit reported at MatchTier.EXACT (see
+        tests/geometry/_helpers.FakeIndex.by_label_tiered for the same convention)."""
+        return [(r, MatchTier.EXACT) for r in self.by_label(noun)]
 
 
 class FakeRobotIO:

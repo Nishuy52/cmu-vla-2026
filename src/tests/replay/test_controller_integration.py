@@ -41,6 +41,9 @@ class _FakeScene:
     def by_label(self, noun):
         return []
 
+    def by_label_tiered(self, noun):
+        return []
+
 
 def _bag(bag_factory, typestore):
     ts = typestore

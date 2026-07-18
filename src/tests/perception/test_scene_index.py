@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.interfaces import InstanceRecord
+from core.interfaces import InstanceRecord, SceneIndex
 from core.perception.scene_index import (
     BasicSceneIndex,
     MatchTier,
@@ -251,3 +251,57 @@ def test_add_disjoint_reassigns_colliding_id():
     assert len(ids) == 2
     assert len(set(ids)) == 2  # no duplicate ids
     assert added.instance_id != 1
+
+
+# --------------------------------------------------------------------------- #24:
+# SceneIndex Protocol structurally requires by_label_tiered
+
+
+class _ConformingFakeIndex:
+    """Minimal SceneIndex: implements all_instances, by_label AND by_label_tiered."""
+
+    def all_instances(self):
+        return []
+
+    def by_label(self, noun):
+        return []
+
+    def by_label_tiered(self, noun):
+        return []
+
+
+class _NonConformingFakeIndex:
+    """Missing by_label_tiered — pre-#24 this satisfied SceneIndex; it must not now."""
+
+    def all_instances(self):
+        return []
+
+    def by_label(self, noun):
+        return []
+
+
+def test_basic_scene_index_conforms_to_scene_index_protocol():
+    idx = BasicSceneIndex([_rec(1, "chair", [0, 0, 0], [1, 1, 1])])
+    assert isinstance(idx, SceneIndex)
+    assert hasattr(idx, "by_label_tiered")
+
+
+def test_scene_index_protocol_structurally_requires_by_label_tiered():
+    # A minimal fake that implements by_label_tiered duck-type-conforms...
+    assert isinstance(_ConformingFakeIndex(), SceneIndex)
+    # ...but one that only implements the pre-#24 by_label surface does not, because
+    # by_label_tiered is now a required Protocol member (not an optional extra that
+    # geometry.toolbox._match_anchor_noun quietly shrugs off via getattr).
+    assert not isinstance(_NonConformingFakeIndex(), SceneIndex)
+
+
+def test_non_conforming_index_lacks_the_attribute_toolbox_depends_on():
+    # This is exactly the failure mode #24 closes off: code consuming a SceneIndex
+    # (geometry.toolbox._match_anchor_noun) can no longer rely on by_label_tiered
+    # being there just because a value type-checks as SceneIndex -- a value that is
+    # actually missing it now also fails the structural isinstance check above, so
+    # the gap is caught at the type boundary instead of surfacing only as a silent
+    # anchor-resolution regression (#13) deep in toolbox's getattr fallback.
+    idx = _NonConformingFakeIndex()
+    assert not isinstance(idx, SceneIndex)
+    assert not hasattr(idx, "by_label_tiered")
