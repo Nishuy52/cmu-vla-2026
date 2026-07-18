@@ -14,7 +14,12 @@ def _base_results(**overrides):
         "scenes": ["arabic_room"],
         "missing_scenes": [],
         "aggregate": {
-            "numerical": {"n": 15, "exact_match_rate_pipeline": 1.0},
+            "numerical": {
+                "n": 15,
+                "pipeline_determinism_rate": 1.0,
+                "n_with_true_answer": 15,
+                "true_accuracy": 1.0,
+            },
         },
         "scores": [
             {
@@ -74,11 +79,11 @@ def test_added_row_detected():
 def test_topline_delta_and_one_sided_key():
     before = _base_results()
     after = json.loads(json.dumps(before))
-    after["aggregate"]["numerical"]["exact_match_rate_pipeline"] = 0.8
+    after["aggregate"]["numerical"]["pipeline_determinism_rate"] = 0.8
     after["aggregate"]["numerical"]["new_metric"] = 0.5
 
     report = build_report(before, after)
-    assert "numerical.exact_match_rate_pipeline" in report
+    assert "numerical.pipeline_determinism_rate" in report
     assert "-0.2000" in report
     assert "numerical.new_metric" in report
     # one-sided key: before column shows the missing-value marker
