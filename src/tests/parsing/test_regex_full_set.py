@@ -34,13 +34,54 @@ def test_instruction_routes_end_in_goto(all_questions):
         assert plan.route[-1].kind.value == "goto", f"{scene}: {q!r}"
 
 
+# ----------------------------------------------------------------- issue #23 regression
+
+
+def test_leading_superlative_resolves_target_noun():
+    """'Find the closest X to Y' parses to target noun X, not Y (issue #23).
+
+    The superlative-first NP shape ("the CLOSEST speaker TO the plant") must resolve
+    the head noun to 'speaker' with a top-level closest_to clause anchored on 'plant' —
+    the pre-fix parser mis-identified the head noun as 'plant' with empty clauses.
+    """
+    plan = parse_regex("Find the closest speaker to the plant.")
+    assert plan.target is not None
+    assert plan.target.noun == "speaker"
+    assert [cl.pred.value for cl in plan.target.clauses] == ["closest_to"]
+    assert plan.target.clauses[0].anchors[0].noun == "plant"
+
+
+def test_leading_superlative_farthest_from():
+    """'Find the farthest X from Y' resolves the same way for the farthest_from family."""
+    plan = parse_regex("Find the farthest suitcase from the door.")
+    assert plan.target is not None
+    assert plan.target.noun == "suitcase"
+    assert [cl.pred.value for cl in plan.target.clauses] == ["farthest_from"]
+    assert plan.target.clauses[0].anchors[0].noun == "door"
+
+
+def test_leading_superlative_with_modifier():
+    """A modifier between the superlative adjective and the head noun still resolves."""
+    plan = parse_regex("Find the nearest small lamp to the sofa.")
+    assert plan.target is not None
+    assert plan.target.noun == "lamp"
+    assert plan.target.attributes == ["small"]
+    assert [cl.pred.value for cl in plan.target.clauses] == ["closest_to"]
+
+
+# ----------------------------------------------------------------- issue #25 regression
+#
+# These first three cases exercise the trailing-superlative surfacing baseline (a bare
+# "on the Y closest to Z" ranks the target, an explicit relative pronoun or a counting
+# question keeps it nested under Y) that the guard extensions below are built on top of.
+
+
 def test_trailing_superlative_surfaces_to_head_target():
     """'<target> on the Y closest to Z' parses to TWO top-level clauses on the target.
 
     The bare trailing superlative ranks the TARGET (the speakers), not the anchor Y —
     so it surfaces as a second top-level ``closest_to`` clause rather than nesting under
-    the ``on`` anchor (issue #20). Guards the attachment the golden fixture asserts but
-    the noun-multiset golden tests never actually compared.
+    the ``on`` anchor.
     """
     q = "Find the speaker on the TV cabinet closest to the potted plant on the TV cabinet."
     plan = parse_regex(q)
@@ -79,6 +120,58 @@ def test_counting_superlative_does_not_surface():
     """
     plan = parse_regex(
         "How many computer monitors are on the table closest to the map wall decal?"
+    )
+    assert plan.target is not None
+    assert [cl.pred.value for cl in plan.target.clauses] == ["on"]
+    anchor = plan.target.clauses[0].anchors[0]
+    assert anchor.disambiguator is not None
+    assert anchor.disambiguator.pred.value == "closest_to"
+
+
+def test_with_anchor_superlative_binds_to_anchor_not_target():
+    """A bare WITH-anchor's trailing superlative binds to the anchor, not the target.
+
+    "the pillow WITH a lamp closest to the window" means the lamp closest to the
+    window — the superlative must nest under the 'with' anchor (one top-level clause),
+    not surface to the pillow (issue #25).
+    """
+    plan = parse_regex("Find the pillow with a lamp closest to the window.")
+    assert plan.target is not None
+    assert plan.target.noun == "pillow"
+    assert [cl.pred.value for cl in plan.target.clauses] == ["with"]
+    anchor = plan.target.clauses[0].anchors[0]
+    assert anchor.noun == "lamp"
+    assert anchor.disambiguator is not None
+    assert anchor.disambiguator.pred.value == "closest_to"
+    assert anchor.disambiguator.anchors[0].noun == "window"
+
+
+def test_relative_clause_superlative_with_trailing_comma_stays_nested():
+    """A paused/comma'd relative-clause delivery ("that is, closest to ...") still guards.
+
+    A trailing comma after the copula must not defeat the relative-clause guard —
+    the superlative stays bound to the anchor (issue #25).
+    """
+    plan = parse_regex(
+        "Find the tv cabinet on the shelf that is, closest to the window."
+    )
+    assert plan.target is not None
+    assert [cl.pred.value for cl in plan.target.clauses] == ["on"]
+    anchor = plan.target.clauses[0].anchors[0]
+    assert anchor.noun == "shelf"
+    assert anchor.disambiguator is not None
+    assert anchor.disambiguator.pred.value == "closest_to"
+
+
+def test_it_is_copula_superlative_stays_nested():
+    """The bare 'it is' copula form guards the trailing superlative like 'that is' does.
+
+    "... on the shelf IT IS closest to the window" binds to the shelf, not the head
+    target (issue #25) — _CONNECTOR_RE already recognized 'it is', the relative-clause
+    tail guard did not.
+    """
+    plan = parse_regex(
+        "Find the tv cabinet on the shelf it is closest to the window."
     )
     assert plan.target is not None
     assert [cl.pred.value for cl in plan.target.clauses] == ["on"]
