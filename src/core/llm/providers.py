@@ -103,12 +103,24 @@ class OpenAIChatAdapter:
         *,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
+        call_timeout_s: float | None = None,
     ) -> None:
         self.base_url = base_url
         self.model = model
         self._api_key = api_key
         self.max_tokens = max_tokens
         self.temperature = temperature
+        #: Issue #46: request-level timeout threaded into the openai SDK's own
+        #: ``timeout=`` kwarg on every ``create()`` call (NOT just the client
+        #: constructor). The SDK enforces this via the underlying httpx request
+        #: timeout, so a timed-out call actually CLOSES the HTTP connection —
+        #: which makes a local OpenAI-compat server (llama.cpp/vLLM) see the
+        #: client disconnect and abort generation, instead of continuing to
+        #: burn GPU/compute on a call nobody is waiting for anymore. This is a
+        #: second, request-scoped enforcement layer on top of (not a
+        #: replacement for) the outer thread-based ``wrap_call_timeout``
+        #: backstop in core.llm.timeout, which still guards non-network hangs.
+        self.call_timeout_s = call_timeout_s
 
     def _client(self):
         try:
@@ -121,12 +133,18 @@ class OpenAIChatAdapter:
         return openai.OpenAI(base_url=self.base_url, api_key=self._api_key)
 
     def _create(self, messages: list[dict]) -> str:
-        resp = self._client().chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-        )
+        kwargs: dict = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+        }
+        if self.call_timeout_s is not None:
+            # Request-level timeout (issue #46): the openai SDK forwards this to
+            # httpx as the per-request timeout, so it closes the connection on
+            # expiry rather than merely raising client-side after the fact.
+            kwargs["timeout"] = self.call_timeout_s
+        resp = self._client().chat.completions.create(**kwargs)
         return resp.choices[0].message.content or ""
 
     def chat(self, messages: list[dict[str, str]]) -> str:

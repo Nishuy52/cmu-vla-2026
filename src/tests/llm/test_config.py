@@ -134,6 +134,23 @@ def test_build_chat_fns_wraps_with_timeout():
     assert fns[0]([{"role": "user", "content": "x"}]) == "ok"
 
 
+def test_build_adapter_threads_call_timeout_into_openai_request(monkeypatch):
+    # Issue #46: the resolved config's call_timeout_s must reach the OpenAI adapter's
+    # request-level timeout, not just the outer thread-based backstop.
+    from tests.llm.fakes import FakeOpenAIClient, make_openai_module
+
+    monkeypatch.setitem(__import__("sys").modules, "openai", make_openai_module(reply="ok"))
+    cfg = LlmConfig(
+        primary=ProviderSpec(
+            kind="openai", base_url="http://host/v1", model="gpt-x", api_key_env=""
+        ),
+        call_timeout_s=9.0,
+    )
+    fns = build_chat_fns(cfg)
+    fns[0]([{"role": "user", "content": "x"}])
+    assert FakeOpenAIClient.last.create_calls[0]["timeout"] == 9.0
+
+
 def test_build_chat_fns_with_tiers_only_local_configured():
     # issue #44 repro: only the local slot is configured -> its tier name must be
     # "local", not "api" (which is what index-0 would get from the gapped fn list).

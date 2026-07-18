@@ -205,13 +205,17 @@ def _as_dict(v: Any) -> dict[str, Any]:
 # ------------------------------------------------------------------- adapter construction
 
 
-def _build_adapter(spec: ProviderSpec):
+def _build_adapter(spec: ProviderSpec, call_timeout_s: float = DEFAULT_CALL_TIMEOUT_S):
     """Construct the raw (un-timeout-wrapped) adapter for one spec.
 
     Raises ``ProviderUnavailable`` for an unknown kind or a spec missing required fields.
     Note: this does NOT import or require the provider SDK — that stays lazy inside the
     adapter's call — so an OpenAI adapter can be built with the SDK absent and only fails
     when the ladder actually invokes it.
+
+    ``call_timeout_s`` is threaded into the OpenAI adapter's request-level timeout
+    (issue #46) so the configured call timeout closes the connection on expiry, not just
+    the outer thread-based ``wrap_call_timeout``/``with_timeout`` backstop applied below.
     """
     kind = spec.kind
     if kind == "stub":
@@ -222,7 +226,9 @@ def _build_adapter(spec: ProviderSpec):
                 "openai provider needs both base_url and model "
                 f"(got base_url={spec.base_url!r}, model={spec.model!r})"
             )
-        return OpenAIChatAdapter(spec.base_url, spec.model, spec.api_key())
+        return OpenAIChatAdapter(
+            spec.base_url, spec.model, spec.api_key(), call_timeout_s=call_timeout_s
+        )
     if kind == "anthropic":
         if not spec.model:
             raise ProviderUnavailable("anthropic provider needs a model")
@@ -267,7 +273,7 @@ def build_chat_fns_with_tiers(config: LlmConfig) -> list[tuple[str, ChatFn]]:
         if spec is None:
             continue
         try:
-            adapter = _build_adapter(spec)
+            adapter = _build_adapter(spec, config.call_timeout_s)
         except ProviderUnavailable:
             continue
         tier_name = DEFAULT_TIER_NAMES[i] if i < len(DEFAULT_TIER_NAMES) else SLOTS[i]
