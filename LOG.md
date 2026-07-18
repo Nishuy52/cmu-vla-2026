@@ -773,3 +773,43 @@ gate). Gate 0 residuals: LLM keys, Docker Hub, host reboot.
 
 **Next:** Gate 4 live checklist, then local-LLM Phase 0 (both need the
 sim box; order per plan).
+
+## 2026-07-18 (session 17, continued) - Gate 4 detector UNBLOCKED live; host-first loop adopted
+
+- **New standing rule (user): host-first iteration** - everything runs
+  natively on this box by default; docker only at key checkpoints
+  (CLAUDE.md standing rule 5, ubuntu_setup S8b). Enablers landed:
+  tools/setup_host_node.sh (ROS Jazzy check incl. separate CycloneDDS RMW
+  gate, image-pinned venv, weights extracted FROM the image) and
+  tools/run_host_node.sh. Proved out immediately: three fix-verify cycles
+  in ~20 min that would each have been a 20-40 min image rebuild.
+- **Gate 4 detector chain fixed through three layers**: #38 transformers
+  pin 4.57.6 (get_head_mask removed at 5.0; executor-verified per-version)
+  -> #41 model never moved off CPU by load_model -> fp16 via
+  torch.autocast at forward time instead of .half() (GDINO's internals
+  keep fp32-only islands; hard-half broke both forward paths). Fixed in
+  2a8fc85 (+2 regression tests, detector suite 37 green).
+- **Live evidence (host node, japanese_room)**: perception=True, ZERO
+  perception errors across two full question runs (was 463/4min), real
+  GPU inference, VRAM steady 3.7 GB peak alongside Unity -> fp16 fits the
+  8 GB dev card with ~4.4 GB headroom. Robot explored and answered with a
+  real non-stub marker.
+- **New defect #42**: the grounded answer picked the wrong object
+  (marker 5.4 m from teapot GT, nearest GT = column) - accuracy, not
+  mechanics; queued for the calibration loop. #39 (retry backoff) also
+  re-evidenced by the pre-fix error storm.
+- Issues #38-#41 filed/closed this stretch; checklist steps 2/5/7 PASSed
+  earlier by executor (CUDA cu13 OK, offline cache OK, packaging build OK
+  with the #40 uncommitted-payload trap noted). The in-container
+  checkpoint rerun awaits the still-running image rebuild.
+- Local-LLM Phase 0 DONE (Ollama 0.32.1 user-space, qwen2.5vl 3b/7b,
+  8k-context requirement found, latency table in local_llm_plan.md:
+  3B passes all four call shapes with 10x headroom; 7B vision over-cap
+  under load, re-baseline pending). In-image serving promoted to a
+  Phase-3 REQUIREMENT (user): bake Ollama + 3B into the ai_module image.
+
+**Next:** (1) in-container checkpoint rerun when the rebuild lands;
+(2) #42 grounding accuracy + #39 backoff; (3) local-LLM Phase 1-2
+(conformance + parse battery + checkpoint matrix vs recorded bags);
+(4) Phase-3 in-image Ollama bake + S7a gate; (5) commit staged fork
+payload (#40) before the pending host reboot.
