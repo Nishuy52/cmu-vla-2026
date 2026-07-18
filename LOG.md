@@ -694,3 +694,35 @@ containers, topics, and GPU were never touched by this session's agents).
 
 Gate 0 residuals: LLM API keys, Docker Hub account, host reboot.
 Open issues: #30 (rates), #33 (confidence gating - needs adjudication).
+
+## 2026-07-18 (session 17, continued) - remaining validation scenes recorded; F12 scene bar met
+
+- User added docker allow rules (sg docker */docker restart/exec/cp) ->
+  restarts unblocked; scene swap + relaunch cycle now fully scriptable
+  (swap via docker cp per ubuntu_setup S5, relaunch via
+  system_simulation.sh with DISPLAY=:1 + RMW exported).
+- **Three more bags, all module-driven** (fresh ai_module boot + numerical
+  question -> sweep + frontier exploration from spawn), all harness-
+  verified full-duration:
+  - `office_1_q1` (329.5 s, 4.29 Hz): coverage x[-0.36,5.29]
+    y[-4.18,0.43], 22.2 m - the best eval-realistic bag so far.
+  - `loft_q1` (329.5 s): degraded-rate specimen - loft renders at
+    1.45 Hz on this box, exploration starved, robot stayed near spawn
+    (7.6 m). Kept as low-rate stress case.
+  - `japanese_room_q1` (329.6 s, 3.19 Hz): x[-2.12,1.20] y[0,3.32],
+    9.7 m; low-furniture geometry.
+- **Redteam F12 scene bar met**: overhead-tunables validation data now
+  spans 4 distinct scenes (jingfan + livingroom_1 + office_1 +
+  japanese_room). Actual validation run against these bags is the next
+  step of the hardening backlog item.
+- **Rate finding for the to-be-filed rates issue**: sensor rate is
+  per-scene render cost (4.29 / 3.7-3.85 / 3.19 / 1.45 Hz across
+  office_1 / livingroom_1 / japanese_room / loft) - all below the ~10 Hz
+  contract; loft is pathological. Eval-machine (4090) presumably faster.
+- Sim left with japanese_room installed. Container bag copies deleted
+  after verified host copies (disk back to ~79G free... ~21 GB in
+  data/sim_bags).
+
+**Next:** run the overhead-tunables validation against the 4-scene bag
+set (hardening backlog), file the rates issue with the per-scene table,
+then Gate 4 - real perception (unchanged).
