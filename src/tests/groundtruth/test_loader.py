@@ -161,3 +161,168 @@ def test_parse_object_csv_direct_matches_load_scene():
     scene = load_scene(LOFT_DIR)
     assert len(direct) == len(scene.instances)
     assert [r.instance_id for r in direct] == [r.instance_id for r in scene.instances]
+
+
+# --------------------------------------------------------------------------- #27:
+# corrupt colour slots must not desync aliases vs color_bins
+
+_OBJECT_CSV_COLUMNS = [
+    "object_id",
+    "raw_label",
+    "object_bbox_cx",
+    "object_bbox_cy",
+    "object_bbox_cz",
+    "object_bbox_xlength",
+    "object_bbox_ylength",
+    "object_bbox_zlength",
+    "object_bbox_heading",
+]
+
+
+def _write_object_csv(tmp_path, rows: list[dict[str, str]]):
+    """Write a minimal synthetic ``*_object_result.csv`` and return its path.
+
+    ``rows`` may carry extra colour columns (``object_color_*{1,2,3}``) beyond the
+    base geometry columns; the header is the union across all rows so a row that
+    omits a column (e.g. a missing percentage) round-trips as a genuinely blank
+    field, not a present-but-empty one — distinguishing "absent" from "malformed".
+    """
+    fieldnames = list(_OBJECT_CSV_COLUMNS)
+    for row in rows:
+        for k in row:
+            if k not in fieldnames:
+                fieldnames.append(k)
+    path = tmp_path / "synthetic_object_result.csv"
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    return path
+
+
+def _base_row(**overrides) -> dict[str, str]:
+    row = {
+        "object_id": "0",
+        "raw_label": "pillow",
+        "object_bbox_cx": "0.0",
+        "object_bbox_cy": "0.0",
+        "object_bbox_cz": "0.0",
+        "object_bbox_xlength": "0.3",
+        "object_bbox_ylength": "0.3",
+        "object_bbox_zlength": "0.3",
+        "object_bbox_heading": "0.0",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_corrupt_rgb_drops_slot_from_both_aliases_and_bins(tmp_path, caplog):
+    """A scheme name with unparseable RGB must not survive as an alias while its
+    ColorBin silently vanishes (issue #27a): the whole slot is dropped from both."""
+    row = _base_row(
+        object_color_scheme1="gray",
+        object_color_r1="not-a-number",
+        object_color_g1="79",
+        object_color_b1="79",
+        object_color_scheme_percentage1="0.95",
+    )
+    path = _write_object_csv(tmp_path, [row])
+    with caplog.at_level("WARNING", logger="core.groundtruth.loader"):
+        recs = parse_object_csv(path)
+    assert len(recs) == 1
+    rec = recs[0]
+    assert "gray" not in rec.aliases  # would desync if it survived here alone
+    assert rec.color_bins == ()
+    assert "corrupt colour slot 1" in caplog.text
+    assert str(path) in caplog.text
+    assert "gray" in caplog.text
+
+
+def test_malformed_percentage_treated_as_invalid_not_zero(tmp_path, caplog):
+    """A percentage that fails float() must be INVALID (whole slot skipped, issue
+    #27b) — not silently collapsed to fraction=0.0, which would defeat colour
+    dominance salience (#11/#12) while still looking like legitimate zero data."""
+    row = _base_row(
+        object_color_scheme1="gray",
+        object_color_r1="47",
+        object_color_g1="79",
+        object_color_b1="79",
+        object_color_scheme_percentage1="not-a-percentage",
+    )
+    path = _write_object_csv(tmp_path, [row])
+    with caplog.at_level("WARNING", logger="core.groundtruth.loader"):
+        recs = parse_object_csv(path)
+    rec = recs[0]
+    assert rec.color_bins == ()
+    assert "gray" not in rec.aliases
+    assert "corrupt colour slot 1" in caplog.text
+    assert "percentage" in caplog.text
+
+
+def test_missing_percentage_still_defaults_to_zero(tmp_path):
+    """A genuinely ABSENT percentage (no column value at all) is not malformed —
+    it must keep defaulting to fraction=0.0, unlike a present-but-unparseable one."""
+    row = _base_row(
+        object_color_scheme1="gray",
+        object_color_r1="47",
+        object_color_g1="79",
+        object_color_b1="79",
+        # no object_color_scheme_percentage1 key at all
+    )
+    path = _write_object_csv(tmp_path, [row])
+    recs = parse_object_csv(path)
+    rec = recs[0]
+    assert [b.name for b in rec.color_bins] == ["gray"]
+    assert rec.color_bins[0].fraction == 0.0
+    assert "gray" in rec.aliases
+
+
+def test_second_slot_corruption_does_not_affect_first_slot(tmp_path, caplog):
+    """Corruption in one colour slot must not drop a sibling slot's valid data."""
+    row = _base_row(
+        object_color_scheme1="gray",
+        object_color_r1="47",
+        object_color_g1="79",
+        object_color_b1="79",
+        object_color_scheme_percentage1="0.7",
+        object_color_scheme2="black",
+        object_color_r2="bad",
+        object_color_g2="0",
+        object_color_b2="0",
+        object_color_scheme_percentage2="0.3",
+    )
+    path = _write_object_csv(tmp_path, [row])
+    with caplog.at_level("WARNING", logger="core.groundtruth.loader"):
+        recs = parse_object_csv(path)
+    rec = recs[0]
+    assert [b.name for b in rec.color_bins] == ["gray"]
+    assert rec.aliases == ("gray",)
+    assert "corrupt colour slot 2" in caplog.text
+
+
+def test_aliases_and_color_bins_always_stay_in_lock_step(tmp_path):
+    """Regression pin for #27a: whatever survives, aliases and color_bins names
+    must match 1:1 in order — the very invariant the bug broke."""
+    rows = [
+        _base_row(
+            object_id="0",
+            object_color_scheme1="gray",
+            object_color_r1="47",
+            object_color_g1="79",
+            object_color_b1="79",
+            object_color_scheme_percentage1="0.95",
+        ),
+        _base_row(
+            object_id="1",
+            object_color_scheme1="maroon",
+            object_color_r1="oops",
+            object_color_g1="0",
+            object_color_b1="0",
+            object_color_scheme_percentage1="0.5",
+        ),
+    ]
+    path = _write_object_csv(tmp_path, rows)
+    recs = parse_object_csv(path)
+    for rec in recs:
+        assert tuple(b.name for b in rec.color_bins) == rec.aliases

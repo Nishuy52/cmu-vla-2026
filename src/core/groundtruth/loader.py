@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import math
 import os
 from dataclasses import dataclass, field
@@ -44,6 +45,8 @@ from typing import Iterable
 import numpy as np
 
 from core.interfaces import ColorBin, InstanceRecord
+
+_LOGGER = logging.getLogger(__name__)
 
 # The 15 canonical VLA-3D colour names are already human words; we attach them
 # verbatim. A very coarse size bucket is derived from AABB volume so size
@@ -152,28 +155,32 @@ def obb_to_aabb(
 # --------------------------------------------------------------------------- colour/size
 
 
-def _dominant_colors(row: dict[str, str]) -> list[str]:
-    """The up-to-3 dominant colour scheme names for an object row ('_' filtered)."""
-    out: list[str] = []
-    for i in (1, 2, 3):
-        name = (row.get(f"object_color_scheme{i}") or "").strip()
-        if name and name != "_" and name.lower() != "n/a":
-            out.append(name.lower())
-    return out
+def _color_slots(
+    row: dict[str, str], *, source: str, line: int
+) -> list[tuple[str, tuple[int, int, int], float]]:
+    """The up-to-3 dominant-colour slots for an object row, as (name, raw RGB,
+    fraction) — the single source of truth for BOTH :func:`_dominant_colors`
+    (aliases/caption) and :func:`_color_bins` (:class:`ColorBin` list), so the two
+    can never desync (issue #27).
 
+    Reads the paired ``object_color_scheme{i}`` + ``object_color_r/g/b{i}`` +
+    ``object_color_scheme_percentage{i}`` columns for ``i`` in 1..3.
 
-def _color_bins(row: dict[str, str]) -> tuple[ColorBin, ...]:
-    """The up-to-3 dominant colour bins as (scheme name, raw RGB, fraction).
+    A slot with no scheme name (blank / ``_`` / ``n/a``) is simply ABSENT — not
+    corrupt — and is skipped quietly. A slot WITH a scheme name but an unparseable
+    RGB, or a *present-but-malformed* percentage, is CORRUPT: the whole slot (name +
+    RGB + percentage together) is dropped from BOTH the alias list and the
+    ColorBin list, with a loud warning naming the source file, CSV line, and slot
+    index. Previously the RGB failure silently desynced the two structures (the name
+    kept surviving as an alias while the bin vanished — a colour then unmatchable via
+    either the alias or the bin path), and a malformed percentage silently collapsed
+    to ``fraction=0.0`` ('0% of object', not 'unknown'), which can never clear
+    ``colour_dominance_floor`` and so silently defeated colour salience (#11/#12).
 
-    Reads the paired ``object_color_r/g/b{i}`` + ``object_color_scheme{i}`` +
-    ``object_color_scheme_percentage{i}`` columns. Carries the raw RGB and fraction
-    the scheme name alone loses, so colour matching can apply luminance / dominance
-    salience (issues #11/#12). A bin is included only when it has a scheme name AND
-    parseable RGB. This does NOT stay in lock-step with :func:`_dominant_colors`: a
-    row with a valid scheme name but corrupt/unparseable RGB diverges — the name still
-    survives as an alias in ``_dominant_colors``, but the bin is dropped here. (The
-    behaviour itself is unchanged; a separate issue tracks the signal mechanism.)"""
-    bins: list[ColorBin] = []
+    A genuinely MISSING percentage field (column absent or blank) is not malformed —
+    it legitimately defaults to ``0.0``, unchanged from prior behaviour.
+    """
+    out: list[tuple[str, tuple[int, int, int], float]] = []
     for i in (1, 2, 3):
         name = (row.get(f"object_color_scheme{i}") or "").strip().lower()
         if not name or name == "_" or name == "n/a":
@@ -184,14 +191,53 @@ def _color_bins(row: dict[str, str]) -> tuple[ColorBin, ...]:
                 int(float(row[f"object_color_g{i}"])),
                 int(float(row[f"object_color_b{i}"])),
             )
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as exc:
+            _LOGGER.warning(
+                "%s:%d: corrupt colour slot %d (scheme=%r): unparseable RGB (%s) — "
+                "dropping this slot from both aliases and color_bins to avoid desync",
+                source, line, i, name, exc,
+            )
             continue
-        try:
-            frac = float(row.get(f"object_color_scheme_percentage{i}") or 0.0)
-        except (TypeError, ValueError):
-            frac = 0.0
-        bins.append(ColorBin(name=name, rgb=rgb, fraction=frac))
-    return tuple(bins)
+        raw_pct = row.get(f"object_color_scheme_percentage{i}")
+        if raw_pct is None or not str(raw_pct).strip():
+            frac = 0.0  # legitimately absent, not malformed
+        else:
+            try:
+                frac = float(raw_pct)
+            except (TypeError, ValueError) as exc:
+                _LOGGER.warning(
+                    "%s:%d: corrupt colour slot %d (scheme=%r): unparseable "
+                    "percentage %r (%s) — dropping this slot from both aliases and "
+                    "color_bins instead of silently collapsing to 0.0 (which would "
+                    "defeat colour-dominance salience)",
+                    source, line, i, name, raw_pct, exc,
+                )
+                continue
+        out.append((name, rgb, frac))
+    return out
+
+
+def _dominant_colors(
+    row: dict[str, str], *, source: str = "<unknown>", line: int = 0
+) -> list[str]:
+    """The up-to-3 dominant colour scheme names for an object row (corrupt slots
+    excluded — see :func:`_color_slots`)."""
+    return [name for name, _rgb, _frac in _color_slots(row, source=source, line=line)]
+
+
+def _color_bins(
+    row: dict[str, str], *, source: str = "<unknown>", line: int = 0
+) -> tuple[ColorBin, ...]:
+    """The up-to-3 dominant colour bins as (scheme name, raw RGB, fraction).
+
+    Carries the raw RGB and fraction the scheme name alone loses, so colour matching
+    can apply luminance / dominance salience (issues #11/#12). Stays in lock-step
+    with :func:`_dominant_colors` by construction — both draw from the same
+    :func:`_color_slots` pass (issue #27)."""
+    return tuple(
+        ColorBin(name=name, rgb=rgb, fraction=frac)
+        for name, rgb, frac in _color_slots(row, source=source, line=line)
+    )
 
 
 def _size_token(extents: np.ndarray) -> str:
@@ -221,6 +267,7 @@ def parse_object_csv(path: os.PathLike | str) -> list[InstanceRecord]:
     cross-reference the scene graph / referential statements by index).
     """
     recs: list[InstanceRecord] = []
+    source = str(path)
     with open(path, encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
@@ -247,7 +294,13 @@ def parse_object_csv(path: os.PathLike | str) -> list[InstanceRecord]:
             )
             heading = float(row.get("object_bbox_heading") or 0.0)
             amin, amax = obb_to_aabb(center, extents, heading)
-            colors = _dominant_colors(row)
+            # One shared pass over the colour slots (issue #27): computing colors and
+            # bins separately from independent row scans (the pre-fix shape) is what
+            # let a corrupt slot survive in one structure while vanishing from the
+            # other. line_num counts the header, so this is the 1-based physical CSV
+            # line of the current data row.
+            slots = _color_slots(row, source=source, line=reader.line_num)
+            colors = [name for name, _rgb, _frac in slots]
             caption = _build_caption(colors, extents)
             centroid = (amin + amax) / 2.0
             recs.append(
@@ -262,7 +315,10 @@ def parse_object_csv(path: os.PathLike | str) -> list[InstanceRecord]:
                     points=None,
                     caption=caption,
                     aliases=tuple(colors),
-                    color_bins=_color_bins(row),
+                    color_bins=tuple(
+                        ColorBin(name=name, rgb=rgb, fraction=frac)
+                        for name, rgb, frac in slots
+                    ),
                 )
             )
     return recs
