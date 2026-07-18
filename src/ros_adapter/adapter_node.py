@@ -90,6 +90,7 @@ from core.perception.colored_map import ColoredVoxelMap
 from core.perception.detector import GroundingDinoDetector
 from core.perception.scene_index import BasicSceneIndex
 from core.perception.tracker import PerceptionPipeline
+from core.perception.vision_encode import resolve_encode_fn
 from ros_adapter.cloud_packing import pack_colored_cloud
 from core.replay.bag_reader import (
     TOPIC_CAMERA,
@@ -383,6 +384,15 @@ class AdapterNode(Node):
                 "off (deterministic offline path)."
             )
 
+        # ---- Vision encode_fn (Gate 4 item 2 / H14 / OR-F10) ------------------
+        # The vision checkpoints (CP2/CP3/CP5) default to raw .npy bytes (test-friendly,
+        # no image lib). resolve_encode_fn swaps in a real JPEG encoder when Pillow is
+        # importable (the common case — see core.perception.vision_encode); it returns
+        # None (soft-degrade, logged) when Pillow is absent, and _build_checkpoint_seams
+        # then falls back to each builder's own .npy default. Resolved once at boot,
+        # never re-checked per call.
+        self._vision_encode_fn = resolve_encode_fn(self.get_logger())
+
         # ---- Perception pipeline seam (H6 / SYS-F1) ---------------------------
         # The heads resolve against a live SceneIndex. Following the runner/single.py
         # _ScriptedPerception pattern, a PerceptionPipeline is fed (pano, scan) pairs on
@@ -423,8 +433,11 @@ class AdapterNode(Node):
         # (H14 / OR-F10). A configured network LLM/VLM provider paired with the default raw
         # .npy image encoder means CP2/CP3/CP5 vision calls send bytes a real vision API
         # rejects — they would silently NEVER work at eval while every offline test stays
-        # green. There is no JPEG encode_fn swap in this node yet, so if any provider is
-        # configured we must fail LOUD at boot rather than silently at eval.
+        # green. Gate 4 wired a real JPEG encode_fn (self._vision_encode_fn, above) for the
+        # common case (Pillow present); this assert now only fires when that resolution
+        # came back None (Pillow missing) AND a network provider is configured — i.e. the
+        # one remaining case where a vision checkpoint would silently send bytes a real
+        # vision API rejects.
         self._assert_encoder_provider_consistency()
 
         # ---- Sim-time guard ---------------------------------------------------
@@ -688,11 +701,16 @@ class AdapterNode(Node):
 
         return {
             "verifier": build_verifier(text_chat, ledger_proxy, clock),
-            "anchor_confirmer": build_anchor_confirm(text_chat, ledger_proxy, clock),
-            "miss_recoverer": build_miss_recovery(
-                text_chat, ledger_proxy, clock, {"tile_w": tile_w, "tile_h": tile_h}
+            "anchor_confirmer": build_anchor_confirm(
+                text_chat, ledger_proxy, clock, {"encode_fn": self._vision_encode_fn}
             ),
-            "frontier_selector": build_frontier_select(text_chat, ledger_proxy, clock),
+            "miss_recoverer": build_miss_recovery(
+                text_chat, ledger_proxy, clock,
+                {"encode_fn": self._vision_encode_fn, "tile_w": tile_w, "tile_h": tile_h},
+            ),
+            "frontier_selector": build_frontier_select(
+                text_chat, ledger_proxy, clock, {"encode_fn": self._vision_encode_fn}
+            ),
         }
 
     def _assert_encoder_provider_consistency(self) -> None:
@@ -700,11 +718,13 @@ class AdapterNode(Node):
 
         H14 / OR-F10 landmine: the vision checkpoints (CP2/CP3/CP5) default to
         core.checkpoints._vision.default_encode_fn, which emits raw ``.npy`` bytes a real
-        vision API rejects. If a network provider is configured but this node has not swapped
-        in a JPEG encoder, those checkpoints would silently NEVER work at eval while all
-        offline tests stay green. There is no JPEG encode_fn swap in this node yet, so any
-        configured network provider is a boot-time inconsistency — shout so it cannot pass a
-        smoke test silently (this is the missing wiring-time assert OR-F10 called out).
+        vision API rejects. Gate 4 wired a real JPEG encode_fn (self._vision_encode_fn,
+        via core.perception.vision_encode.resolve_encode_fn) into the checkpoint seams
+        below whenever Pillow is importable — the common case — so those checkpoints now
+        send real image bytes. This assert covers the one remaining inconsistency: Pillow
+        absent (``self._vision_encode_fn is None``, the builders' own .npy default then
+        applies) WHILE a network provider is configured — shout so that combination can
+        never pass a smoke test silently (the wiring-time assert OR-F10 called out).
         """
         if not self._llm_configured:
             return  # no provider -> nothing sends images -> the .npy default is harmless
@@ -716,11 +736,14 @@ class AdapterNode(Node):
         ]
         if not configured:
             return  # only stub/local tiers -> no live vision API to reject .npy bytes
+        if self._vision_encode_fn is not None:
+            return  # a real JPEG encoder is wired -> CP2/CP3/CP5 send real image bytes
         self.get_logger().error(
-            "SUBMISSION-BLOCKER: a network LLM/VLM provider is configured (%s) but the vision "
-            "checkpoints still use the default raw .npy image encoder — a real vision API "
-            "rejects those bytes, so CP2/CP3/CP5 would silently never fire at eval. Swap in a "
-            "JPEG encode_fn before shipping vision checkpoints (H14 / OR-F10)."
+            "SUBMISSION-BLOCKER: a network LLM/VLM provider is configured (%s) but no real "
+            "image encoder is available (Pillow not installed) — the vision checkpoints "
+            "fall back to the default raw .npy image encoder, which a real vision API "
+            "rejects, so CP2/CP3/CP5 would silently never fire at eval. Install pillow "
+            "(H14 / OR-F10)."
             % ", ".join(sorted({s.kind for s in configured}))
         )
 

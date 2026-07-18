@@ -132,9 +132,26 @@ def test_cp4_rich_verifier_carries_runner_up(src: str):
 
 
 def test_cp3_anchor_seam_built(src: str):
-    # The CP3 seam is built and accepts the optional anchor_noun the caller wires through.
-    assert "build_anchor_confirm(text_chat, ledger_proxy, clock)" in src
+    # The CP3 seam is built and accepts the optional anchor_noun the caller wires through,
+    # plus the real vision encode_fn (Gate 4 item 2) so a configured network provider gets
+    # real JPEG bytes rather than the checkpoint's raw-.npy default.
+    assert "build_anchor_confirm(" in src
+    assert '"encode_fn": self._vision_encode_fn' in src
     assert 'anchor_confirmer=seams.get("anchor_confirmer")' in src
+
+
+def test_cp5_frontier_seam_gets_vision_encoder(src: str):
+    # CP5 (frontier_select) is also a vision checkpoint (Gate 4 item 2) — it must get the
+    # same real-JPEG-when-available encode_fn as CP2/CP3, not just the text ladder.
+    assert "build_frontier_select(" in src
+    assert src.count('"encode_fn": self._vision_encode_fn') >= 3  # CP2, CP3, CP5
+
+
+def test_vision_encode_fn_resolved_at_boot(src: str):
+    # Gate 4 item 2: a real JPEG encode_fn is resolved once at boot (Pillow-lazy,
+    # gracefully degrading to None when Pillow is absent — see core.perception.vision_encode).
+    assert "from core.perception.vision_encode import resolve_encode_fn" in src
+    assert "self._vision_encode_fn = resolve_encode_fn(self.get_logger())" in src
 
 
 def test_default_tile_dims_match_projection_formula():
