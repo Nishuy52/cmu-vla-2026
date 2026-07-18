@@ -17,6 +17,12 @@ test = ["pytest>=8"]
 # `dev` adds parallel test execution (pytest-xdist). Not required to run the suite;
 # only the full milestone gate uses it: `pytest -m "" -n auto` (see src/README.md).
 dev = ["pytest>=8", "pytest-xdist>=3"]
+# `llm` is needed only to actually CALL a configured openai/anthropic-kind provider
+# slot (core/llm/providers.py imports each SDK lazily inside the call, so the fast
+# test tier runs fine with fakes and no SDK installed at all — see tests/llm/fakes.py).
+# Install this to drive the local-LLM slot (docs/local_llm_plan.md) or a real
+# primary/secondary API slot.
+llm = ["openai>=1.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]

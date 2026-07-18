@@ -48,3 +48,9 @@
   → issues #11/#12); IF leg-count census (meth-F5, 0/30 dropped);
   `--no-spawn-hint` run (arch-F9); unaligned-scene frame fit (meth-F11,
   aligned 24→28/30). New resolver-mispick bug → issue #13.
+- **T13** local-llm-phase1-2 — Phase 1 conformance
+  (`tools/llm_conformance.py`, 6/10 schema-valid vs 8/10 bar, two model
+  failure modes found) + Phase 2 parse battery
+  (`tools/llm_parse_battery.py`, all 75 questions; run confounded by full
+  sim-stack contention — 2/75 reached the LLM tier; re-run on a quiet box
+  recommended). No Ollama wire quirk found. Issues #44/#45/#46 filed.

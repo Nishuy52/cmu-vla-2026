@@ -813,3 +813,15 @@ sim box; order per plan).
 (conformance + parse battery + checkpoint matrix vs recorded bags);
 (4) Phase-3 in-image Ollama bake + S7a gate; (5) commit staged fork
 payload (#40) before the pending host reboot.
+
+## 2026-07-19 — Local-LLM Phase 1-2 (parse half) — task record T13
+
+Started and wrapped T13 (`docs/tasks/T13-local-llm-phase1-2/task.md`):
+Phase 1 conformance tool + 10-question sample (6/10 valid, below the 8/10
+bar) and Phase 2 parse battery over all 75 training questions (confounded
+by unexpected full sim-stack contention on the dev box — 2/75 reached the
+LLM tier; re-run on a quiet box recommended). No Ollama wire quirk found,
+so no adapter change. Issues #44 (parse_tier mislabeling on local-only
+config), #45 (repair prompt not schema-guided), #46 (client-only timeout
+vs Ollama's single-concurrency server) filed. Next: quiet-box Phase-2
+re-run; Phase-2 vision-checkpoint half; Phase-3 in-image bake.

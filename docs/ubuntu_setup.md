@@ -280,6 +280,13 @@ networking → localhost reachable from the containers; re-assert env in compose
 like RMW, gotcha 13). Phase-0 latency table and model verdicts:
 `docs/local_llm_plan.md` §"Phase 0 results".
 
+**SDK requirement (Phase 1, 18 Jul):** `core/llm/providers.py` imports the `openai`
+package lazily inside the call, so the fast test tier needs nothing installed — but
+to actually DRIVE a configured `openai`-kind slot (local or a real cloud primary/
+secondary) the SDK must be present: `pip install -e '.[llm]'` from `src/` (or
+`pip install openai` directly). Conformance/battery tooling
+(`tools/llm_conformance.py`, `tools/llm_parse_battery.py`) needs this installed.
+
 **Submission requirement:** the host install above is the DEV loop only. The
 submission image must serve the model IN-CONTAINER (organisers run only our
 container at eval) — Ollama binary + baked `qwen2.5vl:3b` blobs go into the
