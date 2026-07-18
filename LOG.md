@@ -753,3 +753,23 @@ then Gate 4 - real perception (unchanged).
 swap docker-ai_module:latest in with VLA_DETECTOR=grounding_dino, GPU/VRAM
 + batched-forward + offline-cache checks, RVIZ smoke, clean-clone packaging
 gate). Gate 0 residuals: LLM keys, Docker Hub, host reboot.
+
+## 2026-07-18 (session 17, continued) - local-LLM bridge plan written
+
+- New constraint from user: no cloud LLM keys until early August, and no
+  SoC cluster. Plan: docs/local_llm_plan.md.
+- Recon confirmed the provider layer needs ZERO code changes: the "local"
+  slot (VLA_LLM_LOCAL_KIND=openai + BASE_URL + MODEL) speaks OpenAI wire
+  incl. vision; ladder timeout/repair/regex-floor already bound a weak
+  local model's damage.
+- Strategy: Ollama serving two regimes on the 8 GB 4060 - 3-4B Q4 VLM for
+  live runs (GPU shared with Unity+GDINO), 7-8B Q4 VLM for offline parse
+  battery + checkpoint replay against recorded-bag panoramas. Phases:
+  0 serving+latency baseline -> 1 conformance -> 2 offline value
+  measurement (per-checkpoint enable matrix vs regex floor) -> 3 live
+  integration (post Gate-4 checklist) -> 4 August switchover, local slot
+  demotes to permanent tier-3 failover (+ decision item: bake local model
+  into submission image as eval-day dark-network fallback).
+
+**Next:** Gate 4 live checklist, then local-LLM Phase 0 (both need the
+sim box; order per plan).
