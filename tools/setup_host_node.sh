@@ -28,9 +28,15 @@ if [[ ! -d /opt/ros/jazzy ]]; then
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo "$UBUNTU_CODENAME") main" \
     | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
   sudo apt-get update
-  sudo apt-get install -y ros-jazzy-ros-base ros-jazzy-rmw-cyclonedds-cpp python3-venv
+  sudo apt-get install -y ros-jazzy-ros-base python3-venv
 else
-  echo "==> /opt/ros/jazzy present, skipping ROS install"
+  echo "==> /opt/ros/jazzy present, skipping ROS base install"
+fi
+# CycloneDDS RMW checked SEPARATELY from the base install: a pre-existing Jazzy
+# without it would silently run FastDDS -> no cross-container data (gotcha 13).
+if ! dpkg -s ros-jazzy-rmw-cyclonedds-cpp >/dev/null 2>&1; then
+  echo "==> Installing ros-jazzy-rmw-cyclonedds-cpp (sudo)..."
+  sudo apt-get install -y ros-jazzy-rmw-cyclonedds-cpp
 fi
 
 # ---------- 2. Pinned venv mirroring the image ----------
