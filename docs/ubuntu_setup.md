@@ -82,21 +82,49 @@ submodule is pinned to `81035e9`.)
 Follow `upstream/CMU-VLN-Challenge-2026/docker/README.md` exactly — summary of what it does
 (details in `docs/upstream_notes.md` §4–5):
 
-- [ ] Pull the challenge system image and the `ai_module` base image as instructed in `docker/`.
-- [ ] Download the **training scene binaries** from the Google Drive folder linked in the upstream
+- [x] Pull the challenge system image and the `ai_module` base image as instructed in `docker/`.
+- [x] Download the **training scene binaries** from the Google Drive folder linked in the upstream
       README ("training environments") — one Unity `Model.x86_64` per scene.
-- [ ] Install a scene: place its files under
+- [x] Install a scene: place its files under
       `autonomy_stack_mecanum_wheel_platform/src/base_autonomy/vehicle_simulator/mesh/unity/environment/`
       and mark `Model.x86_64` executable (`chmod +x`). Swap scenes by swapping this folder's contents.
-- [ ] Launch: the two-container compose stack (`system` + `ai_module`, host networking,
+- [x] Launch: the two-container compose stack (`system` + `ai_module`, host networking,
       CycloneDDS; Unity bridge on port 10000). First smoke test: `system_simulation.sh` with the
       dummy ai_module — the robot should sit in the scene and RVIZ should show the panorama,
       lidar, and terrain map.
-- [ ] Env var sanity: `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` must be consistent in BOTH containers
+- [x] Env var sanity: `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` must be consistent in BOTH containers
       or topic discovery silently fails (upstream gotcha 13).
 - [ ] Verify the loop with the ordered Tier-2 smoke tests (containers → scene render → sensor
       liveness → actuation → dummy round-trip → relaunched dry-run) in `docs/sim_verification.md`,
       which extends this section with PASS/FAIL criteria per step.
+
+**As-built findings (18 Jul 2026, first Ubuntu bring-up):**
+
+- **Scene-source trap:** the correct scene zips are the ones the 2026 upstream README links —
+  Drive folder `unity_env_models` (`1nki_xoFKX1bYr8m7qiGRQelwnQ7EKVYc`), binaries built Nov 2024.
+  A near-identical 2025-era folder `cmu_vla_challenge_unity_environments_ros1` (binaries Nov 2023)
+  circulates in search results and is **protocol-incompatible** with the ROS2 `ros_tcp_endpoint`:
+  symptom is a reconnect loop of `Connection from 127.0.0.1` + `JSONDecodeError` in
+  `handle_syscommand` and silent sensor topics, while `/state_estimation` (host-side odometry)
+  still streams at 200 Hz. Check `Model.x86_64`'s file date if in doubt.
+  `tools/fetch_unity_scenes.sh` downloads the correct set per-file via gdown (works on Ubuntu;
+  the 10 Jul gdown failure was folder-mode/Windows-specific). Scenes live in
+  `~/vla/data/unity_scenes_ros2/<scene>/<scene>/`.
+- **Scene install is `docker cp`**, not a mount: the system container is a prebuilt image with the
+  scene baked in at `.../mesh/unity/` (shipped default = livingroom_3). Swap:
+  `docker exec iros2026_system rm -rf $U/environment`, `docker cp <scene>/<scene>/. iros2026_system:$U/`,
+  then `docker exec -u root ... chown -R docker:docker $U && chmod +x $U/environment/Model.x86_64`
+  (cp'd files arrive root-owned). Survives `docker restart`, lost on container re-create.
+- **Gotcha 13 has a sharper form:** the containers set `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`
+  only in `~/.bashrc`, so **non-interactive `docker exec bash -c` shells skip it** and run FastDDS
+  — discovery still works (topics/subscriber counts look right) but no data crosses containers
+  (FastDDS shared-memory transport, separate `/dev/shm`). Export it explicitly in every exec, or
+  use `bash -ic`. After changing middleware, restart both containers — stale daemons/nodes from
+  the wrong RMW break node creation.
+- `office_building_1/2` ship with **empty `object_list.txt`** in both scene sets — they are
+  platform extras, not among the 15 training scenes.
+- On the RTX 4060 Laptop, topic rates run below contract with RVIZ rendering
+  (`/camera/image` ~3.7 Hz vs ~10, terrain ~3.9 vs ~5; scan ~4–5 Hz) — tracked as a GitHub issue.
 
 ## 6. Sample data for the replay harness
 

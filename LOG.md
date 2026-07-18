@@ -524,3 +524,37 @@ README; remember gdown failed on the sample-data folder 10 Jul, so
 browser download likely needed), pull upstream images, stock-sim smoke
 tests 2.1-2.5 per sim_verification.md. Gate 0 residuals: LLM API keys,
 Docker Hub account.
+
+## 2026-07-18 (session 16, continued) - Gate 2: stock sim + dummy round-trip PASS
+
+- **Scene-source trap found and resolved.** First scene install used zips
+  from the 2025-era Drive folder `cmu_vla_challenge_unity_environments_ros1`
+  (Nov 2023 binaries) -> ros_tcp_endpoint reconnect loop + JSONDecodeError,
+  sensors silent. Control test with the image's stock scene (identified as
+  livingroom_3 by object_list md5) passed, isolating the fault to the scene
+  build generation. Correct folder = `unity_env_models`
+  (`1nki_...`, the one the 2026 README links; Nov 2024 builds). Full detail
+  in ubuntu_setup §5 "As-built findings".
+- **All 18 correct scenes fetched + extracted** to
+  `data/unity_scenes_ros2/` via new `tools/fetch_unity_scenes.sh` (per-file
+  gdown with pinned IDs; folder-mode gdown failure from 10 Jul does not
+  apply per-file on Ubuntu). office_building_1/2 have empty
+  object_list.txt in both sets - platform extras, not training scenes.
+- **Tier 2.1-2.5 PASS** on livingroom_1 (Nov 2024 build): containers up;
+  bridge clean (0 JSON errors); scan ~4-5 Hz / state_estimation 200 Hz;
+  waypoint round-trip drives the robot ((0,0) -> stop near (1.5,0), short
+  of target consistent with obstacle stop); dummy VLM cross-container
+  round-trip answers numerical question (`data: 4`).
+- **Sharper form of gotcha 13 hit in practice:** RMW env only in the
+  containers' .bashrc -> non-interactive `docker exec` runs FastDDS;
+  discovery looks fine but no data crosses containers. Documented in
+  ubuntu_setup §5.
+- **Residuals:** (1) topic rates below contract on this box (camera
+  ~3.7 Hz vs ~10) - issue drafted, creation blocked by session
+  permissions, FILE MANUALLY next session; (2) Tier 2.2 visual RVIZ/Unity
+  window check not eyeballed yet (user to confirm windows render);
+  (3) Tier 2.6+ (relaunched dry-run) pending; (4) host not rebooted since
+  full-upgrade - do before next sim session.
+
+**Next:** file the rates issue, eyeball RVIZ, Tier 2.6 relaunch dry-run,
+then Gate 3 (our module replaces dummy) per phase2_playbook.
