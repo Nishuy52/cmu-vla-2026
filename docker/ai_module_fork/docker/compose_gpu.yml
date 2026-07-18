@@ -1,0 +1,72 @@
+# FORK-SHAPED (H7) reference copy of the fork's docker/compose_gpu.yml, with the ai_module
+# service wired to OUR node + Phase-3 in-image LLM launch wrapper. Base structure copied
+# verbatim from upstream/CMU-VLN-Challenge-2026/docker/compose_gpu.yml (system service
+# untouched — gotcha 12; only difference from compose.yml is the nvidia GPU reservation on both
+# services) and extended the same way as compose.yml — see that file's header and
+# docs/local_llm_plan.md Phase 3.
+#
+# This is the file that actually matters for the VRAM-sharing recommendation
+# (docs/local_llm_plan.md Phase 3 "VRAM note"): GDINO (~3.6 GB) + Unity + the baked qwen2.5vl:3b
+# (~3.2 GB) coexist on ONE GPU here, unlike compose.yml which has no GPU reservation.
+#   - Dev box (RTX 4060 Laptop, 8 GB, shared with Unity + RVIZ): keep OLLAMA_KEEP_ALIVE SHORT
+#     (default below, 5m) so an idle-but-resident model releases VRAM back to GDINO/Unity between
+#     LLM calls instead of pinning ~3.2 GB the whole session.
+#   - Eval box (RTX 4090, 24 GB): plenty of headroom for all three resident at once — override to
+#     LONG at invocation, matching the image's own baked default (60m):
+#       OLLAMA_KEEP_ALIVE=60m docker compose -f compose_gpu.yml up --build -d
+#
+# NOT auto-synced by sync_to_fork.sh (ai_module/-only scope, gotcha 12) — apply manually at the
+# fork's docker/compose_gpu.yml, same as compose.yml (docs/ubuntu_setup.md §7a step 2).
+services:
+  system:
+    image: zhangjicmu/ubuntu24_ros:cmu_vla_challenge_simulation
+    container_name: iros2026_system
+    privileged: true
+    network_mode: host
+    environment:
+      - DISPLAY
+      - QT_X11_NO_MITSHM=1
+      - XAUTHORITY=/tmp/.docker.xauth
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /etc/localtime:/etc/localtime:ro
+      - /dev/input:/dev/input
+      - /dev/bus/usb:/dev/bus/usb
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  ai_module:
+    build:
+      context: ../ai_module              # fork-shape: context IS ai_module/ (COPY src/ etc. resolve)
+      dockerfile: docker/Dockerfile      # i.e. ai_module/docker/Dockerfile
+    container_name: iros2026_ai_module
+    network_mode: host
+    environment:
+      # Re-assert: a compose environment/env_file entry OVERRIDES the Dockerfile ENV of the same
+      # name (docs/upstream_notes.md gotcha 13). Both containers must agree on CycloneDDS.
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      # SHORT default = dev-box-safe (see header note). Eval runs override at invocation with
+      # OLLAMA_KEEP_ALIVE=60m (or unset the override entirely and edit this default before the
+      # submission build, whichever this session's runbook — reports/local_llm_phase3/
+      # BUILD_AND_VERIFY.md — ends up recommending after the post-reboot measurement).
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}
+    env_file:
+      - ../.env.llm                      # optional, gitignored: OPENAI_API_KEY=... etc.
+    command: >
+      /bin/bash -lc "/opt/vla/launch_with_llm.sh"
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

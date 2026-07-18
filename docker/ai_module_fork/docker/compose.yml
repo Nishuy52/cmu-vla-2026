@@ -1,0 +1,55 @@
+# FORK-SHAPED (H7) reference copy of the fork's docker/compose.yml, with the ai_module service
+# wired to OUR node + Phase-3 in-image LLM launch wrapper. Base structure copied verbatim from
+# upstream/CMU-VLN-Challenge-2026/docker/compose.yml (system service untouched — gotcha 12) and
+# extended per docs/ai_module_fork/README.md "Point the compose ai_module service at our
+# Dockerfile" + docs/local_llm_plan.md Phase 3.
+#
+# This file is NOT auto-synced by sync_to_fork.sh (that script only stages ai_module/ per gotcha
+# 12 — see its header comment). Apply it manually at the fork's docker/compose.yml as step 2 of
+# the packaging gate (docs/ubuntu_setup.md §7a), the same manual-edit step the README already
+# documented; this file is now the copy-pasteable source of that edit instead of an inline
+# snippet.
+#
+# OLLAMA_KEEP_ALIVE: baked default in the image is 60m (long — fine on a 24 GB eval 4090). This
+# compose file exposes it as an overridable env var defaulting SHORT (5m) because this file has
+# no GPU reservation and is meant for CPU-only / no-GPU-passthrough smoke runs, where VRAM
+# headroom is not the concern it is under compose_gpu.yml. See compose_gpu.yml for the dev-box
+# vs eval-box recommendation that actually matters (GDINO + Unity + the 3B model sharing one
+# GPU) and docs/local_llm_plan.md Phase 3 "VRAM note".
+services:
+  system:
+    image: zhangjicmu/ubuntu24_ros:cmu_vla_challenge_simulation
+    container_name: iros2026_system
+    privileged: true
+    network_mode: host
+    environment:
+      - DISPLAY
+      - QT_X11_NO_MITSHM=1
+      - XAUTHORITY=/tmp/.docker.xauth
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /etc/localtime:/etc/localtime:ro
+      - /dev/input:/dev/input
+      - /dev/bus/usb:/dev/bus/usb
+    stdin_open: true
+    tty: true
+
+  ai_module:
+    build:
+      context: ../ai_module              # fork-shape: context IS ai_module/ (COPY src/ etc. resolve)
+      dockerfile: docker/Dockerfile      # i.e. ai_module/docker/Dockerfile
+    container_name: iros2026_ai_module
+    network_mode: host
+    environment:
+      # Re-assert: a compose environment/env_file entry OVERRIDES the Dockerfile ENV of the same
+      # name (docs/upstream_notes.md gotcha 13). Both containers must agree on CycloneDDS.
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      # Overridable at invocation: `OLLAMA_KEEP_ALIVE=60m docker compose -f compose.yml up --build`
+      # for a long-hold run; defaults short here (no-GPU-reservation file — see note above).
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}
+    env_file:
+      - ../.env.llm                      # optional, gitignored: OPENAI_API_KEY=... etc.
+    command: >
+      /bin/bash -lc "/opt/vla/launch_with_llm.sh"
+    stdin_open: true
+    tty: true

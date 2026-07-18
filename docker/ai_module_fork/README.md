@@ -27,16 +27,22 @@ After running the sync script against a fork checkout, the fork's `ai_module/` l
   ai_module/
     docker/
       Dockerfile        <- docker/ai_module_fork/docker/Dockerfile (this repo), context = ai_module/
+    launch_with_llm.sh  <- docker/ai_module_fork/ai_module/launch_with_llm.sh (this repo)
     src/
       core/             <- src/core/        (this repo)
       ros_adapter/      <- src/ros_adapter/ (this repo)   (ament pkg: vla_ai_module)
     ...                 (upstream's other ai_module/ files, untouched)
   docker/
-    compose.yml         <- upstream; ai_module service builds context ../ai_module (see below)
+    compose.yml         <- apply manually from docker/ai_module_fork/docker/compose.yml (this repo)
+    compose_gpu.yml     <- apply manually from docker/ai_module_fork/docker/compose_gpu.yml (this repo)
   system/               <- upstream; NEVER modified (gotcha 12)
 ```
 
-`src/tests/` is **not** synced — see "Sync approach" below.
+`src/tests/` is **not** synced — see "Sync approach" below. `compose.yml`/`compose_gpu.yml` are
+**not** synced by the script either (they live outside `ai_module/`, so per gotcha 12 they're a
+manual step — see "Point the compose `ai_module` service at our Dockerfile" below); the versions
+under `docker/ai_module_fork/docker/` are the copy-pasteable source for that manual edit, not a
+build-time dependency of the image.
 
 ## Sync approach (and why tests are excluded)
 

@@ -2,12 +2,20 @@
 # sync_to_fork.sh — stage our repo's payload into the challenge fork's ai_module/ tree (H7).
 #
 # The submission fork may modify ONLY ai_module/ (upstream_notes.md gotcha 12). Our code lives
-# in THIS repo under src/ and docker/ai_module_fork/docker/Dockerfile. This script copies both
-# into the fork's ai_module/ directory in the exact shape the fork build expects:
+# in THIS repo under src/, docker/ai_module_fork/docker/Dockerfile, and
+# docker/ai_module_fork/ai_module/launch_with_llm.sh. This script copies all three into the
+# fork's ai_module/ directory in the exact shape the fork build expects:
 #
-#     <fork>/ai_module/docker/Dockerfile   <- docker/ai_module_fork/docker/Dockerfile (this repo)
-#     <fork>/ai_module/src/core/           <- src/core/        (this repo)
-#     <fork>/ai_module/src/ros_adapter/    <- src/ros_adapter/ (this repo)
+#     <fork>/ai_module/docker/Dockerfile      <- docker/ai_module_fork/docker/Dockerfile (this repo)
+#     <fork>/ai_module/launch_with_llm.sh     <- docker/ai_module_fork/ai_module/launch_with_llm.sh (this repo)
+#     <fork>/ai_module/src/core/              <- src/core/        (this repo)
+#     <fork>/ai_module/src/ros_adapter/       <- src/ros_adapter/ (this repo)
+#
+# NOTE (Phase 3, docs/local_llm_plan.md): docker/ai_module_fork/docker/compose.yml and
+# compose_gpu.yml are reference copies only, deliberately NOT synced here — they live outside
+# ai_module/ in the fork tree (docker/compose*.yml at the fork root), so per gotcha 12 they are
+# applied manually as part of the packaging gate (docs/ubuntu_setup.md §7a step 2), same as the
+# README already documented before this script existed.
 #
 # src/tests/ is DELIBERATELY EXCLUDED: the runtime image only needs `core` + `ros_adapter`
 # (the adapter node imports neither pytest nor the test tree), so tests only bloat the image on a
@@ -47,7 +55,13 @@ mkdir -p "$AI_MODULE/docker"
 cp "$SCRIPT_DIR/docker/Dockerfile" "$AI_MODULE/docker/Dockerfile"
 echo "synced : ai_module/docker/Dockerfile"
 
-# 2) src/ (core + ros_adapter, NO tests) -> ai_module/src/
+# 2) launch_with_llm.sh -> ai_module/launch_with_llm.sh (Phase 3 in-image LLM launch wrapper;
+#    the Dockerfile COPYs this from the build context root, i.e. ai_module/)
+cp "$SCRIPT_DIR/ai_module/launch_with_llm.sh" "$AI_MODULE/launch_with_llm.sh"
+chmod +x "$AI_MODULE/launch_with_llm.sh"
+echo "synced : ai_module/launch_with_llm.sh"
+
+# 3) src/ (core + ros_adapter, NO tests) -> ai_module/src/
 #    rsync with --delete keeps the fork's src/ an exact mirror of ours minus tests; falls back to
 #    cp if rsync is unavailable.
 mkdir -p "$AI_MODULE/src"

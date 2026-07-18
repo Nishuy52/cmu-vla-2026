@@ -218,6 +218,113 @@ RUN mkdir -p src && ln -s /opt/vla/src/ros_adapter src/ros_adapter && \
 # `docker` user specifically, not root) — append our workspace overlay to the SAME file. The
 # original draft appended to /root/.bashrc, which the non-root runtime user never sources.
 RUN echo "source /opt/vla/ws/install/setup.bash" >> /home/docker/.bashrc
+
+# --- Local LLM serving (Phase 3, docs/local_llm_plan.md "Phase 3 — live integration"). Bakes
+#     an Ollama standalone server + the qwen2.5vl:3b blobs into the image, mirroring the GDINO
+#     weights-bake pattern above: fetched at build time, offline at runtime, build-time
+#     assertions guard the bake. This is the SUBMISSION path — the eval host runs ONLY our
+#     container, so the model must be served IN-container; the host Ollama install
+#     (docs/ubuntu_setup.md §8a) remains dev-loop convenience only and is not used at eval.
+#
+#     PINNED VERSION (do not float to "latest"): the linux/amd64 release asset format changed
+#     to .tar.zst as of v0.32 (docs/local_llm_plan.md "Phase 0 results" confirms this for
+#     v0.32.1 on this box) — pinning avoids a rebuild silently picking up a differently-named or
+#     differently-compressed asset under the "latest" alias. zstd is not in the base image (the
+#     GDINO layers above only needed curl) so it is apt-installed here.
+ENV OLLAMA_VERSION=v0.32.1
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends zstd && \
+    rm -rf /var/lib/apt/lists/*
+#     Extract + prune non-CUDA runner variants in one fused layer (chown included, same
+#     copy-up-avoidance reasoning as the GDINO weights RUN above). The tarball ships
+#     lib/ollama/<backend> subtrees for every accelerator Ollama supports (rocm, vulkan, a
+#     cpu fallback, and one or more cuda_v* runners); we only need the CUDA runner that matches
+#     the driver on both the dev 4060 and the eval 4090 (Phase-0 measured cuda_v13 selected
+#     against driver 13.2) plus the cpu fallback (so the container degrades instead of
+#     hard-failing to start if a GPU is ever unavailable at runtime). Everything else is deleted.
+#     confirm on Ubuntu (flag 4 of 4, Phase 3): this build cannot run here (GPU wedged pending
+#     reboot, per session constraint) — the `find`/`ls` line below prints the actual extracted
+#     tree to the build log specifically so the first post-reboot build can eyeball it BEFORE
+#     trusting the prune glob; if the runner directory names differ from cuda_v13/cpu*, fix the
+#     `case` pattern before relying on this layer.
+RUN mkdir -p /opt/vla/ollama && \
+    curl -fSL --retry 3 -o /tmp/ollama.tar.zst \
+      "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst" && \
+    tar --use-compress-program=unzstd -xf /tmp/ollama.tar.zst -C /opt/vla/ollama && \
+    rm /tmp/ollama.tar.zst && \
+    echo "=== extracted ollama tree (confirm-on-Ubuntu: verify before trusting the prune) ===" && \
+    find /opt/vla/ollama -maxdepth 3 | sort && \
+    if [ -d /opt/vla/ollama/lib/ollama ]; then \
+      cd /opt/vla/ollama/lib/ollama && \
+      for d in */; do \
+        d="${d%/}"; \
+        case "$d" in \
+          cuda_v13*|cpu*) echo "keeping runner: $d" ;; \
+          *) echo "pruning runner: $d"; rm -rf "$d" ;; \
+        esac; \
+      done; \
+    else \
+      echo "NOTE: no lib/ollama runner dir found at the expected path — layout may differ for ${OLLAMA_VERSION}, nothing pruned (confirm on Ubuntu)"; \
+    fi && \
+    chown -R docker:docker /opt/vla/ollama
+RUN test -x /opt/vla/ollama/bin/ollama || (echo "ollama binary missing after extract at /opt/vla/ollama/bin/ollama" && exit 1)
+#     Model blobs. Pattern per Phase 3 spec: start `ollama serve` backgrounded against the baked
+#     OLLAMA_MODELS dir, wait for it to come up, `ollama pull` the model, then stop the server —
+#     leaves the manifest+blobs on disk for the runtime server to load with no network call.
+#     Deviation from the literal `kill %1` shorthand in the Phase 3 spec: `%1` is a bash
+#     "current job" job-control reference, and non-interactive `RUN` shells (Docker uses
+#     `/bin/sh -c`, i.e. dash — no job control regardless) don't reliably support it. Instead:
+#     background `ollama serve` inside a `( … & echo $! > pidfile )` subshell so the PID is
+#     captured reliably without depending on how the outer `&&`/`&` chain parses (a bare
+#     `cmd1 && cmd2 &` backgrounds the WHOLE and-list as one job, not just cmd2 — `$!` right
+#     after that would not reliably be ollama's own PID), then `ollama pull`, capture its exit
+#     status, kill+wait the captured PID, chown, and re-raise the pull's exit status so a failed
+#     pull still fails the build instead of silently leaving no model baked. Flag this whole
+#     block as confirm-on-Ubuntu along with the rest.
+ENV OLLAMA_MODELS=/opt/vla/ollama_models
+ENV OLLAMA_CONTEXT_LENGTH=8192
+ENV OLLAMA_HOST=127.0.0.1:11434
+ENV PATH=/opt/vla/ollama/bin:${PATH}
+RUN mkdir -p "${OLLAMA_MODELS}" && \
+    ( ollama serve & echo $! > /tmp/ollama.pid ) && \
+    sleep 5 && \
+    ollama pull qwen2.5vl:3b; \
+    PULL_STATUS=$?; \
+    OLLAMA_PID="$(cat /tmp/ollama.pid)"; \
+    kill "${OLLAMA_PID}" 2>/dev/null; \
+    wait "${OLLAMA_PID}" 2>/dev/null; \
+    rm -f /tmp/ollama.pid; \
+    chown -R docker:docker "${OLLAMA_MODELS}"; \
+    exit "${PULL_STATUS}"
+# Build-time assertion (plain file/size checks, no GPU, no server) that the model actually landed
+# — same "fail loud at build time, not silently at runtime" discipline as the GDINO checks above.
+# confirm on Ubuntu: the manifest path below follows Ollama's documented on-disk layout
+# (manifests/registry.ollama.ai/library/<model>/<tag>); verify against the pinned v0.32.1 tree.
+RUN python3 -c "\
+import os; \
+models_dir = os.environ['OLLAMA_MODELS']; \
+manifest = os.path.join(models_dir, 'manifests', 'registry.ollama.ai', 'library', 'qwen2.5vl', '3b'); \
+assert os.path.isfile(manifest), f'missing ollama manifest at {manifest} — confirm-on-Ubuntu: check the actual on-disk layout under {models_dir}'; \
+blobs_dir = os.path.join(models_dir, 'blobs'); \
+assert os.path.isdir(blobs_dir), f'missing blobs dir at {blobs_dir}'; \
+total = sum(os.path.getsize(os.path.join(blobs_dir, f)) for f in os.listdir(blobs_dir) if os.path.isfile(os.path.join(blobs_dir, f))); \
+gb = total / (1024**3); \
+assert 2.5 <= gb <= 4.0, f'qwen2.5vl:3b blob total {gb:.2f} GB outside sane range [2.5, 4.0] GB'; \
+print(f'ollama model OK: manifest at {manifest}; blobs {gb:.2f} GB')"
+# Long default keep_alive (baked default; the eval 4090 has headroom to hold the model
+# resident) — the dev box override (short keep_alive, since GDINO + Unity + the 3B model
+# together are tight on 8 GB VRAM) is set in compose, not here; see
+# docker/ai_module_fork/docker/compose.yml and docs/local_llm_plan.md Phase 3 "VRAM note".
+ENV OLLAMA_KEEP_ALIVE=60m
+# Local-slot wiring for core/llm/config.py (src/core/llm/config.py's VLA_LLM_LOCAL_* indirection,
+# docs/ubuntu_setup.md §8a): baked so the local tier works out of the box with no compose env
+# needed, matching "offline at runtime" — compose may still override VLA_LLM_LOCAL_MODEL etc. if
+# a different local model is ever swapped in. VLA_LOCAL_API_KEY is a dummy value (Ollama's
+# OpenAI-compatible endpoint does not check it) — never a real credential.
+ENV VLA_LLM_LOCAL_KIND=openai
+ENV VLA_LLM_LOCAL_BASE_URL=http://127.0.0.1:11434/v1
+ENV VLA_LLM_LOCAL_MODEL=qwen2.5vl:3b
+ENV VLA_LOCAL_API_KEY=local-dummy-key
 USER docker
 
 # --- LLM parse-provider keys are NEVER baked into the image. They are passed at run time via
@@ -233,7 +340,16 @@ USER docker
 #     or a keyless llm_config.json at the repo root (indirection only; no keys in the file).
 #     See docker/ai_module_fork/README.md.
 
+# --- Launch wrapper (Phase 3): starts the baked ollama serve, pre-warms qwen2.5vl:3b bounded to
+#     ~30s, then execs the same overlay-source + ros2-launch tail the old CMD used directly (see
+#     docker/ai_module_fork/ai_module/launch_with_llm.sh for the full contract). Build context is
+#     ai_module/ (see file header), so this resolves to ai_module/launch_with_llm.sh — synced in
+#     by sync_to_fork.sh alongside src/ and docker/Dockerfile.
+COPY --chown=docker:docker launch_with_llm.sh /opt/vla/launch_with_llm.sh
+RUN chmod +x /opt/vla/launch_with_llm.sh
+
 WORKDIR /opt/vla
-# Entry: source the overlay then launch. compose overrides this with the launch command
-# (see README.md); kept here so `docker run` alone brings the node up.
-CMD ["/bin/bash", "-lc", "source /opt/vla/ws/install/setup.bash && ros2 launch vla_ai_module ai_module.launch.py"]
+# Entry: run the LLM launch wrapper, which execs the overlay-source + ros2-launch tail once
+# ollama is up (or the warm-up budget expires — see launch_with_llm.sh). compose overrides this
+# with the same command (see README.md); kept here so `docker run` alone brings the node up.
+CMD ["/bin/bash", "-lc", "/opt/vla/launch_with_llm.sh"]
