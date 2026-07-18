@@ -9,3 +9,4 @@ datasets/
 /checkpoints/
 logs/
 .pytest_cache/
+reports/gate4_grounding_probe/*.jsonl
