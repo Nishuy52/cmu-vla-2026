@@ -239,6 +239,35 @@ def test_cp4_all_provisional_publishes_nothing_or_f8():
     assert head.best_candidate is None
 
 
+# ------------------------------------------------------- issue #43a answer eligibility
+def test_cp4_low_score_winner_not_published_falls_through():
+    """A winner with n_obs >= 2 but peak score under the 0.30 answer-eligibility floor
+    (a weak question-pass recall hit, not a confident detection) is ineligible just like
+    a provisional-only (n_obs=1) winner -- verify() falls through to the next eligible
+    candidate."""
+    sc = scene(
+        inst(1, "bowl", n_obs=3, score=0.20, centroid=(0, 0, 0)),   # under the score floor
+        inst(2, "bowl", n_obs=3, score=0.90, centroid=(5, 0, 0)),   # eligible
+    )
+    head = _orhead(sc, object_plan("bowl"))
+    assert head.best_candidate.instance_id == 1  # ranks first by id
+    m = head.verify()
+    assert m is not None
+    assert head.best_candidate.instance_id == 2  # low-score winner refused, fell through
+
+
+def test_cp4_all_low_score_publishes_nothing():
+    """Every ranked candidate under the score floor -> verify() refuses to publish."""
+    sc = scene(
+        inst(1, "bowl", n_obs=3, score=0.10),
+        inst(2, "bowl", n_obs=3, score=0.29, centroid=(5, 0, 0)),
+    )
+    head = _orhead(sc, object_plan("bowl"))
+    m = head.verify()
+    assert m is None
+    assert head.best_candidate is None
+
+
 # --------------------------------------------------------------------------- backward compat
 def test_legacy_bool_seam_injected_as_verifier_is_detected():
     sc = scene(

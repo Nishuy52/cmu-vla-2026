@@ -173,6 +173,56 @@ def test_object_ref_target_match_beats_anchor_rung():
     assert m.label == "teapot"
 
 
+# --------------------------------------------------------------- issue #43a eligibility
+def test_object_ref_rung3_ineligible_target_falls_through_to_anchor():
+    # 'teapot' is present but under the answer-eligibility bar (n_obs=1, a question-pass
+    # recall hit, not a confident detection) -> rung 3 must NOT mark on it; falls through
+    # to the anchor rung (table), same as if the target were entirely absent (issue #43a).
+    teapot = make_instance(1, "teapot", n_obs=1, centroid=(-0.6, 2.1, 0.3))
+    table = make_instance(2, "table", centroid=(0, 0, 0), extent=(3.0, 3.0, 3.0))
+    plan = _plan_with_anchor("teapot", "table")
+    f = FloorAnswers()
+    f.update(FakeScene([teapot, table]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert m.label == "table"
+
+
+def test_object_ref_rung3_low_score_target_falls_through_to_anchor():
+    # n_obs sufficient but peak score under the 0.30 answer floor -> also ineligible.
+    teapot = make_instance(1, "teapot", n_obs=5, score=0.20, centroid=(-0.6, 2.1, 0.3))
+    table = make_instance(2, "table", centroid=(0, 0, 0), extent=(3.0, 3.0, 3.0))
+    plan = _plan_with_anchor("teapot", "table")
+    f = FloorAnswers()
+    f.update(FakeScene([teapot, table]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert m.label == "table"
+
+
+def test_object_ref_rung3_ineligible_and_no_anchor_falls_to_final_rung():
+    # Ineligible target, no anchor instances either -> rung 3 and the anchor rung both
+    # skip it, but the final rung (any instance, largest, unfiltered by eligibility --
+    # "silence is still the only unforgivable failure") still applies and CAN mark on
+    # the ineligible target itself if it is the largest instance around.
+    teapot = make_instance(1, "teapot", n_obs=1, centroid=(-0.6, 2.1, 0.3), extent=(1.0, 1.0, 1.0))
+    column = make_instance(2, "column", centroid=(2.3, -2.4, 1.5), extent=(0.3, 0.3, 2.0))
+    plan = _plan_with_anchor("teapot", "table")
+    f = FloorAnswers()
+    f.update(FakeScene([teapot, column]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert m.label == "teapot"  # final rung is unfiltered; teapot has the larger volume
+
+
+def test_object_ref_rung3_eligible_target_still_wins():
+    # Sanity: an eligible target (n_obs>=2, score>=0.30) still wins rung 3 as before.
+    teapot = make_instance(1, "teapot", n_obs=2, score=0.30, centroid=(-0.6, 2.1, 0.3))
+    table = make_instance(2, "table", centroid=(0, 0, 0), extent=(3.0, 3.0, 3.0))
+    plan = _plan_with_anchor("teapot", "table")
+    f = FloorAnswers()
+    f.update(FakeScene([teapot, table]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert m.label == "teapot"
+
+
 def test_instruction_following_first_anchor_point():
     f = FloorAnswers()
     f.update(FakeScene([]), None, PartialResults(first_anchor_pt=(5.0, 6.0, 0.0)))

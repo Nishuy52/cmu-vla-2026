@@ -34,11 +34,16 @@ from core.geometry.toolbox import (
 )
 from core.parsing.regex_tier import _REL_TOKENS  # read-only: relation-token -> Pred map
 from core.plan_schema import Anchor, Clause, Plan, Pred, TargetSpec
+from core.perception.detector import is_answer_eligible
 from core.perception.dimension_priors import clamp_record_marker
 
 #: Re-observation gate (OR-F8): a winner with fewer than this many distinct observations is
 #: provisional-only (e.g. a CP2 hallucination-recovery instance, n_obs=1) and must never be
-#: committed as the published /selected_object_marker without re-observation.
+#: committed as the published /selected_object_marker without re-observation. Superseded
+#: (not replaced) by the stricter issue #43a ``is_answer_eligible`` gate actually applied in
+#: :meth:`ObjectRefHead._first_committable` — that gate ALSO requires n_obs >= this value
+#: (its default equals REOBS_MIN_N_OBS) plus a peak-score floor, so OR-F8's guarantee still
+#: holds. Kept as a named constant for the docstring/rationale trail.
 REOBS_MIN_N_OBS: int = 2
 
 # Legacy narrow per-clause verifier (backward compat):
@@ -149,12 +154,14 @@ class ObjectRefHead:
     def _first_committable(
         self, winner: InstanceRecord, res: ResolveResult
     ) -> InstanceRecord | None:
-        """Return the winner if committable, else the first non-provisional ranked
-        candidate after it, else None (OR-F8 provisional-commit guard)."""
-        if winner is not None and winner.n_obs >= REOBS_MIN_N_OBS:
+        """Return the winner if answer-eligible, else the first answer-eligible ranked
+        candidate after it, else None (OR-F8 provisional-commit guard; issue #43a
+        answer-eligibility gate — n_obs + peak score, see
+        ``core.perception.detector.is_answer_eligible``)."""
+        if winner is not None and is_answer_eligible(winner):
             return winner
         for cand in res.candidates_ranked:
-            if cand.n_obs >= REOBS_MIN_N_OBS:
+            if is_answer_eligible(cand):
                 return cand
         return None
 

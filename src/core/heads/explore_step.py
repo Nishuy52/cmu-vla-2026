@@ -25,9 +25,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from core.interfaces import QType, RobotIO, WaypointCmd
+from core.fsm.floors import _anchor_nouns
 from core.nav.exploration import ExplorationPolicy, ExplorationStatus
 from core.nav.frontiers import detect_frontiers
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
+from core.perception.detector import is_answer_eligible
 from core.plan_schema import Plan
 
 from core.heads.instruction import InstructionHead
@@ -129,6 +131,11 @@ class ExploreHead:
     #: is NOT throttled (it needs 5 Hz waypoint advancement and does no frontier work).
     _last_frontier_decision: Any | None = None
     _last_frontier_t: float | None = None
+    #: Issue #43b — the most recent scene index, refreshed every ``_explore`` tick.
+    #: ``_affinity_nouns`` reads it to check target-noun eligibility (no live SceneIndex
+    #: reaches ``_affinity()``'s callers otherwise: policy construction happens once, at
+    #: the first tick, so this must be current by then).
+    _scene: Any | None = None
 
     # ------------------------------------------------------------------ per-tick
     def advance(self, io: RobotIO, scene) -> None:
@@ -154,6 +161,7 @@ class ExploreHead:
         self._explore(io, scene)
 
     def _explore(self, io: RobotIO, scene=None) -> None:
+        self._scene = scene  # issue #43b: keep _affinity_nouns' eligibility check current
         odom = io.latest_odom()
         # SYS-F9: never construct or run the exploration policy against a pre-odom
         # (0,0)/t=0 anchor — that seeds the sweep at the origin and, once the real odom
@@ -423,11 +431,22 @@ class ExploreHead:
         frontier score toward the still-ungrounded route nouns so we drive toward where
         the missing anchors most likely are (architecture §4 row 10, H3b). The earliest
         ungrounded leg's noun leads (``next_noun_affinity_target``), then any other
-        ungrounded nouns, then the rest of the plan's nouns as a fallback. For non-IF
-        qtypes this is exactly the plan's nouns as before.
+        ungrounded nouns, then the rest of the plan's nouns as a fallback.
+
+        For OBJECT_REFERENCE (issue #43b): when the target noun has NO answer-eligible
+        instances (see ``core.perception.detector.is_answer_eligible`` — the target is
+        either absent or only weakly-scored/under-observed question-pass hits), bias the
+        frontier score toward the target's ANCHOR noun(s) instead (e.g. 'table' in 'the
+        teapot on the table') — steering exploration toward the grounded anchor, from
+        which a re-observed/rescored target instance is most likely to be found. If the
+        target IS already eligible, this is a no-op (target nouns as before).
+
+        For all other qtypes this is exactly the plan's nouns as before.
         """
         base = _plan_nouns(self.plan)
         inst = self.instruction
+        if self.plan is not None and self.plan.qtype is QType.OBJECT_REFERENCE:
+            return self._object_ref_affinity_nouns(base)
         if inst is None or self.plan is None or self.plan.qtype is not QType.INSTRUCTION_FOLLOWING:
             return base
         biased: list[str] = []
@@ -448,6 +467,37 @@ class ExploreHead:
             if n not in biased:
                 biased.append(n)
         return biased or base
+
+    def _object_ref_affinity_nouns(self, base: list[str]) -> list[str]:
+        """Issue #43b: OBJECT_REFERENCE affinity — anchor-seeking when target-starved.
+
+        No anchor nouns, no scene, or the target already answer-eligible: fall through
+        to the plan nouns unchanged (today's purely-geometric-plus-target behaviour).
+        """
+        target_noun = getattr(self.plan.target, "noun", None) if self.plan.target else None
+        anchors = _anchor_nouns(self.plan)
+        if not anchors or self._target_is_answer_eligible(target_noun):
+            return base
+        biased: list[str] = [n for n in anchors if n]
+        for n in base:  # target noun (+ any others) stays as a fallback tail
+            if n not in biased:
+                biased.append(n)
+        return biased
+
+    def _target_is_answer_eligible(self, target_noun: str | None) -> bool:
+        """True iff the scene has >=1 answer-eligible instance of the target noun.
+
+        No scene yet (pre-first-tick) or no target noun: treated as "not yet known to be
+        starved" — returns True so affinity stays on the target noun rather than jumping
+        to the anchor before perception has had a chance to ground anything at all.
+        """
+        if self._scene is None or not target_noun:
+            return True
+        try:
+            candidates = self._scene.by_label(target_noun)
+        except Exception:  # noqa: BLE001 — a broken scene lookup must not crash exploration
+            return True
+        return any(is_answer_eligible(c) for c in candidates)
 
 
 def _frontier_unreachable(f) -> bool:

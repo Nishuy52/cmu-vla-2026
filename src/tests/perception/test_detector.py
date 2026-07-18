@@ -8,8 +8,12 @@ import pytest
 
 from core.perception.detector import (
     Detection,
+    DEFAULT_GDINO_ANSWER_MIN_OBS,
+    DEFAULT_GDINO_ANSWER_MIN_SCORE,
     DEFAULT_GDINO_QUESTION_BOX_THRESHOLD,
     DEFAULT_GDINO_VOCAB_PASS_CADENCE,
+    ENV_GDINO_ANSWER_MIN_OBS,
+    ENV_GDINO_ANSWER_MIN_SCORE,
     ENV_GDINO_CHECKPOINT_PATH,
     ENV_GDINO_CONFIG_PATH,
     ENV_GDINO_DEVICE,
@@ -23,6 +27,9 @@ from core.perception.detector import (
     GDINO_BACKOFF_DEGRADE_N,
     GDINO_MODEL_ID,
     GDINO_REQUIRED_INSTALLS,
+    answer_min_obs,
+    answer_min_score,
+    is_answer_eligible,
     GroundingDinoDetector,
     _norm_cxcywh_to_tile_xyxy,
     build_gdino_prompt,
@@ -767,3 +774,72 @@ def test_backoff_degrades_to_cap_after_n_failures_no_further_logging(tmp_path, c
         det(tiles)
         assert det._next_retry_at - clock() == pytest.approx(GDINO_BACKOFF_CAP_S)
         assert caplog.records == []
+
+
+# --------------------------------------------------------------------- issue #43a eligibility
+
+
+class _Rec:
+    """Minimal duck-typed stand-in for InstanceRecord (n_obs + score only)."""
+
+    def __init__(self, n_obs: int, score: float) -> None:
+        self.n_obs = n_obs
+        self.score = score
+
+
+def test_answer_eligibility_defaults():
+    assert DEFAULT_GDINO_ANSWER_MIN_OBS == 2
+    assert DEFAULT_GDINO_ANSWER_MIN_SCORE == pytest.approx(0.30)
+    assert answer_min_obs() == DEFAULT_GDINO_ANSWER_MIN_OBS
+    assert answer_min_score() == pytest.approx(DEFAULT_GDINO_ANSWER_MIN_SCORE)
+
+
+def test_answer_eligible_at_both_floors():
+    # Exactly at the floor on both axes -> eligible (>=, not >).
+    assert is_answer_eligible(_Rec(n_obs=2, score=0.30)) is True
+
+
+def test_ineligible_single_observation():
+    # n_obs == 1 (the issue's headline case): ineligible even with a strong score.
+    assert is_answer_eligible(_Rec(n_obs=1, score=0.95)) is False
+
+
+def test_ineligible_below_score_floor():
+    # n_obs sufficient but peak score just under the 0.30 answer floor (still clears the
+    # 0.25 recall floor used for index/exploration — that floor is untouched).
+    assert is_answer_eligible(_Rec(n_obs=5, score=0.29)) is False
+
+
+def test_eligible_well_above_both_floors():
+    assert is_answer_eligible(_Rec(n_obs=10, score=0.9)) is True
+
+
+def test_ineligible_missing_attributes_not_raising():
+    class _Bare:
+        pass
+
+    assert is_answer_eligible(_Bare()) is False
+
+
+def test_answer_min_obs_env_override(monkeypatch):
+    monkeypatch.setenv(ENV_GDINO_ANSWER_MIN_OBS, "5")
+    assert answer_min_obs() == 5
+    assert is_answer_eligible(_Rec(n_obs=4, score=0.9)) is False
+    assert is_answer_eligible(_Rec(n_obs=5, score=0.9)) is True
+
+
+def test_answer_min_score_env_override(monkeypatch):
+    monkeypatch.setenv(ENV_GDINO_ANSWER_MIN_SCORE, "0.5")
+    assert answer_min_score() == pytest.approx(0.5)
+    assert is_answer_eligible(_Rec(n_obs=10, score=0.4)) is False
+    assert is_answer_eligible(_Rec(n_obs=10, score=0.5)) is True
+
+
+def test_answer_min_obs_malformed_env_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv(ENV_GDINO_ANSWER_MIN_OBS, "not-a-number")
+    assert answer_min_obs() == DEFAULT_GDINO_ANSWER_MIN_OBS
+
+
+def test_answer_min_score_malformed_env_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv(ENV_GDINO_ANSWER_MIN_SCORE, "not-a-number")
+    assert answer_min_score() == pytest.approx(DEFAULT_GDINO_ANSWER_MIN_SCORE)
