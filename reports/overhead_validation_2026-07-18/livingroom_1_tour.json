@@ -1,7 +1,7 @@
 {
-  "bag": "data/sim_bags/livingroom_1_tour",
-  "scene": "data/unity_scenes_ros2/livingroom_1/livingroom_1",
-  "runtime_s": 24.678751313997054,
+  "bag": "/home/jason/cmu_ws/cmu-vla-2026/data/sim_bags/livingroom_1_tour",
+  "scene": "/home/jason/cmu_ws/cmu-vla-2026/data/unity_scenes_ros2/livingroom_1/livingroom_1",
+  "runtime_s": 21.504692497000065,
   "replay": {
     "n_odom": 63900,
     "n_terrain": 1229,
@@ -28,7 +28,8 @@
     "delta_m": 0.17785581719818122,
     "note": "delta = measured - configured; a positive delta means the real sensor sits higher than assumed, so the vehicle_z-0.60 fallback UNDER-estimates floor_z (over-estimates height-above-floor) by about this much for cells that never saw terrain",
     "flagged_cells_fallback_ground_z_nan": 1,
-    "flagged_cells_terrain_ground_z": 873
+    "flagged_cells_terrain_ground_z": 873,
+    "estimated_ground_offset_m": 0.7528548985719681
   },
   "overhead_cells": {
     "observed_cells": 34658,
@@ -53,15 +54,6 @@
         "observed_cells": 72,
         "flagged_cells": 21,
         "hit_rate": 0.2916666666666667
-      },
-      {
-        "id": 73,
-        "name": "shelf",
-        "top_z": 1.73150026787854,
-        "footprint_cells": 39,
-        "observed_cells": 39,
-        "flagged_cells": 0,
-        "hit_rate": 0.0
       },
       {
         "id": 84,
@@ -91,9 +83,9 @@
         "hit_rate": 0.37
       }
     ],
-    "aggregate_observed_cells": 502,
+    "aggregate_observed_cells": 463,
     "aggregate_flagged_cells": 167,
-    "aggregate_hit_rate": 0.33266932270916333
+    "aggregate_hit_rate": 0.36069114470842334
   },
   "sensitivity": {
     "default": {

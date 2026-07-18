@@ -20,7 +20,9 @@ from core.nav.costmap import Costmap
 from core.nav.occupancy import (
     DEFAULT_OVERHEAD_CONFIG,
     FREE,
+    GROUND_OFFSET_WARMUP_PATCHES,
     OBSTACLE,
+    VEHICLE_SENSOR_HEIGHT_ENV_VAR,
     OverheadConfig,
     OccupancyGrid,
     integrate_scan_overhead_decimated,
@@ -116,6 +118,122 @@ def test_terrain_ground_beats_fallback():
     assert not grid.is_overhead(*grid.world_to_cell(0.05, 0.05))
     # A scan point at z=0.70 is 0.40 above the pinned ground -> in band.
     grid.integrate_scan_overhead(_scan(_repeat_cell(0.05, 0.05, 0.70, 5)), vehicle_z=0.0)
+    assert grid.is_overhead(*grid.world_to_cell(0.05, 0.05))
+
+
+# --------------------------------------------------------------------------- ground-offset estimator (issue #36)
+
+
+def _terrain_pt(x: float, y: float, z: float, t: float = 0.0) -> TerrainPatch:
+    return TerrainPatch(t=t, points=np.array([[x, y, z, 0.02]], dtype=np.float32), extended=False)
+
+
+def _warm_up(grid: OccupancyGrid, vehicle_z, *, n: int = GROUND_OFFSET_WARMUP_PATCHES) -> None:
+    """Feed n terrain patches (far from x=0..1, y=0..1 probe cells used by callers
+    below) each with a vehicle_z sample, so grid.ground_offset_estimate warms up
+    without pinning any terrain ground_z on the cells the tests probe."""
+    vzs = vehicle_z if isinstance(vehicle_z, list) else [vehicle_z] * n
+    assert len(vzs) == n
+    for i, vz in enumerate(vzs):
+        grid.integrate_patch(_terrain_pt(50.0 + i, 50.0, -0.6, t=float(i)), vehicle_z=vz)
+
+
+def test_ground_offset_estimate_none_before_warmup():
+    grid = OccupancyGrid(cell_m=0.1)
+    for i in range(GROUND_OFFSET_WARMUP_PATCHES - 1):
+        grid.integrate_patch(_terrain_pt(i, 0.0, -0.6, t=float(i)), vehicle_z=0.0)
+    assert grid.ground_offset_estimate is None
+
+
+def test_ground_offset_estimate_available_at_warmup_threshold():
+    grid = OccupancyGrid(cell_m=0.1)
+    _warm_up(grid, 0.0)
+    # jingfan-like geometry: vehicle z ~= 0.0, floor/ground z ~= -0.6 -> offset ~0.6.
+    assert grid.ground_offset_estimate == pytest.approx(0.6)
+
+
+def test_ground_offset_estimate_ignores_patches_without_vehicle_z():
+    """A patch integrated without vehicle_z contributes ground_z as usual but does
+    NOT count toward warm-up (no sample to estimate the vehicle-height offset)."""
+    grid = OccupancyGrid(cell_m=0.1)
+    for i in range(GROUND_OFFSET_WARMUP_PATCHES + 5):
+        grid.integrate_patch(_terrain_pt(i, 0.0, -0.6, t=float(i)))  # no vehicle_z
+    assert grid.ground_offset_estimate is None
+
+
+def test_ground_offset_estimate_reproduces_sim_rig_delta():
+    """Sim-rig-like geometry (report finding 1): vehicle_z samples clustered around
+    0.75-0.78 m above a floor at z=0 -> estimate lands in that range, not 0.60."""
+    grid = OccupancyGrid(cell_m=0.1)
+    for i, vz in enumerate([0.74, 0.75, 0.76, 0.75, 0.77]):
+        grid.integrate_patch(_terrain_pt(50.0 + i, 50.0, 0.0, t=float(i)), vehicle_z=vz)
+    assert grid.ground_offset_estimate == pytest.approx(0.75)
+    assert 0.75 <= grid.ground_offset_estimate <= 0.78
+
+
+def test_fallback_uses_warmed_estimator_over_stale_constant():
+    """Once warmed, the runtime estimate (not the 0.60 constant) drives the
+    fallback ground for cells with no terrain ground_z of their own. Uses a
+    floor-at-0 warm-up so vehicle_z=0.75, ground=0.0 -> estimate=0.75, easy to
+    reason about."""
+    grid = OccupancyGrid(cell_m=0.1)
+    for i in range(GROUND_OFFSET_WARMUP_PATCHES):
+        grid.integrate_patch(_terrain_pt(50.0 + i, 50.0, 0.0, t=float(i)), vehicle_z=0.75)
+    assert grid.ground_offset_estimate == pytest.approx(0.75)
+
+    # Probe cell (0.05, 0.05) never saw terrain -> fallback path.
+    # Estimator ground = vehicle_z(0.75) - estimate(0.75) = 0.0; a point at z=0.30
+    # is 0.30 above it -> inside [0.25, 1.20] -> flagged.
+    # (With the stale 0.60 constant, ground would be 0.15 and the same point only
+    # 0.15 above it -> below band -> NOT flagged -- see the next test.)
+    grid.integrate_scan_overhead(_scan(_repeat_cell(0.05, 0.05, 0.30, 3)), vehicle_z=0.75)
+    assert grid.is_overhead(*grid.world_to_cell(0.05, 0.05))
+
+
+def test_fallback_uses_constant_before_warmup():
+    grid = OccupancyGrid(cell_m=0.1)
+    # Only one patch (< warm-up threshold) -> estimator unavailable, falls back to
+    # the configured constant (0.60): ground = 0.75 - 0.60 = 0.15.
+    grid.integrate_patch(_terrain_pt(50.0, 50.0, 0.0), vehicle_z=0.75)
+    assert grid.ground_offset_estimate is None
+    # A point at z=0.30 is only 0.15 above that ground -> below band -> not flagged.
+    grid.integrate_scan_overhead(_scan(_repeat_cell(0.05, 0.05, 0.30, 3)), vehicle_z=0.75)
+    assert not grid.is_overhead(*grid.world_to_cell(0.05, 0.05))
+
+
+def test_use_ground_offset_estimator_false_pins_the_constant():
+    """OverheadConfig(use_ground_offset_estimator=False) bypasses a warmed
+    estimator, e.g. to isolate the constant-only hypothesis in a validation run."""
+    grid = OccupancyGrid(cell_m=0.1)
+    for i in range(GROUND_OFFSET_WARMUP_PATCHES):
+        grid.integrate_patch(_terrain_pt(50.0 + i, 50.0, 0.0, t=float(i)), vehicle_z=0.75)
+    assert grid.ground_offset_estimate == pytest.approx(0.75)
+    cfg = OverheadConfig(use_ground_offset_estimator=False)
+    grid.integrate_scan_overhead(_scan(_repeat_cell(0.05, 0.05, 0.30, 3)), vehicle_z=0.75, cfg=cfg)
+    assert not grid.is_overhead(*grid.world_to_cell(0.05, 0.05))
+
+
+def test_env_override_takes_precedence_over_warmed_estimator(monkeypatch):
+    """VLA_OVERHEAD_VEHICLE_SENSOR_HEIGHT_M pins the fallback, overriding both the
+    default constant and a warmed runtime estimate."""
+    monkeypatch.setenv(VEHICLE_SENSOR_HEIGHT_ENV_VAR, "0.60")
+    grid = OccupancyGrid(cell_m=0.1)
+    for i in range(GROUND_OFFSET_WARMUP_PATCHES):
+        grid.integrate_patch(_terrain_pt(50.0 + i, 50.0, 0.0, t=float(i)), vehicle_z=0.75)
+    assert grid.ground_offset_estimate == pytest.approx(0.75)
+    # Pinned to 0.60 -> ground = 0.75 - 0.60 = 0.15; a point at 0.30 is only 0.15
+    # above -> below band -> not flagged (would be flagged if the estimator won).
+    grid.integrate_scan_overhead(_scan(_repeat_cell(0.05, 0.05, 0.30, 3)), vehicle_z=0.75)
+    assert not grid.is_overhead(*grid.world_to_cell(0.05, 0.05))
+
+
+def test_env_override_invalid_value_ignored(monkeypatch):
+    monkeypatch.setenv(VEHICLE_SENSOR_HEIGHT_ENV_VAR, "not-a-number")
+    grid = OccupancyGrid(cell_m=0.1)
+    for i in range(GROUND_OFFSET_WARMUP_PATCHES):
+        grid.integrate_patch(_terrain_pt(50.0 + i, 50.0, 0.0, t=float(i)), vehicle_z=0.75)
+    # Falls through to the warmed estimator (0.75) since the env value doesn't parse.
+    grid.integrate_scan_overhead(_scan(_repeat_cell(0.05, 0.05, 0.30, 3)), vehicle_z=0.75)
     assert grid.is_overhead(*grid.world_to_cell(0.05, 0.05))
 
 

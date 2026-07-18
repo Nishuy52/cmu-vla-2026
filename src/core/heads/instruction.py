@@ -188,7 +188,9 @@ class InstructionHead:
     def _ingest_terrain(self, io: RobotIO, pose: tuple[float, float]) -> None:
         patch = io.latest_terrain(extended=False)
         if patch is not None:
-            self.grid.integrate_patch(patch)
+            # vehicle_z feeds the runtime ground-offset estimator (issue #36) used
+            # by the overhead fallback below.
+            self.grid.integrate_patch(patch, vehicle_z=_vehicle_z(io))
         # Overhead-clearance layer: fold the raw /registered_scan through the grid so
         # overhangs the terrain slab filtered out (bar tables the base stack reads as
         # FREE floor) get flagged. Terrain first so per-cell ground_z is available.

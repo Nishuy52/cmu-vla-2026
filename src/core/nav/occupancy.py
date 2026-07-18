@@ -17,7 +17,8 @@ from FREE (a cell can be observed-but-obstacle or observed-but-free).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import os
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -28,6 +29,25 @@ CELL_M: float = 0.10  # grid resolution, metres/cell
 FREE_MAX: float = 0.15  # intensity < this -> FREE (matches TerrainPatch.FREE_MAX)
 OBSERVE_RADIUS_M: float = 8.0  # lidar footprint radius for the observed mask
 GROW_PAD_CELLS: int = 8  # extra ring of cells added when the grid must grow
+
+#: issue #36 -- min terrain patches (each contributing a vehicle_z sample) before
+#: the runtime ground-offset estimator is trusted; kept small so warm-up is fast.
+GROUND_OFFSET_WARMUP_PATCHES: int = 5
+
+#: env override: pins the fallback vehicle-height-above-ground to a fixed value,
+#: bypassing both the constant default and the runtime estimator (e.g. a rig
+#: whose exact mount height is known ahead of time). Unset by default.
+VEHICLE_SENSOR_HEIGHT_ENV_VAR: str = "VLA_OVERHEAD_VEHICLE_SENSOR_HEIGHT_M"
+
+
+def _env_vehicle_sensor_height_override() -> float | None:
+    raw = os.environ.get(VEHICLE_SENSOR_HEIGHT_ENV_VAR)
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
 
 # --------------------------------------------------------------------------- states
 UNKNOWN: int = 0
@@ -54,11 +74,22 @@ class OverheadConfig:
     overhead_min: float = 0.25  # m above local ground: band lower edge (skip near-ground)
     overhead_max: float = 1.20  # m above local ground: band upper edge (skip tall walls/ceiling)
     min_points_per_cell: int = 3  # cell needs >= this many in-band points to flag (noise reject)
-    #: fallback local-ground estimate when a cell has no terrain-derived ground z:
+    #: fallback local-ground estimate when a cell has no terrain-derived ground z
+    #: AND the runtime estimator (below) has not warmed up yet:
     #: ground_z ~= vehicle_z - vehicle_sensor_height. The registered-scan / terrain
     #: clouds are map-frame, with the vehicle sensor origin ~0.6 m above the floor
-    #: (jingfan fixtures: vehicle z ~= 0.0, ground/free terrain z ~= -0.6).
+    #: (jingfan fixtures: vehicle z ~= 0.0, ground/free terrain z ~= -0.6). This is
+    #: the jingfan real-robot rig height; the sim sensor mount sits ~0.15-0.18 m
+    #: higher (issue #36) -- ``use_ground_offset_estimator`` corrects for that
+    #: automatically once warmed, so this constant only matters pre-warm-up.
     vehicle_sensor_height: float = 0.60
+    #: when True (default), once >= GROUND_OFFSET_WARMUP_PATCHES terrain patches
+    #: have contributed a vehicle_z sample, the per-grid runtime ground-offset
+    #: estimate (``OccupancyGrid.ground_offset_estimate``) is used for the
+    #: fallback instead of the constant above -- see issue #36. Set False to pin
+    #: the fallback to ``vehicle_sensor_height`` unconditionally (e.g. to isolate
+    #: the constant-only hypothesis in a validation run).
+    use_ground_offset_estimator: bool = True
 
 
 DEFAULT_OVERHEAD_CONFIG = OverheadConfig()
@@ -94,6 +125,14 @@ class OccupancyGrid:
     #: per-cell terrain-derived ground surface z (map frame), max-lag from the
     #: lowest terrain point seen; NaN until a terrain point lands in the cell.
     ground_z: np.ndarray | None = None
+    #: issue #36 runtime ground-offset estimator state: vehicle_z observed at
+    #: each terrain-patch integrate call that also supplied a vehicle_z, and the
+    #: running min terrain point z seen so far (proxy for the scene floor).
+    #: ``ground_offset_estimate`` derives median(vehicle_z) - min ground z from
+    #: these once warmed up. Deliberately plain Python (not grid arrays): O(one
+    #: scalar/append) per patch, not per cell.
+    _gz_offset_vehicle_zs: list[float] = field(default_factory=list, repr=False, compare=False)
+    _gz_offset_min_ground_z: float = field(default=float("inf"), repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.state is None:
@@ -170,14 +209,25 @@ class OccupancyGrid:
         self.origin_y -= pad_top * self.cell_m
 
     # ------------------------------------------------------------- ingest
-    def integrate_patch(self, patch: TerrainPatch) -> None:
-        """Fold one terrain cloud (N,4 XYZI) into the grid, keeping max intensity/cell."""
+    def integrate_patch(self, patch: TerrainPatch, vehicle_z: float | None = None) -> None:
+        """Fold one terrain cloud (N,4 XYZI) into the grid, keeping max intensity/cell.
+
+        ``vehicle_z`` (optional): the vehicle's map-frame z at the time this patch
+        was captured. When supplied, it feeds the runtime ground-offset estimator
+        (issue #36) used by ``integrate_scan_overhead``'s fallback -- callers that
+        have odom available alongside the patch should pass it; omitting it just
+        means this patch doesn't contribute a warm-up sample (estimator stays
+        unwarmed longer, falls back to ``OverheadConfig.vehicle_sensor_height``).
+        """
         pts = np.asarray(patch.points, dtype=np.float64)  # float64 keeps cell
         # indexing consistent with world_to_cell (Python float); float32 rounds
         # differently at exact cell boundaries.
         if pts.size == 0:
             return
         xs, ys, zs, inten = pts[:, 0], pts[:, 1], pts[:, 2], pts[:, 3]
+        if vehicle_z is not None:
+            self._gz_offset_vehicle_zs.append(float(vehicle_z))
+            self._gz_offset_min_ground_z = min(self._gz_offset_min_ground_z, float(zs.min()))
         cols = np.floor((xs - self.origin_x) / self.cell_m).astype(np.int64)
         rows = np.floor((ys - self.origin_y) / self.cell_m).astype(np.int64)
         self._ensure_bounds(rows, cols)
@@ -208,6 +258,38 @@ class OccupancyGrid:
         merged_gz = np.where(np.isnan(prev_gz), seg_gz, np.minimum(prev_gz, seg_gz))
         self.ground_z[u_rows, u_cols] = merged_gz.astype(np.float32)
 
+    @property
+    def ground_offset_estimate(self) -> float | None:
+        """Runtime vehicle-height-above-ground estimate (issue #36), or None pre-warm-up.
+
+        ``median(vehicle_z sampled at each contributing integrate_patch call) -
+        min(terrain point z seen so far)`` -- a robust (median-based), deterministic,
+        O(1)-per-patch running estimate. Reproduces ~0.60 m on a jingfan-like rig
+        (vehicle z~=0, floor~=-0.6) and ~0.75-0.78 m on the sim bags (see
+        reports/overhead_validation_2026-07-18/summary.md finding 1) without any
+        scene-specific tuning. None until >= GROUND_OFFSET_WARMUP_PATCHES patches
+        have contributed a vehicle_z sample -- callers fall back to the configured
+        constant until then.
+        """
+        if len(self._gz_offset_vehicle_zs) < GROUND_OFFSET_WARMUP_PATCHES:
+            return None
+        return float(np.median(self._gz_offset_vehicle_zs)) - self._gz_offset_min_ground_z
+
+    def _fallback_ground_z(self, vehicle_z: float, cfg: OverheadConfig) -> float:
+        """Local-ground fallback for cells with no terrain-derived ``ground_z`` yet.
+
+        Precedence: env override (if set) > runtime estimator (if warmed and
+        enabled) > the configured constant. See issue #36.
+        """
+        override = _env_vehicle_sensor_height_override()
+        if override is not None:
+            return float(vehicle_z) - override
+        if cfg.use_ground_offset_estimator:
+            estimate = self.ground_offset_estimate
+            if estimate is not None:
+                return float(vehicle_z) - estimate
+        return float(vehicle_z) - float(cfg.vehicle_sensor_height)
+
     def integrate_scan_overhead(
         self,
         scan: LidarScan,
@@ -223,9 +305,11 @@ class OccupancyGrid:
         the terrain-derived FREE/OBSTACLE `state`.
 
         Local ground per cell: the terrain-derived `ground_z` if a terrain point has
-        landed in the cell; otherwise the fallback (vehicle_z - vehicle_sensor_height).
-        Overhead points over UNKNOWN floor (no terrain yet) therefore still flag — the
-        table is caught before the floor beneath it is ever classified.
+        landed in the cell; otherwise `_fallback_ground_z` (vehicle_z minus the
+        warmed-up runtime ground-offset estimate, or `vehicle_sensor_height` before
+        warm-up -- see issue #36). Overhead points over UNKNOWN floor (no terrain
+        yet) therefore still flag — the table is caught before the floor beneath it
+        is ever classified.
         """
         pts = np.asarray(scan.points, dtype=np.float64)
         if pts.size == 0:
@@ -237,8 +321,9 @@ class OccupancyGrid:
         cols = np.floor((xs - self.origin_x) / self.cell_m).astype(np.int64)
         rows = np.floor((ys - self.origin_y) / self.cell_m).astype(np.int64)
 
-        # Per-point local ground: terrain ground_z where known, else the fallback.
-        fallback_gz = float(vehicle_z) - float(cfg.vehicle_sensor_height)
+        # Per-point local ground: terrain ground_z where known, else the fallback
+        # (env override > runtime estimator once warmed > configured constant).
+        fallback_gz = self._fallback_ground_z(vehicle_z, cfg)
         cell_gz = self.ground_z[rows, cols]
         gz = np.where(np.isnan(cell_gz), fallback_gz, cell_gz)
         height = zs - gz

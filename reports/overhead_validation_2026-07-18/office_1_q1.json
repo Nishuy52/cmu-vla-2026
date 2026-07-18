@@ -1,7 +1,7 @@
 {
-  "bag": "data/sim_bags/office_1_q1",
-  "scene": "data/unity_scenes_ros2/office_1/office_1",
-  "runtime_s": 32.0987326789982,
+  "bag": "/home/jason/cmu_ws/cmu-vla-2026/data/sim_bags/office_1_q1",
+  "scene": "/home/jason/cmu_ws/cmu-vla-2026/data/unity_scenes_ros2/office_1/office_1",
+  "runtime_s": 27.99047838399997,
   "replay": {
     "n_odom": 65902,
     "n_terrain": 1412,
@@ -27,18 +27,19 @@
     "measured_sensor_height_m": 0.7500068105926514,
     "delta_m": 0.15000681059265142,
     "note": "delta = measured - configured; a positive delta means the real sensor sits higher than assumed, so the vehicle_z-0.60 fallback UNDER-estimates floor_z (over-estimates height-above-floor) by about this much for cells that never saw terrain",
-    "flagged_cells_fallback_ground_z_nan": 13,
-    "flagged_cells_terrain_ground_z": 1295
+    "flagged_cells_fallback_ground_z_nan": 2,
+    "flagged_cells_terrain_ground_z": 1296,
+    "estimated_ground_offset_m": 0.7500069960951805
   },
   "overhead_cells": {
     "observed_cells": 35101,
-    "flagged_cells": 1308,
-    "fraction": 0.03726389561550953
+    "flagged_cells": 1298,
+    "fraction": 0.036979003447195236
   },
   "false_flags": {
     "gt_overhang_object_count": 94,
     "open_floor_cells": 3255,
-    "flagged_cells": 1308,
+    "flagged_cells": 1298,
     "false_flag_cells": 0,
     "rate": 0.0,
     "examples": []
@@ -51,8 +52,8 @@
         "top_z": 2.3861439404205322,
         "footprint_cells": 90,
         "observed_cells": 90,
-        "flagged_cells": 48,
-        "hit_rate": 0.5333333333333333
+        "flagged_cells": 51,
+        "hit_rate": 0.5666666666666667
       },
       {
         "id": 50,
@@ -87,17 +88,17 @@
         "top_z": 1.1764241366485595,
         "footprint_cells": 138,
         "observed_cells": 138,
-        "flagged_cells": 16,
-        "hit_rate": 0.11594202898550725
+        "flagged_cells": 7,
+        "hit_rate": 0.050724637681159424
       }
     ],
     "aggregate_observed_cells": 957,
-    "aggregate_flagged_cells": 429,
-    "aggregate_hit_rate": 0.4482758620689655
+    "aggregate_flagged_cells": 423,
+    "aggregate_hit_rate": 0.44200626959247646
   },
   "sensitivity": {
     "default": {
-      "flagged_cells": 1308,
+      "flagged_cells": 1298,
       "cfg": {
         "overhead_min": 0.25,
         "overhead_max": 1.2,
@@ -113,7 +114,7 @@
         "min_points_per_cell": 3,
         "vehicle_sensor_height": 0.7500068105926514
       },
-      "delta_vs_default": -12
+      "delta_vs_default": -2
     },
     "minpts2": {
       "flagged_cells": 1581,
@@ -123,7 +124,7 @@
         "min_points_per_cell": 2,
         "vehicle_sensor_height": 0.6
       },
-      "delta_vs_default": 273
+      "delta_vs_default": 283
     }
   }
 }
