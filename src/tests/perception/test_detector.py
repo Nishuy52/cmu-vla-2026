@@ -14,6 +14,9 @@ from core.perception.detector import (
     ENV_GDINO_MODEL_ID,
     ENV_GDINO_PRECISION,
     FakeDetector,
+    GDINO_BACKOFF_BASE_S,
+    GDINO_BACKOFF_CAP_S,
+    GDINO_BACKOFF_DEGRADE_N,
     GDINO_MODEL_ID,
     GDINO_REQUIRED_INSTALLS,
     GroundingDinoDetector,
@@ -21,6 +24,20 @@ from core.perception.detector import (
     build_gdino_prompt,
     refresh_prompt,
 )
+
+
+class _FakeClock:
+    """Manually-advanced monotonic clock stand-in (mirrors mocks.mock_io.FakeClock)."""
+
+    def __init__(self, start: float = 0.0) -> None:
+        self._t = float(start)
+
+    def __call__(self) -> float:
+        return self._t
+
+    def advance(self, dt: float) -> float:
+        self._t += float(dt)
+        return self._t
 
 
 def _tiles(n=4):
@@ -189,6 +206,7 @@ class _FakeTorch:
 
     def __init__(self, cuda_available: bool) -> None:
         self.cuda = _FakeCuda(cuda_available)
+        self.float32 = "float32"  # only used past a successful _ensure_model (backoff tests)
 
 
 def test_resolve_device_prefers_explicit_pref():
@@ -441,3 +459,145 @@ def test_refresh_prompt_detector_without_prompt_attr_is_noop():
         return [[] for _ in tiles]
 
     assert refresh_prompt(plain_detector, ["chair"], []) is None
+
+
+# ------------------------------------------------------------------ load backoff (issue #39)
+# A permanently-failing model load used to re-run the full load_model cascade every
+# perception tick (5 Hz), pegging adapter CPU and starving other subscribers. These tests
+# drive GroundingDinoDetector with a fake clock + a stubbed ``_lazy_import`` returning a
+# controllable (always-failing or always-succeeding) load_model_fn, so no torch/groundingdino
+# install is needed.
+
+
+def _backoff_detector(tmp_path, clock, load_model_fn):
+    cfg = tmp_path / "gdino.cfg.py"
+    cfg.write_text("# fake config\n")
+    ckpt = tmp_path / "gdino.pth"
+    ckpt.write_bytes(b"\x00")
+    det = GroundingDinoDetector(
+        ["sofa"], config_path=str(cfg), checkpoint_path=str(ckpt), device="cpu", clock=clock,
+    )
+    det._lazy_import = lambda: (_FakeTorch(cuda_available=False), load_model_fn, None)
+    return det
+
+
+class _FailingLoad:
+    """Counts calls; always raises."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        raise RuntimeError("boom: weights corrupt")
+
+
+def test_backoff_empty_detections_during_cooldown_without_exception(tmp_path):
+    clock = _FakeClock()
+    load = _FailingLoad()
+    det = _backoff_detector(tmp_path, clock, load)
+    tiles = _tiles(4)
+
+    out = det(tiles)  # first attempt fails
+
+    assert out == [[], [], [], []]
+    assert load.calls == 1
+    assert det._consecutive_load_failures == 1
+
+
+def test_backoff_schedule_no_reload_before_cooldown_then_reload_after(tmp_path):
+    clock = _FakeClock()
+    load = _FailingLoad()
+    det = _backoff_detector(tmp_path, clock, load)
+    tiles = _tiles(4)
+
+    det(tiles)
+    assert load.calls == 1  # first attempt
+
+    clock.advance(0.5)  # < 1s backoff after first failure
+    det(tiles)
+    assert load.calls == 1  # still cooling down, no reload attempted
+
+    clock.advance(0.5)  # now at the 1s boundary
+    det(tiles)
+    assert load.calls == 2  # cooldown elapsed -> retried (and failed again)
+
+    clock.advance(1.9)  # < 2s backoff after second failure
+    det(tiles)
+    assert load.calls == 2
+
+    clock.advance(0.1)  # now at the 2s boundary
+    det(tiles)
+    assert load.calls == 3
+
+
+def test_backoff_success_resets_failure_state(tmp_path):
+    clock = _FakeClock()
+    load = _FailingLoad()
+    det = _backoff_detector(tmp_path, clock, load)
+    tiles = _tiles(4)
+
+    det(tiles)
+    clock.advance(GDINO_BACKOFF_BASE_S)
+    det(tiles)
+    assert det._consecutive_load_failures == 2
+
+    fake_model = _FakeModel()
+    clock.advance(2 * GDINO_BACKOFF_BASE_S)
+    det._lazy_import = lambda: (_FakeTorch(cuda_available=False), lambda *a, **k: fake_model, None)
+    det._call_batched = lambda torch, model, tiles, device, dtype: [[] for _ in tiles]
+    det(tiles)
+
+    assert det._consecutive_load_failures == 0
+    assert det._next_retry_at == 0.0
+    assert det._model is fake_model
+
+    # No cooldown after a success: the very next call re-runs immediately.
+    load2 = _FailingLoad()
+    det._lazy_import = lambda: (_FakeTorch(cuda_available=False), load2, None)
+    det._model = None  # force a fresh load attempt
+    det(tiles)
+    assert load2.calls == 1
+
+
+def test_backoff_single_log_per_transition(tmp_path, caplog):
+    clock = _FakeClock()
+    load = _FailingLoad()
+    det = _backoff_detector(tmp_path, clock, load)
+    tiles = _tiles(4)
+
+    with caplog.at_level("WARNING", logger="core.perception.detector"):
+        for _ in range(GDINO_BACKOFF_DEGRADE_N):
+            det(tiles)
+            wait = det._next_retry_at - clock()
+            if wait > 0:
+                clock.advance(wait)
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(warnings) == GDINO_BACKOFF_DEGRADE_N - 1
+    assert len(errors) == 1
+    assert "degraded" in errors[0].message
+    assert load.calls == GDINO_BACKOFF_DEGRADE_N
+
+
+def test_backoff_degrades_to_cap_after_n_failures_no_further_logging(tmp_path, caplog):
+    clock = _FakeClock()
+    load = _FailingLoad()
+    det = _backoff_detector(tmp_path, clock, load)
+    tiles = _tiles(4)
+
+    with caplog.at_level("WARNING", logger="core.perception.detector"):
+        for _ in range(GDINO_BACKOFF_DEGRADE_N):
+            det(tiles)
+            wait = det._next_retry_at - clock()
+            if wait > 0:
+                clock.advance(wait)
+        # 5th failure just logged the single ERROR transition; delay is now capped.
+        assert det._consecutive_load_failures == GDINO_BACKOFF_DEGRADE_N
+
+        caplog.clear()
+        # One more failure past the degrade point: still capped, no new log record.
+        det(tiles)
+        assert det._next_retry_at - clock() == pytest.approx(GDINO_BACKOFF_CAP_S)
+        assert caplog.records == []

@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Protocol, Sequence
 
@@ -146,6 +147,20 @@ ENV_GDINO_DEVICE = "GDINO_DEVICE"
 #: at build time and never fetched over the network at inference time.
 ENV_GDINO_CONFIG_PATH = "GDINO_CONFIG_PATH"
 ENV_GDINO_CHECKPOINT_PATH = "GDINO_CHECKPOINT_PATH"
+
+# --------------------------------------------------------------------------- load backoff
+
+# Issue #39: a permanently-failing model load (bad weights, OOM, missing config) used to
+# re-run the full load_model cascade every perception tick (5 Hz), pegging adapter CPU and
+# starving other subscribers. Failed loads now back off exponentially instead.
+
+#: First retry delay after a load failure, doubling each consecutive failure.
+GDINO_BACKOFF_BASE_S: float = 1.0
+#: Once degraded (see :data:`GDINO_BACKOFF_DEGRADE_N`), every retry waits this long.
+GDINO_BACKOFF_CAP_S: float = 60.0
+#: Consecutive failures after which the detector stops climbing the backoff curve and
+#: settles at the capped retry interval (logged once as a single ERROR transition).
+GDINO_BACKOFF_DEGRADE_N: int = 5
 
 
 def build_gdino_prompt(question_nouns: Sequence[str], vocab_nouns: Sequence[str]) -> str:
@@ -300,6 +315,7 @@ class GroundingDinoDetector:
         device: str | None = None,
         config_path: str | None = None,
         checkpoint_path: str | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.prompt = build_gdino_prompt(question_nouns, vocab_nouns)
         self.box_threshold = float(box_threshold)
@@ -318,6 +334,12 @@ class GroundingDinoDetector:
         self._resolved_device: str | None = None
         self._resolved_half: bool | None = None
         self._warned_batch_fallback = False
+        # Load-failure backoff state (issue #39): incremented on every failed
+        # _ensure_model attempt, reset on success. ``_clock`` is injectable (default
+        # time.monotonic) so tests can drive the schedule with a fake clock.
+        self._clock = clock
+        self._consecutive_load_failures = 0
+        self._next_retry_at: float = 0.0
 
     def _lazy_import(self):
         try:
@@ -414,6 +436,46 @@ class GroundingDinoDetector:
         )
         return model
 
+    # ------------------------------------------------------------------ load backoff
+
+    def _in_cooldown(self) -> bool:
+        return self._consecutive_load_failures > 0 and self._clock() < self._next_retry_at
+
+    def _record_load_failure(self, exc: Exception) -> None:
+        """Record one failed load attempt and schedule the next retry (issue #39).
+
+        Delay doubles each consecutive failure (``GDINO_BACKOFF_BASE_S`` * 2**(n-1)) until
+        ``GDINO_BACKOFF_DEGRADE_N`` consecutive failures, at which point the detector is
+        considered degraded and every subsequent retry waits the full
+        ``GDINO_BACKOFF_CAP_S`` — logged once as a single ERROR transition, not re-logged
+        on every attempt thereafter (this fires at most once per 5 Hz tick per failure, not
+        per tick: cooldown short-circuits every call in between).
+        """
+        self._consecutive_load_failures += 1
+        n = self._consecutive_load_failures
+        if n >= GDINO_BACKOFF_DEGRADE_N:
+            delay = GDINO_BACKOFF_CAP_S
+        else:
+            delay = min(GDINO_BACKOFF_BASE_S * (2 ** (n - 1)), GDINO_BACKOFF_CAP_S)
+        self._next_retry_at = self._clock() + delay
+        if n == GDINO_BACKOFF_DEGRADE_N:
+            _LOGGER.error(
+                "GroundingDinoDetector: model load failed %d consecutive times (%s); "
+                "degraded to long-cooldown retries (%.0fs).",
+                n, exc, GDINO_BACKOFF_CAP_S,
+            )
+        elif n < GDINO_BACKOFF_DEGRADE_N:
+            _LOGGER.warning(
+                "GroundingDinoDetector: model load failed (%s); retrying in %.0fs.",
+                exc, delay,
+            )
+        # n > GDINO_BACKOFF_DEGRADE_N: already-degraded transition was logged once above;
+        # stay silent on further attempts so a stuck GPU doesn't spam the log forever.
+
+    def _reset_load_failures(self) -> None:
+        self._consecutive_load_failures = 0
+        self._next_retry_at = 0.0
+
     def _forward_ctx(self, torch):
         """Mixed-precision context for forward passes: fp16 autocast on CUDA when the
         resolved precision is half, no-op otherwise (weights stay fp32 — see #41)."""
@@ -448,11 +510,22 @@ class GroundingDinoDetector:
             # to ground. Short-circuits BEFORE the lazy import, so a detector constructed
             # before the first question never needs torch present to no-op harmlessly.
             return [[] for _ in tiles]
+        if self._in_cooldown():
+            # Issue #39: a load that already failed is backing off — no-op cleanly
+            # (mirrors the empty-prompt short-circuit above) instead of re-running the
+            # full import/load cascade every tick until the cooldown elapses.
+            return [[] for _ in tiles]
         # Lazy-import gate: raises the clear install error when torch/groundingdino are
-        # absent. Exercised with a non-empty prompt above so this always actually runs
-        # inference when there is something to look for.
+        # absent (a deploy misconfiguration, not the transient/repeated failure this
+        # backoff targets) — exercised with a non-empty prompt above so this always
+        # actually runs inference when there is something to look for.
         torch, load_model_fn, predict_fn = self._lazy_import()
-        model = self._ensure_model(torch, load_model_fn)
+        try:
+            model = self._ensure_model(torch, load_model_fn)
+        except Exception as exc:  # noqa: BLE001 - any model-load failure backs off (issue #39)
+            self._record_load_failure(exc)
+            return [[] for _ in tiles]
+        self._reset_load_failures()
         device = self._resolved_device
         # Inputs stay fp32; _forward_ctx's autocast downcasts per-op where safe (#41).
         dtype = torch.float32
