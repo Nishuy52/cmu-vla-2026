@@ -164,4 +164,82 @@ python -m tools.overhead_validation run data/sim_bags/<bag> data/unity_scenes_ro
     --summary-md reports/overhead_validation_2026-07-18/summary_table.md
 ```
 
+## Addendum (2026-07-19): #36 estimator fix + #37 shelf-73 classifier fix
+
+Both open issues from this validation exercise (#36, #37) are fixed. Re-ran
+`tools.overhead_validation` against the current bags/scenes for the affected
+cases; both findings below use the fixed code.
+
+### #36 -- runtime ground-offset estimator replaces the stale 0.60 m constant
+
+`OccupancyGrid` now maintains a running ground-offset estimate --
+`median(vehicle_z sampled at each terrain-patch integrate call) - min(terrain
+point z seen so far)` -- available once `GROUND_OFFSET_WARMUP_PATCHES` (= 5,
+small and deterministic) patches have contributed a `vehicle_z` sample.
+`OverheadConfig.use_ground_offset_estimator` (default `True`) routes the
+fallback-ground calculation (cells with no terrain-derived `ground_z` yet)
+through this estimate instead of the fixed `vehicle_sensor_height`; the
+constant remains the pre-warm-up fallback and stays available by setting
+`use_ground_offset_estimator=False`. An env override
+(`VLA_OVERHEAD_VEHICLE_SENSOR_HEIGHT_M`) can still pin a fixed value ahead of
+both. Wiring: `integrate_patch` now accepts an optional `vehicle_z` and both
+live call sites (`core/heads/explore_step.py`, `core/heads/instruction.py`)
+pass the latest odom z alongside each terrain patch.
+
+Re-ran on `office_1_q1` and `livingroom_1_tour` (the two bags named in the
+follow-up): the "default" grid's own runtime estimate now lands within
+0.003-0.025 m of the bag's independently measured sensor height, vs. the
+stale 0.60 m constant's 0.15-0.18 m error:
+
+| Bag | `configured_vehicle_sensor_height_m` (stale) | `measured_sensor_height_m` (median vehicle_z − floor_z) | `estimated_ground_offset_m` (new, from `default` grid) |
+|---|---|---|---|
+| office_1_q1 | 0.60 | 0.7500 | 0.7500 |
+| livingroom_1_tour | 0.60 | 0.7779 | 0.7529 |
+
+The finding-1 gap (constant under-estimating the sim rig by 0.15-0.18 m) is
+resolved: fallback cells (the only cells this constant ever affected) now use
+a value the running estimator converges to on its own, per-bag, with no
+scene-specific tuning -- not the jingfan-fitted constant. Flagged-cell counts
+moved by a handful of cells versus the original run (874 → 1298/34658→35101
+region-dependent single-digit shifts), consistent with finding 5's original
+observation that this correction is second-order next to `min_points_per_cell`.
+
+Tests: `src/tests/nav/test_overhead.py` (new: warm-up threshold, sim-rig and
+jingfan-rig reproduction, fallback precedence estimator > constant, the
+`use_ground_offset_estimator=False` escape hatch, env-override precedence and
+invalid-value handling).
+
+### #37 -- shelf-73 was a validation-tool classifier bug, not a layer defect
+
+Confirmed hypothesis (a) from the issue. `livingroom_1` object id 73
+("shelf"): `z=1.709`, `dz=0.045` → `bottom_z≈1.687`, `top_z≈1.731` (scene
+`floor_z≈-0.03` to `-0.003` depending on bag). The clearance band's top edge
+is `floor_z + overhead_max` ≈ `1.17-1.20`. Shelf 73's underside sits **~0.49 m
+above** the band top -- the overhead layer never watches that high by design
+(`overhead_max=1.20`), so its permanent 0/39-cell "miss" in both livingroom
+bags was the tool counting a correctly-unflagged, out-of-band object as a
+failure. `known_overhang_objects()` now also requires
+`bottom_z <= floor_z + band_max` (`band_max` defaults to the live
+`OverheadConfig.overhead_max`, not a hardcoded duplicate); shelf 73 no longer
+appears in either livingroom bag's known-overhang object list. No change was
+made to any overhead-layer band tunable.
+
+Re-ran both `livingroom_1` bags with the fixed classifier:
+
+| Bag | Known-overhang objects (was / now) | Aggregate hit rate (was / now) |
+|---|---|---|
+| livingroom_1_tour | 5 / 4 (shelf 73 dropped) | 33.3% / 36.1% |
+| livingroom_1_tour_nw | 5 / 4 (shelf 73 dropped) | 26.5% / 28.7% |
+
+The remaining 4 known-overhang objects per bag (`cabinet` id 2, `table` id
+84, `round table` id 102, `tv cabinet` id 103) are unchanged and still show
+genuine partial-hit-rate misses (19-56% hit, matching the original finding 4
+bimodal pattern) -- those are real coverage gaps, not classifier artifacts,
+and are left open (no tunable change made per the issue's instructions).
+
+The `loft` known-overhang misses (finding 4's other open thread -- 5 of 7
+objects at 0%, plausibly starved by the 1.45 Hz degraded rate) were not
+re-probed in this pass; #37 only asked for a focused check if shelf-73
+remained a genuine in-band miss after the classifier fix, and it did not.
+
 Tests: `python -m pytest tools` (GT rasterization helpers, `tools/tests/test_overhead_validation.py`).

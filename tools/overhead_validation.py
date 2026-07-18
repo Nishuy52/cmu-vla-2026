@@ -209,13 +209,29 @@ def known_overhang_objects(
     *,
     keywords: tuple[str, ...] = _KNOWN_OVERHANG_KEYWORDS,
     top_margin: float = _KNOWN_OVERHANG_TOP_MARGIN_M,
+    band_max: float = DEFAULT_OVERHEAD_CONFIG.overhead_max,
 ) -> list[SceneObject]:
-    """Named overhang furniture: name matches a keyword and top is well above the floor."""
+    """Named overhang furniture the layer is expected to catch.
+
+    Name matches a keyword, top is well above the floor (``top_margin``), AND
+    the underside sits at/below the clearance-band top (``floor_z + band_max``).
+    The last condition is issue #37 hypothesis (a): an object mounted entirely
+    ABOVE the band (``bottom_z > floor_z + band_max``) is out of the overhead
+    layer's watched range by design -- the layer never claims to catch it, so
+    counting it as a "known overhang" over-includes correctly-unflagged objects
+    as misses. ``band_max`` defaults to the live ``OverheadConfig.overhead_max``
+    so this classifier tracks the real band without a hardcoded duplicate.
+    """
     out = []
     for obj in objects:
         name_l = obj.name.lower()
-        if any(kw in name_l for kw in keywords) and obj.top_z > floor_z + top_margin:
-            out.append(obj)
+        if not any(kw in name_l for kw in keywords):
+            continue
+        if obj.top_z <= floor_z + top_margin:
+            continue
+        if obj.bottom_z > floor_z + band_max:
+            continue
+        out.append(obj)
     return out
 
 
@@ -325,8 +341,18 @@ def run_replay(
 
     cfgs: dict[str, OverheadConfig] = {
         "default": DEFAULT_OVERHEAD_CONFIG,
-        "shifted": replace(DEFAULT_OVERHEAD_CONFIG, vehicle_sensor_height=measured_sensor_height),
-        "minpts2": replace(DEFAULT_OVERHEAD_CONFIG, min_points_per_cell=2),
+        # "shifted"/"minpts2" isolate their one hypothesis: pin the runtime
+        # ground-offset estimator off (issue #36) so they still test the
+        # constant-only sensor-height / min-points hypotheses untouched by the
+        # now-default estimator (which "default" exercises instead).
+        "shifted": replace(
+            DEFAULT_OVERHEAD_CONFIG,
+            vehicle_sensor_height=measured_sensor_height,
+            use_ground_offset_estimator=False,
+        ),
+        "minpts2": replace(
+            DEFAULT_OVERHEAD_CONFIG, min_points_per_cell=2, use_ground_offset_estimator=False
+        ),
     }
     grids: dict[str, OccupancyGrid] = {name: OccupancyGrid() for name in _VARIANT_NAMES}
 
@@ -353,8 +379,9 @@ def run_replay(
             if rec.msg.extended:
                 continue  # live wiring uses the non-extended /terrain_map only
             n_terrain += 1
+            vehicle_z = float(latest_odom.z) if latest_odom is not None else None
             for grid in grids.values():
-                grid.integrate_patch(rec.msg)
+                grid.integrate_patch(rec.msg, vehicle_z=vehicle_z)
         elif isinstance(rec.msg, LidarScan):
             n_scan += 1
             scan_ts.append(rec.t)
@@ -418,6 +445,7 @@ def compute_metrics(
     n_fallback = int(fallback_mask.sum())
     n_terrain_ground = int(terrain_mask.sum())
 
+    estimated_offset = default_grid.ground_offset_estimate
     sensor_height = {
         "configured_vehicle_sensor_height_m": configured_height,
         "median_vehicle_z_m": replay.median_vehicle_z,
@@ -432,6 +460,11 @@ def compute_metrics(
         ),
         "flagged_cells_fallback_ground_z_nan": n_fallback,
         "flagged_cells_terrain_ground_z": n_terrain_ground,
+        # issue #36 fix: the "default" grid's own runtime ground-offset estimate
+        # (median vehicle_z - min terrain ground z), used for its fallback cells
+        # once warmed -- should land close to measured_sensor_height_m, not
+        # configured_vehicle_sensor_height_m.
+        "estimated_ground_offset_m": estimated_offset,
     }
 
     # --- item 2: overhead cell counts ------------------------------------------
@@ -494,7 +527,7 @@ def compute_metrics(
     }
 
     # --- item 4: known-overhang hit rate -----------------------------------------
-    overhangs = known_overhang_objects(scene_objects, floor_z)
+    overhangs = known_overhang_objects(scene_objects, floor_z, band_max=overhead_max)
     per_object = []
     total_obs = total_flag = 0
     for obj in overhangs:

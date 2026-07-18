@@ -140,6 +140,38 @@ def test_known_overhang_objects_empty_when_none_match():
     assert known_overhang_objects(objs, floor_z) == []
 
 
+def test_known_overhang_objects_excludes_mount_above_band_top():
+    """Issue #37 hypothesis (a): an object whose UNDERSIDE sits above the
+    clearance-band top (floor + band_max) is correctly unflagged by design (the
+    overhead layer only watches [overhead_min, overhead_max]) -- it must not be
+    counted as a "known overhang" the layer is expected to catch."""
+    floor_z = 0.0
+    band_max = 1.20
+    objs = [
+        # bottom_z = 1.5 - 0.1 = 1.4 > floor + 1.20 -> mounted above the band ->
+        # excluded even though top (1.6) clears top_margin (0.4).
+        SceneObject(0, 0, 0, 1.5, 0.4, 0.4, 0.2, 0.0, "wall shelf"),
+        # bottom_z = 0.7 - 0.1 = 0.6 <= floor + 1.20 -> underside inside the band ->
+        # a genuine known overhang, kept.
+        SceneObject(1, 1, 1, 0.7, 0.4, 0.4, 0.2, 0.0, "shelf"),
+    ]
+    result = known_overhang_objects(objs, floor_z, band_max=band_max)
+    assert {o.id for o in result} == {1}
+
+
+def test_known_overhang_objects_band_max_defaults_to_overhead_config():
+    """band_max defaults to the live OverheadConfig.overhead_max, not a duplicated
+    hardcoded constant."""
+    floor_z = 0.0
+    from core.nav.occupancy import DEFAULT_OVERHEAD_CONFIG
+
+    obj = SceneObject(
+        0, 0, 0, DEFAULT_OVERHEAD_CONFIG.overhead_max + 0.5, 0.4, 0.4, 0.2, 0.0, "shelf"
+    )
+    # underside = overhead_max + 0.4 > floor + overhead_max -> excluded by default.
+    assert known_overhang_objects([obj], floor_z) == []
+
+
 # --------------------------------------------------------------------------- parse_object_list
 
 def test_parse_object_list_handles_quoted_multiword_names(tmp_path):

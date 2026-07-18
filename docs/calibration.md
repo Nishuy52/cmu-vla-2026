@@ -108,7 +108,7 @@ are hard module constants.
 | nav.overhead_min | 0.25 | m | Overhead-clearance band lower edge (height above local ground; skip near-ground returns) | `occupancy.OverheadConfig.overhead_min` | dataclass field (`OverheadConfig`, passed to `integrate_scan_overhead`) | H |
 | nav.overhead_max | 1.20 | m | Overhead-clearance band upper edge (skip walls/ceiling above furniture) | `occupancy.OverheadConfig.overhead_max` | dataclass field (`OverheadConfig`) | H |
 | nav.overhead_min_points_per_cell | 3 | points | In-band scan points a cell needs before it flags OVERHEAD (noise reject). The decimation helper `integrate_scan_overhead_decimated` now scales this DOWN by the applied stride (`ceil(min_points/stride)`, floor 1) so a sparse-but-real overhang edge that passes at full density still passes after decimation (redteam H13 / SYS-F12). | `occupancy.OverheadConfig.min_points_per_cell` | dataclass field (`OverheadConfig`) | M |
-| nav.vehicle_sensor_height | 0.60 | m | Fallback local-ground = `vehicle_z − this` when a cell has no terrain-derived ground z (jingfan: vehicle z ≈ 0.0, floor z ≈ −0.6) | `occupancy.OverheadConfig.vehicle_sensor_height` | dataclass field (`OverheadConfig`) | M |
+| nav.vehicle_sensor_height | 0.60 | m | Pre-warm-up fallback local-ground = `vehicle_z − this` when a cell has no terrain-derived ground z AND the runtime ground-offset estimator hasn't warmed up yet (jingfan: vehicle z ≈ 0.0, floor z ≈ −0.6). Fixed #36 (18 Jul validation): once `>= GROUND_OFFSET_WARMUP_PATCHES` terrain patches have contributed a `vehicle_z` sample, a running estimate (`median(vehicle_z) − min terrain ground z`) replaces this constant for the fallback — this row is now only the cold-start/disabled-estimator value. | `occupancy.OverheadConfig.vehicle_sensor_height`, `use_ground_offset_estimator`, `OccupancyGrid.ground_offset_estimate` | dataclass field (`OverheadConfig`); env override `VLA_OVERHEAD_VEHICLE_SENSOR_HEIGHT_M` | M |
 | nav.overhead_scan_max_pts | 12000 | points | Per-tick decimation cap for the raw /registered_scan fed to the overhead layer | `occupancy.OVERHEAD_SCAN_MAX_PTS` | module constant (default arg to `integrate_scan_overhead_decimated`) | L |
 | nav.min_cluster_size | 5 | cells | Frontier clusters below this are noise | `frontiers.MIN_CLUSTER_SIZE` | function param (`detect_frontiers`) | M |
 | nav.w_size | 1.0 | — | Frontier score reward on cluster size | `frontiers.W_SIZE` | function param | M |
@@ -133,14 +133,22 @@ are hard module constants.
 > `reports/overhead_validation_2026-07-18/summary.md`. Verdict: band + point
 > gate behave sanely cross-scene (flags 1.2–3.7% of observed cells, tracks
 > furniture density; zero false flags on open floor, though that GT
-> structurally under-tests wall-mounted objects). Two issues filed: #36
-> (`vehicle_sensor_height=0.60` is 0.15–0.18 m low for the sim rig — fallback
-> path only, small blast radius today) and #37 (known-overhang misses:
-> livingroom_1 shelf 73 at 0% in both bags; loft misses confounded by its
-> 1.45 Hz rate, #30). Sensitivity: `min_points_per_cell` is the dominant lever
-> (3→2 adds 36–273 flagged cells/bag); band-shift is noise-level. The
-> exploration-side asymmetry (only IF routes use a Costmap; frontier
-> exploration ignores overhead) remains flagged in the backlog and deferred.
+> structurally under-tests wall-mounted objects). Two issues filed and now
+> **fixed 19 Jul 2026** (addendum in
+> `reports/overhead_validation_2026-07-18/summary.md`): #36
+> (`vehicle_sensor_height=0.60` was 0.15–0.18 m low for the sim rig — fallback
+> path only, small blast radius today) is fixed by a runtime ground-offset
+> estimator that replaces the constant once warmed (converges to within
+> ~0.003–0.025 m of the measured per-bag offset on the two bags re-checked);
+> #37's livingroom_1 shelf-73 "0% miss" was a validation-tool classifier bug
+> (the object is mounted ~0.49 m above the clearance-band top — correctly
+> unflagged by design), fixed by excluding out-of-band underside objects from
+> the known-overhang GT set — no overhead-layer tunable changed. loft's misses
+> remain open, still confounded by its 1.45 Hz rate (#30). Sensitivity:
+> `min_points_per_cell` is the dominant lever (3→2 adds 36–273 flagged
+> cells/bag); band-shift is noise-level. The exploration-side asymmetry (only
+> IF routes use a Costmap; frontier exploration ignores overhead) remains
+> flagged in the backlog and deferred.
 
 ---
 
