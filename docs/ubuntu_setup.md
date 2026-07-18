@@ -212,9 +212,17 @@ xhost +
 cd /tmp/fork-clean/docker && docker compose -f compose.yml up --build -d
 ```
 
-Resolve the three **confirm-on-Ubuntu flags** marked in the Dockerfile as you go: (1) cross-container
-topic discovery under `rmw_cyclonedds_cpp`; (2) whether `--break-system-packages` is needed on the
-Noble base (PEP 668); (3) the colcon symlink layout + `ament`/`core`-on-PYTHONPATH coexistence.
+~~Resolve the three **confirm-on-Ubuntu flags** marked in the Dockerfile as you go~~ **All three
+resolved 18 Jul** (details in the Dockerfile's updated comments): (1) CycloneDDS cross-container —
+works with the compose env entry; (2) PEP 668 — flag required, AND the base image ships with **no
+pip at all** (Dockerfile now bootstraps `python3-pip` as root; pip installs split in two because
+pytest's `pluggy>=1.5` collides with the apt-owned 1.4.0 and a blanket `--ignore-installed` would
+break apt's numpy/scipy); (3) colcon symlink layout — works as drafted, with `--chown` on COPY and
+the overlay `source` line in `/home/docker/.bashrc` (not root's — same trap class as gotcha 13).
+Also fixed on first Ubuntu boot: `adapter_node.py` assigned `self._clock`, shadowing rclpy `Node`'s
+own `_clock` → RecursionError; renamed `self._robotio_clock`. Tier 2.7 PASSED 18 Jul (twice,
+independently verified): question latched, 5 Hz exploration waypoints, exactly one legal integer
+on `/numerical_response` at latch+~219 s.
 
 **First smoke test:** run the ordered Tier-2 checks in `docs/sim_verification.md`, especially
 **Tier 2.7** (our-module round-trip — publish a challenge question, confirm the adapter latches

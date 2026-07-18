@@ -35,8 +35,8 @@ Highest-leverage thinking while Fable is cheap. All outputs are docs/code in thi
 
 ## Phase 2 — Full sim loop (Ubuntu reinstall → ~5 Aug)
 
-- [ ] Native Ubuntu 24.04 install, Docker + repo setup, run sim end-to-end
-- [ ] Port the Windows-developed core into the real `ai_module` ROS node (thin adapter — designed for this from day one)
+- [x] Native Ubuntu 24.04 install, Docker + repo setup, run sim end-to-end
+- [x] Port the Windows-developed core into the real `ai_module` ROS node (thin adapter — designed for this from day one)
 - [ ] Iterate on all 15 training scenes; measure score + wall-clock per question type
 - [ ] Perception-difficulty recalibration: 2025 top-3 results
       leaned on the ground-truth /object_markers topic (absent in

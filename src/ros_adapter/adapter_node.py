@@ -266,7 +266,14 @@ class AdapterNode(Node):
         self._terrain_ext: TerrainPatch | None = None
         self._odom: OdomState | None = None
         self._question: Question | None = None
-        self._clock = _NodeClock(self)
+        # NOTE: must NOT be named `self._clock` — rclpy.node.Node.__init__ already sets
+        # `self._clock = ROSClock()` and Node.get_clock() / several internal rclpy methods
+        # (e.g. declare_parameter's _set_parameters_atomically_common) read that exact
+        # attribute directly. Overwriting it here previously caused get_clock() to return
+        # this wrapper instead of the real clock, so _NodeClock.now() -> get_clock().now()
+        # recursed into itself (RecursionError, confirmed on Ubuntu first boot). Renamed to
+        # avoid the collision.
+        self._robotio_clock = _NodeClock(self)
 
         # ---- Subscriptions (six allowed system-output topics) -----------------
         self.create_subscription(
@@ -624,7 +631,7 @@ class AdapterNode(Node):
         # ledger/clock at intake; read them lazily so parse honours the live budget.
         def _parse(question):
             ctrl = self._controller
-            clock = ctrl.budget._clock if (ctrl is not None and ctrl.budget is not None) else self._clock
+            clock = ctrl.budget._clock if (ctrl is not None and ctrl.budget is not None) else self._robotio_clock
             ledger = ctrl.ledger if ctrl is not None else None
             return parse_ladder.parse(question, self._chat_fns, clock, ledger)
 
@@ -670,7 +677,7 @@ class AdapterNode(Node):
             ctrl = self._controller
             return ctrl.ledger if ctrl is not None else None
 
-        clock = self._clock
+        clock = self._robotio_clock
         ledger_proxy = _LedgerProxy(_ledger)
 
         # CP2 tile-dims wiring (OR-F8, coordinator item 3): bound bbox_hint rejection needs
@@ -862,7 +869,7 @@ class AdapterNode(Node):
             return self._odom
 
     def clock(self) -> Clock:
-        return self._clock
+        return self._robotio_clock
 
     # ------------------------------------------------------------------ RobotIO: publishers
 

@@ -558,3 +558,35 @@ Docker Hub account.
 
 **Next:** file the rates issue, eyeball RVIZ, Tier 2.6 relaunch dry-run,
 then Gate 3 (our module replaces dummy) per phase2_playbook.
+
+## 2026-07-18 (session 16, continued) - Gate 3.1-3.2 PASS: our module replaces the dummy
+
+- Executor (sonnet subagent) staged the fork shape into /tmp/fork-clean
+  (local clone only - no public GitHub fork yet, deliberate), ran
+  sync_to_fork.sh, built `docker-ai_module` (9.46 GB; base ~9.4 GB),
+  swapped it in for the dummy container.
+- All three confirm-on-Ubuntu Dockerfile flags resolved; biggest find:
+  the upstream ai_module base image has NO pip (bootstrap added).
+  Critical adapter fix: `self._clock` shadowed rclpy Node's `_clock` ->
+  RecursionError at boot; renamed `_robotio_clock`. Details in
+  ubuntu_setup.md §7a (updated).
+- **Tier 2.7 PASS**, then independently re-verified by a fresh verifier
+  subagent (fresh question, module restart, attribute-collision audit,
+  fork invariant `git status` clean outside ai_module/ + compose,
+  fast tests 1054 passed / 32 skipped). Evidence in both agents' runs:
+  question latched -> 5 Hz waypoints -> exactly one legal integer at
+  latch+~219 s (explore budget 210 s + answer ticks). Master plan rows
+  38-39 ticked.
+- pilotfish v1.2.1 installed globally this session (~/.claude: 8 role
+  agents, orchestration policy, model=best); executor+verifier
+  frontmatter switched to sonnet per user. Effective next session.
+- **New defect (decision pending):** empty scene index -> numerical head
+  injects partial.count=0 which overrides MODAL_COUNT=2 floor
+  (core/fsm/floors.py:147-148). If perception is dark at eval, count
+  questions answer 0 instead of modal 2. Proposed: suppress head count
+  when instances_tracked==0. Needs GitHub issue (gh issue create still
+  blocked for the agent session - file manually with the rates issue).
+
+**Next:** Gate 3.3 tiling-constant calibration against the sim panorama,
+then Gate 4 (GroundingDINO weights + real detector + PerceptionPipeline
+wiring). Gate 0 residuals unchanged: LLM API keys, Docker Hub account.

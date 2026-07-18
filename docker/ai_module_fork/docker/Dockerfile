@@ -58,9 +58,36 @@ ENV PYTHONPATH=/opt/vla/src:${PYTHONPATH}
 #     Phase-2: uncomment after weights decision (docs/ubuntu_setup.md §7 step 3; use CUDA wheels
 #     for the 4090 eval box and pre-download the GroundingDINO weights so nothing is fetched at
 #     run time).
+#
+#     CONFIRMED on Ubuntu (flag 2 of 3): the base image's default runtime user is the non-root
+#     `docker` user, and it has NO pip binary at all (`pip`/`pip3`: command not found — the base
+#     image never installs python3-pip, not even a PEP-668-restricted one). `apt-get install
+#     python3-pip` requires root, so we switch to `USER root` for the install layers (the `docker`
+#     user has passwordless sudo, but `USER root` is simpler for RUN layers) and switch back to
+#     `USER docker` below before CMD so the runtime user matches the base image's own default.
+#     Once python3-pip is present, `--break-system-packages` IS required and is NOT a no-op:
+#     tested `pip install numpy` (as both root and the `docker` user) without the flag and both
+#     fail with "error: externally-managed-environment" (PEP 668, Noble marks the system
+#     interpreter externally-managed regardless of caller uid). Keep the flag.
+USER root
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+#     Second CONFIRMED-on-Ubuntu finding: `pytest>=8` needs `pluggy>=1.5`, but the base image
+#     already has `python3-pluggy` 1.4.0 installed via apt/dpkg (pulled in automatically by
+#     ros-jazzy-ament-cmake-pytest -> python3-pytest 7.4.4). A single `pip install numpy rosbags
+#     pytest` tries to upgrade that dpkg-owned pluggy in place and fails with "Cannot uninstall
+#     pluggy 1.4.0, RECORD file not found" (pip refuses to remove a package it did not install).
+#     A blanket `--ignore-installed` "fixes" that but also forces numpy to be reinstalled/upgraded
+#     to the latest (2.x), which breaks the apt-provided scipy (`numpy<1.28.0,>=1.21.6` — used by
+#     other ROS packages in the base image). Split into two invocations instead: numpy/rosbags
+#     first (numpy>=1.26 is already satisfied by apt's 1.26.4, so this layer never touches it),
+#     then pytest on its own with `--ignore-installed` scoped to just pytest's dependency graph
+#     (pygments/packaging/iniconfig/pluggy) — numpy is not in that graph so it stays untouched.
 RUN pip install --no-cache-dir --break-system-packages \
       "numpy>=1.26" \
-      "rosbags>=0.11" \
+      "rosbags>=0.11"
+RUN pip install --no-cache-dir --break-system-packages --ignore-installed \
       "pytest>=8"
 # Phase-2: uncomment after weights decision --
 # RUN pip install --no-cache-dir --break-system-packages torch torchvision groundingdino-py
@@ -68,19 +95,28 @@ RUN pip install --no-cache-dir --break-system-packages \
 # --- Copy the workspace source. Build context is ai_module/ (the fork tree; see header), so
 #     `src/` here resolves to ai_module/src/ — our repo's src/ synced in by sync_to_fork.*.
 #     Tests are NOT synced into the fork (see README rationale), so `src/` is core + ros_adapter.
-COPY src/ /opt/vla/src/
+#     --chown keeps the tree owned by the `docker` runtime user (matches the base image's own
+#     ownership model) rather than leaving it root-owned from the `USER root` block above.
+COPY --chown=docker:docker src/ /opt/vla/src/
 
 # --- Build the ament_python package so `ros2 launch vla_ai_module ...` resolves. The package
 #     manifest lives in src/ros_adapter/. We build it into a colcon workspace at /opt/vla/ws.
-#     confirm on Ubuntu (flag 3 of 3): the colcon symlink layout below assumes
-#     src/ros_adapter/package.xml is discoverable and that ament+`core`-on-PYTHONPATH coexist;
-#     if colcon complains about `core` not being a ROS package, that is expected — core is a
-#     plain pip/PYTHONPATH module, not an ament package, and is intentionally NOT built here.
+#     CONFIRMED on Ubuntu (flag 3 of 3): the colcon symlink layout below works as drafted —
+#     `colcon build --packages-select vla_ai_module` finds src/ros_adapter/package.xml through
+#     the symlink and builds cleanly; colcon does NOT try to build `core` (it is plain
+#     PYTHONPATH, not discovered as an ament package, exactly as intended) and does not complain.
+#     ament (install/setup.bash) and `core` on PYTHONPATH coexist without conflict.
 WORKDIR /opt/vla/ws
 RUN mkdir -p src && ln -s /opt/vla/src/ros_adapter src/ros_adapter && \
     /bin/bash -c "source /opt/ros/jazzy/setup.bash && \
-      colcon build --packages-select vla_ai_module"
-RUN echo "source /opt/vla/ws/install/setup.bash" >> /root/.bashrc
+      colcon build --packages-select vla_ai_module" && \
+    chown -R docker:docker /opt/vla/ws
+# NOTE: base image's `docker` user gets RMW_IMPLEMENTATION + ROS sourcing from
+# /home/docker/.bashrc (docs/ubuntu_setup.md gotcha 13's "only in ~/.bashrc" trap applies to the
+# `docker` user specifically, not root) — append our workspace overlay to the SAME file. The
+# original draft appended to /root/.bashrc, which the non-root runtime user never sources.
+RUN echo "source /opt/vla/ws/install/setup.bash" >> /home/docker/.bashrc
+USER docker
 
 # --- LLM parse-provider keys are NEVER baked into the image. They are passed at run time via
 #     the environment (compose `env_file:` or `environment:`). core/llm/config.py reads:
