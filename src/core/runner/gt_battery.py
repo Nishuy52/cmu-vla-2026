@@ -843,7 +843,15 @@ def _load_answers(answers_path: os.PathLike | str | None) -> dict | None:
     try:
         with open(p, encoding="utf-8") as fh:
             return json.load(fh)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        # Present but unreadable is a louder condition than legitimately absent —
+        # true accuracy will still read "n/a" like the missing-key case, but this
+        # warns so the two are not silently conflated.
+        print(
+            f"gt_battery: WARNING: answer key {p} exists but is unreadable "
+            f"({exc.__class__.__name__}: {exc}) - true accuracy will read n/a",
+            file=sys.stderr,
+        )
         return None
 
 

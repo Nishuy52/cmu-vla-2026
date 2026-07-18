@@ -423,3 +423,27 @@ def test_livingroom_3_registered_as_data_unfittable():
     """livingroom_3 must stay registered in the meth-F11 data-confirmed-unfittable map."""
     _DATA = GB._DATA_UNFITTABLE_IF_SCENES
     assert "livingroom_3" in _DATA and _DATA["livingroom_3"]
+
+
+# --------------------------------------------------------------------------- issue #16
+
+
+def test_load_answers_warns_on_corrupt_key(tmp_path, capsys):
+    """A present-but-unreadable answer key is louder than a legitimately missing one."""
+    bad = tmp_path / "gt_answers_numerical.json"
+    bad.write_text("{not valid json", encoding="utf-8")
+
+    result = GB._load_answers(bad)
+    assert result is None
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert str(bad) in err
+
+
+def test_load_answers_missing_file_no_warning(tmp_path, capsys):
+    """A legitimately absent key is a soft condition: no warning."""
+    missing = tmp_path / "does_not_exist.json"
+    result = GB._load_answers(missing)
+    assert result is None
+    err = capsys.readouterr().err
+    assert err == ""
