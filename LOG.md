@@ -726,3 +726,30 @@ Open issues: #30 (rates), #33 (confidence gating - needs adjudication).
 **Next:** run the overhead-tunables validation against the 4-scene bag
 set (hardening backlog), file the rates issue with the per-scene table,
 then Gate 4 - real perception (unchanged).
+
+## 2026-07-18 (session 17, continued) - overhead multi-scene validation DONE (H13/F12)
+
+- Executor built `tools/overhead_validation.py` (+20 tests, `pytest tools`
+  50 passed; src/ untouched, fast tier clean): replays a bag through the
+  live overhead wiring against 3 config variants in lock-step, judges the
+  final OVERHEAD layer against object_list.txt (rotated-rect footprints)
+  + traversable_area.ply. Ran all 5 sim bags -> reports/
+  overhead_validation_2026-07-18/ (per-bag JSON + summary.md).
+- **Verdict: jingfan-fitted tunables hold cross-scene.** Flags 1.2-3.7%
+  of observed cells tracking furniture density; 0 false flags on open
+  floor (caveat: that GT under-tests wall-mounted objects); known-
+  overhang hit 26-45% aggregate on healthy scenes, bimodal per object.
+- **Issues filed:** #36 vehicle_sensor_height 0.60 vs measured 0.75-0.78
+  on every sim scene (fallback-only blast radius, fix before sparse-
+  terrain runs); #37 overhang misses (livingroom_1 shelf 73 = 0% in both
+  bags; loft misses confounded by 1.45 Hz rate -> #30). min_points_per_
+  cell is the dominant sensitivity lever (3->2: +36..273 cells/bag).
+- Issue-tracker cleanup while filing rates data: per-scene table + loft
+  starvation evidence commented onto #30; dups #35/#28/#29 closed.
+- calibration.md boxed caveat + backlog H13 flipped to validated-with-
+  pointers. Exploration-side asymmetry remains open/deferred.
+
+**Next:** Gate 4 live checklist (build side complete per session-16 entry:
+swap docker-ai_module:latest in with VLA_DETECTOR=grounding_dino, GPU/VRAM
++ batched-forward + offline-cache checks, RVIZ smoke, clean-clone packaging
+gate). Gate 0 residuals: LLM keys, Docker Hub, host reboot.

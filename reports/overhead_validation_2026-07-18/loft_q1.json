@@ -1,0 +1,147 @@
+{
+  "bag": "data/sim_bags/loft_q1",
+  "scene": "data/unity_scenes_ros2/loft/loft",
+  "runtime_s": 9.647856081002828,
+  "replay": {
+    "n_odom": 65894,
+    "n_terrain": 477,
+    "n_scan": 477,
+    "n_pose_marks": 329,
+    "mark_cadence_s": 1.0,
+    "bag_t_span_s": [
+      1784367914.4136899,
+      1784368243.8784003
+    ],
+    "mean_scan_hz": 1.4472988209366469,
+    "grid_shape": [
+      177,
+      186
+    ],
+    "cell_m": 0.1
+  },
+  "n_scene_objects": 115,
+  "sensor_height": {
+    "configured_vehicle_sensor_height_m": 0.6,
+    "median_vehicle_z_m": 0.7457099556922913,
+    "floor_z_m": -0.00474,
+    "measured_sensor_height_m": 0.7504499556922912,
+    "delta_m": 0.15044995569229125,
+    "note": "delta = measured - configured; a positive delta means the real sensor sits higher than assumed, so the vehicle_z-0.60 fallback UNDER-estimates floor_z (over-estimates height-above-floor) by about this much for cells that never saw terrain",
+    "flagged_cells_fallback_ground_z_nan": 10,
+    "flagged_cells_terrain_ground_z": 454
+  },
+  "overhead_cells": {
+    "observed_cells": 23278,
+    "flagged_cells": 464,
+    "fraction": 0.019932983933327604
+  },
+  "false_flags": {
+    "gt_overhang_object_count": 79,
+    "open_floor_cells": 2431,
+    "flagged_cells": 464,
+    "false_flag_cells": 0,
+    "rate": 0.0,
+    "examples": []
+  },
+  "known_overhang_hit_rate": {
+    "objects": [
+      {
+        "id": 9,
+        "name": "table",
+        "top_z": 0.7455980929370117,
+        "footprint_cells": 242,
+        "observed_cells": 242,
+        "flagged_cells": 14,
+        "hit_rate": 0.05785123966942149
+      },
+      {
+        "id": 17,
+        "name": "TV cabinet",
+        "top_z": 0.5735387202452087,
+        "footprint_cells": 88,
+        "observed_cells": 88,
+        "flagged_cells": 0,
+        "hit_rate": 0.0
+      },
+      {
+        "id": 20,
+        "name": "table",
+        "top_z": 0.42838182809265135,
+        "footprint_cells": 28,
+        "observed_cells": 28,
+        "flagged_cells": 0,
+        "hit_rate": 0.0
+      },
+      {
+        "id": 21,
+        "name": "table",
+        "top_z": 0.48891969928474427,
+        "footprint_cells": 38,
+        "observed_cells": 38,
+        "flagged_cells": 0,
+        "hit_rate": 0.0
+      },
+      {
+        "id": 22,
+        "name": "table",
+        "top_z": 3.7250392461853026,
+        "footprint_cells": 96,
+        "observed_cells": 96,
+        "flagged_cells": 0,
+        "hit_rate": 0.0
+      },
+      {
+        "id": 35,
+        "name": "cabinet",
+        "top_z": 0.7888230592842103,
+        "footprint_cells": 110,
+        "observed_cells": 110,
+        "flagged_cells": 0,
+        "hit_rate": 0.0
+      },
+      {
+        "id": 73,
+        "name": "table",
+        "top_z": 3.414523361174927,
+        "footprint_cells": 25,
+        "observed_cells": 25,
+        "flagged_cells": 5,
+        "hit_rate": 0.2
+      }
+    ],
+    "aggregate_observed_cells": 627,
+    "aggregate_flagged_cells": 19,
+    "aggregate_hit_rate": 0.030303030303030304
+  },
+  "sensitivity": {
+    "default": {
+      "flagged_cells": 464,
+      "cfg": {
+        "overhead_min": 0.25,
+        "overhead_max": 1.2,
+        "min_points_per_cell": 3,
+        "vehicle_sensor_height": 0.6
+      }
+    },
+    "shifted": {
+      "flagged_cells": 441,
+      "cfg": {
+        "overhead_min": 0.25,
+        "overhead_max": 1.2,
+        "min_points_per_cell": 3,
+        "vehicle_sensor_height": 0.7504499556922912
+      },
+      "delta_vs_default": -23
+    },
+    "minpts2": {
+      "flagged_cells": 608,
+      "cfg": {
+        "overhead_min": 0.25,
+        "overhead_max": 1.2,
+        "min_points_per_cell": 2,
+        "vehicle_sensor_height": 0.6
+      },
+      "delta_vs_default": 144
+    }
+  }
+}

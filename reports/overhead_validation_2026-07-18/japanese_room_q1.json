@@ -1,0 +1,83 @@
+{
+  "bag": "data/sim_bags/japanese_room_q1",
+  "scene": "data/unity_scenes_ros2/japanese_room/japanese_room",
+  "runtime_s": 17.427174327000102,
+  "replay": {
+    "n_odom": 65914,
+    "n_terrain": 1052,
+    "n_scan": 1052,
+    "n_pose_marks": 329,
+    "mark_cadence_s": 1.0,
+    "bag_t_span_s": [
+      1784368369.9670348,
+      1784368699.5318666
+    ],
+    "mean_scan_hz": 3.1913610761739877,
+    "grid_shape": [
+      206,
+      206
+    ],
+    "cell_m": 0.1
+  },
+  "n_scene_objects": 63,
+  "sensor_height": {
+    "configured_vehicle_sensor_height_m": 0.6,
+    "median_vehicle_z_m": 0.7632010579109192,
+    "floor_z_m": -0.016926,
+    "measured_sensor_height_m": 0.7801270579109192,
+    "delta_m": 0.1801270579109192,
+    "note": "delta = measured - configured; a positive delta means the real sensor sits higher than assumed, so the vehicle_z-0.60 fallback UNDER-estimates floor_z (over-estimates height-above-floor) by about this much for cells that never saw terrain",
+    "flagged_cells_fallback_ground_z_nan": 0,
+    "flagged_cells_terrain_ground_z": 346
+  },
+  "overhead_cells": {
+    "observed_cells": 28897,
+    "flagged_cells": 346,
+    "fraction": 0.011973561269335917
+  },
+  "false_flags": {
+    "gt_overhang_object_count": 51,
+    "open_floor_cells": 1822,
+    "flagged_cells": 346,
+    "false_flag_cells": 0,
+    "rate": 0.0,
+    "examples": []
+  },
+  "known_overhang_hit_rate": {
+    "objects": [],
+    "aggregate_observed_cells": 0,
+    "aggregate_flagged_cells": 0,
+    "aggregate_hit_rate": null
+  },
+  "sensitivity": {
+    "default": {
+      "flagged_cells": 346,
+      "cfg": {
+        "overhead_min": 0.25,
+        "overhead_max": 1.2,
+        "min_points_per_cell": 3,
+        "vehicle_sensor_height": 0.6
+      }
+    },
+    "shifted": {
+      "flagged_cells": 347,
+      "cfg": {
+        "overhead_min": 0.25,
+        "overhead_max": 1.2,
+        "min_points_per_cell": 3,
+        "vehicle_sensor_height": 0.7801270579109192
+      },
+      "delta_vs_default": 1
+    },
+    "minpts2": {
+      "flagged_cells": 382,
+      "cfg": {
+        "overhead_min": 0.25,
+        "overhead_max": 1.2,
+        "min_points_per_cell": 2,
+        "vehicle_sensor_height": 0.6
+      },
+      "delta_vs_default": 36
+    }
+  }
+}

@@ -103,6 +103,7 @@ The architecture's "dimension sanity table" does not exist in code; trimmed unde
 
 ### H13. Overhead-clearance layer: soften and validate — sources: SYS-F12
 Make overhead soft-cost except in corridor threading; scale `min_points_per_cell` with decimation stride; validate the five jingfan-fitted tunables on ≥2 more scenes' bags at the Ubuntu gate; decide (or document) the exploration-side asymmetry.
+**Validation DONE 18 Jul 2026** on 5 bags / 4 scenes (`tools/overhead_validation.py`, `reports/overhead_validation_2026-07-18/`): tunables hold cross-scene; residuals filed as #36 (sensor-height constant low for sim rig) and #37 (per-object overhang misses). Exploration-side asymmetry still open.
 
 ### H14. Performance + hygiene — sources: SYS-F13, SYS-F14, OR-F10
 Benchmark the pure-Python hot loop on a realistic grid now (frontier BFS ~50–150 ms/tick estimated); vectorize if >50 ms; throttle frontier detection to 1 Hz; decimate odom conversion. Loud-log + deliberate policy on second-question text. Gate-checklist line: grep compose/launch override for `debug_viz`. Trim the CP1 parse system prompt under the 2k-token budget; startup assert that a network provider isn't paired with the `.npy` encoder; CP5 abstain option.

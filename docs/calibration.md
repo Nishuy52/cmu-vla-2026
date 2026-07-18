@@ -126,18 +126,21 @@ are hard module constants.
 | nav.stall_move_m | 0.3 | m | Movement below this over the window ⇒ stalled | `breadcrumbs.STALL_MOVE_M` | constructor arg | M |
 | nav.stall_window_s | 10.0 | s | Stall observation window | `breadcrumbs.STALL_WINDOW_S` | constructor arg | M |
 
-> **Overhead-clearance tunables — single-bag fit; multi-scene validation is an
-> Ubuntu-gate item (redteam H13 / SYS-F12).** The five overhead tunables
-> (`overhead_min`, `overhead_max`, `overhead_min_points_per_cell`,
-> `vehicle_sensor_height`, `overhead_scan_max_pts`) plus the softening weight
-> (`overhead_soft_cost_mult`) are fitted to the single jingfan bag. They are NOT
-> validated on any other scene. Softening the layer to SOFT-cost by default (H13)
-> makes a wrong flag cheap rather than route-killing, which lowers the risk of the
-> single-bag fit — but the band/point-gate values still need validation on ≥2 more
-> scenes' recorded bags at the Ubuntu gate before they are trusted (the hardening
-> backlog lists this as an open Ubuntu-gate item). The exploration-side asymmetry
-> (only IF routes use a Costmap; frontier exploration ignores overhead) is likewise
-> flagged there and deferred.
+> **Overhead-clearance tunables — multi-scene validation DONE 18 Jul 2026**
+> (redteam H13 / SYS-F12; was: single-bag jingfan fit, no other-scene evidence).
+> Validated against 5 recorded sim bags across 4 scenes via
+> `tools/overhead_validation.py`; full results in
+> `reports/overhead_validation_2026-07-18/summary.md`. Verdict: band + point
+> gate behave sanely cross-scene (flags 1.2–3.7% of observed cells, tracks
+> furniture density; zero false flags on open floor, though that GT
+> structurally under-tests wall-mounted objects). Two issues filed: #36
+> (`vehicle_sensor_height=0.60` is 0.15–0.18 m low for the sim rig — fallback
+> path only, small blast radius today) and #37 (known-overhang misses:
+> livingroom_1 shelf 73 at 0% in both bags; loft misses confounded by its
+> 1.45 Hz rate, #30). Sensitivity: `min_points_per_cell` is the dominant lever
+> (3→2 adds 36–273 flagged cells/bag); band-shift is noise-level. The
+> exploration-side asymmetry (only IF routes use a Costmap; frontier
+> exploration ignores overhead) remains flagged in the backlog and deferred.
 
 ---
 
