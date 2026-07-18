@@ -447,3 +447,48 @@ def test_load_answers_missing_file_no_warning(tmp_path, capsys):
     assert result is None
     err = capsys.readouterr().err
     assert err == ""
+
+
+# --------------------------------------------------------------------------- issue #15
+
+
+def test_write_report_stamps_default_calibration(tmp_path):
+    """write_report has no dangling ``cal`` param — provenance stamps default_calibration."""
+    import hashlib
+
+    from core.calibration import default_calibration, to_json
+
+    scores = [
+        GB.GTQuestionScore(scene="a", qtype=QType.NUMERICAL.value, question="q", our_count=1),
+    ]
+    _md, json_path = GB.write_report(scores, [], tmp_path)
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    expected = hashlib.sha1(to_json(default_calibration()).encode("utf-8")).hexdigest()[:12]
+    assert payload["provenance"]["calibration_sha1"] == expected
+
+
+# --------------------------------------------------------------------------- issue #17
+
+
+def test_main_cli_summary_prints_instance_match_not_iou_headline(tmp_path, monkeypatch, capsys):
+    """CLI summary headline must agree with the report: instance-match, not IoU."""
+    scores = [
+        GB.GTQuestionScore(
+            scene="syn", qtype=QType.OBJECT_REFERENCE.value, question="q",
+            gt_target_id=1, our_target_id=1, iou=0.5,
+        ),
+        GB.GTQuestionScore(
+            scene="syn", qtype=QType.OBJECT_REFERENCE.value, question="q2",
+            gt_target_id=2, our_target_id=99, iou=0.0,
+        ),
+    ]
+    monkeypatch.setattr(GB, "run_gt_battery", lambda *a, **k: (scores, []))
+    monkeypatch.setattr(
+        GB, "write_report", lambda *a, **k: (tmp_path / "r.md", tmp_path / "r.json")
+    )
+    rc = GB.main(["--groundtruth", str(tmp_path)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "or_instance_match=1/2" in out
+    assert "or_iou=" not in out  # the old headline key must be gone
+    assert "or_iou_diag=" in out  # IoU survives as a diagnostic

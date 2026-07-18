@@ -1121,13 +1121,28 @@ def _md_table(scores: list[GTQuestionScore]) -> str:
     return header + "\n".join(rows) + "\n"
 
 
+def _or_instance_match(scores: list[GTQuestionScore]) -> tuple[list[GTQuestionScore], int]:
+    """Object-reference instance-match count (arch-F3 headline; IoU is diagnostic).
+
+    Returns (scoreable_rows, n_instance_matched), over OR questions where a GT
+    target was matched (scoreable).
+    """
+    obj_rows = [s for s in scores if s.qtype == QType.OBJECT_REFERENCE.value]
+    or_scored = [s for s in obj_rows if s.gt_target_id is not None]
+    or_instance_match = sum(
+        1
+        for s in or_scored
+        if s.our_target_id is not None and s.our_target_id == s.gt_target_id
+    )
+    return or_scored, or_instance_match
+
+
 def write_report(
     scores: list[GTQuestionScore],
     missing: list[str],
     out_dir: os.PathLike | str,
     *,
     argv: list[str] | None = None,
-    cal=None,
 ) -> tuple[Path, Path]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -1201,13 +1216,7 @@ def write_report(
     )
     # Instance-match (arch-F3): resolved instance id == gt_target_id, over the OR
     # questions where a GT target was matched (scoreable). Real-perception IoU pending.
-    obj_rows = [s for s in scores if s.qtype == QType.OBJECT_REFERENCE.value]
-    or_scored = [s for s in obj_rows if s.gt_target_id is not None]
-    or_instance_match = sum(
-        1
-        for s in or_scored
-        if s.our_target_id is not None and s.our_target_id == s.gt_target_id
-    )
+    or_scored, or_instance_match = _or_instance_match(scores)
 
     lines.append("## Topline (per type)\n")
     lines.append(
@@ -1236,7 +1245,7 @@ def write_report(
 
     payload = {
         "date": date.today().isoformat(),
-        "provenance": collect_provenance("gt_battery", argv, cal),
+        "provenance": collect_provenance("gt_battery", argv),
         "n_questions": len(scores),
         "scenes": scenes,
         "missing_scenes": missing,
@@ -1315,10 +1324,19 @@ def main(argv: list[str] | None = None) -> int:
         if n["n_with_true_answer"]
         else "n/a"
     )
+    # Headline OR metric matches the report: instance-match / scoreability
+    # (IoU is a diagnostic pending real perception, see write_report).
+    or_scored, or_instance_match = _or_instance_match(scores)
+    or_instance_str = (
+        f"{or_instance_match}/{len(or_scored)} (scoreable {len(or_scored)}/{o['n']})"
+        if o["n"]
+        else "n/a"
+    )
     print(
         f"gt_battery: {len(scores)} questions / {len({s.scene for s in scores})} scenes  "
         f"num_true={num_true_str} "
-        f"or_iou={_num(o['mean_iou'])} "
+        f"or_instance_match={or_instance_str} "
+        f"or_iou_diag={_num(o['mean_iou'])} "
         f"if_rubric={_num(i['mean_rubric_score'])} "
         f"if_thread_viol={i['total_threading_violations']} "
         f"if_avoid_viol={i['total_avoid_violations']}"
