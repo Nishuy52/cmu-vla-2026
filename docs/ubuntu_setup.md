@@ -163,11 +163,23 @@ multi-GB bag to a few hundred MB that move freely between machines.
    the size the eval machine tolerates (upstream README notes a Simply NUC i9 host).
    The open-vocab detector is a GroundingDINO-class model (`core/perception/detector.py`
    `GroundingDinoDetector`, lazy-imported); install its deps into the image and pre-download the
-   weights so nothing is fetched at run time:
-   ```bash
-   pip install torch torchvision groundingdino-py     # CUDA wheels for the 4090 eval box
-   # pre-fetch GroundingDINO weights for model 'IDEA-Research/grounding-dino-base'
-   ```
+   weights so nothing is fetched at run time.
+   **DONE 18 Jul — baked into the fork Dockerfile** (`docker/ai_module_fork/docker/Dockerfile`),
+   as-built facts:
+   - Deps layer: `torch torchvision transformers groundingdino-py` under
+     `PIP_CONSTRAINT numpy==1.26.4` (opencv≥4.12 would drag numpy 2 and break apt scipy; pip
+     backtracks to opencv 4.11). Image grows 2.58 → **6.76 GB**.
+   - Weights: `GDINO_MODEL_ID` (grounding-dino-base) = **Swin-B** →
+     `groundingdino_swinb_cogcoor.pth` (938 MB, GitHub release v0.1.0-alpha2) at
+     `GDINO_CHECKPOINT_PATH=/opt/vla/weights/groundingdino/...pth`, plus the matching
+     `GroundingDINO_SwinB_cfg.py` copied out of the package to `GDINO_CONFIG_PATH` (without it
+     the detector falls back to the SwinT config → state-dict mismatch).
+   - **Hidden second fetch:** groundingdino constructs a `bert-base-uncased` tokenizer/encoder
+     via HF at model build — baked (~441 MB) into `HF_HOME=/opt/vla/hf_cache`, then
+     `HF_HUB_OFFLINE=1` + `TRANSFORMERS_OFFLINE=1` set so runtime resolves only from the baked
+     cache (fails loud, never hangs on network).
+   - A build-time assertion layer verifies checkpoint size, SwinB config marker
+     (`swin_B_384_22k`), and the BERT snapshot.
    Until these are present the detector raises a clear ImportError and the offline path falls back
    to the scripted `FakeDetector` (tests only).
    Before the Docker build, set the parse-provider env vars (`VLA_LLM_PRIMARY_*` / `_SECONDARY_*` /

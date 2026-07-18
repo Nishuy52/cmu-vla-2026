@@ -54,10 +54,9 @@ ENV PYTHONPATH=/opt/vla/src:${PYTHONPATH}
 #     if `pip install` succeeds WITHOUT the flag, the base is not externally-managed and the flag
 #     is unnecessary. Left in as the defensive default so the build does not die at this layer.
 #
-#     torch + groundingdino are the perception stack — heavy, and gated on the weights decision.
-#     Phase-2: uncomment after weights decision (docs/ubuntu_setup.md §7 step 3; use CUDA wheels
-#     for the 4090 eval box and pre-download the GroundingDINO weights so nothing is fetched at
-#     run time).
+#     torch + groundingdino are the perception stack — heavy. Gate 4 (docs/ubuntu_setup.md §7
+#     step 3): installed below with default CUDA (cu12x) wheels, weights baked in the layer that
+#     follows so nothing is fetched at run time.
 #
 #     CONFIRMED on Ubuntu (flag 2 of 3): the base image's default runtime user is the non-root
 #     `docker` user, and it has NO pip binary at all (`pip`/`pip3`: command not found — the base
@@ -71,7 +70,7 @@ ENV PYTHONPATH=/opt/vla/src:${PYTHONPATH}
 #     interpreter externally-managed regardless of caller uid). Keep the flag.
 USER root
 RUN apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3-pip && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3-pip curl && \
     rm -rf /var/lib/apt/lists/*
 #     Second CONFIRMED-on-Ubuntu finding: `pytest>=8` needs `pluggy>=1.5`, but the base image
 #     already has `python3-pluggy` 1.4.0 installed via apt/dpkg (pulled in automatically by
@@ -89,8 +88,106 @@ RUN pip install --no-cache-dir --break-system-packages \
       "rosbags>=0.11"
 RUN pip install --no-cache-dir --break-system-packages --ignore-installed \
       "pytest>=8"
-# Phase-2: uncomment after weights decision --
-# RUN pip install --no-cache-dir --break-system-packages torch torchvision groundingdino-py
+#     Gate 4: uncommented. Default PyPI wheels for torch/torchvision on linux are CUDA-enabled
+#     (cu12x) and cover both the 4090 eval box and an 8 GB 4060 dev box, so no --index-url/CUDA
+#     pin is needed. `transformers` is already a transitive dep of groundingdino-py
+#     (requirements.txt: torch/torchvision/transformers/addict/yapf/timm/numpy/opencv-python/
+#     supervision==0.6.0/pycocotools) but is named explicitly here because the very next layer
+#     imports it directly to pre-fetch BERT.
+#
+#     Third CONFIRMED-on-Ubuntu finding (Gate 4 build, 18 Jul): same RECORD-file failure class as
+#     the pluggy note above, this time via numpy. groundingdino-py pulls opencv-python, and
+#     opencv-python >=4.12 requires numpy>=2 on py3.12 — so an unconstrained install tries to
+#     upgrade the dpkg-owned numpy 1.26.4 in place and dies with "Cannot uninstall numpy 1.26.4,
+#     RECORD file not found" (and even if it could, numpy 2.x breaks the apt scipy pinned
+#     numpy<1.28 — see the pluggy note). Fix: a PIP_CONSTRAINT pinning numpy==1.26.4, which makes
+#     the resolver keep the apt numpy untouched and backtrack opencv-python to 4.11.0.86 (verified
+#     on PyPI: its py3.12 requirement is numpy>=1.26.0, satisfied by 1.26.4; pycocotools and
+#     supervision==0.6.0 have no numpy upper pin; torch/transformers/timm don't pin numpy>=2).
+RUN printf 'numpy==1.26.4\n' > /tmp/pip-constraints.txt && \
+    PIP_CONSTRAINT=/tmp/pip-constraints.txt pip install --no-cache-dir --break-system-packages \
+      torch \
+      torchvision \
+      transformers \
+      groundingdino-py && \
+    rm /tmp/pip-constraints.txt
+
+# --- Weight baking (Gate 4 item 1: "bake into the image (offline-capable rule)").
+#
+#     Investigated groundingdino-py==0.4.0 (the giswqs/GroundingDINO fork on PyPI — the exact
+#     package GDINO_REQUIRED_INSTALLS names) to find out what `groundingdino.util.inference.
+#     load_model()` (the function GroundingDinoDetector._lazy_import pulls in) actually needs on
+#     disk, since nothing about weights is obvious from the import alone:
+#       1. `load_model(config_path, checkpoint_path, device)` takes LOCAL file paths for both a
+#          plain-Python model config and a finetuned .pth checkpoint. The configs for both size
+#          variants SHIP INSIDE THE PIP PACKAGE already (site-packages/groundingdino/config/
+#          GroundingDINO_SwinT_OGC.py and GroundingDINO_SwinB_cfg.py) — nothing to bake there.
+#          The checkpoint is NOT bundled and NOT auto-downloaded by the package or by load_model;
+#          it only exists as a GitHub Release asset. GDINO_MODEL_ID in core/perception/detector.py
+#          is "IDEA-Research/grounding-dino-base" (HF-hub-style "base" size) -> the Swin-B variant,
+#          config GroundingDINO_SwinB_cfg.py + checkpoint groundingdino_swinb_cogcoor.pth
+#          (confirmed reachable at the URL below, 938_057_991 bytes, release v0.1.0-alpha2; the
+#          SwinT asset 404s under that same tag, SwinB is the one that's actually current there).
+#       2. Both configs set text_encoder_type = "bert-base-uncased" — real BERT, not a
+#          GroundingDINO-specific weight. groundingdino/util/get_tokenlizer.py calls
+#          `AutoTokenizer.from_pretrained(...)` and `BertModel.from_pretrained(...)` at model
+#          construction time, i.e. a genuine HuggingFace Hub fetch, cached under HF_HOME. (The
+#          Swin backbone itself has NO such fetch: build_swin_transformer() only random-inits the
+#          module — the finetuned .pth's state_dict overwrites backbone + transformer + BERT
+#          projection in one `load_state_dict` call, so there is no separate ImageNet-pretrained
+#          backbone download to bake for the Swin-B path used here.)
+#     So two different baking mechanisms, both landing under /opt/vla so the runtime user can read
+#     them: a plain file download for the checkpoint, and transformers' own from_pretrained() (not
+#     a hand-rolled snapshot_download) for BERT, so the on-disk cache layout is exactly what the
+#     real runtime from_pretrained() call will resolve.
+#     Single RUN on purpose: fetches + chown MUST share one layer. A separate `RUN chown -R`
+#     after the downloads re-copies every weight file into a fresh overlay layer (chown = metadata
+#     change = whole-file copy-up), which was measured to duplicate 1.38GB in the first Gate-4
+#     build. Fused like this the weights exist in exactly one layer, already docker-owned.
+ENV HF_HOME=/opt/vla/hf_cache
+ENV GDINO_CHECKPOINT_PATH=/opt/vla/weights/groundingdino/groundingdino_swinb_cogcoor.pth
+#     GDINO_CONFIG_PATH must be baked too (detector.py reads ENV_GDINO_CONFIG_PATH): its
+#     _resolve_config_path() fallback when the env var is unset is the package-bundled
+#     GroundingDINO_SwinT_OGC.py — the SwinT config — which state-dict-mismatches the Swin-B
+#     checkpoint above at load time. Copy the package's SwinB config to a stable path next to the
+#     checkpoint (resolved from the installed package at build time, not a hardcoded
+#     site-packages path) and point the env var at it.
+ENV GDINO_CONFIG_PATH=/opt/vla/weights/groundingdino/GroundingDINO_SwinB_cfg.py
+RUN mkdir -p "${HF_HOME}" "$(dirname "${GDINO_CHECKPOINT_PATH}")" && \
+    python3 -c "from transformers import AutoTokenizer, BertModel; AutoTokenizer.from_pretrained('bert-base-uncased'); BertModel.from_pretrained('bert-base-uncased')" && \
+    python3 -c "import groundingdino, os, shutil; src = os.path.join(os.path.dirname(groundingdino.__file__), 'config', 'GroundingDINO_SwinB_cfg.py'); shutil.copyfile(src, os.environ['GDINO_CONFIG_PATH'])" && \
+    curl -fSL --retry 3 -o "${GDINO_CHECKPOINT_PATH}" "https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha2/groundingdino_swinb_cogcoor.pth" && \
+    chown -R docker:docker /opt/vla/hf_cache /opt/vla/weights
+# Build-time assertion (no GPU, no model construction — plain file checks) that both baked
+# artifacts actually landed before the layer is allowed to succeed.
+#     The config check asserts on the backbone marker line, the field that actually
+#     distinguishes the two bundled configs (SwinB: backbone = "swin_B_384_22k"; SwinT:
+#     backbone = "swin_T_224_1k") — guarding against the SwinT-config/SwinB-weights mismatch.
+RUN python3 -c "\
+import glob, os; \
+ckpt = os.environ['GDINO_CHECKPOINT_PATH']; \
+ckpt_size = os.path.getsize(ckpt); \
+assert ckpt_size > 900_000_000, f'groundingdino checkpoint too small: {ckpt_size} bytes at {ckpt}'; \
+cfg = os.environ['GDINO_CONFIG_PATH']; \
+assert os.path.isfile(cfg), f'missing baked gdino config at {cfg}'; \
+cfg_text = open(cfg).read(); \
+assert 'swin_B_384_22k' in cfg_text, f'{cfg} is not the Swin-B config (no swin_B_384_22k backbone marker) — SwinT config + SwinB checkpoint mismatches at load'; \
+hub = os.path.join(os.environ['HF_HOME'], 'hub'); \
+snaps = glob.glob(os.path.join(hub, 'models--bert-base-uncased', 'snapshots', '*')); \
+assert snaps, f'no bert-base-uncased snapshot under {hub}'; \
+snap = snaps[0]; \
+assert os.path.isfile(os.path.join(snap, 'config.json')), f'missing config.json in {snap}'; \
+assert os.path.isfile(os.path.join(snap, 'vocab.txt')), f'missing vocab.txt in {snap}'; \
+weight_files = glob.glob(os.path.join(snap, '*.safetensors')) + glob.glob(os.path.join(snap, 'pytorch_model.bin')); \
+assert weight_files, f'no bert weight file under {snap}'; \
+print(f'weights OK: gdino checkpoint {ckpt_size} bytes; swinB config at {cfg}; bert snapshot {snap} weight file(s) {weight_files}')"
+# Runtime offline guard: force transformers/huggingface_hub to resolve ONLY from the HF_HOME cache
+# baked above and never attempt a network call at run time (docs/ubuntu_setup.md §7 item 3 — the
+# eval host is assumed offline-capable). Set AFTER the prefetch layers above, which still need the
+# network. If the cache is ever incomplete this turns a would-be silent hang into a loud
+# "not found locally" error instead.
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
 
 # --- Copy the workspace source. Build context is ai_module/ (the fork tree; see header), so
 #     `src/` here resolves to ai_module/src/ — our repo's src/ synced in by sync_to_fork.*.
