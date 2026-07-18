@@ -877,3 +877,19 @@ re-run; Phase-2 vision-checkpoint half; Phase-3 in-image bake.
    §7a clean-clone gate.
 6. Then: #43/#33 calibration adjudication; Gate-0 residuals (LLM keys
    early Aug, Docker Hub account).
+
+## 2026-07-19 (session 18) — post-reboot runbook step 2: T13 clean rerun
+
+Executed runbook step 2 (T13, `docs/tasks/T13-local-llm-phase1-2/task.md`
+"Post-reboot clean rerun" section) on the healthy post-reboot box (GPU
+P0/2505 MHz, qwen2.5vl:3b fully GPU-resident, tg 80-88 t/s). Conformance:
+still FAIL at 7/10 (bar 8/10; up from pre-fix 6/10), stable across 2 runs,
+2 root causes with raw model output analyzed in
+`reports/local_llm_phase1/conformance.md`. Parse battery: unconfounded,
+all 75 questions in `reports/local_llm_phase2/parse_battery.md`; LLM
+tier reached 77% of calls; agreement 93%/80%/63% (numerical/OR/IF);
+recommendation KEEP FLOOR for all three QTypes, reasoning grounded in an
+18-divergence root-cause analysis. Filed #47 (goto/via_near mislabel),
+#48 (flattened stacked relative clauses), #49 (spurious avoid
+fabrication) for adjudication — model-content defects, no src/ changes.
+**Next:** step 3 (vision-checkpoint replay) per the runbook.

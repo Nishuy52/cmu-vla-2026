@@ -103,3 +103,42 @@ task (parse half only) and untouched.
   without touching the model or examples.
 - Phase 0 vision latency re-baseline (7B over-cap on busy box) was already
   flagged before this task; still open.
+
+## Post-reboot clean rerun (2026-07-19, runbook step 2)
+
+Both prior results above were invalidated (7B model used for Phase 1
+instead of the required 3B; Phase 2 confounded by full sim-stack
+contention — see `reports/local_llm_phase2/parse_battery.confounded.md`).
+This is the authoritative clean rerun on the healthy post-reboot box
+(GPU P0/2505 MHz under load, Ollama v0.32.1, qwen2.5vl:3b fully
+GPU-resident, 459cebe's schema-guided-repair + enum-synonym fixes live).
+
+- **Phase 1 conformance**: **still FAIL, 7/10** (bar 8/10) — up from the
+  pre-fix 6/10 baseline noted in `LOG.md`, but short of the bar. Stable
+  across 2 independent runs (same 3 questions fail both times). Two root
+  causes, both rule violations in the model's output (not adapter/schema
+  bugs — repair correctly steers on format issues, just not on wrong
+  content): (A) flat two-clause target instead of a nested disambiguator
+  for "X on Y closest/near to Z" phrasing (rule 4), and (B) fabricated
+  `avoid` clauses synthesized from unrelated anchors, occasionally
+  additionally schema-malformed. Full raw-output analysis in
+  `reports/local_llm_phase1/conformance.md` "Residual failure mode
+  analysis".
+- **Phase 2 parse battery**: unconfounded, all 75 questions,
+  `reports/local_llm_phase2/parse_battery.md`. LLM tier reached on 58/75
+  (77%); tg rate 80-88 t/s (mean 84.3, from `~/ollama/serve.log`), healthy.
+  Agreement with the regex floor: numerical 93%, object_reference 80%,
+  instruction_following 63%. 18/75 divergences, grouped into the same two
+  root causes as Phase 1 plus a route-leg-kind mislabeling pattern
+  (`"go near X"` tagged `via_near` instead of `goto`, rule 6) and one
+  cosmetic plural/singular miss. **Recommendation: KEEP FLOOR for all
+  three QTypes** — the floor is 100% valid + 100% qtype-correct at zero
+  latency on every question in the battery, and every non-cosmetic
+  divergence is a case where the floor is right and the LLM is
+  systematically wrong on a specific, identifiable construct (not random
+  noise an ensemble/voting scheme would average out).
+- **Issues filed**: #47 (goto/via_near mislabeling), #48 (flattened
+  stacked relative clauses), #49 (spurious avoid fabrication) — all three
+  are model-output content defects flagged for adjudication (few-shot
+  prompt additions are the likely fix), not adapter or ladder bugs;
+  no `src/` changes made per this task's constraint.
