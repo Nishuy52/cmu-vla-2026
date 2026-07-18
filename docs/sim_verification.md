@@ -502,6 +502,46 @@ fixture and writes a `.ply` you can open in any point-cloud viewer.*
 
 ---
 
+## Recording validation bags from the sim
+
+Purpose: local bags for the offline replay harness (`core.replay.BagSource`) and the
+overhead-tunables multi-scene validation (redteam H13 / SYS-F12 — the five overhead
+values are single-bag fits to the jingfan real-robot bag and need ≥2 more scenes).
+Recorded bags live in `data/sim_bags/<scene>_<name>/` (git-ignored; index in
+`data/sim_bags/README.md`).
+
+With the sim stack up (2.2) and sensors live (2.3), from the host:
+
+```bash
+# 1. Recorder, in the system container — detached, self-stops via SIGINT so the MCAP
+#    finalizes cleanly. RMW must be exported explicitly (gotcha 13: non-interactive
+#    exec shells skip .bashrc and would silently run FastDDS).
+docker exec -d iros2026_system bash -c '
+  source /home/docker/autonomy_stack_mecanum_wheel_platform/install/setup.bash &&
+  export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp &&
+  timeout -s INT 320 ros2 bag record -o /home/docker/bags/<scene>_<name> \
+    /camera/image /registered_scan /terrain_map /terrain_map_ext \
+    /state_estimation /way_point_with_heading'
+
+# 2. Drive coverage: either publish a question (module-driven run; needs a fresh
+#    ai_module boot — the adapter latches only the FIRST question per boot) or loop
+#    `ros2 topic pub --once /way_point_with_heading ...` waypoints (Tier-2.4 mechanism).
+#    Observed robot speed is slow (~0.06 m/s effective with obstacle avoidance):
+#    use ~1-1.5 m hops and ≥30 s per leg or the tour outruns the robot.
+
+# 3. After the recorder stops, copy out and free the container copy:
+docker cp iros2026_system:/home/docker/bags/<scene>_<name> data/sim_bags/
+```
+
+- Size: ~14-15 MB/s (dominated by `/camera/image` raw 1920×640 rgb) → ~5.5 GB for
+  320 s. Record uncompressed: the replay harness reads plain MCAP; fixtures distill
+  later (`python -m core.replay.fixtures extract`).
+- Verify every bag before trusting it: parse through `core.replay.BagSource` and check
+  all five contract topics convert for the full duration at the expected rates, and
+  that the odom bounding box actually covers the area you meant to record.
+- Scene swap between recordings follows the `docker cp` procedure in
+  `docs/ubuntu_setup.md` §5 and needs a sim relaunch to load the new scene.
+
 ## Known-good state checklist
 
 Re-run this table after **any** environment change (driver update, image re-pull, scene swap,

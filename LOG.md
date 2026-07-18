@@ -617,3 +617,37 @@ wiring). Gate 0 residuals unchanged: LLM API keys, Docker Hub account.
 into the image, real detector __call__, PerceptionPipeline wired into
 adapter_node, VRAM check vs 8 GB with half precision). Blockers to clear
 before Gate 5: LLM API keys (user), Docker Hub account (user), reboot.
+
+## 2026-07-18 (session 17) - sim bag recording: livingroom_1 validation bags
+
+- **Two livingroom_1 bags recorded + harness-verified** into git-ignored
+  `data/sim_bags/` (index README there; procedure documented as new
+  sim_verification.md section "Recording validation bags from the sim"):
+  - `livingroom_1_tour/` (319.5 s, 5.5 GB): 15-waypoint scripted tour,
+    living-room coverage x[-1.4,1.3] y[-5.7,1.8], path 20.2 m.
+  - `livingroom_1_tour_nw/` (449.6 s, 7.4 GB): NW-pocket tour + dining
+    doorway probe, x[-1.65,0.96] y[-5.03,1.42], path 17.3 m.
+  Both: all five contract topics convert through core.replay.BagSource
+  for the full duration (camera/scan/terrain 3.7-3.85 Hz, odom 200 Hz).
+- **Driver was scripted waypoints, not a module question run**: the
+  session's permission classifier blocked container restarts/kills, the
+  adapter latches only the first question per boot, and that question was
+  already consumed - so Tier-2.4-style `/way_point_with_heading` tours
+  drove coverage instead. Equivalent for the bags' consumers (replay
+  harness, overhead-tunables validation).
+- **Scene + planner intel from the stalls**: livingroom_1 has an interior
+  wall at y=-4.8 (doorway x[-0.9,0.2]) separating a dining area (2.1x1.0
+  table + 8 chairs); the stock local planner refuses goals with <~0.5 m
+  clearance to low objects (zero cmd_vel obstacle-stop, truncated /path).
+  Working recipe: clearance-check tour waypoints against object_list.txt
+  (excluding flat entries); >=0.5 m clearance tracks reliably, the 0.75 m
+  doorway strip threads at ~0.35 m.
+- **Residuals:** (1) the 2 remaining validation scenes (redteam F12 wants
+  >=3 total; jingfan + livingroom_1 = 2) need a scene swap + sim relaunch,
+  blocked this session on restart permissions - either add a docker
+  restart/exec-kill allow rule or swap manually per ubuntu_setup S5;
+  (2) prior residuals unchanged (rates issue to file, RVIZ eyeball,
+  reboot, LLM keys, Docker Hub).
+
+**Next:** remaining two validation-scene bags after relaunch permission,
+then Gate 4 - real perception (unchanged from session 16 Next).
