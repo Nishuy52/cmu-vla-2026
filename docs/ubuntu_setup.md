@@ -6,9 +6,9 @@ tick the checkboxes as you go and note deviations in `LOG.md`.*
 
 ## 0. OS install
 
-- [ ] **Ubuntu 24.04 LTS (Noble), 64-bit** — the challenge stack is built for it; do not substitute 22.04/25.x.
-- [ ] During install: enable third-party drivers so the NVIDIA driver installs cleanly.
-- [ ] Disk: ≥ 150 GB free for the repo + Docker images + Unity scene binaries + sample data.
+- [x] **Ubuntu 24.04 LTS (Noble), 64-bit** — the challenge stack is built for it; do not substitute 22.04/25.x.
+- [x] During install: enable third-party drivers so the NVIDIA driver installs cleanly.
+- [x] Disk: ≥ 150 GB free for the repo + Docker images + Unity scene binaries + sample data.
 - [ ] `sudo apt update && sudo apt full-upgrade -y && sudo reboot`
 
 ## 1. NVIDIA driver + verify GPU
@@ -57,6 +57,13 @@ cd src && pytest -m "" -n auto                    # the whole core suite must pa
 
 If copying from Windows rather than cloning: copy the repo folder EXCLUDING `.venv/`, `data/`,
 `upstream/` (re-fetch upstream fresh below — Windows checkouts can mangle line endings/symlinks).
+
+**As-built (18 Jul 2026):** the repo actually lives at `~/cmu_ws/cmu-vla-2026` with a symlink
+`~/vla -> ~/cmu_ws/cmu-vla-2026`, so every `~/vla` path in this guide works unchanged. The §0–§3
+apt installs are scripted in `~/cmu_ws/setup_env.sh` (idempotent, re-runnable). ROS 2 Jazzy
+(`ros-jazzy-desktop` + `ros-dev-tools`) is also installed natively and sourced in `~/.bashrc` —
+not required by the Docker-based challenge stack, but useful for host-side `ros2 topic` debugging
+against the host-networked containers.
 
 ## 4. Challenge repo + submodule
 

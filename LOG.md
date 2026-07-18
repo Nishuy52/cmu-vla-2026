@@ -494,3 +494,33 @@ follow-up queue (PRs to close them).
 **Next:** unchanged from session 14 - OR/IF image answer-key visual
 transcription (arch-F3 residual), Gate 0 execution, issues #11-#13
 (now plus #15-#19 polish queue) as the actionable code follow-ups.
+
+## 2026-07-18 (session 16) - Ubuntu day-one: Gate 1 complete
+
+- Machine bring-up on the fresh Ubuntu 24.04.4 install (phase2_playbook
+  Gate 1 / ubuntu_setup §0-§4). All installs scripted in
+  `~/cmu_ws/setup_env.sh` (outside the repo, idempotent).
+- Deviations from the guide, recorded in §3 "As-built": repo at
+  `~/cmu_ws/cmu-vla-2026`, symlink `~/vla` -> there (all doc paths work
+  verbatim); native ROS 2 Jazzy installed in addition to the Docker
+  stack (host-side debugging only).
+- Removed a suspicious snap curl (publisher "aoilinux" - not the
+  official curl publisher; likely typosquat, worth remembering the box
+  had it) -> proper apt curl 8.5.0.
+- Verified: NVIDIA driver 595.71 on the RTX 4060 Laptop (8 GB - below
+  the 10-14 GB eval target; §8 half-precision posture applies, full
+  config validates on the SoC cluster). Docker 29.6.2 + NVIDIA
+  Container Toolkit; `docker run --gpus all ubuntu nvidia-smi` PASSES.
+  Disk 158 GB free. §0 full-upgrade done via script but NO reboot yet -
+  do one before Gate 2 sim work in case of kernel/driver updates.
+- Upstream cloned + submodule at the expected pin `81035e9` (§4).
+- venv + deps (numpy/pytest/pytest-xdist/rosbags/pypdf). **Full gate
+  green on Linux first try: 1095 passed, 46 skipped, 78 s** (`pytest
+  -m "" -n auto` from `src/`); tools suite 33/33. No path/line-ending
+  surprises - the Gate 1 exit criterion is met.
+
+**Next:** Gate 2 - training scene binaries (Drive folder in upstream
+README; remember gdown failed on the sample-data folder 10 Jul, so
+browser download likely needed), pull upstream images, stock-sim smoke
+tests 2.1-2.5 per sim_verification.md. Gate 0 residuals: LLM API keys,
+Docker Hub account.
