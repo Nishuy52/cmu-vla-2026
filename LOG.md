@@ -590,3 +590,30 @@ then Gate 3 (our module replaces dummy) per phase2_playbook.
 **Next:** Gate 3.3 tiling-constant calibration against the sim panorama,
 then Gate 4 (GroundingDINO weights + real detector + PerceptionPipeline
 wiring). Gate 0 residuals unchanged: LLM API keys, Docker Hub account.
+
+## 2026-07-18 (session 16, continued) - #31 fixed, #32 closed, Gate 3.3 PASS
+
+- **#31 fixed and verified** (61f046e): NumericalHead withholds on empty
+  index; executor found the defect fired through a SECOND channel
+  (factory._final_answer verify path bypasses floors entirely) and
+  closed both. 7 tests added; independent verifier CONFIRMED all claims
+  incl. fresh e2e repro (empty scene -> 2, three-sofas+absent-noun -> 0).
+- **#32 closed** (locking tests only): object_ref and instruction heads
+  audited - both already withhold on zero evidence and defer to
+  better-informed floors. Full gate 1105 passed. Audit surfaced a
+  confidence-gating design question -> filed as **#33** (committable
+  route prefix accepts n_obs=1 legs; needs expected-points adjudication).
+- **Gate 3.3 PASS, no flips**: AZIMUTH_SIGN/-1, COLUMN0_YAW_OFFSET/pi,
+  ELEVATION_SIGN/-1 all CONFIRMED against live livingroom_1 pano -
+  7 GT objects spanning the ring, <2% column error; camera-level
+  consistent. Evidence: docs/tiling_calibration.md +
+  data/calibration/pano_livingroom_1.png. Sim publishes bgr8 (not rgb8);
+  checked - image_to_pano already swaps to RGB, no defect.
+- Issues #30/#31 filed this session (gh allow rules added to user +
+  project settings; note: rules match direct `gh issue ...` commands,
+  not scripts wrapping them). #31 auto-closed by commit; #32 by 70922e6.
+
+**Next:** Gate 4 - real perception (GroundingDINO deps + weights baked
+into the image, real detector __call__, PerceptionPipeline wired into
+adapter_node, VRAM check vs 8 GB with half precision). Blockers to clear
+before Gate 5: LLM API keys (user), Docker Hub account (user), reboot.
