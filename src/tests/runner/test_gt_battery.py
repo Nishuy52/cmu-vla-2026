@@ -425,6 +425,24 @@ def test_livingroom_3_registered_as_data_unfittable():
     assert "livingroom_3" in _DATA and _DATA["livingroom_3"]
 
 
+# --------------------------------------------------------------------------- issue #15
+
+
+def test_write_report_stamps_default_calibration(tmp_path):
+    """write_report has no dangling ``cal`` param — provenance stamps default_calibration."""
+    import hashlib
+
+    from core.calibration import default_calibration, to_json
+
+    scores = [
+        GB.GTQuestionScore(scene="a", qtype=QType.NUMERICAL.value, question="q", our_count=1),
+    ]
+    _md, json_path = GB.write_report(scores, [], tmp_path)
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    expected = hashlib.sha1(to_json(default_calibration()).encode("utf-8")).hexdigest()[:12]
+    assert payload["provenance"]["calibration_sha1"] == expected
+
+
 # --------------------------------------------------------------------------- issue #16
 
 
@@ -447,24 +465,6 @@ def test_load_answers_missing_file_no_warning(tmp_path, capsys):
     assert result is None
     err = capsys.readouterr().err
     assert err == ""
-
-
-# --------------------------------------------------------------------------- issue #15
-
-
-def test_write_report_stamps_default_calibration(tmp_path):
-    """write_report has no dangling ``cal`` param — provenance stamps default_calibration."""
-    import hashlib
-
-    from core.calibration import default_calibration, to_json
-
-    scores = [
-        GB.GTQuestionScore(scene="a", qtype=QType.NUMERICAL.value, question="q", our_count=1),
-    ]
-    _md, json_path = GB.write_report(scores, [], tmp_path)
-    payload = json.loads(json_path.read_text(encoding="utf-8"))
-    expected = hashlib.sha1(to_json(default_calibration()).encode("utf-8")).hexdigest()[:12]
-    assert payload["provenance"]["calibration_sha1"] == expected
 
 
 # --------------------------------------------------------------------------- issue #17
@@ -492,3 +492,40 @@ def test_main_cli_summary_prints_instance_match_not_iou_headline(tmp_path, monke
     assert "or_instance_match=1/2" in out
     assert "or_iou=" not in out  # the old headline key must be gone
     assert "or_iou_diag=" in out  # IoU survives as a diagnostic
+
+
+# --------------------------------------------------------------------------- issue #26
+
+
+def test_write_report_surfaces_parse_notes_diagnostics(tmp_path):
+    """Non-empty per-question parse_notes get their own markdown diagnostics section."""
+    scores = [
+        GB.GTQuestionScore(
+            scene="a", qtype=QType.NUMERICAL.value, question="How many photos near it?",
+            our_count=1, parse_notes="unparsed clause text dropped: 'near it'",
+        ),
+        GB.GTQuestionScore(
+            scene="b", qtype=QType.NUMERICAL.value, question="How many chairs?",
+            our_count=2,  # clean parse: no parse_notes
+        ),
+    ]
+    md_path, json_path = GB.write_report(scores, [], tmp_path)
+    md = md_path.read_text(encoding="utf-8")
+    assert "## Parse diagnostics" in md
+    assert "unparsed clause text dropped: 'near it'" in md
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    parse_notes_by_scene = {s["scene"]: s["parse_notes"] for s in payload["scores"]}
+    assert parse_notes_by_scene["a"] == "unparsed clause text dropped: 'near it'"
+    assert parse_notes_by_scene["b"] == ""
+
+
+def test_write_report_omits_parse_diagnostics_when_all_clean(tmp_path):
+    """No section is emitted when every row's parse was clean (no dead heading)."""
+    scores = [
+        GB.GTQuestionScore(
+            scene="a", qtype=QType.NUMERICAL.value, question="How many chairs?", our_count=2,
+        ),
+    ]
+    md_path, _json_path = GB.write_report(scores, [], tmp_path)
+    assert "## Parse diagnostics" not in md_path.read_text(encoding="utf-8")

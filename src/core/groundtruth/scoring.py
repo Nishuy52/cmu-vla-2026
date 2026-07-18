@@ -236,6 +236,9 @@ class NumericalScore:
     annotated_targets_of_class: int | None = None
     csv_instances_of_class: int | None = None
     note: str = ""
+    #: Parse-time notes off the resolved Plan (e.g. "unparsed clause text dropped: ...")
+    #: — regex-tier ctx.notes joined by parse_regex. Empty when the parse was clean.
+    parse_notes: str = ""
 
 
 def _independent_count(
@@ -455,6 +458,7 @@ def score_numerical(
             gt_count_independent=None,
             independent_source="none",
             note="no target parsed",
+            parse_notes=plan.notes,
         )
     # min_obs default 1: GT is fully observed (every instance has n_obs=3), so raising
     # this gate does not change the count on GT scenes — the sweep may vary it but it is
@@ -503,6 +507,7 @@ def score_numerical(
         annotated_targets_of_class=ann_cov,
         csv_instances_of_class=csv_cov,
         note=note,
+        parse_notes=plan.notes,
     )
 
 
@@ -520,6 +525,9 @@ class ObjectRefScore:
     match_method: str = "none"  # "exact" | "fuzzy" | "relation" | "unique" | "none"
     our_target_id: int | None = None  # instance id of our top resolver pick, if any
     note: str = ""
+    #: Parse-time notes off the resolved Plan (e.g. "unparsed clause text dropped: ...")
+    #: — regex-tier ctx.notes joined by parse_regex. Empty when the parse was clean.
+    parse_notes: str = ""
 
 
 def _iter_statements(referential: dict | None):
@@ -695,6 +703,7 @@ def score_object_reference(
             iou=0.0, our_marker=None, gt_target_id=gt_id, target_source=source,
             match_method=method, our_target_id=our_target_id,
             note="our resolver returned no candidate",
+            parse_notes=plan.notes,
         )
 
     if gt_id is not None and gt_id in by_id:
@@ -704,6 +713,7 @@ def score_object_reference(
         return ObjectRefScore(
             iou, our_marker, gt_id, source, method,
             our_target_id=our_target_id, note=note,
+            parse_notes=plan.notes,
         )
 
     # No trustworthy GT target: report self-IoU (1.0) but flag it clearly.
@@ -715,6 +725,7 @@ def score_object_reference(
         match_method="none",
         our_target_id=our_target_id,
         note="no GT target matched; IoU undefined (flagged, not guessed)",
+        parse_notes=plan.notes,
     )
 
 

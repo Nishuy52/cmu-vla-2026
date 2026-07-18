@@ -189,6 +189,42 @@ def test_independent_count_strict_class_excludes_photo_frame():
     assert ns.independent_source == "referential"
 
 
+# ----------------------------------------------------- parse-time notes (issue #26)
+
+
+def test_score_numerical_propagates_plan_parse_notes(monkeypatch):
+    """A clause-dropped-at-parse-time signal must survive onto NumericalScore."""
+    from core.plan_schema import Plan, TargetSpec
+    from core.interfaces import QType as _QType
+
+    fake_plan = Plan(
+        qtype=_QType.NUMERICAL, question_raw="q",
+        target=TargetSpec(noun="photo", raw="photo"),
+        notes="unparsed clause text dropped: 'near the thing'",
+    )
+    monkeypatch.setattr(S, "parse_regex", lambda text: fake_plan)
+    idx = BasicSceneIndex([_rec(1, "photo", 0, 0)])
+    ns = score_numerical("How many photos near the thing?", idx)
+    assert ns.parse_notes == "unparsed clause text dropped: 'near the thing'"
+
+
+def test_score_object_reference_propagates_plan_parse_notes(monkeypatch):
+    """Same clause-dropped signal must survive onto ObjectRefScore."""
+    from core.plan_schema import Plan, TargetSpec
+    from core.interfaces import QType as _QType
+
+    fake_plan = Plan(
+        qtype=_QType.OBJECT_REFERENCE, question_raw="q",
+        target=TargetSpec(noun="photo", raw="photo"),
+        notes="unparsed clause text dropped: 'near the thing'",
+    )
+    monkeypatch.setattr(S, "parse_regex", lambda text: fake_plan)
+    instances = [_rec(1, "photo", 0, 0)]
+    idx = BasicSceneIndex(instances)
+    ors = S.score_object_reference("Go to the photo near the thing.", idx, instances)
+    assert ors.parse_notes == "unparsed clause text dropped: 'near the thing'"
+
+
 # ------------------------------------------------------ class_only exclusion (NUM-F6b)
 
 

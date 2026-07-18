@@ -598,6 +598,10 @@ class GTQuestionScore:
     frame_aligned: bool | None = None
     fit_residual_m: float | None = None
     note: str = ""
+    #: Parse-time notes off the resolved Plan (meth issue #26) — e.g. "unparsed clause
+    #: text dropped: ..." — surfaced here so a clause-dropped resolution is reviewable
+    #: from the report instead of being parse-time-only trivia. Empty on a clean parse.
+    parse_notes: str = ""
 
 
 # --------------------------------------------------------------------------- per-scene
@@ -646,7 +650,7 @@ def score_scene(
                 annotated_targets_of_class=ns.annotated_targets_of_class,
                 csv_instances_of_class=ns.csv_instances_of_class,
                 gt_answer_true=gt_true, true_match=true_match, true_source=true_source,
-                note=note,
+                note=note, parse_notes=ns.parse_notes,
             )
         )
 
@@ -659,6 +663,7 @@ def score_scene(
                 gt_target_id=ors.gt_target_id, our_target_id=ors.our_target_id,
                 target_source=ors.target_source,
                 match_method=ors.match_method, note=ors.note,
+                parse_notes=ors.parse_notes,
             )
         )
 
@@ -718,10 +723,13 @@ def score_scene(
         mapped = frame.apply(np.asarray([start_pt], dtype=float))[0]
         spawn_xy = (float(mapped[0]), float(mapped[1]))
 
+    from core.parsing.regex_tier import parse_regex as _parse_regex_if
+
     for i, text in enumerate(if_texts):
         traj_q = _IF_TRAJ_INDEX.get(i)
         rec = GTQuestionScore(
             scene=gt.scene_name, qtype=QType.INSTRUCTION_FOLLOWING.value, question=text,
+            parse_notes=_parse_regex_if(text).notes,
         )
         traj_path = None
         if questions_dir is not None and traj_q is not None:
@@ -1240,6 +1248,18 @@ def write_report(
     )
     lines.append("\n## Per-question\n")
     lines.append(_md_table(scores))
+
+    # Parse diagnostics (issue #26): parse-time notes (e.g. "unparsed clause text
+    # dropped: ...") are otherwise invisible outside a one-off debug run — surface any
+    # non-empty ones here so a clause-dropped resolution is reviewable from the report.
+    parse_diag_rows = [s for s in scores if s.parse_notes]
+    if parse_diag_rows:
+        lines.append("\n## Parse diagnostics\n")
+        lines.append("| Scene | Type | Question | Parse notes |\n|---|---|---|---|\n")
+        for s in parse_diag_rows:
+            q = s.question if len(s.question) <= 55 else s.question[:52] + "..."
+            lines.append(f"| {s.scene} | {s.qtype[:4]} | {q} | {s.parse_notes} |")
+        lines.append("")
 
     md_path.write_text("\n".join(lines), encoding="utf-8")
 
