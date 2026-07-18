@@ -52,7 +52,8 @@ second copy by hand; the sync scripts mirror our payload into the fork:
 - `sync_to_fork.ps1` — Windows (staging only; no build possible on Windows).
 - `sync_to_fork.sh`  — Ubuntu (staging, then build with compose).
 
-Both copy `docker/ai_module_fork/docker/Dockerfile` → `<fork>/ai_module/docker/Dockerfile` and
+Both copy `docker/ai_module_fork/docker/Dockerfile` → `<fork>/ai_module/docker/Dockerfile`,
+`docker/ai_module_fork/ai_module/launch_with_llm.sh` → `<fork>/ai_module/launch_with_llm.sh`, and
 `src/{core,ros_adapter}` → `<fork>/ai_module/src/`, and **exclude `src/tests/`** (plus
 `__pycache__`, `.pytest_cache`, `*.pyc`).
 
@@ -97,14 +98,22 @@ optional keys) so it launches our node:
     network_mode: host
     environment:
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp   # re-assert: OVERRIDES the Dockerfile ENV
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}   # short dev-box default; override long at eval
     env_file:
       - ../.env.llm                      # optional, gitignored: OPENAI_API_KEY=... etc.
     command: >
-      bash -lc "source /opt/vla/ws/install/setup.bash &&
-                ros2 launch vla_ai_module ai_module.launch.py"
+      /bin/bash -lc "/opt/vla/launch_with_llm.sh"
     stdin_open: true
     tty: true
 ```
+
+(Phase 3: the `command` above is the in-image Ollama launch wrapper, not a bare
+`ros2 launch` — it starts the baked `ollama serve`, pre-warms the model, then execs the
+same `ros2 launch vla_ai_module ai_module.launch.py` tail. See
+`docker/ai_module_fork/ai_module/launch_with_llm.sh` and
+`reports/local_llm_phase3/BUILD_AND_VERIFY.md`. The actual `docker/ai_module_fork/docker/compose.yml`
+and `compose_gpu.yml` in this repo are the copy-pasteable source of truth; this snippet
+mirrors them.)
 
 The `system` service is unchanged (`docs/upstream_notes.md` gotcha 12: never touch the system
 container).

@@ -44,7 +44,12 @@ sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart doc
 docker run --rm --gpus all ubuntu nvidia-smi    # verify GPU visible in a container
 ```
 
-## 3. This workspace
+**Post-reboot note:** after a full reboot (not just `newgrp docker` in the current
+shell), the `docker` group membership from `usermod -aG docker $USER` is picked up by
+new login sessions automatically — plain `docker ...` commands work with no wrapper.
+The `sg docker -c '...'` wrapper is only needed as a fallback in a **stale session**
+that predates the group add (e.g. a long-lived autonomous/agent session started before
+the reboot) — use it there instead of restarting that session.
 
 ```bash
 sudo apt install -y git git-lfs python3.12-venv
@@ -221,17 +226,36 @@ git clone <fork-remote> /tmp/fork-clean
 ~/vla/docker/ai_module_fork/sync_to_fork.sh /tmp/fork-clean
 #    -> writes /tmp/fork-clean/ai_module/docker/Dockerfile and /tmp/fork-clean/ai_module/src/
 
-# 2. edit the fork's docker/compose.yml ai_module service to launch OUR node:
+# 2. edit the fork's docker/compose.yml ai_module service to launch OUR node. Phase 3
+#    (in-image Ollama bake, docs/local_llm_plan.md): the command is the launch wrapper,
+#    not a bare ros2 launch — it starts the baked ollama serve + pre-warm before exec'ing
+#    the same ros2 launch tail:
 #    build.context: ../ai_module ; build.dockerfile: docker/Dockerfile
-#    command: ros2 launch vla_ai_module ai_module.launch.py
+#    command: /bin/bash -lc "/opt/vla/launch_with_llm.sh"
 #    environment: RMW_IMPLEMENTATION=rmw_cyclonedds_cpp  (re-assert; OVERRIDES the Dockerfile ENV)
+#                 OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}  (short dev-box default; see below)
 #    env_file: ../.env.llm  (optional; VLA_LLM_* keys)
-#    Full snippet in docker/ai_module_fork/README.md.
+#    Full snippet in docker/ai_module_fork/README.md; ready-made files at
+#    docker/ai_module_fork/docker/compose.yml and compose_gpu.yml (copy-paste, not auto-synced —
+#    gotcha 12, they live outside ai_module/).
 
 # 3. build + bring the stack up exactly as evaluators do:
 xhost +
 cd /tmp/fork-clean/docker && docker compose -f compose.yml up --build -d
 ```
+
+**Phase-3 bake (in-image Ollama, `docs/local_llm_plan.md` Phase 3 — authored-pending-build,
+`b507eb9`):** the Dockerfile now also bakes an Ollama standalone server (tarball pinned
+`OLLAMA_VERSION=v0.32.1`, non-CUDA/non-CPU runner variants pruned) plus the `qwen2.5vl:3b`
+model blobs, so the local LLM tier is served entirely in-container at eval (no host
+Ollama at eval — organisers run only this container). Image grows from the Gate-4
+baseline (6.76 GB) by roughly **+5 GB**. The bake needs network at *build* time (Ollama
+release + model registry, same class of build-time dependency as the GDINO weights
+fetch) even though the resulting image is offline at *runtime*. Ordered post-build
+verification (size delta, boot-log grep sequence, curl smoke, in-container ladder
+conformance, VRAM coexistence with GDINO, and the clean-clone gate below) is
+`reports/local_llm_phase3/BUILD_AND_VERIFY.md` — run it after every Phase-3 image build
+before trusting the result.
 
 ~~Resolve the three **confirm-on-Ubuntu flags** marked in the Dockerfile as you go~~ **All three
 resolved 18 Jul** (details in the Dockerfile's updated comments): (1) CycloneDDS cross-container —
@@ -288,12 +312,13 @@ secondary) the SDK must be present: `pip install -e '.[llm]'` from `src/` (or
 (`tools/llm_conformance.py`, `tools/llm_parse_battery.py`) needs this installed.
 
 **Submission requirement:** the host install above is the DEV loop only. The
-submission image must serve the model IN-CONTAINER (organisers run only our
-container at eval) — Ollama binary + baked `qwen2.5vl:3b` blobs go into the
+submission image serves the model IN-CONTAINER (organisers run only our
+container at eval) — Ollama binary + baked `qwen2.5vl:3b` blobs are baked into the
 ai_module Dockerfile alongside the GDINO weights, with `ollama serve` +
-pre-warm in the launch wrapper. Spec: `docs/local_llm_plan.md` Phase 3. When
-that lands, THIS section's Dockerfile/compose implications must be reflected
-in §7a.
+pre-warm in the launch wrapper. **Authored 19 Jul (`b507eb9`), verification
+pending the first post-reboot build** — spec: `docs/local_llm_plan.md` Phase 3;
+Dockerfile/compose implications are reflected in §7a; ordered post-build
+verification: `reports/local_llm_phase3/BUILD_AND_VERIFY.md`.
 
 ## 8b. Fast iteration: host-native ai_module node (containers at checkpoints only)
 

@@ -33,11 +33,20 @@ Two regimes, two model sizes:
 | Regime | GPU state | Model | Serving |
 |---|---|---|---|
 | **Live sim runs** | Unity + GDINO resident (~3.5-5 GB) | small VLM ~3-4B Q4 (first pick: `qwen2.5vl:3b`, alt `gemma3:4b`) — ~3 GB | Ollama, on-demand load |
-| **Offline dev** (parse battery, prompt work, checkpoint replay vs recorded panos — sim NOT running) | GPU free | 7-8B VLM Q4 (first pick: `qwen2.5vl:7b`) — ~6 GB | Ollama |
+| **Offline dev** (parse battery, prompt work, checkpoint replay vs recorded panos — sim NOT running) | GPU free | ~~7-8B VLM Q4 (`qwen2.5vl:7b`) — ~6 GB~~ **DISQUALIFIED (Phase 0, 18 Jul) — see below** | Ollama |
 
-- Offline regime is where most of the pre-August work happens (parse
-  quality, prompt iteration, checkpoint evaluation against the recorded
-  bags' real panoramas) — it gets the better model.
+- **7B disqualified for the vision shapes (Phase 0 measurement):** `qwen2.5vl:7b` warm
+  text-parse is fine (1.8 s), but its vision shapes spill from GPU to CPU under
+  contention on the 8 GB 4060 — 1-tile 21.6 s and full-pano 91.3 s, both over the 20 s
+  per-call cap, at an `OLLAMA_CONTEXT_LENGTH=8192` context (the CP2 4-tile shape alone
+  needs ~4.2k tokens, so 8k is the floor, not a knob to shrink further to buy headroom).
+  Root cause is VRAM, not raw compute: 7B Q4 (~6 GB) leaves too little headroom at 8k
+  context on a 7.6 GiB-usable card once anything else (Unity/GDINO/OS) shares the GPU,
+  and it offloads layers to CPU rather than failing loud. Offline dev now uses **3B
+  everywhere** (same model as the live regime — no separate offline-tier model); the
+  7B row above is struck through as a historical record of the rejected plan, not a
+  live recommendation. Revisit only on a box with materially more VRAM headroom at 8k
+  context, or a smaller/faster 7-8B quant that actually clears the vision shapes.
 - Live regime only needs to prove wiring + latency + VRAM coexistence;
   the 3B is enough for that, and August's cloud models replace it for
   quality.
@@ -84,6 +93,15 @@ Two regimes, two model sizes:
 ### Phase 3 — live integration, IN-IMAGE serving (~1-2 sessions; after
 ### Gate-4 live checklist)
 
+**Status: authored-pending-build (19 Jul, commit `b507eb9`, interrupted by a host
+reboot).** The Dockerfile bake, launch wrapper, and compose files below are written and
+committed but have **not yet run on Ubuntu** — every "Exit" bar in this phase is the
+acceptance criterion for the first post-reboot build, not a confirmed result. Ordered
+post-build verification (image size delta, boot-log grep sequence, curl smoke,
+in-container ladder conformance, VRAM coexistence with GDINO, and the §7a clean-clone
+gate) lives at **`reports/local_llm_phase3/BUILD_AND_VERIFY.md`** — run it immediately
+after the build and update this section's status once it passes.
+
 **Requirement (user, 18 Jul): the local model must be served inside the
 ai_module container, not from the host** — at eval the organisers run only
 our container, so a host Ollama does not exist there. The host install
@@ -93,18 +111,31 @@ our container, so a host Ollama does not exist there. The host install
    pattern: fetched at build, offline at runtime): Ollama standalone
    binary+libs (prune rocm/mlx variants, keep cuda) + the `qwen2.5vl:3b`
    model blobs pulled at build time into a baked `OLLAMA_MODELS` dir.
-   Estimated +5-7 GB on the 20.3 GB image — matters for the Docker Hub
-   push (Gate-0 residual).
+   **Authored** at `docker/ai_module_fork/docker/Dockerfile` (pinned
+   `OLLAMA_VERSION=v0.32.1`; the linux/amd64 release asset became `.tar.zst` as of
+   v0.32, confirmed on this box at Phase 0 — pinning avoids silently picking up a
+   differently-packaged "latest"). Estimated **+~5 GB** on the 6.76 GB Gate-4 baseline
+   (the 20.3 GB figure in the original estimate above predates the Gate-4 measurement
+   and the 7B disqualification) — matters for the Docker Hub push (Gate-0 residual);
+   measured delta goes in `reports/local_llm_phase3/BUILD_AND_VERIFY.md` step (a) once
+   built.
 2. Launch wrapper: start `ollama serve` (OLLAMA_CONTEXT_LENGTH=8192, long
    keep-alive) before/alongside the node, pre-warm the model at boot
    (Phase-0 cold load 7-10 s), then the adapter. Local-slot env
    (`VLA_LLM_LOCAL_*` → `http://localhost:11434/v1`) in the compose
-   environment (re-assert like RMW, gotcha 13).
+   environment (re-assert like RMW, gotcha 13). **Authored** at
+   `docker/ai_module_fork/ai_module/launch_with_llm.sh`; wired into
+   `docker/ai_module_fork/docker/compose.yml` / `compose_gpu.yml` as the `ai_module`
+   service's `command:`. Dev-box `OLLAMA_KEEP_ALIVE` defaults SHORT (5m, compose
+   override) vs the image's baked default LONG (60m) — see `compose_gpu.yml`'s header
+   comment for the dev-box-vs-eval-box rationale (shared 8 GB GPU vs a dedicated 24 GB
+   eval 4090).
 3. One live question per QType on the 3B with GDINO resident: VRAM watch,
    ledger latencies, no watchdog-floor regressions.
    Exit: live run with `llm=True` served ENTIRELY in-container, ledger
    latencies inside budget, no OOM, and the §7a clean-clone packaging
-   gate still passes.
+   gate still passes. **Not yet run** — pending the post-reboot build; see
+   `reports/local_llm_phase3/BUILD_AND_VERIFY.md` steps (e)/(f).
 
 ### Phase 4 — August switchover (when keys arrive)
 1. Fill primary/secondary slots with the real keys; the baked local tier
