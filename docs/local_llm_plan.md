@@ -81,24 +81,67 @@ Two regimes, two model sizes:
    ledger entries.
    Exit: documented matrix + battery deltas committed to reports/.
 
-### Phase 3 — live integration (~1 session; after Gate-4 live checklist)
-1. Add the local-slot env to the compose `ai_module` service (host
-   networking → `http://localhost:11434/v1` reachable from container;
-   re-assert like RMW per gotcha 13/§7a).
-2. One live question per QType on the 3B with GDINO resident: VRAM watch
-   (`nvidia-smi` logging), ledger latencies, no watchdog-floor regressions.
-   Exit: live run with `llm=True` completes with ledger latencies inside
-   budget and no OOM.
+### Phase 3 — live integration, IN-IMAGE serving (~1-2 sessions; after
+### Gate-4 live checklist)
+
+**Requirement (user, 18 Jul): the local model must be served inside the
+ai_module container, not from the host** — at eval the organisers run only
+our container, so a host Ollama does not exist there. The host install
+(Phase 0) remains the dev-loop convenience; the submission path is:
+
+1. Bake serving into the image (Dockerfile, mirroring the GDINO-weights
+   pattern: fetched at build, offline at runtime): Ollama standalone
+   binary+libs (prune rocm/mlx variants, keep cuda) + the `qwen2.5vl:3b`
+   model blobs pulled at build time into a baked `OLLAMA_MODELS` dir.
+   Estimated +5-7 GB on the 20.3 GB image — matters for the Docker Hub
+   push (Gate-0 residual).
+2. Launch wrapper: start `ollama serve` (OLLAMA_CONTEXT_LENGTH=8192, long
+   keep-alive) before/alongside the node, pre-warm the model at boot
+   (Phase-0 cold load 7-10 s), then the adapter. Local-slot env
+   (`VLA_LLM_LOCAL_*` → `http://localhost:11434/v1`) in the compose
+   environment (re-assert like RMW, gotcha 13).
+3. One live question per QType on the 3B with GDINO resident: VRAM watch,
+   ledger latencies, no watchdog-floor regressions.
+   Exit: live run with `llm=True` served ENTIRELY in-container, ledger
+   latencies inside budget, no OOM, and the §7a clean-clone packaging
+   gate still passes.
 
 ### Phase 4 — August switchover (when keys arrive)
-1. Fill primary/secondary slots with the real keys; local demotes to
-   tier-3 failover exactly as the ladder intends. Re-run the Phase-2
-   battery with cloud models to re-decide the checkpoint matrix.
-2. **Decision item (flag now, decide then):** bake the quantized local
-   model + server into the submission image as an eval-day dark-network
-   fallback tier (+2-4 GB image size; organizers provide tokens at
-   runtime, but a network hiccup then costs a whole question — the local
-   tier turns that into degraded-quality instead of regex-floor).
+1. Fill primary/secondary slots with the real keys; the baked local tier
+   demotes to tier-3 failover exactly as the ladder intends — now also
+   covering eval-day network hiccups (degraded-quality instead of
+   regex-floor). Re-run the Phase-2 battery with cloud models to
+   re-decide the checkpoint matrix.
+2. Revisit image size vs Docker Hub limits if the push is painful
+   (options: tighter quant, or drop the bake and accept regex-floor on
+   network loss).
+
+## Phase 0 results (18 Jul 2026)
+
+Ollama v0.32.1 standalone (no sudo: tarball → `~/ollama`, `ollama serve` as a
+user process; GitHub-releases asset is now `.tar.zst`), CUDA detected on the
+4060 (cuda_v13 runner vs driver 13.2). `qwen2.5vl:3b` (3.2 GB) and
+`qwen2.5vl:7b` (6.0 GB) pulled.
+
+- **Config requirement discovered:** default served context auto-sizes to
+  4096, and the CP2 4-tile shape alone is ~4.2k tokens → HTTP 400. Serve with
+  `OLLAMA_CONTEXT_LENGTH=8192` (all four shapes fit).
+- Latency vs the 20 s per-call cap (cold = includes model load; warm = mean
+  of 3; measured while the sim stack + a pathological CPU-burning detector
+  retry loop (#38/#39) were running — treat as worst-case-busy, re-baseline
+  7B on a quiet box):
+
+| model | parse | tile1 | tile4 | pano |
+|---|---|---|---|---|
+| qwen2.5vl:3b warm | 1.8 s | 1.0 s | 1.3 s | 1.1 s |
+| qwen2.5vl:7b warm | 1.8 s | **21.6 s (over)** | 5.2 s | **91.3 s (over)** |
+
+- **Verdict:** 3B passes every shape with 10× headroom even on a loaded box —
+  live regime confirmed feasible. 7B text-parse is fine; its vision shapes
+  spill to CPU under GPU contention — usable offline only if a quiet-box
+  re-baseline comes in under cap, else drop to 3B everywhere or try a
+  mid-size alternative. Cold loads (7-10 s for 3B) mean the live config
+  should pre-warm at boot and use a long `OLLAMA_KEEP_ALIVE`.
 
 ## Risks / mitigations
 

@@ -245,8 +245,61 @@ local/regex only (offline).
 
 Evaluation (sim round) runs our container on the organisers' machine — plan VRAM for the RTX 4090
 spec (architecture §6 targets ≈10–14 GB peak). If your home GPU is smaller, develop with the
-detector in half precision / smaller variants and validate the full config on the SoC cluster
-(`docs/soc_cluster_guide.md`) or accept slower local runs.
+detector in half precision / smaller variants and accept slower local runs. *(The SoC cluster
+fallback formerly noted here is NOT available — constraint confirmed 18 Jul 2026.)*
+
+## 8a. Local LLM serving (dev bridge until API keys; see docs/local_llm_plan.md)
+
+No-sudo user-space install (the systemd installer needs root; this doesn't):
+
+```bash
+mkdir -p ~/ollama && cd ~/ollama
+curl -fsSL -O https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tar.zst
+tar --use-compress-program=unzstd -xf ollama-linux-amd64.tar.zst   # → bin/ lib/
+# Serve with the models dir kept inside ~/ollama and an 8k context —
+# REQUIRED: the CP2 4-tile call shape is ~4.2k tokens and 400s on the 4096 default.
+OLLAMA_MODELS=~/ollama/models OLLAMA_CONTEXT_LENGTH=8192 OLLAMA_KEEP_ALIVE=30m \
+  ~/ollama/bin/ollama serve &
+~/ollama/bin/ollama pull qwen2.5vl:3b   # live-regime model (3.2 GB)
+~/ollama/bin/ollama pull qwen2.5vl:7b   # offline-regime model (6.0 GB)
+```
+
+Wire into the module via the existing local provider slot (zero code changes):
+`VLA_LLM_LOCAL_KIND=openai`, `VLA_LLM_LOCAL_BASE_URL=http://localhost:11434/v1`,
+`VLA_LLM_LOCAL_MODEL=qwen2.5vl:3b`, and a dummy `VLA_LOCAL_API_KEY=local` (host
+networking → localhost reachable from the containers; re-assert env in compose
+like RMW, gotcha 13). Phase-0 latency table and model verdicts:
+`docs/local_llm_plan.md` §"Phase 0 results".
+
+**Submission requirement:** the host install above is the DEV loop only. The
+submission image must serve the model IN-CONTAINER (organisers run only our
+container at eval) — Ollama binary + baked `qwen2.5vl:3b` blobs go into the
+ai_module Dockerfile alongside the GDINO weights, with `ollama serve` +
+pre-warm in the launch wrapper. Spec: `docs/local_llm_plan.md` Phase 3. When
+that lands, THIS section's Dockerfile/compose implications must be reflected
+in §7a.
+
+## 8b. Fast iteration: host-native ai_module node (containers at checkpoints only)
+
+For adapter/perception iteration, run OUR node natively against the sim
+container's graph (host networking + CycloneDDS make this transparent) instead
+of rebuilding the image per change — seconds per cycle instead of minutes:
+
+```bash
+bash tools/setup_host_node.sh   # once; sudo-prompts for the ROS 2 Jazzy apt install
+bash tools/run_host_node.sh     # per iteration, with the sim containers up
+```
+
+Rules that keep this safe:
+- **The image is the truth.** The host venv mirrors the image pins
+  (numpy==1.26.4, transformers==4.57.6 — single source of truth is the fork
+  Dockerfile's constraint list; update BOTH when either changes) and the
+  weights/HF cache are extracted FROM the built image, not re-downloaded.
+- **Checkpoint discipline:** any gate exit, battery result you intend to
+  trust, or submission MUST re-run in the container (sync_to_fork → compose
+  build → §7a clean-clone gate). Host runs are scratch evidence only.
+- Never run the host node and the containerised ai_module simultaneously
+  (both would latch the question).
 
 ## Troubleshooting quick refs
 
