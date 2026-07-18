@@ -69,6 +69,11 @@ class NumericalHead:
     contrib_min_obs: int = 0
     _run_count: int | None = None
     _run_len: int = 0
+    # Set by advance() when the scene index holds zero tracked instances overall (perception
+    # dark/not-wired). Distinguishes that "no data at all" state from the ordinary "count is
+    # None because advance() was never given a usable scene/plan" state below, so answer()
+    # can withhold rather than fabricate a zero (see advance()'s empty-index branch).
+    _index_empty: bool = False
 
     # ------------------------------------------------------------------ update
     def advance(self, scene: SceneIndex | None) -> None:
@@ -76,6 +81,16 @@ class NumericalHead:
         if scene is None or self.plan is None or self.plan.target is None:
             self._reset_run()
             return
+        if not scene.all_instances():
+            # An empty index is absence of data, not an observation of zero — e.g. with
+            # perception fully dark, EVERY noun would otherwise "count" to 0. Withhold the
+            # count so the FSM floor's modal-count fallback answers instead; a genuine
+            # zero (index non-empty, target noun just absent) still counts normally below.
+            self.count = None
+            self._index_empty = True
+            self._reset_run()
+            return
+        self._index_empty = False
         min_obs = self._answer_min_obs(scene)
         n, ids = counting(self.plan.target, scene, min_obs=min_obs, th=self.thresholds)
         self.count = n
@@ -130,8 +145,15 @@ class NumericalHead:
             min_contrib_n_obs=self.contrib_min_obs,
         )
 
-    def answer(self) -> IntAnswer:
-        """Current best integer answer (falls back to 0 before any count)."""
+    def answer(self) -> IntAnswer | None:
+        """Current best integer answer, or None if there is nothing to publish.
+
+        None signals the empty-index case (see advance()): the FSM's verify contract
+        treats None as "no answer yet" and falls back to the FloorAnswers modal count
+        instead of a fabricated 0. Absent that case, falls back to 0 before any count.
+        """
+        if self._index_empty:
+            return None
         return IntAnswer(int(self.count) if self.count is not None else 0)
 
 

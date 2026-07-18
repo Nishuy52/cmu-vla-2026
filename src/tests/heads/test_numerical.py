@@ -84,6 +84,27 @@ def test_none_scene_is_safe():
     assert head.answer() == IntAnswer(0)
 
 
+def test_empty_index_withholds_count_not_zero():
+    # Perception dark / not wired: zero tracked instances overall is absence of data, not
+    # an observed zero — the head must withhold rather than claim a false "0" (the FSM
+    # floor's modal count is the correct fallback; see core/fsm/floors.py).
+    sc = scene()  # empty index
+    head = NumericalHead(plan=numerical_plan("chair"))
+    head.advance(sc)
+    assert head.count is None
+    assert head.answer() is None
+    assert head.signal().stable is False
+
+
+def test_empty_index_recovers_once_scene_populates():
+    head = NumericalHead(plan=numerical_plan("chair"))
+    head.advance(scene())  # dark tick: withheld
+    assert head.answer() is None
+    head.advance(scene(inst(1, "chair"), inst(2, "chair")))  # perception comes online
+    assert head.count == 2
+    assert head.answer() == IntAnswer(2)
+
+
 def test_clause_filter_narrows_count():
     # two chairs, one near a table -> counting with a NEAR clause yields 1
     sc = scene(

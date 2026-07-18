@@ -39,6 +39,25 @@ def test_numerical_modal_on_empty_scene_and_no_plan():
     assert f.get(QType.NUMERICAL).value == MODAL_COUNT
 
 
+def test_numerical_modal_on_empty_scene_with_real_plan():
+    # Perception dark (zero tracked instances at all): the numerical head is expected to
+    # withhold partial.count (leave it None) rather than claim a false "0" — floors.py
+    # then falls through to the modal count, exactly as it does with no plan at all.
+    f = FloorAnswers()
+    f.update(FakeScene([]), _num_plan("chair"), PartialResults(count=None))
+    assert f.get(QType.NUMERICAL).value == MODAL_COUNT
+
+
+def test_numerical_honors_genuine_zero_from_partial_count():
+    # A real observed zero (index non-empty, target noun just absent) must still answer
+    # 0 -- partial.count is checked with `is not None`, not truthiness, so a real 0 from
+    # the numerical head is never mistaken for "no count yet".
+    scene = FakeScene([make_instance(1, "table")])
+    f = FloorAnswers()
+    f.update(scene, _num_plan("unicorn"), PartialResults(count=0))
+    assert f.get(QType.NUMERICAL).value == 0
+
+
 def test_object_ref_best_candidate_marker():
     cand = make_instance(9, "lamp", centroid=(3.0, 4.0, 1.0))
     f = FloorAnswers()

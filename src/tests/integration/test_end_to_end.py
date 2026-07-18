@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from core.fsm.controller import QuestionController, State
+from core.fsm.floors import MODAL_COUNT
 from core.geometry.toolbox import (
     avoid_capsule,
     capsule_violated,
@@ -226,3 +227,23 @@ def test_absent_target_numerical_answers_zero_never_silent():
     assert ctrl.state is State.DONE
     assert len(io.ints) == 1  # a legal integer, never silence
     assert io.ints[0] == IntAnswer(0)
+
+
+def test_empty_perception_numerical_answers_modal_not_zero():
+    """The bug this guards against: perception fully dark (zero tracked instances at
+    all, not just zero of the target noun) must answer the FSM floor's modal count
+    (core/fsm/floors.MODAL_COUNT), never a fabricated 0 — an empty index is absence of
+    data, not an observation of zero.
+    """
+    sc = SyntheticScene(0)  # no objects placed at all
+    idx = BasicSceneIndex([])  # perception dark / not wired: zero tracked instances
+    clk = FakeClock(0.0)
+    io = MockRobotIO(sc, clk)
+    io.set_question("how many chairs are there")
+    ctrl = QuestionController(**build_callables(idx))
+
+    _run(io, ctrl, clk, drive=False)
+
+    assert ctrl.state is State.DONE
+    assert len(io.ints) == 1  # a legal integer, never silence
+    assert io.ints[0] == IntAnswer(MODAL_COUNT)

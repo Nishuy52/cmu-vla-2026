@@ -46,6 +46,32 @@ def test_explore_binds_plan_and_advances_numerical():
     assert wv.scene is sc
 
 
+def test_explore_withholds_count_on_empty_index():
+    # Perception dark: zero tracked instances overall is absence of data, not an
+    # observed zero. partial.count must stay None so the FSM floor's modal count wins
+    # instead of a fabricated 0 (core/fsm/floors.py's designed fallback).
+    sc = _idx()  # empty index
+    cbs = build_callables(sc)
+    io = MockRobotIO(SyntheticScene(0), FakeClock())
+    plan = numerical_plan("chair")
+    cbs["explore"](io, plan, WorldView(scene=sc))
+    wv = cbs["probe"](io)
+    assert wv.partial.count is None
+
+
+def test_verify_returns_none_for_numerical_on_empty_index():
+    # The verify callable's contract is "final publishable answer, or None" (controller.py)
+    # — on an empty index, numerical must return None so the controller falls back to the
+    # FloorAnswers modal count rather than publishing a fabricated 0.
+    sc = _idx()  # empty index
+    cbs = build_callables(sc)
+    io = MockRobotIO(SyntheticScene(0), FakeClock())
+    plan = numerical_plan("chair")
+    cbs["explore"](io, plan, WorldView(scene=sc))
+    ans = cbs["verify"](io, plan, WorldView(scene=sc))
+    assert ans is None
+
+
 def test_probe_assembles_stability_signal():
     sc = _idx(inst(1, "chair"), inst(2, "chair"))
     cbs = build_callables(sc)
