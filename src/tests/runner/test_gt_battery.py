@@ -418,5 +418,8 @@ def test_terminal_goal_centroid_delegates_to_candidates():
     else:
         assert top is None
 
+
+def test_livingroom_3_registered_as_data_unfittable():
+    """livingroom_3 must stay registered in the meth-F11 data-confirmed-unfittable map."""
     _DATA = GB._DATA_UNFITTABLE_IF_SCENES
     assert "livingroom_3" in _DATA and _DATA["livingroom_3"]
