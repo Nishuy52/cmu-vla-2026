@@ -825,3 +825,55 @@ so no adapter change. Issues #44 (parse_tier mislabeling on local-only
 config), #45 (repair prompt not schema-guided), #46 (client-only timeout
 vs Ollama's single-concurrency server) filed. Next: quiet-box Phase-2
 re-run; Phase-2 vision-checkpoint half; Phase-3 in-image bake.
+
+## 2026-07-19 (session 17, continued) - #42 fixed+verified, LLM fixes, GPU wedge -> reboot gate
+
+- **#42 dual-caption + anchor-floor fixes landed (959a74f)**, offline-
+  validated through the new code path (19/19 on-bearing teapot detections
+  at the 0.25 question-pass threshold). Live rerun: mechanics perfect
+  (0 errors, 3.6 GB VRAM, dual-pass on GPU), answer still wrong via a
+  DIFFERENT path -> #43 filed (false-positive target instances at the
+  recall threshold + exploration never gained the decisive vantage;
+  needs #33-style expected-points adjudication + instrumented debug run
+  = calibration loop item, not a tonight bug).
+- **Env truths learned the hard way**: (1) sim sensor streams can wedge
+  (Unity/bridge zombie - processes alive, topics dead) after hours +
+  CPU storms; relaunch fixes. (2) qwen2.5vl:7b at 8k ctx NEVER fits the
+  7.6 GiB card (llama-server offloads -> ~2 tok/s); 3B is the only
+  local model for this box. (3) the dGPU itself wedged into P8/210 MHz
+  w/ 8.5 W SW power cap (52 C, plugged, performance profile - unfixable
+  in software) -> **HOST REBOOT REQUIRED**, everything GPU-bound gated
+  on it. (4) The 4 h docker rebuild died without completing (image tag
+  unchanged); pip-layer cache state unknown until the next build.
+- **LLM ladder fixes** (agent-committed): #44 tier mislabel, #45 schema-
+  guided repair prompts, enum synonym normalization (furthest_from->
+  farthest_from etc.). Conformance was 6/10 pre-fix; clean post-fix
+  rerun PENDING REBOOT (all latency data since ~00:00 invalid due to
+  the wedge). #46 (client timeout leaves server generating) open as a
+  Phase-3 design item.
+- **Phase-3 in-image bake being AUTHORED now** (no build): Dockerfile
+  Ollama v0.32.1 + baked 3B blobs + serve/prewarm launch wrapper +
+  compose env, in the IN-REPO fork copy (docker/ai_module_fork - /tmp/
+  fork-clean dies with the reboot; recreate via upstream clone +
+  sync_to_fork.sh; its commit 6543178 was the #40 fix, redo after
+  restage). Post-reboot runbook: reports/local_llm_phase3/
+  BUILD_AND_VERIFY.md (authored by the same task).
+
+**POST-REBOOT RUNBOOK (execute in order):**
+1. Verify GPU unwedged: nvidia-smi clocks ~boost under load, then
+   restart Ollama (ubuntu_setup §8a one-liner) + `ollama ps` sanity.
+2. Rerun LLM conformance (expect >=8/10 post-fixes) + full 75-question
+   parse battery on the 3B (tools/llm_conformance.py /
+   tools/llm_parse_battery.py; quiet box) -> finalize per-QType
+   recommendation in reports/local_llm_phase2/.
+3. Vision-checkpoint replay (CP2/CP3/CP5 vs recorded-bag panos + GT) ->
+   completes the Phase-2 enable matrix.
+4. Restage fork (/tmp/fork-clean): upstream clone + sync_to_fork.sh +
+   commit (redo #40's commit).
+5. Rebuild docker-ai_module (now incl. #41/#42/#39 src + Phase-3 bake if
+   its authoring landed) - schedule for an idle stretch, download may
+   restart from zero. Then the IN-CONTAINER checkpoint: relaunch sim,
+   teapot run, VRAM/batched/marker evidence, BUILD_AND_VERIFY.md steps,
+   §7a clean-clone gate.
+6. Then: #43/#33 calibration adjudication; Gate-0 residuals (LLM keys
+   early Aug, Docker Hub account).
