@@ -9,6 +9,7 @@ from core.llm.config import (
     LlmConfig,
     ProviderSpec,
     build_chat_fns,
+    build_chat_fns_with_tiers,
     load_config,
 )
 from core.llm.providers import LocalStub
@@ -131,6 +132,50 @@ def test_build_chat_fns_wraps_with_timeout():
     cfg = LlmConfig(primary=ProviderSpec(kind="stub", stub_reply="ok"), call_timeout_s=5.0)
     fns = build_chat_fns(cfg)
     assert fns[0]([{"role": "user", "content": "x"}]) == "ok"
+
+
+def test_build_chat_fns_with_tiers_only_local_configured():
+    # issue #44 repro: only the local slot is configured -> its tier name must be
+    # "local", not "api" (which is what index-0 would get from the gapped fn list).
+    cfg = LlmConfig(local=ProviderSpec(kind="stub", stub_reply="L"))
+    pairs = build_chat_fns_with_tiers(cfg)
+    assert [name for name, _ in pairs] == ["local"]
+    assert pairs[0][1]([{"role": "user", "content": "x"}]) == "L"
+
+
+def test_build_chat_fns_with_tiers_skips_gap_correctly():
+    # secondary skipped (None) -> primary/local keep their true tier names, no shift.
+    cfg = LlmConfig(
+        primary=ProviderSpec(kind="stub", stub_reply="P"),
+        secondary=None,
+        local=ProviderSpec(kind="stub", stub_reply="L"),
+    )
+    pairs = build_chat_fns_with_tiers(cfg)
+    assert [name for name, _ in pairs] == ["api", "local"]
+
+
+def test_build_chat_fns_with_tiers_skips_broken_slot_keeps_tier_alignment():
+    # primary broken (skipped at build) -> secondary keeps its true tier "api2".
+    cfg = LlmConfig(
+        primary=ProviderSpec(kind="openai", model="", base_url=None),
+        secondary=ProviderSpec(kind="stub", stub_reply="S"),
+    )
+    pairs = build_chat_fns_with_tiers(cfg)
+    assert [name for name, _ in pairs] == ["api2"]
+
+
+def test_build_chat_fns_matches_build_chat_fns_with_tiers_fns():
+    # build_chat_fns is defined in terms of build_chat_fns_with_tiers; each call builds
+    # fresh adapter/timeout-wrapper closures, so compare behavior, not identity/equality.
+    cfg = LlmConfig(
+        primary=ProviderSpec(kind="stub", stub_reply="P"),
+        local=ProviderSpec(kind="stub", stub_reply="L"),
+    )
+    plain = build_chat_fns(cfg)
+    tiered = build_chat_fns_with_tiers(cfg)
+    assert len(plain) == len(tiered) == 2
+    msg = [{"role": "user", "content": "x"}]
+    assert [fn(msg) for fn in plain] == [fn(msg) for _, fn in tiered] == ["P", "L"]
 
 
 def test_malformed_json_file_is_ignored(tmp_path, monkeypatch):

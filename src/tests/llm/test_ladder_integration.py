@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 
-from core.llm.config import LlmConfig, ProviderSpec, build_chat_fns
+from core.llm.config import LlmConfig, ProviderSpec, build_chat_fns, build_chat_fns_with_tiers
 from core.parsing.ladder import parse
 from core.plan_schema import Plan
 
@@ -74,3 +74,19 @@ def test_empty_config_falls_to_regex_floor():
     plan = parse(QUESTION, fns, FakeClock())
     assert plan.parse_tier == "regex"
     assert plan.validate() == []
+
+
+def test_local_only_config_stamps_local_tier_not_api():
+    # Regression for issue #44: only the local slot is configured (Phase-3 in-container /
+    # current dev-bridge wiring). The correct fix is for the CALLER (production:
+    # ros_adapter.adapter_node) to derive tier_names from build_chat_fns_with_tiers instead
+    # of relying on ladder.parse's position-based DEFAULT_TIER_NAMES default — which is what
+    # this test exercises end-to-end.
+    cfg = LlmConfig(local=ProviderSpec(kind="stub", stub_reply=VALID_PLAN_JSON))
+    pairs = build_chat_fns_with_tiers(cfg)
+    tier_names = tuple(name for name, _ in pairs)
+    fns = [fn for _, fn in pairs]
+    assert tier_names == ("local",)
+    plan = parse(QUESTION, fns, FakeClock(), tier_names=tier_names)
+    assert plan.validate() == []
+    assert plan.parse_tier == "local"  # NOT "api"

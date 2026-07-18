@@ -8,6 +8,7 @@ from core.llm.config import (
     LlmConfig,
     ProviderSpec,
     build_chat_fns,
+    build_chat_fns_with_tiers,
     load_config,
 )
 from core.llm.providers import (
@@ -33,6 +34,7 @@ __all__ = [
     "ProviderUnavailable",
     "VisionChatFn",
     "build_chat_fns",
+    "build_chat_fns_with_tiers",
     "call_with_timeout",
     "load_config",
     "with_timeout",

@@ -84,7 +84,7 @@ from core.interfaces import (
 )
 from core.fsm.controller import QuestionController
 from core.heads import build_callables
-from core.llm.config import build_chat_fns, load_config
+from core.llm.config import build_chat_fns_with_tiers, load_config
 from core.parsing import ladder as parse_ladder
 from core.perception.colored_map import ColoredVoxelMap
 from core.perception.detector import GroundingDinoDetector
@@ -371,7 +371,9 @@ class AdapterNode(Node):
         # -> the parse ladder goes straight to the deterministic regex floor, and every
         # checkpoint seam stays None/off (offline determinism preserved for tests + dark net).
         self._llm_config = load_config()
-        self._chat_fns = build_chat_fns(self._llm_config)
+        _chat_tiers = build_chat_fns_with_tiers(self._llm_config)
+        self._chat_fns = [fn for _, fn in _chat_tiers]
+        self._chat_tier_names = tuple(name for name, _ in _chat_tiers)
         self._llm_configured = bool(self._chat_fns)
         if self._llm_configured:
             self.get_logger().info(
@@ -660,7 +662,9 @@ class AdapterNode(Node):
             ctrl = self._controller
             clock = ctrl.budget._clock if (ctrl is not None and ctrl.budget is not None) else self._robotio_clock
             ledger = ctrl.ledger if ctrl is not None else None
-            return parse_ladder.parse(question, self._chat_fns, clock, ledger)
+            return parse_ladder.parse(
+                question, self._chat_fns, clock, ledger, tier_names=self._chat_tier_names
+            )
 
         # Checkpoint seams bound to the configured chat_fns; their ledger/clock resolve lazily
         # via _LedgerProxy since the controller's ledger only exists after intake.

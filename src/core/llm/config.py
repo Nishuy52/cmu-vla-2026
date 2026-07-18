@@ -238,16 +238,38 @@ def build_chat_fns(config: LlmConfig) -> list[ChatFn]:
     during construction (bad kind / missing required field) are skipped with their slot
     left out, so one broken slot never blanks the whole ladder.
 
-    The returned list feeds ``ladder.parse`` directly and its length/order line up with
-    ``ladder.DEFAULT_TIER_NAMES`` for the configured slots.
+    NOTE: this list alone does not carry which ``SLOTS`` entry each fn came from — when a
+    slot is skipped, positions shift, so zipping this against ``ladder.DEFAULT_TIER_NAMES``
+    by index mislabels ``parse_tier`` (issue #44). Callers that need correct tier stamps
+    (i.e. production, not tests that always configure a contiguous prefix of slots) should
+    use :func:`build_chat_fns_with_tiers` and pass its tier names through to
+    ``ladder.parse(..., tier_names=...)``.
     """
-    fns: list[ChatFn] = []
-    for spec in config.slots():
+    return [fn for _, fn in build_chat_fns_with_tiers(config)]
+
+
+def build_chat_fns_with_tiers(config: LlmConfig) -> list[tuple[str, ChatFn]]:
+    """Like :func:`build_chat_fns`, but pairs each fn with its actual ``SLOTS`` name.
+
+    Skipped (``None`` or unbuildable) slots leave no gap — the returned list is exactly
+    the configured/buildable slots in order, each tagged with the slot name it actually
+    came from (``"primary"`` / ``"secondary"`` / ``"local"``, i.e. ``ladder`` tier names
+    ``"api"`` / ``"api2"`` / ``"local"`` respectively — ``SLOTS`` and
+    ``ladder.DEFAULT_TIER_NAMES`` are positionally aligned). This is the fix for issue #44:
+    callers pass ``[name for name, _ in ...]`` as ``ladder.parse``'s ``tier_names`` so the
+    recorded ``parse_tier`` reflects the slot that actually answered, not its position in
+    the (possibly gapped) fn list.
+    """
+    from core.parsing.ladder import DEFAULT_TIER_NAMES
+
+    pairs: list[tuple[str, ChatFn]] = []
+    for i, spec in enumerate(config.slots()):
         if spec is None:
             continue
         try:
             adapter = _build_adapter(spec)
         except ProviderUnavailable:
             continue
-        fns.append(with_timeout(adapter, config.call_timeout_s))
-    return fns
+        tier_name = DEFAULT_TIER_NAMES[i] if i < len(DEFAULT_TIER_NAMES) else SLOTS[i]
+        pairs.append((tier_name, with_timeout(adapter, config.call_timeout_s)))
+    return pairs

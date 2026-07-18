@@ -7,6 +7,10 @@ Plan.validate().
 """
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from core.interfaces import QType
 from core.plan_schema import (
     Anchor,
@@ -14,6 +18,7 @@ from core.plan_schema import (
     Clause,
     LegKind,
     Plan,
+    PlanSchemaError,
     Pred,
     RouteLeg,
     TargetSpec,
@@ -298,3 +303,71 @@ def test_avoid_between_needs_two_anchors():
     )
     errs = plan.validate()
     assert any("between needs exactly 2 anchors" in e for e in errs)
+
+
+# ------------------------------------------------------------- enum error messages (#45)
+
+
+def _plan_json(pred: str) -> str:
+    return json.dumps(
+        {
+            "qtype": "object_reference",
+            "question_raw": "x",
+            "target": {
+                "noun": "lantern",
+                "clauses": [{"pred": pred, "anchors": [{"noun": "vase"}]}],
+            },
+        }
+    )
+
+
+def test_invalid_pred_raises_schema_error_naming_field_value_and_valid_set():
+    with pytest.raises(PlanSchemaError) as exc_info:
+        Plan.from_json(_plan_json("closer_to"))
+    msg = str(exc_info.value)
+    assert "'pred'" in msg
+    assert "'closer_to'" in msg
+    # valid set is derived from the Pred enum itself, not a hand-maintained list
+    for member in Pred:
+        assert member.value in msg
+
+
+def test_invalid_qtype_raises_schema_error():
+    bad = json.dumps({"qtype": "not_a_real_qtype", "question_raw": "x"})
+    with pytest.raises(PlanSchemaError) as exc_info:
+        Plan.from_json(bad)
+    assert "'qtype'" in str(exc_info.value)
+    assert "'not_a_real_qtype'" in str(exc_info.value)
+
+
+def test_invalid_route_kind_raises_schema_error():
+    bad = json.dumps(
+        {
+            "qtype": "instruction_following",
+            "question_raw": "x",
+            "route": [{"kind": "walk_to", "anchors": [{"noun": "door"}]}],
+        }
+    )
+    with pytest.raises(PlanSchemaError) as exc_info:
+        Plan.from_json(bad)
+    assert "'walk_to'" in str(exc_info.value)
+
+
+# ------------------------------------------------------- pred synonym aliases (parse-robustness)
+
+
+def test_furthest_from_alias_parses_as_farthest_from():
+    plan = Plan.from_json(_plan_json("furthest_from"))
+    assert plan.validate() == []
+    assert plan.target.clauses[0].pred is Pred.FARTHEST_FROM
+
+
+def test_nearest_to_alias_parses_as_closest_to():
+    plan = Plan.from_json(_plan_json("nearest_to"))
+    assert plan.validate() == []
+    assert plan.target.clauses[0].pred is Pred.CLOSEST_TO
+
+
+def test_unknown_pred_value_still_fails():
+    with pytest.raises(PlanSchemaError):
+        Plan.from_json(_plan_json("closer_to"))

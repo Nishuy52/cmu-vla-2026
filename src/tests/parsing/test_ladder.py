@@ -108,6 +108,65 @@ def test_repair_round_fixes_invalid_output():
     assert INVALID_PLAN_JSON in repair_user
 
 
+# -------------------------------------------------- schema-guided repair prompt (#45)
+
+
+def _plan_json_with_pred(pred: str) -> str:
+    return json.dumps(
+        {
+            "qtype": "object_reference",
+            "question_raw": QUESTION,
+            "target": {
+                "noun": "beer bottle",
+                "raw": "beer bottle",
+                "attributes": [],
+                "clauses": [{"pred": pred, "anchors": [{"noun": "couch", "raw": "couch"}]}],
+            },
+            "route": [],
+            "avoid": [],
+            "notes": "",
+        }
+    )
+
+
+def test_repair_prompt_surfaces_offending_field_value_and_valid_preds():
+    # "closer_to" is not a valid Pred and not an accepted synonym (unlike furthest_from,
+    # which core.plan_schema now normalizes before this ever reaches validation) — it must
+    # still fail, and the repair prompt built from that failure must name the field, the
+    # bad value, and the schema's actual valid values (not a raw exception repr).
+    bad_reply = _plan_json_with_pred("closer_to")
+    fn = StubChat([bad_reply, VALID_PLAN_JSON])
+    parse(QUESTION, [fn], FakeClock())
+    assert len(fn.calls) == 2
+    repair_user = fn.calls[1][-1]["content"]
+    assert "'pred'" in repair_user
+    assert "'closer_to'" in repair_user
+    assert "farthest_from" in repair_user  # valid value, proves the list isn't truncated/stale
+    assert "closest_to" in repair_user
+
+
+def test_local_stub_furthest_from_repair_round_gets_schema_guidance():
+    """Regression per issue #45's exact repro shape, using LocalStub's scripted replies: a
+    first reply with an invalid/unrecognised pred, and a repair-round reply. The repair
+    prompt handed back to the model must list 'farthest_from' among the valid values."""
+    from core.llm.providers import LocalStub
+
+    # Use a value that is NOT one of the accepted exact-synonym aliases (issue: enum
+    # synonym normalization fixed 'furthest_from' itself to parse directly), so the repair
+    # round in this test still actually fires and exercises the repair-prompt content.
+    first_reply = _plan_json_with_pred("furthest_frm")  # typo'd, not an alias
+    repair_reply = VALID_PLAN_JSON
+    stub = LocalStub([first_reply, repair_reply])
+    plan = parse(QUESTION, [stub], FakeClock(), tier_names=("local",))
+    assert plan.parse_tier == "local"
+    assert len(stub.calls) == 2
+    repair_messages = stub.calls[1]
+    repair_user = repair_messages[-1]["content"]
+    assert "'pred'" in repair_user
+    assert "'furthest_frm'" in repair_user
+    assert "farthest_from" in repair_user
+
+
 def test_falls_through_tiers_in_order():
     bad = StubChat(["garbage", "still garbage"])
     good = StubChat([VALID_PLAN_JSON])

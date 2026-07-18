@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field, asdict
 from enum import Enum
+from typing import Any
 
 from core.interfaces import QType
 
@@ -154,6 +155,50 @@ def _enum_value(o):  # json.dumps default hook
     raise TypeError(type(o))
 
 
+class PlanSchemaError(ValueError):
+    """An enum field in the Plan JSON had an invalid value.
+
+    Distinct from a bare ``ValueError`` so the message names the offending field, the
+    provided value, and the full set of valid values/shape (derived programmatically from
+    the enum, never a hand-maintained list that can drift) — the repair round in
+    ``core.parsing.ladder`` feeds this message verbatim to the model, so a small model gets
+    something it can act on instead of a raw ``"'furthest_from' is not a valid Pred"`` repr
+    (issue #45).
+    """
+
+
+def _enum_from(cls: type[Enum], value: Any, field_name: str) -> Enum:
+    """Look up ``value`` in the (str) Enum ``cls``; raise ``PlanSchemaError`` on a miss.
+
+    The valid-values list in the error message is derived from ``cls`` itself, so it can
+    never drift out of sync with the schema.
+    """
+    try:
+        return cls(value)
+    except ValueError:
+        valid = ", ".join(m.value for m in cls)
+        raise PlanSchemaError(
+            f"field {field_name!r}: invalid value {value!r} (valid: {valid})"
+        ) from None
+
+
+#: Exact-synonym aliases accepted for Pred values, canonicalized before enum lookup. Small
+#: and explicit (issue: enum synonym normalization) — covers the two superlative predicates
+#: local/small LLMs commonly emit the plain-English synonym for instead of the schema's
+#: canonical enum value. Anything not in this map is passed through unchanged (and, if still
+#: invalid, reported via PlanSchemaError above).
+_PRED_ALIASES: dict[str, str] = {
+    "furthest_from": Pred.FARTHEST_FROM.value,
+    "nearest_to": Pred.CLOSEST_TO.value,
+}
+
+
+def _normalize_pred(value: Any) -> Any:
+    if isinstance(value, str) and value in _PRED_ALIASES:
+        return _PRED_ALIASES[value]
+    return value
+
+
 def _anchor_from_dict(d: dict) -> Anchor:
     return Anchor(
         noun=d["noun"],
@@ -165,7 +210,7 @@ def _anchor_from_dict(d: dict) -> Anchor:
 
 def _clause_from_dict(d: dict) -> Clause:
     return Clause(
-        pred=Pred(d["pred"]),
+        pred=_enum_from(Pred, _normalize_pred(d["pred"]), "pred"),
         anchors=[_anchor_from_dict(a) for a in d["anchors"]],
         negated=bool(d.get("negated", False)),
     )
@@ -174,7 +219,7 @@ def _clause_from_dict(d: dict) -> Clause:
 def _plan_from_dict(d: dict) -> Plan:
     tgt = d.get("target")
     return Plan(
-        qtype=QType(d["qtype"]),
+        qtype=_enum_from(QType, d["qtype"], "qtype"),
         question_raw=d.get("question_raw", ""),
         target=TargetSpec(
             noun=tgt["noun"],
@@ -185,7 +230,10 @@ def _plan_from_dict(d: dict) -> Plan:
         if tgt
         else None,
         route=[
-            RouteLeg(kind=LegKind(l["kind"]), anchors=[_anchor_from_dict(a) for a in l["anchors"]])
+            RouteLeg(
+                kind=_enum_from(LegKind, l["kind"], "route[].kind"),
+                anchors=[_anchor_from_dict(a) for a in l["anchors"]],
+            )
             for l in d.get("route", [])
         ],
         avoid=[

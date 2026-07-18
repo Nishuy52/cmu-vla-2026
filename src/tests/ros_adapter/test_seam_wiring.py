@@ -70,11 +70,13 @@ def test_detector_prompt_refresh_wired_to_build_callables(src: str):
 
 
 def test_ladder_and_config_wired(src: str):
-    assert "from core.llm.config import build_chat_fns, load_config" in src
+    assert "from core.llm.config import build_chat_fns_with_tiers, load_config" in src
     assert "from core.parsing import ladder as parse_ladder" in src
-    assert "self._chat_fns = build_chat_fns(self._llm_config)" in src
-    # parse routed through the ladder with the controller's clock + ledger.
-    assert "parse_ladder.parse(question, self._chat_fns, clock, ledger)" in src
+    assert "_chat_tiers = build_chat_fns_with_tiers(self._llm_config)" in src
+    # parse routed through the ladder with the controller's clock + ledger, and the ACTUAL
+    # per-slot tier names (issue #44) so parse_tier reflects the slot that answered.
+    assert "self._chat_tier_names = tuple(name for name, _ in _chat_tiers)" in src
+    assert "tier_names=self._chat_tier_names" in src
 
 
 def test_checkpoint_seams_wired(src: str):
