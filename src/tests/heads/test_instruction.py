@@ -104,6 +104,31 @@ def test_ungrounded_when_anchor_absent():
     assert head.ungrounded_subgoals() == 1
 
 
+def test_terminal_waypoint_none_when_anchor_absent():
+    # Zero instance evidence for the (only) leg's anchor: no leg ever grounds geometry,
+    # so no route/follower is ever built. terminal_waypoint() must withhold (None) rather
+    # than fabricate a coordinate — the FSM floor's richer scene-centroid/origin fallback
+    # (core/fsm/floors.py _instruction_following) answers instead. Mirrors the
+    # NumericalHead empty-index withhold pattern (core/heads/numerical.py).
+    sc, idx = _if_scene()
+    head = InstructionHead(plan=instruction_plan([_goto("unicorn")]))
+    io = _DriveIO(sc)
+    head.advance(io, idx)
+    assert head.ungrounded_subgoals() == 1
+    assert head.terminal_waypoint() is None
+
+
+def test_terminal_waypoint_none_on_empty_index():
+    # Perception fully dark (empty scene index, e.g. not wired yet): every leg stays
+    # ungrounded (no anchors resolve at all), so terminal_waypoint() must withhold rather
+    # than emit a fabricated waypoint. The watchdog floor supplies a legal fallback.
+    head = InstructionHead(plan=instruction_plan([_goto("sofa")]))
+    io = _DriveIO(SyntheticScene(0))
+    head.advance(io, scene())
+    assert head.ungrounded_subgoals() == 1
+    assert head.terminal_waypoint() is None
+
+
 def test_ungrounded_when_low_nobs():
     sc = scene(inst(1, "sofa", n_obs=1, centroid=(2.0, 2.0, 0.0)))
     head = InstructionHead(plan=instruction_plan([_goto("sofa")]))

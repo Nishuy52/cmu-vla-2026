@@ -48,6 +48,21 @@ def test_verify_none_when_nothing_ranked():
     assert head.verify() is None
 
 
+def test_verify_none_on_empty_index():
+    # Perception fully dark (empty scene index): resolve()'s noun-match/category-only
+    # ladder bottoms out at [] (no instances at all to fall back to), so nothing ranks.
+    # The head must not fabricate a marker from nothing — verify() withholds (None) so
+    # the FSM floor's richer any-instance fallback (core/fsm/floors.py
+    # FloorAnswers._object_reference, rungs 3-5) answers instead. Mirrors the
+    # NumericalHead empty-index withhold pattern (core/heads/numerical.py).
+    sc = scene()
+    head = ObjectRefHead(plan=object_plan("chair"))
+    head.advance(sc)
+    assert head.best_candidate is None
+    assert head.best_marker is None
+    assert head.verify() is None
+
+
 def test_llm_verify_demotes_failed_winner():
     sc = scene(
         inst(1, "chair", centroid=(0.0, 0.0, 0.0)),
