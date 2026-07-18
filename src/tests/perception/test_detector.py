@@ -213,6 +213,100 @@ def test_resolve_half_auto_by_device():
     assert det._resolve_half("cpu") is False  # full on CPU
 
 
+class _FakeModel:
+    """Duck-typed stand-in for a loaded groundingdino model: records .to()/.eval()/.half()
+    calls in order so tests can assert the device move happens before precision is applied."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def to(self, device):
+        self.calls.append(f"to:{device}")
+        return self
+
+    def eval(self):
+        self.calls.append("eval")
+        return self
+
+    def half(self):
+        self.calls.append("half")
+        return self
+
+
+def test_ensure_model_moves_to_device_never_halves(tmp_path):
+    # groundingdino-py's load_model(..., device="cuda") leaves the returned model on CPU
+    # (issue #41); _ensure_model must move it explicitly. Weights are NEVER hard-.half()ed
+    # (mixed float32 buffers inside GroundingDINO break under a halved model) — fp16 comes
+    # from _forward_ctx's autocast instead, so resolved_half only arms that context.
+    cfg = tmp_path / "gdino.cfg.py"
+    cfg.write_text("# fake config\n")
+    ckpt = tmp_path / "gdino.pth"
+    ckpt.write_bytes(b"\x00")
+    det = GroundingDinoDetector(
+        config_path=str(cfg), checkpoint_path=str(ckpt), device="cuda", precision="auto",
+    )
+    fake_model = _FakeModel()
+    model = det._ensure_model(_FakeTorch(cuda_available=True), lambda *a, **k: fake_model)
+    assert model is fake_model
+    assert "to:cuda" in fake_model.calls
+    assert "half" not in fake_model.calls
+    assert det._resolved_half is True  # arms the fp16 autocast forward context
+
+
+class _FakeAutocastTorch(_FakeTorch):
+    """Fake torch recording autocast constructions (returned ctx is a no-op)."""
+
+    def __init__(self, cuda_available: bool) -> None:
+        super().__init__(cuda_available)
+        self.autocast_calls: list[dict] = []
+        self.float16 = "float16"
+
+    def autocast(self, device_type, dtype):
+        self.autocast_calls.append({"device_type": device_type, "dtype": dtype})
+        import contextlib
+
+        return contextlib.nullcontext()
+
+
+def test_forward_ctx_autocast_only_on_cuda_half(tmp_path):
+    cfg = tmp_path / "gdino.cfg.py"
+    cfg.write_text("# fake config\n")
+    ckpt = tmp_path / "gdino.pth"
+    ckpt.write_bytes(b"\x00")
+    det = GroundingDinoDetector(
+        config_path=str(cfg), checkpoint_path=str(ckpt), device="cuda", precision="auto",
+    )
+    fake_torch = _FakeAutocastTorch(cuda_available=True)
+    det._ensure_model(fake_torch, lambda *a, **k: _FakeModel())
+    with det._forward_ctx(fake_torch):
+        pass
+    assert fake_torch.autocast_calls == [{"device_type": "cuda", "dtype": "float16"}]
+
+    det_cpu = GroundingDinoDetector(
+        config_path=str(cfg), checkpoint_path=str(ckpt), device="cpu", precision="auto",
+    )
+    fake_torch_cpu = _FakeAutocastTorch(cuda_available=False)
+    det_cpu._ensure_model(fake_torch_cpu, lambda *a, **k: _FakeModel())
+    with det_cpu._forward_ctx(fake_torch_cpu):
+        pass
+    assert fake_torch_cpu.autocast_calls == []  # nullcontext on CPU/full precision
+
+
+def test_ensure_model_no_half_on_cpu(tmp_path):
+    cfg = tmp_path / "gdino.cfg.py"
+    cfg.write_text("# fake config\n")
+    ckpt = tmp_path / "gdino.pth"
+    ckpt.write_bytes(b"\x00")
+    det = GroundingDinoDetector(
+        config_path=str(cfg), checkpoint_path=str(ckpt), device="cpu", precision="auto",
+    )
+    fake_model = _FakeModel()
+    model = det._ensure_model(_FakeTorch(cuda_available=False), lambda *a, **k: fake_model)
+    assert model is fake_model
+    assert "to:cpu" in fake_model.calls
+    assert "half" not in fake_model.calls
+
+
 def test_resolve_config_path_from_ctor_and_env(monkeypatch, tmp_path):
     monkeypatch.delenv(ENV_GDINO_CONFIG_PATH, raising=False)
     cfg = tmp_path / "gdino.cfg.py"

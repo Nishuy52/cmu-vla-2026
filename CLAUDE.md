@@ -14,7 +14,14 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 2. **No AI/tooling attribution anywhere** — not in documents, not in commit messages, not in code comments.
 3. **`docs/ubuntu_setup.md` must stay current** — any change affecting installation/deployment (dependency, model weight, env var, container) updates it in the same session.
 4. **Commit and push (`origin` = github.com/Nishuy52/cmu-vla-2026, private) at every milestone and session end.**
-5. **Detected issues become GitHub issues.** Any defect, failure, or
+5. **Host-first iteration (added 18 Jul 2026): run everything natively on
+   this machine by default** — the host-node loop (`tools/run_host_node.sh`,
+   ubuntu_setup §8b) for the adapter/perception, the host venv for core, the
+   host Ollama for LLM work. Docker builds/runs ONLY at key checkpoints
+   (gate exits, battery results to be trusted, §7a packaging gate,
+   submissions) — rebuilds take too long for iteration. Host env pins must
+   mirror the fork Dockerfile (single source of truth).
+6. **Detected issues become GitHub issues.** Any defect, failure, or
    open problem detected (by review, verification, battery/diagnosis
    runs, or agents) that is not fixed in the same session gets filed
    as a GitHub issue on `origin` (`gh issue create`) — one issue per

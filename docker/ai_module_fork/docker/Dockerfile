@@ -104,11 +104,16 @@ RUN pip install --no-cache-dir --break-system-packages --ignore-installed \
 #     the resolver keep the apt numpy untouched and backtrack opencv-python to 4.11.0.86 (verified
 #     on PyPI: its py3.12 requirement is numpy>=1.26.0, satisfied by 1.26.4; pycocotools and
 #     supervision==0.6.0 have no numpy upper pin; torch/transformers/timm don't pin numpy>=2).
-RUN printf 'numpy==1.26.4\n' > /tmp/pip-constraints.txt && \
+#     Gate 4 build (18 Jul), issue #38: the unpinned `transformers` line above resolved a
+#     version that dropped `BertModel.get_head_mask`, which groundingdino-py's vendored
+#     BertModelWarper still calls -> AttributeError on every detector load. Pin
+#     transformers==4.57.6 (verified on Ubuntu to still expose get_head_mask and load
+#     cleanly against groundingdino-py 0.4.0) to keep the resolver off the broken range.
+RUN printf 'numpy==1.26.4\ntransformers==4.57.6\n' > /tmp/pip-constraints.txt && \
     PIP_CONSTRAINT=/tmp/pip-constraints.txt pip install --no-cache-dir --break-system-packages \
       torch \
       torchvision \
-      transformers \
+      transformers==4.57.6 \
       groundingdino-py && \
     rm /tmp/pip-constraints.txt
 

@@ -13,6 +13,7 @@ detections deterministically.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
@@ -394,17 +395,31 @@ class GroundingDinoDetector:
         config_path = self._resolve_config_path()
         checkpoint_path = self._resolve_checkpoint_path()
         model = load_model_fn(config_path, checkpoint_path, device=device)
+        # groundingdino-py's load_model(..., device=device) does NOT actually move the
+        # returned model: it sets args.device and loads the checkpoint with
+        # map_location="cpu", so parameters stay on CPU regardless of `device`. Move
+        # explicitly before applying precision (see issue #41).
+        model = model.to(device)
         model.eval()
-        if half and device == "cuda":
-            model = model.half()
+        # fp16 is applied via torch.autocast at forward time (_forward_ctx), NOT by
+        # hard-.half()ing the weights: GroundingDINO's internals mix float32 buffers
+        # into the graph, and a halved model fails with "expected scalar type Float
+        # but found Half" on both forward paths (issue #41).
         self._model = model
         self._resolved_device = device
         self._resolved_half = half
         _LOGGER.info(
             "GroundingDinoDetector: loaded %s on %s (%s precision).",
-            self.model_id, device, "fp16" if half else "fp32",
+            self.model_id, device, "fp16-autocast" if half else "fp32",
         )
         return model
+
+    def _forward_ctx(self, torch):
+        """Mixed-precision context for forward passes: fp16 autocast on CUDA when the
+        resolved precision is half, no-op otherwise (weights stay fp32 — see #41)."""
+        if self._resolved_half and self._resolved_device == "cuda":
+            return torch.autocast(device_type="cuda", dtype=torch.float16)
+        return contextlib.nullcontext()
 
     # ------------------------------------------------------------------ preprocessing
 
@@ -439,7 +454,8 @@ class GroundingDinoDetector:
         torch, load_model_fn, predict_fn = self._lazy_import()
         model = self._ensure_model(torch, load_model_fn)
         device = self._resolved_device
-        dtype = torch.float16 if self._resolved_half else torch.float32
+        # Inputs stay fp32; _forward_ctx's autocast downcasts per-op where safe (#41).
+        dtype = torch.float32
         try:
             return self._call_batched(torch, model, tiles, device, dtype)
         except Exception as exc:
@@ -491,7 +507,7 @@ class GroundingDinoDetector:
             raise ValueError("tiles have mismatched shapes; batching requires a uniform tile size")
         batch = torch.stack(tensors, dim=0)
         captions = [self.prompt] * len(tiles)
-        with torch.no_grad():
+        with torch.no_grad(), self._forward_ctx(torch):
             outputs = model(batch, captions=captions)
         logits = outputs["pred_logits"].sigmoid()  # (B, nq, ntok)
         boxes = outputs["pred_boxes"]              # (B, nq, 4) cxcywh in [0, 1]
@@ -508,11 +524,12 @@ class GroundingDinoDetector:
         for b, tile in enumerate(tiles):
             tile_h, tile_w = tile.shape[0], tile.shape[1]
             image = self._to_tensor(tile, torch, device, dtype)
-            boxes, scores, phrases = predict_fn(
-                model=model, image=image, caption=self.prompt,
-                box_threshold=self.box_threshold, text_threshold=self.text_threshold,
-                device=device,
-            )
+            with self._forward_ctx(torch):
+                boxes, scores, phrases = predict_fn(
+                    model=model, image=image, caption=self.prompt,
+                    box_threshold=self.box_threshold, text_threshold=self.text_threshold,
+                    device=device,
+                )
             dets: list[Detection] = []
             for (cx, cy, bw, bh), score, phrase in zip(
                 boxes.tolist(), scores.tolist(), phrases,
