@@ -35,6 +35,8 @@ from core.fsm.floors import PartialResults
 from core.interfaces import IntAnswer, MarkerBox, QType, Question, RobotIO, SceneIndex, WaypointCmd
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.llm.timeout import DEFAULT_CALL_TIMEOUT_S, wrap_call_timeout
+from core.parsing.vocab import PHRASES, SINGLE_NOUNS
+from core.perception.detector import DetectorFn, refresh_prompt
 from core.plan_schema import Plan
 
 from core.heads.explore_step import (
@@ -43,11 +45,21 @@ from core.heads.explore_step import (
     FrontierSelectFn,
     FuseHintFn,
     MissRecoveryFn,
+    _plan_nouns,
     uniform_affinity,
 )
 from core.heads.instruction import AnchorConfirmFn, InstructionHead
 from core.heads.numerical import NumericalHead
 from core.heads.object_ref import LlmVerifyFn, ObjectRefHead, VerifierFn
+
+#: Issue #34 "standing vocab": every canonical noun the offline parser knows (the 114-noun
+#: training vocabulary — core.parsing.vocab's own docstring), single-word + multi-word
+#: phrases collapsed to their canonical form. Handed to :func:`build_gdino_prompt` (via
+#: :func:`refresh_prompt`) AFTER the latched question's own nouns, so the detector also
+#: grounds on the rest of the known vocabulary at lower recall priority — not just the
+#: exact nouns this one question mentioned (read-only reuse: core/parsing/vocab.py is
+#: out of scope for this fix; nothing here mutates it).
+_STANDING_VOCAB_NOUNS: tuple[str, ...] = tuple(sorted(set(SINGLE_NOUNS) | set(PHRASES.values())))
 
 
 @dataclass
@@ -68,6 +80,11 @@ class HeadState:
     budget_frac: Callable[[], float] | None = None  # CP2 >=60% coverage trigger
     tiles_fn: Callable[[], object] | None = None  # CP2 tile supplier
     fuse_hint: FuseHintFn | None = None  # CP2 provisional-instance fusion
+    #: Issue #34 — the live perception detector (GroundingDinoDetector / FakeDetector),
+    #: if any, whose ``.prompt`` gets rebuilt from the plan's nouns the moment it latches
+    #: (see :meth:`bind`). None (default) is a no-op, matching today's behaviour when no
+    #: detector is wired (VLA_DETECTOR=none, or an offline/replay caller with none to give).
+    detector: DetectorFn | None = None
 
     plan: Plan | None = None
     numerical: NumericalHead | None = None
@@ -76,10 +93,22 @@ class HeadState:
     explore: ExploreHead | None = None
 
     def bind(self, plan: Plan | None) -> None:
-        """Latch the plan and construct the qtype's head(s) exactly once."""
+        """Latch the plan, refresh the detector prompt, and construct the qtype's head(s)
+        — each exactly once, the first time a non-None plan reaches either ``explore`` or
+        ``verify`` (whichever the FSM calls first this run).
+
+        Issue #34: refreshing ``self.detector``'s prompt HERE — rather than only at
+        construction, when no question has latched yet and the prompt is forced empty —
+        is what stops a ``GroundingDinoDetector`` from being silently inert for the whole
+        run. This is the one seam both the adapter (``ros_adapter/adapter_node.py``,
+        real ROS timer/callback threads) and the offline replay path
+        (``core/runner/single.py`` -> ``build_callables`` -> this same ``bind``) drive
+        identically, so the fix lands once for both callers.
+        """
         if plan is None or self.plan is not None:
             return
         self.plan = plan
+        refresh_prompt(self.detector, _plan_nouns(plan), _STANDING_VOCAB_NOUNS)
         if plan.qtype is QType.NUMERICAL:
             self.numerical = NumericalHead(plan=plan, thresholds=self.thresholds)
         elif plan.qtype is QType.OBJECT_REFERENCE:
@@ -125,6 +154,7 @@ def build_callables(
     budget_frac: Callable[[], float] | None = None,
     tiles_fn: Callable[[], object] | None = None,
     fuse_hint: FuseHintFn | None = None,
+    detector: DetectorFn | None = None,
     thresholds: Thresholds = DEFAULT_THRESHOLDS,
     call_timeout_s: float = DEFAULT_CALL_TIMEOUT_S,
 ) -> dict:
@@ -133,6 +163,12 @@ def build_callables(
     scene_index: the live SceneIndex the heads resolve/count against.
     parse:       checkpoint-1 parse fn; default = the offline regex tier.
     affinity_fn: nouns -> ((x,y)->float) frontier bias; default uniform.
+    detector:    the live perception detector (e.g. GroundingDinoDetector), if any. Its
+                 ``.prompt`` is rebuilt from the plan's nouns + the standing vocab the
+                 moment the plan latches (issue #34 — see ``HeadState.bind``), so a
+                 detector constructed at boot with an empty prompt stops being silently
+                 inert once a question arrives. None (default) is a no-op: nothing to
+                 refresh, matching today's behaviour.
 
     Checkpoint seams (design doc wiring map; all default None == today's behaviour):
     * ``verifier``          — rich CP4 pre-answer verification (full contract). Falls back
@@ -180,6 +216,7 @@ def build_callables(
         budget_frac=budget_frac,
         tiles_fn=tiles_fn,
         fuse_hint=fuse_hint,
+        detector=detector,
     )
     parse_fn = parse if parse is not None else _default_parse
 

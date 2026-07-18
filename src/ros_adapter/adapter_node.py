@@ -405,6 +405,13 @@ class AdapterNode(Node):
         #   * VLA_DETECTOR=grounding_dino: make_detector() -> the lazy GroundingDINO seam; the
         #     pipeline's live index replaces the stub and grows as frames are grounded.
         detector = make_detector(self.get_logger())
+        # Kept alongside self._perception (issue #34): _build_controller_callables hands
+        # this SAME instance to build_callables(detector=...) so HeadState.bind refreshes
+        # its .prompt from the question nouns the moment the plan latches — otherwise a
+        # GroundingDinoDetector never leaves its boot-time empty prompt and every __call__
+        # short-circuits to zero detections for the whole run. None when perception is off
+        # (VLA_DETECTOR=none); refresh_prompt no-ops on None.
+        self._detector: GroundingDinoDetector | None = detector
         self._perception: PerceptionPipeline | None = None
         self._last_pano_t: float | None = None
         if detector is not None:
@@ -607,6 +614,12 @@ class AdapterNode(Node):
           BudgetState (which only exists after question intake). Without ``budget_frac`` the
           H4c provisional-terminal gate is inert (commits immediately — safe but the
           withholding guard never fires), so wiring it is load-bearing (H8 verifier note).
+        * ``detector=self._detector`` (issue #34) — the SAME GroundingDinoDetector instance
+          ``self._perception`` calls every keyframe. Passing it here lets
+          ``HeadState.bind`` (core/heads/factory.py) rebuild its ``.prompt`` from the
+          question's nouns the moment the plan latches, on both the LLM-configured and the
+          offline (regex-only) path below — without this a detector built at boot with an
+          empty prompt never grounds anything for the rest of the run.
 
         build_callables wraps every provider-triggering seam with a hard per-call timeout at
         the injection boundary (SYS-F8), so nothing here can stall the 5 Hz tick past that
@@ -638,6 +651,7 @@ class AdapterNode(Node):
                 self._scene_index,
                 budget_frac=_budget_frac,
                 remaining_s=_remaining_s,
+                detector=self._detector,
             )
 
         # A ledger-and-clock-bound closure for the parse ladder. The controller builds its own
@@ -661,6 +675,7 @@ class AdapterNode(Node):
             frontier_selector=seams.get("frontier_selector"),
             budget_frac=_budget_frac,
             remaining_s=_remaining_s,
+            detector=self._detector,
         )
 
     def _build_checkpoint_seams(self) -> dict:

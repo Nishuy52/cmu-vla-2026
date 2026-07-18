@@ -86,6 +86,12 @@ class FakeDetector:
         self._fixed = list(detections or [])
         self._script = [list(f) for f in script] if script is not None else None
         self._call = 0
+        # Mirrors GroundingDinoDetector.prompt (issue #34): a plain string attribute so
+        # FakeDetector can stand in for the real detector in prompt-refresh tests
+        # (:func:`refresh_prompt`) without changing its scripted-replay behaviour, which
+        # never actually consults ``self.prompt`` — the script/fixed detections play back
+        # regardless, matching its documented "deterministic scripted detector" contract.
+        self.prompt: str = ""
 
     def __call__(self, tiles: Sequence[np.ndarray]) -> list[list[Detection]]:
         n = len(tiles)
@@ -161,6 +167,46 @@ def build_gdino_prompt(question_nouns: Sequence[str], vocab_nouns: Sequence[str]
     return " . ".join(ordered) + " ."
 
 
+def refresh_prompt(
+    detector: object | None,
+    question_nouns: Sequence[str],
+    vocab_nouns: Sequence[str],
+) -> str | None:
+    """Rebuild ``detector.prompt`` from the latched question's nouns + standing vocab.
+
+    Issue #34: ``GroundingDinoDetector`` is constructed at boot with empty
+    ``question_nouns``/``vocab_nouns`` (no question latched yet), so its ``prompt`` stays
+    ``""`` and every ``__call__`` short-circuits to zero detections forever, even after a
+    question latches and the target/anchor nouns become known. This is the shared refresh
+    seam: called once the question is parsed (see
+    :meth:`core.heads.factory.HeadState.bind`), it rebuilds and reassigns ``detector.prompt``
+    in place via :func:`build_gdino_prompt` so the SAME live detector instance that
+    :class:`~core.perception.tracker.PerceptionPipeline` calls every keyframe starts
+    grounding on the very next call.
+
+    Structural, not nominal: any object exposing a settable ``.prompt`` string attribute
+    (:class:`GroundingDinoDetector`, :class:`FakeDetector`) is refreshed; ``None`` or a
+    detector with no ``.prompt`` attribute (a plain function, a
+    :class:`~core.perception.scripted.ScriptedPanoDetector`, which replays labels keyed by
+    keyframe index and has no text-prompt concept) is left untouched — this is a no-op, not
+    an error, so it is always safe to call unconditionally on every plan latch.
+
+    Thread-safety: this performs exactly one attribute assignment (``detector.prompt =
+    ...``), which is atomic under the GIL — safe to call from whichever thread latches the
+    plan (the adapter's 5 Hz tick timer) even though a different thread's subscription
+    callback may concurrently be feeding the same detector through
+    ``PerceptionPipeline.process`` — the reader either sees the old prompt or the fully-built
+    new one, never a partial write.
+
+    Returns the new prompt string, or ``None`` if ``detector`` has no ``.prompt`` to refresh.
+    """
+    if detector is None or not hasattr(detector, "prompt"):
+        return None
+    prompt = build_gdino_prompt(question_nouns, vocab_nouns)
+    detector.prompt = prompt
+    return prompt
+
+
 #: ImageNet normalisation GroundingDINO's own preprocessing uses (torchvision convention).
 _IMAGENET_MEAN: tuple[float, float, float] = (0.485, 0.456, 0.406)
 _IMAGENET_STD: tuple[float, float, float] = (0.229, 0.224, 0.225)
@@ -177,11 +223,32 @@ def _norm_cxcywh_to_tile_xyxy(
     tile's own (unresized) width/height (:class:`~core.perception.tiling.TileSpec`'s
     ``width``/``height``), no inverse-resize math needed. Pure function (no torch), so
     this piece of the real-inference math is unit-testable without the model.
+
+    The raw affine result is clamped to the tile bounds ``[0, tile_w] x [0, tile_h]``: a
+    real GDINO box centred near an edge (or, degenerately, entirely outside ``[0, 1]``
+    normalised space) otherwise yields negative or beyond-frame coordinates that
+    downstream pixel indexing (mask crops, tile-array slicing) cannot safely use.
+    Clamping each edge independently before ordering can, for a box that already
+    straddles a bound asymmetrically, leave ``x1 < x0`` or ``y1 < y0``; the two are
+    swapped back into order afterward so the result is always a well-formed (possibly
+    zero-area, never inverted) box — consistent with how
+    :mod:`core.perception.fusion` already tolerates a zero-area/degenerate bbox (its
+    frustum padding, ``FusionConfig.angular_pad``, guarantees a non-empty angular gate
+    regardless of bbox span, so no additional degenerate-box special-casing is needed
+    downstream of this clamp).
     """
     x0 = (cx - w / 2.0) * tile_w
     y0 = (cy - h / 2.0) * tile_h
     x1 = (cx + w / 2.0) * tile_w
     y1 = (cy + h / 2.0) * tile_h
+    x0 = min(max(x0, 0.0), float(tile_w))
+    x1 = min(max(x1, 0.0), float(tile_w))
+    y0 = min(max(y0, 0.0), float(tile_h))
+    y1 = min(max(y1, 0.0), float(tile_h))
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
     return float(x0), float(y0), float(x1), float(y1)
 
 

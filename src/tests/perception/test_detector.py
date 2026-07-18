@@ -19,6 +19,7 @@ from core.perception.detector import (
     GroundingDinoDetector,
     _norm_cxcywh_to_tile_xyxy,
     build_gdino_prompt,
+    refresh_prompt,
 )
 
 
@@ -279,3 +280,70 @@ def test_norm_cxcywh_to_tile_xyxy_scales_independently_per_axis():
     assert x1 == pytest.approx(60.0)
     assert y0 == pytest.approx(65.0)
     assert y1 == pytest.approx(85.0)
+
+
+# ------------------------------------------------------------------ box clamping (verifier refutation)
+
+
+def test_norm_cxcywh_to_tile_xyxy_centered_case_unchanged():
+    # Sanity baseline for the clamp tests below: a fully-inside box is untouched.
+    x0, y0, x1, y1 = _norm_cxcywh_to_tile_xyxy(0.5, 0.5, 0.5, 0.5, tile_w=640, tile_h=640)
+    assert (x0, y0, x1, y1) == pytest.approx((160.0, 160.0, 480.0, 480.0))
+
+
+def test_norm_cxcywh_to_tile_xyxy_edge_hugging_clamps_to_bounds():
+    # cx=0, cy=0, w=0.5, h=0.5 on a 640x640 tile: unclamped affine gives (-160,-160,160,160)
+    # — a box hugging the top-left corner whose far edge legitimately sits inside the tile.
+    # Real GDINO detections at tile edges produce exactly this shape; downstream pixel
+    # indexing must never see a negative coordinate.
+    x0, y0, x1, y1 = _norm_cxcywh_to_tile_xyxy(0.0, 0.0, 0.5, 0.5, tile_w=640, tile_h=640)
+    assert (x0, y0, x1, y1) == pytest.approx((0.0, 0.0, 160.0, 160.0))
+    assert 0.0 <= x0 <= x1 <= 640.0
+    assert 0.0 <= y0 <= y1 <= 640.0
+
+
+def test_norm_cxcywh_to_tile_xyxy_fully_outside_degenerates_safely():
+    # Entirely outside normalised [0, 1] space on both axes: every raw corner clamps to the
+    # same tile edge, collapsing to a zero-area box AT the bound rather than an inverted
+    # (x1 < x0) or out-of-bounds one.
+    x0, y0, x1, y1 = _norm_cxcywh_to_tile_xyxy(-1.0, -1.0, 0.2, 0.2, tile_w=640, tile_h=640)
+    assert (x0, y0, x1, y1) == pytest.approx((0.0, 0.0, 0.0, 0.0))
+    assert x0 <= x1 and y0 <= y1  # never inverted
+
+    # Fully outside past the high edge too.
+    x0, y0, x1, y1 = _norm_cxcywh_to_tile_xyxy(2.0, 2.0, 0.2, 0.2, tile_w=640, tile_h=640)
+    assert (x0, y0, x1, y1) == pytest.approx((640.0, 640.0, 640.0, 640.0))
+    assert x0 <= x1 and y0 <= y1
+
+
+# ------------------------------------------------------------------ prompt refresh (issue #34)
+
+
+def test_fake_detector_has_empty_prompt_by_default():
+    assert FakeDetector().prompt == ""
+
+
+def test_refresh_prompt_updates_fake_detector_in_place():
+    fake = FakeDetector()
+    assert fake.prompt == ""
+    new_prompt = refresh_prompt(fake, ["chair", "table"], ["sofa"])
+    assert new_prompt == "chair . table . sofa ."
+    assert fake.prompt == "chair . table . sofa ."  # mutated in place, same instance
+
+
+def test_refresh_prompt_updates_gdino_detector_in_place():
+    det = GroundingDinoDetector()  # boot-time construction: no question latched yet
+    assert det.prompt == ""
+    refresh_prompt(det, ["lamp"], [])
+    assert det.prompt == "lamp ."
+
+
+def test_refresh_prompt_none_detector_is_noop():
+    assert refresh_prompt(None, ["chair"], []) is None
+
+
+def test_refresh_prompt_detector_without_prompt_attr_is_noop():
+    def plain_detector(tiles):
+        return [[] for _ in tiles]
+
+    assert refresh_prompt(plain_detector, ["chair"], []) is None

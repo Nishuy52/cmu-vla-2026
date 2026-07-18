@@ -52,6 +52,20 @@ def test_detector_factory_defaults_to_stub(src: str):
     assert "instances_tracked > 0 on a live scene" in src
 
 
+def test_detector_prompt_refresh_wired_to_build_callables(src: str):
+    # Issue #34: GroundingDinoDetector is constructed at boot with an empty prompt (no
+    # question latched yet); without rewiring it stays "" (silently inert) forever. The
+    # same live instance handed to PerceptionPipeline must also reach build_callables so
+    # HeadState.bind (core/heads/factory.py) can refresh its .prompt on plan latch.
+    assert "self._detector: GroundingDinoDetector | None = detector" in src
+    assert "self._perception = PerceptionPipeline(detector, index=BasicSceneIndex([]))" in src
+    # Passed through on BOTH the offline (no-LLM) and LLM-configured build_callables calls
+    # in _build_controller_callables — the prompt refresh must not depend on whether an
+    # LLM provider is configured. (>=2, not ==, since the docstring above also mentions
+    # the kwarg by name once.)
+    assert src.count("detector=self._detector") >= 2
+
+
 # --------------------------------------------------------------------- H8 LLM / checkpoints
 
 
