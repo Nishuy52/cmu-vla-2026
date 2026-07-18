@@ -8,11 +8,15 @@ import pytest
 
 from core.perception.detector import (
     Detection,
+    DEFAULT_GDINO_QUESTION_BOX_THRESHOLD,
+    DEFAULT_GDINO_VOCAB_PASS_CADENCE,
     ENV_GDINO_CHECKPOINT_PATH,
     ENV_GDINO_CONFIG_PATH,
     ENV_GDINO_DEVICE,
     ENV_GDINO_MODEL_ID,
     ENV_GDINO_PRECISION,
+    ENV_GDINO_QUESTION_BOX_THRESHOLD,
+    ENV_GDINO_VOCAB_PASS_CADENCE,
     FakeDetector,
     GDINO_BACKOFF_BASE_S,
     GDINO_BACKOFF_CAP_S,
@@ -459,6 +463,168 @@ def test_refresh_prompt_detector_without_prompt_attr_is_noop():
         return [[] for _ in tiles]
 
     assert refresh_prompt(plain_detector, ["chair"], []) is None
+
+
+# ------------------------------------------------------------------ dual-caption detection (issue #42)
+
+
+def test_gdino_builds_short_question_only_prompt_at_construction():
+    det = GroundingDinoDetector(["teapot"], ["table", "sofa"])
+    assert det.prompt == "teapot . table . sofa ."
+    assert det.question_prompt == "teapot ."  # no vocab nouns in the short caption
+
+
+def test_fake_detector_has_empty_question_prompt_by_default():
+    assert FakeDetector().question_prompt == ""
+
+
+def test_refresh_prompt_updates_fake_detector_question_prompt_too():
+    fake = FakeDetector()
+    refresh_prompt(fake, ["teapot"], ["table"])
+    assert fake.prompt == "teapot . table ."
+    assert fake.question_prompt == "teapot ."
+
+
+def test_refresh_prompt_updates_gdino_detector_both_captions():
+    det = GroundingDinoDetector()  # boot-time: no question latched yet
+    assert det.prompt == "" and det.question_prompt == ""
+    refresh_prompt(det, ["teapot"], ["table", "chair"])
+    assert det.prompt == "teapot . table . chair ."
+    assert det.question_prompt == "teapot ."
+
+
+def test_question_box_threshold_precedence(monkeypatch):
+    monkeypatch.delenv(ENV_GDINO_QUESTION_BOX_THRESHOLD, raising=False)
+    assert GroundingDinoDetector().question_box_threshold == DEFAULT_GDINO_QUESTION_BOX_THRESHOLD
+    monkeypatch.setenv(ENV_GDINO_QUESTION_BOX_THRESHOLD, "0.18")
+    assert GroundingDinoDetector().question_box_threshold == 0.18
+    assert GroundingDinoDetector(question_box_threshold=0.4).question_box_threshold == 0.4  # ctor wins
+
+
+def test_vocab_pass_cadence_precedence(monkeypatch):
+    monkeypatch.delenv(ENV_GDINO_VOCAB_PASS_CADENCE, raising=False)
+    assert GroundingDinoDetector().vocab_pass_cadence == DEFAULT_GDINO_VOCAB_PASS_CADENCE
+    monkeypatch.setenv(ENV_GDINO_VOCAB_PASS_CADENCE, "5")
+    assert GroundingDinoDetector().vocab_pass_cadence == 5
+    assert GroundingDinoDetector(vocab_pass_cadence=1).vocab_pass_cadence == 1  # ctor wins
+
+
+def _dual_pass_detector(tmp_path, **kwargs) -> GroundingDinoDetector:
+    """A GroundingDinoDetector whose model 'loads' successfully via a stubbed
+    ``_lazy_import`` (no torch/groundingdino needed) so ``__call__``'s dual-pass
+    orchestration can be exercised end to end; ``_dispatch_pass`` itself is left real —
+    callers stub it directly to record/assert per-pass arguments without needing a real
+    forward pass."""
+    cfg = tmp_path / "gdino.cfg.py"
+    cfg.write_text("# fake config\n")
+    ckpt = tmp_path / "gdino.pth"
+    ckpt.write_bytes(b"\x00")
+    det = GroundingDinoDetector(
+        config_path=str(cfg), checkpoint_path=str(ckpt), device="cpu", **kwargs,
+    )
+    fake_model = _FakeModel()
+    det._lazy_import = lambda: (_FakeTorch(cuda_available=False), lambda *a, **k: fake_model, None)
+    return det
+
+
+def test_dual_pass_merges_question_and_vocab_detections(tmp_path):
+    det = _dual_pass_detector(
+        tmp_path, question_nouns=["teapot"], vocab_nouns=["table"], vocab_pass_cadence=1,
+    )
+    calls: list[tuple[str, float]] = []
+
+    def fake_dispatch(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        calls.append((prompt, box_threshold))
+        label = "teapot" if prompt == det.question_prompt else "table"
+        return [[Detection(0, (0, 0, 1, 1), label, 0.9)] if i == 0 else [] for i in range(len(tiles))]
+
+    det._dispatch_pass = fake_dispatch
+    out = det(_tiles(4))
+
+    # Both passes ran (cadence=1 -> vocab pass due on the very first tick) and their
+    # tile-0 detections were unioned, not overwritten.
+    assert calls == [
+        (det.question_prompt, det.question_box_threshold),
+        (det.prompt, det.box_threshold),
+    ]
+    assert sorted(d.label for d in out[0]) == ["table", "teapot"]
+    assert out[1] == out[2] == out[3] == []
+
+
+def test_question_pass_uses_its_own_lower_threshold(tmp_path):
+    det = _dual_pass_detector(
+        tmp_path, question_nouns=["teapot"], vocab_nouns=[], question_box_threshold=0.22,
+    )
+    assert det.box_threshold == 0.35  # module default, unchanged
+    seen: list[float] = []
+
+    def fake_dispatch(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        seen.append(box_threshold)
+        return [[] for _ in tiles]
+
+    det._dispatch_pass = fake_dispatch
+    det(_tiles(2))
+    assert 0.22 in seen  # question pass ran with its own threshold, not the vocab 0.35
+
+
+def test_vocab_pass_runs_only_every_nth_tick(tmp_path):
+    det = _dual_pass_detector(
+        tmp_path, question_nouns=["teapot"], vocab_nouns=["table"], vocab_pass_cadence=3,
+    )
+    vocab_pass_ticks: list[int] = []
+
+    def fake_dispatch(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        if prompt == det.prompt:
+            vocab_pass_ticks.append(1)
+        return [[] for _ in tiles]
+
+    det._dispatch_pass = fake_dispatch
+    for _ in range(6):
+        det(_tiles(2))
+    # cadence=3 over 6 ticks (0..5) -> due on ticks 0 and 3 -> exactly 2 vocab passes.
+    assert len(vocab_pass_ticks) == 2
+
+
+def test_question_only_tick_is_a_single_forward(tmp_path):
+    det = _dual_pass_detector(
+        tmp_path, question_nouns=["teapot"], vocab_nouns=["table"], vocab_pass_cadence=3,
+    )
+    dispatch_calls = {"n": 0}
+
+    def fake_dispatch(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        dispatch_calls["n"] += 1
+        return [[] for _ in tiles]
+
+    det._dispatch_pass = fake_dispatch
+    det(_tiles(2))  # tick 0 -> vocab due -> two forwards
+    assert dispatch_calls["n"] == 2
+    det(_tiles(2))  # tick 1 -> vocab not due -> one forward (question only)
+    assert dispatch_calls["n"] == 3
+
+
+def test_empty_question_prompt_still_runs_vocab_pass_alone(tmp_path):
+    # No question nouns latched but a standing vocab prompt somehow present (edge case,
+    # e.g. constructed directly with vocab_nouns and empty question_nouns): the question
+    # pass is skipped (empty caption, nothing to ground) but the vocab pass still runs on
+    # its own cadence tick.
+    det = _dual_pass_detector(tmp_path, question_nouns=[], vocab_nouns=["table"], vocab_pass_cadence=1)
+    assert det.question_prompt == ""
+    assert det.prompt == "table ."
+    calls: list[str] = []
+
+    def fake_dispatch(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        calls.append(prompt)
+        return [[] for _ in tiles]
+
+    det._dispatch_pass = fake_dispatch
+    det(_tiles(2))
+    assert calls == ["table ."]
+
+
+def test_both_prompts_empty_still_short_circuits_without_torch():
+    det = GroundingDinoDetector()  # no question latched -> both prompts empty
+    assert det.prompt == "" and det.question_prompt == ""
+    assert det(_tiles(3)) == [[], [], []]
 
 
 # ------------------------------------------------------------------ load backoff (issue #39)

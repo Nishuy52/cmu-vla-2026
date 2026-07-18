@@ -94,6 +94,10 @@ class FakeDetector:
         # never actually consults ``self.prompt`` — the script/fixed detections play back
         # regardless, matching its documented "deterministic scripted detector" contract.
         self.prompt: str = ""
+        # Mirrors GroundingDinoDetector.question_prompt (issue #42 dual-pass detection):
+        # same rationale as ``self.prompt`` above — kept in sync by :func:`refresh_prompt`
+        # but never consulted by the scripted replay itself.
+        self.question_prompt: str = ""
 
     def __call__(self, tiles: Sequence[np.ndarray]) -> list[list[Detection]]:
         n = len(tiles)
@@ -162,6 +166,29 @@ GDINO_BACKOFF_CAP_S: float = 60.0
 #: settles at the capped retry interval (logged once as a single ERROR transition).
 GDINO_BACKOFF_DEGRADE_N: int = 5
 
+# --------------------------------------------------------------------------- dual-caption detection
+
+# Issue #42: the live 117-phrase caption (question nouns + full 114-noun standing vocab)
+# decodes ZERO 'teapot' at any threshold — caption dilution, not a threshold problem (the
+# gate-4 grounding probe, reports/gate4_grounding_probe/). A short "teapot . table ."
+# caption decodes teapot 194/211 keyframes and peaks at score 0.292, below the 0.35 vocab-
+# pass box threshold. So every detection tick now runs a SHORT question-noun-only caption
+# pass at its own (lower) box threshold for target recall, and the existing full
+# question+vocab caption pass — which feeds scene-index breadth (anchor/other-object
+# instances), not target recall — runs at a reduced cadence instead of every tick.
+
+#: Box threshold for the short question-noun-only caption pass. Lower than
+#: :attr:`GroundingDinoDetector.box_threshold`'s 0.35 default because a 2-phrase prompt
+#: carries far less token-position score dilution than the full vocab caption (probe:
+#: peak short-caption teapot score 0.292, 19/19 detections within 6.4 deg of GT at 0.25).
+ENV_GDINO_QUESTION_BOX_THRESHOLD = "GDINO_QUESTION_BOX_THRESHOLD"
+DEFAULT_GDINO_QUESTION_BOX_THRESHOLD: float = 0.25
+
+#: Run the full question+vocab caption pass every Nth detection tick (1 == every tick,
+#: matching the pre-#42 behaviour). The question-noun pass still runs every tick.
+ENV_GDINO_VOCAB_PASS_CADENCE = "GDINO_VOCAB_PASS_CADENCE"
+DEFAULT_GDINO_VOCAB_PASS_CADENCE: int = 3
+
 
 def build_gdino_prompt(question_nouns: Sequence[str], vocab_nouns: Sequence[str]) -> str:
     """Build the GroundingDINO text prompt from question + vocab nouns.
@@ -207,6 +234,12 @@ def refresh_prompt(
     keyframe index and has no text-prompt concept) is left untouched — this is a no-op, not
     an error, so it is always safe to call unconditionally on every plan latch.
 
+    Issue #42 dual-pass detection: if the detector also exposes a settable
+    ``.question_prompt`` (both :class:`GroundingDinoDetector` and :class:`FakeDetector`
+    do), that is refreshed too, from the question nouns alone (no vocab nouns) — the short
+    caption the question-noun pass grounds on. A detector with ``.prompt`` but no
+    ``.question_prompt`` still gets its full prompt refreshed as before.
+
     Thread-safety: this performs exactly one attribute assignment (``detector.prompt =
     ...``), which is atomic under the GIL — safe to call from whichever thread latches the
     plan (the adapter's 5 Hz tick timer) even though a different thread's subscription
@@ -220,6 +253,8 @@ def refresh_prompt(
         return None
     prompt = build_gdino_prompt(question_nouns, vocab_nouns)
     detector.prompt = prompt
+    if hasattr(detector, "question_prompt"):
+        detector.question_prompt = build_gdino_prompt(question_nouns, ())
     return prompt
 
 
@@ -282,6 +317,17 @@ class GroundingDinoDetector:
     the model is :data:`GDINO_MODEL_ID` (overridable via the ``GDINO_MODEL_ID`` env var
     or the ``model_id`` constructor arg — constructor > env > module default).
 
+    Issue #42 dual-pass detection: every call also grounds a SHORT question-noun-only
+    caption (``self.question_prompt``, built without vocab nouns) at its own, lower
+    ``question_box_threshold`` — this is the pass that actually recalls small/rare
+    targets like a teapot, which the full ~117-phrase question+vocab caption dilutes to
+    zero detections at any threshold. The full caption keeps running too, but only every
+    ``vocab_pass_cadence``-th tick (it feeds scene-index breadth — other-object/anchor
+    instances — not target recall, so it doesn't need every-tick cadence). Per-tile
+    detections from both passes that ran this tick are unioned (no dedupe: downstream
+    fusion/association already tolerates overlapping detections). A tick where only the
+    question pass runs costs one forward pass, not two.
+
     Deploy-time knobs (env var, all optional — see the ``ENV_GDINO_*`` constants above):
     ``GDINO_MODEL_ID``, ``GDINO_PRECISION`` (``fp16``/``fp32``/``auto``), ``GDINO_DEVICE``
     (``cuda``/``cpu``), ``GDINO_CONFIG_PATH``, ``GDINO_CHECKPOINT_PATH``. Per the
@@ -310,6 +356,8 @@ class GroundingDinoDetector:
         *,
         box_threshold: float = 0.35,
         text_threshold: float = 0.25,
+        question_box_threshold: float | None = None,
+        vocab_pass_cadence: int | None = None,
         model_id: str | None = None,
         precision: str | None = None,
         device: str | None = None,
@@ -317,9 +365,30 @@ class GroundingDinoDetector:
         checkpoint_path: str | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        # Full question+vocab caption (the pre-#42 prompt; feeds scene-index breadth,
+        # runs at ``vocab_pass_cadence``) and the short question-noun-only caption (#42
+        # dual-pass; runs every tick, at its own lower box threshold for target recall).
         self.prompt = build_gdino_prompt(question_nouns, vocab_nouns)
+        self.question_prompt = build_gdino_prompt(question_nouns, ())
         self.box_threshold = float(box_threshold)
         self.text_threshold = float(text_threshold)
+        # constructor arg > env var > module default (same precedence as every other
+        # ENV_GDINO_* knob below).
+        self.question_box_threshold = float(
+            question_box_threshold
+            if question_box_threshold is not None
+            else os.environ.get(
+                ENV_GDINO_QUESTION_BOX_THRESHOLD, DEFAULT_GDINO_QUESTION_BOX_THRESHOLD
+            )
+        )
+        self.vocab_pass_cadence = int(
+            vocab_pass_cadence
+            if vocab_pass_cadence is not None
+            else os.environ.get(ENV_GDINO_VOCAB_PASS_CADENCE, DEFAULT_GDINO_VOCAB_PASS_CADENCE)
+        )
+        # Detection-tick counter driving the vocab-pass cadence (issue #42); incremented
+        # once per non-empty-tiles __call__, regardless of cooldown/pass outcome.
+        self._tick: int = 0
         # constructor arg > env var > module default (docstring-documented precedence).
         self.model_id = model_id or os.environ.get(ENV_GDINO_MODEL_ID) or GDINO_MODEL_ID
         self.precision = (
@@ -505,10 +574,16 @@ class GroundingDinoDetector:
     def __call__(self, tiles: Sequence[np.ndarray]) -> list[list[Detection]]:
         if not tiles:
             return []
-        if not self.prompt:
-            # No question nouns yet (e.g. freshly booted, question not latched) — nothing
-            # to ground. Short-circuits BEFORE the lazy import, so a detector constructed
-            # before the first question never needs torch present to no-op harmlessly.
+        # Issue #42: decide which caption pass(es) fire on this tick BEFORE the lazy
+        # import, same short-circuit shape as the old single-prompt empty check — a
+        # detector with no question latched yet (both prompts empty) still needs torch
+        # present for nothing.
+        tick = self._tick
+        self._tick += 1
+        run_question = bool(self.question_prompt)
+        cadence = max(self.vocab_pass_cadence, 1)
+        run_vocab = bool(self.prompt) and tick % cadence == 0
+        if not run_question and not run_vocab:
             return [[] for _ in tiles]
         if self._in_cooldown():
             # Issue #39: a load that already failed is backing off — no-op cleanly
@@ -529,16 +604,53 @@ class GroundingDinoDetector:
         device = self._resolved_device
         # Inputs stay fp32; _forward_ctx's autocast downcasts per-op where safe (#41).
         dtype = torch.float32
+        merged: list[list[Detection]] = [[] for _ in tiles]
+        # Question-noun pass first (every tick, target recall) — a tick where the vocab
+        # pass is not due costs exactly this one forward, not two.
+        if run_question:
+            per_tile = self._dispatch_pass(
+                torch, model, predict_fn, tiles, device, dtype,
+                self.question_prompt, self.question_box_threshold,
+            )
+            for i, dets in enumerate(per_tile):
+                merged[i].extend(dets)
+        # Full question+vocab pass (only every ``vocab_pass_cadence``-th tick) — union
+        # its detections into the same per-tile lists; no dedupe, downstream fusion
+        # already tolerates overlapping detections.
+        if run_vocab:
+            per_tile = self._dispatch_pass(
+                torch, model, predict_fn, tiles, device, dtype,
+                self.prompt, self.box_threshold,
+            )
+            for i, dets in enumerate(per_tile):
+                merged[i].extend(dets)
+        return merged
+
+    def _dispatch_pass(
+        self, torch, model, predict_fn, tiles: Sequence[np.ndarray], device, dtype,
+        prompt: str, box_threshold: float,
+    ) -> list[list[Detection]]:
+        """Run one caption pass (batched, falling back to per-tile) through the shared
+        ``_call_batched``/``_call_per_tile`` dispatch, which both read ``self.prompt``/
+        ``self.box_threshold`` — temporarily swapped to this pass's values so those two
+        methods (and their exact call signature, depended on by the issue #39 backoff
+        tests' ``det._call_batched = lambda torch, model, tiles, device, dtype: ...``
+        monkeypatch) stay untouched by the dual-pass change."""
+        saved_prompt, saved_threshold = self.prompt, self.box_threshold
+        self.prompt, self.box_threshold = prompt, box_threshold
         try:
-            return self._call_batched(torch, model, tiles, device, dtype)
-        except Exception as exc:
-            if not self._warned_batch_fallback:
-                _LOGGER.warning(
-                    "GroundingDinoDetector: batched tile forward failed (%s); falling "
-                    "back to one predict() call per tile (slower, always correct).", exc,
-                )
-                self._warned_batch_fallback = True
-            return self._call_per_tile(torch, model, predict_fn, tiles, device, dtype)
+            try:
+                return self._call_batched(torch, model, tiles, device, dtype)
+            except Exception as exc:
+                if not self._warned_batch_fallback:
+                    _LOGGER.warning(
+                        "GroundingDinoDetector: batched tile forward failed (%s); falling "
+                        "back to one predict() call per tile (slower, always correct).", exc,
+                    )
+                    self._warned_batch_fallback = True
+                return self._call_per_tile(torch, model, predict_fn, tiles, device, dtype)
+        finally:
+            self.prompt, self.box_threshold = saved_prompt, saved_threshold
 
     def _decode_batch_item(
         self, tile_id: int, tile: np.ndarray, item_logits, item_boxes,

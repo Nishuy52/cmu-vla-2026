@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from core.fsm.floors import FloorAnswers, MODAL_COUNT, PartialResults
 from core.interfaces import IntAnswer, MarkerBox, QType, WaypointCmd
-from core.plan_schema import Plan, TargetSpec
+from core.plan_schema import Anchor, Clause, Plan, Pred, TargetSpec
 from tests.fsm._fakes import FakeScene, make_instance
 
 
@@ -103,6 +103,74 @@ def test_object_ref_empty_scene_unit_box_at_origin():
     m = f.get(QType.OBJECT_REFERENCE)
     assert (m.cx, m.cy, m.cz) == (0.0, 0.0, 0.0)
     assert (m.sx, m.sy, m.sz) == (1.0, 1.0, 1.0)
+
+
+def _plan_with_anchor(target_noun: str, anchor_noun: str) -> Plan:
+    """e.g. 'find the teapot on the table' -> target='teapot', clause anchor='table'."""
+    clause = Clause(pred=Pred.ON, anchors=[Anchor(noun=anchor_noun)])
+    return Plan(
+        qtype=QType.OBJECT_REFERENCE,
+        question_raw="",
+        target=TargetSpec(noun=target_noun, clauses=[clause]),
+    )
+
+
+def test_object_ref_anchor_rung_fires_when_target_absent_but_anchor_present():
+    # issue #42 repro shape: 'teapot' never grounds, but 'table' does; the anchor rung
+    # should mark on the table instead of falling to rung 5's blind largest-any-label
+    # guess (which in the real incident landed on an unrelated column).
+    table = make_instance(1, "table", centroid=(-0.6, 2.1, 0.3), extent=(1.2, 0.8, 0.4))
+    column = make_instance(2, "column", centroid=(2.3, -2.4, 1.5), extent=(0.3, 0.3, 2.0))
+    plan = _plan_with_anchor("teapot", "table")
+    f = FloorAnswers()
+    f.update(FakeScene([table, column]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert m.label == "table"
+    assert (m.cx, m.cy, m.cz) == (-0.6, 2.1, 0.3)
+
+
+def test_object_ref_anchor_rung_picks_largest_anchor_instance():
+    small = make_instance(1, "table", centroid=(0, 0, 0), extent=(1.0, 1.0, 1.0))
+    big = make_instance(2, "table", centroid=(5, 5, 5), extent=(3.0, 3.0, 3.0))
+    plan = _plan_with_anchor("teapot", "table")
+    f = FloorAnswers()
+    f.update(FakeScene([small, big]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert (m.cx, m.cy, m.cz) == (5.0, 5.0, 5.0)
+
+
+def test_object_ref_anchor_rung_skipped_when_no_anchor_instances_falls_to_largest_volume():
+    # No 'table' instance in the scene either -> the anchor rung has nothing to grab, so
+    # this falls through to rung 5 (largest instance of ANY label), same as pre-#42.
+    column = make_instance(1, "column", centroid=(2.3, -2.4, 1.5), extent=(0.3, 0.3, 2.0))
+    plan = _plan_with_anchor("teapot", "table")
+    f = FloorAnswers()
+    f.update(FakeScene([column]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert m.label == "column"
+
+
+def test_object_ref_anchor_rung_skipped_when_plan_has_no_anchors():
+    # Target absent, no clause anchors at all (plain 'find the unicorn') -> straight to
+    # rung 5, unaffected by the new rung.
+    other = make_instance(1, "sofa", centroid=(2, 2, 2))
+    plan = Plan(qtype=QType.OBJECT_REFERENCE, question_raw="", target=TargetSpec(noun="unicorn"))
+    f = FloorAnswers()
+    f.update(FakeScene([other]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert m.label == "sofa"
+
+
+def test_object_ref_target_match_beats_anchor_rung():
+    # Rung 3 (direct target-noun match) still wins over the new anchor rung when the
+    # target itself IS grounded.
+    teapot = make_instance(1, "teapot", centroid=(-0.6, 2.1, 0.3))
+    table = make_instance(2, "table", centroid=(0, 0, 0), extent=(3.0, 3.0, 3.0))
+    plan = _plan_with_anchor("teapot", "table")
+    f = FloorAnswers()
+    f.update(FakeScene([teapot, table]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert m.label == "teapot"
 
 
 def test_instruction_following_first_anchor_point():

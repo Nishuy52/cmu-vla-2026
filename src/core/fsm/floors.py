@@ -79,6 +79,28 @@ def _target_noun(plan: Any) -> str | None:
     return None
 
 
+def _anchor_nouns(plan: Any) -> list[str]:
+    """Non-target reference nouns carried by the plan's target clauses, tolerating any
+    shape/None (e.g. 'table' in 'find the teapot on the table' -> ['table']).
+
+    Mirrors :func:`core.heads.explore_step._plan_nouns` but excludes the target noun
+    itself — issue #42's anchor-guided rung wants only the ANCHOR side of a clause, not
+    the target the rest of ``_object_reference`` is already trying (and failing) to
+    match directly.
+    """
+    if plan is None:
+        return []
+    nouns: list[str] = []
+    tgt = getattr(plan, "target", None)
+    if tgt is not None:
+        for clause in getattr(tgt, "clauses", None) or []:
+            for anchor in getattr(clause, "anchors", None) or []:
+                noun = getattr(anchor, "noun", None)
+                if noun:
+                    nouns.append(str(noun))
+    return nouns
+
+
 def _instances_for_noun(scene: SceneIndex | None, noun: str | None) -> list[InstanceRecord]:
     """Noun-matched instances via the scene's tolerant lookup; [] on any failure."""
     if scene is None or noun is None:
@@ -138,7 +160,7 @@ class FloorAnswers:
         noun = _target_noun(plan)
 
         self._cache.numerical = self._numerical(scene, noun, partial)
-        self._cache.object_reference = self._object_reference(scene, noun, partial)
+        self._cache.object_reference = self._object_reference(scene, noun, partial, plan)
         self._cache.instruction_following = self._instruction_following(scene, partial)
 
     def _numerical(
@@ -152,7 +174,11 @@ class FloorAnswers:
         return IntAnswer(MODAL_COUNT)
 
     def _object_reference(
-        self, scene: SceneIndex | None, noun: str | None, partial: PartialResults
+        self,
+        scene: SceneIndex | None,
+        noun: str | None,
+        partial: PartialResults,
+        plan: Any | None = None,
     ) -> MarkerBox:
         # 1. explicit override / verified marker
         if partial.best_marker is not None:
@@ -164,11 +190,25 @@ class FloorAnswers:
         matches = _instances_for_noun(scene, noun)
         if matches:
             return clamp_record_marker(max(matches, key=_volume))
-        # 4. any instance at all (largest, for a defensible box)
+        # 4. anchor-guided (issue #42): the target noun is absent from the scene index,
+        # but if the plan carries an anchor noun (e.g. 'table' in 'teapot on the table')
+        # AND the index has instances for it, mark the best (largest) anchor instance
+        # instead of falling straight to rung 5's blind largest-any-label guess — the
+        # target usually sits ON/AT its anchor, so an anchor-centred marker is plausibly
+        # within IoU distance of a small/undetected target, unlike an unrelated big box
+        # elsewhere in the scene (the #42 repro: rung 5 alone landed on a column 1.4 m
+        # from a mismarked teapot's GT). Anchors are tried in clause order; the first
+        # anchor noun with any grounded instances wins.
+        for anchor_noun in _anchor_nouns(plan):
+            anchor_matches = _instances_for_noun(scene, anchor_noun)
+            if anchor_matches:
+                return clamp_record_marker(max(anchor_matches, key=_volume))
+        # 5. any instance at all (largest, for a defensible box) — the final rung; silence
+        # is still the only unforgivable failure, so this never withholds either.
         allinst = _all_instances(scene)
         if allinst:
             return clamp_record_marker(max(allinst, key=_volume))
-        # 5. a 1x1x1 box at the most-observed cluster centroid (else origin)
+        # 6. a 1x1x1 box at the most-observed cluster centroid (else origin)
         return self._unit_marker_at_most_observed(allinst)
 
     def _unit_marker_at_most_observed(self, allinst: list[InstanceRecord]) -> MarkerBox:

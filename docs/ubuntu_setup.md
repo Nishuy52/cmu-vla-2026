@@ -182,6 +182,15 @@ multi-GB bag to a few hundred MB that move freely between machines.
      (`swin_B_384_22k`), and the BERT snapshot.
    Until these are present the detector raises a clear ImportError and the offline path falls back
    to the scripted `FakeDetector` (tests only).
+   - **Dual-caption detection (issue #42, added 18 Jul):** the live ~117-phrase
+     question+vocab caption decodes zero `teapot`-class detections at any threshold
+     (caption dilution); a short question-noun-only caption recovers them. Every
+     detection tick now grounds that short caption at its own, lower threshold
+     (`GDINO_QUESTION_BOX_THRESHOLD`, default `0.25`) in addition to the original
+     question+vocab caption, which now runs at reduced cadence
+     (`GDINO_VOCAB_PASS_CADENCE`, default every 3rd tick — it only feeds scene-index
+     breadth, not target recall). Both are optional env overrides; unset = the module
+     defaults above.
    Before the Docker build, set the parse-provider env vars (`VLA_LLM_PRIMARY_*` / `_SECONDARY_*` /
    `_LOCAL_*` and the key vars they name, e.g. `OPENAI_API_KEY`) or place a keyless `llm_config.json`
    at the repo root — see `core/llm/config.py` for the full var list. Unset = ladder runs local/regex only.
