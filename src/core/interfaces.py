@@ -110,6 +110,46 @@ class IntAnswer:
 # --------------------------------------------------------------------------- world model
 
 
+@dataclass(frozen=True)
+class ColorBin:
+    """One dominant-colour bin of an instance (VLA-3D 15-scheme quantisation).
+
+    name:     scheme colour name (one of the closed 15, e.g. ``gray``, ``maroon``).
+    rgb:      representative 0-255 RGB of the bin (the raw colour the scheme name
+              quantises — carried because the *name* alone loses it).
+    fraction: share of the object's surface points that fell in this bin, [0, 1].
+
+    Carried so colour matching can apply cutoffs the scheme NAME cannot express
+    (issues #11, #12): a near-black object whose points quantise to ``gray`` (RGB
+    47,79,79) is separable from lighter grays only by luminance; a minor off-hue
+    bin (18% maroon on a gray pillow) is separable from a dominant one only by
+    fraction. Optional/defaulted on :class:`InstanceRecord`, so mocks and the live
+    perception path that do not populate it are unaffected.
+    """
+
+    name: str
+    rgb: tuple[int, int, int]
+    fraction: float
+
+    def __post_init__(self) -> None:
+        rgb = self.rgb
+        if len(rgb) != 3:
+            raise ValueError(f"ColorBin.rgb must have 3 channels, got {len(rgb)}: {rgb!r}")
+        for ch, v in zip(("r", "g", "b"), rgb):
+            if not isinstance(v, int) or isinstance(v, bool):
+                raise ValueError(f"ColorBin.rgb.{ch} must be an int, got {v!r}")
+            if not 0 <= v <= 255:
+                raise ValueError(f"ColorBin.rgb.{ch} must be in [0, 255], got {v!r}")
+        if not 0.0 <= self.fraction <= 1.0:
+            raise ValueError(f"ColorBin.fraction must be in [0.0, 1.0], got {self.fraction!r}")
+
+    @property
+    def luma(self) -> float:
+        """Rec. 601 luminance (0-255 scale) of the bin's representative RGB."""
+        r, g, b = self.rgb
+        return 0.299 * r + 0.587 * g + 0.114 * b
+
+
 @dataclass
 class InstanceRecord:
     """One tracked object instance in the fused 3D map (lidar geometry, camera semantics)."""
@@ -124,6 +164,10 @@ class InstanceRecord:
     points: np.ndarray | None = None  # (M, 3) retained fused points (may be decimated)
     caption: str = ""  # optional VLM caption (stretch feature)
     aliases: tuple[str, ...] = ()  # typo/synonym-tolerant match set
+    #: Per-bin (scheme name, raw RGB, fraction) dominant colours; () when unknown
+    #: (mocks / perception without colour quantisation). Enables luminance +
+    #: dominance colour salience (issues #11/#12) that scheme names alone cannot.
+    color_bins: tuple[ColorBin, ...] = ()
 
     @property
     def extents(self) -> np.ndarray:

@@ -448,3 +448,79 @@ def test_counting_big_table_relative():
     idx = FakeIndex([big, small])
     res = T.counting(_spec("table", attributes=["big"]), idx)
     assert res.count == 1 and res.ids == {1}
+
+
+# ---------------------------------------------------- #13: anchored-disambiguator tier
+# A disambiguator anchor names a SPECIFIC object ("the table WITH the horse figurine
+# on it"). A differently-modified head-noun cousin ("elephant figurine") must NOT be
+# allowed to satisfy that anchor when the exact referent exists, or the clause passes
+# for the wrong same-noun candidate and ranking collapses to instance-id order — the
+# earlier-leg distractor then out-ranks the true terminal goal (#13). These use the
+# live BasicSceneIndex so the real head-noun match tier (which pools "X figurine" /
+# "X table" cousins) is exercised — a plain FakeIndex has no head-noun tier.
+
+
+def test_resolve_specific_figurine_anchor_beats_headnoun_cousin():
+    from core.perception.scene_index import BasicSceneIndex
+
+    # Two tables; a horse figurine sits on the FAR one, an elephant figurine on the
+    # near one. "the table with the horse figurine on it" must resolve to the far
+    # table, never the near (elephant) table.
+    tea_table = rec(1, "tea table", (0, 0, 0.25), (2.0, 2.0, 0.5))  # near, lower id
+    table = rec(2, "table", (6, 0, 0.25), (2.0, 2.0, 0.5))  # far
+    elephant = rec(3, "elephant figurine", (0, 0, 0.55), (0.1, 0.1, 0.2))
+    horse = rec(4, "horse figurine", (6, 0, 0.55), (0.1, 0.1, 0.2))
+    idx = BasicSceneIndex([tea_table, table, elephant, horse])
+    spec = _spec("table", clauses=[Clause(Pred.WITH, [Anchor(noun="horse figurine")])])
+    res = T.resolve(spec, idx)
+    assert res.candidates_ranked[0].instance_id == 2
+
+
+def test_resolve_specific_table_anchor_beats_headnoun_cousin():
+    from core.perception.scene_index import BasicSceneIndex
+
+    # Two potted plants; the "dressing table" is far, a "side table" near. "the potted
+    # plant on the dressing table" must resolve to the plant on the dressing table,
+    # not the plant on the (head-noun cousin) side table.
+    side_table = rec(1, "side table", (0, 0, 0.25), (2.0, 2.0, 0.5))  # near, lower id
+    dressing_table = rec(2, "dressing table", (6, 0, 0.25), (2.0, 2.0, 0.5))  # far
+    plant_near = rec(3, "potted plant", (0, 0, 0.55), (0.3, 0.3, 0.4))
+    plant_far = rec(4, "potted plant", (6, 0, 0.55), (0.3, 0.3, 0.4))
+    idx = BasicSceneIndex([side_table, dressing_table, plant_near, plant_far])
+    spec = _spec("potted plant", clauses=[Clause(Pred.ON, [Anchor(noun="dressing table")])])
+    res = T.resolve(spec, idx)
+    assert res.candidates_ranked[0].instance_id == 4
+
+
+def test_resolve_bare_table_anchor_admits_headnoun_cousin():
+    # Dual to the #13 tests (#21): a BARE-noun anchor must NOT get tier discipline.
+    # Scene has an exact "table" AND a head-noun cousin "coffee table"; a bowl sits on
+    # the coffee table. "the bowl on the table" — a bare "table" legitimately means any
+    # table — must admit the coffee table and find the bowl on it, not narrow the anchor
+    # to the exact-label "table" alone (which would collapse to a category-only fallback).
+    from core.perception.scene_index import BasicSceneIndex
+
+    table = rec(1, "table", (0, 0, 0.25), (2.0, 2.0, 0.5))  # exact label, empty
+    coffee_table = rec(2, "coffee table", (6, 0, 0.25), (2.0, 2.0, 0.5))  # head-noun cousin
+    bowl_off = rec(3, "bowl", (12, 0, 0.55), (0.3, 0.3, 0.4))  # on nothing
+    bowl_on = rec(4, "bowl", (6, 0, 0.55), (0.3, 0.3, 0.4))  # on the coffee table
+    idx = BasicSceneIndex([table, coffee_table, bowl_off, bowl_on])
+    spec = _spec("bowl", clauses=[Clause(Pred.ON, [Anchor(noun="table")])])
+    res = T.resolve(spec, idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [4]
+    assert res.audit == []
+
+
+def test_match_anchor_noun_flat_fallback_ignores_tier_discipline():
+    # Fallback contract (#13/#21): a minimal index that exposes no `by_label_tiered`
+    # (e.g. FakeIndex) must return the flat `by_label` result UNCHANGED — even for a
+    # MODIFIED anchor noun, where a tiered index would narrow to the strongest tier and
+    # drop head-noun cousins. Without the tiered API there is no tier signal to act on,
+    # so tier discipline is a no-op and both the exact referent and the cousin survive.
+    exact = rec(1, "dressing table", (0, 0, 0))
+    cousin = rec(2, "side table", (5, 0, 0), aliases=("dressing table",))
+    idx = FakeIndex([exact, cousin])
+    assert not hasattr(idx, "by_label_tiered")
+    got = T._match_anchor_noun(idx, "dressing table")
+    assert got == list(idx.by_label("dressing table"))
+    assert {r.instance_id for r in got} == {1, 2}

@@ -16,18 +16,19 @@
        "noun": "table",
        "raw": "table",
        "attributes": [],
-       "disambiguator": {
-        "pred": "closest_to",
-        "anchors": [
-         {
-          "noun": "folding screen",
-          "raw": "folding screen",
-          "attributes": [],
-          "disambiguator": null
-         }
-        ],
-        "negated": false
-       }
+       "disambiguator": null
+      }
+     ],
+     "negated": false
+    },
+    {
+     "pred": "closest_to",
+     "anchors": [
+      {
+       "noun": "folding screen",
+       "raw": "folding screen",
+       "attributes": [],
+       "disambiguator": null
       }
      ],
      "negated": false
@@ -36,7 +37,7 @@
   },
   "route": [],
   "avoid": [],
-  "notes": "'closest to' selects WHICH table (candidate set of tables, rank by distance to folding screen), then find the bowl on it",
+  "notes": "two top-level clauses: the bare trailing superlative ranks the TARGET (the bowls on a table) by distance to the folding screen — it does not disambiguate the table (see #20; matches the home_building_2 speaker construction). A right-branching parse would nest closest_to under the table anchor",
   "parse_tier": "golden"
  }
 }

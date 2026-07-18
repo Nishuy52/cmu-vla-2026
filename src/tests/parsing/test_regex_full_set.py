@@ -32,3 +32,56 @@ def test_instruction_routes_end_in_goto(all_questions):
         plan = parse_regex(q)
         assert plan.route, f"{scene}: empty route for {q!r}"
         assert plan.route[-1].kind.value == "goto", f"{scene}: {q!r}"
+
+
+def test_trailing_superlative_surfaces_to_head_target():
+    """'<target> on the Y closest to Z' parses to TWO top-level clauses on the target.
+
+    The bare trailing superlative ranks the TARGET (the speakers), not the anchor Y —
+    so it surfaces as a second top-level ``closest_to`` clause rather than nesting under
+    the ``on`` anchor (issue #20). Guards the attachment the golden fixture asserts but
+    the noun-multiset golden tests never actually compared.
+    """
+    q = "Find the speaker on the TV cabinet closest to the potted plant on the TV cabinet."
+    plan = parse_regex(q)
+    assert plan.target is not None
+    preds = [cl.pred.value for cl in plan.target.clauses]
+    assert preds == ["on", "closest_to"], f"expected two top-level clauses, got {preds}"
+    on_cl, sup_cl = plan.target.clauses
+    # The 'on' anchor is a bare cabinet — the superlative no longer nests under it.
+    assert on_cl.anchors[0].noun == "tv cabinet"
+    assert on_cl.anchors[0].disambiguator is None
+    # The surfaced superlative ranks the target by distance to the potted plant.
+    assert sup_cl.anchors[0].noun == "potted plant"
+
+
+def test_relative_clause_superlative_stays_nested():
+    """An explicit relative pronoun binds the superlative to the anchor, not the target.
+
+    "... on the sofa THAT IS closest to the lamp" means the sofa closest to the lamp —
+    the superlative stays nested under the ``on`` anchor (one top-level clause).
+    """
+    plan = parse_regex("Find the pillow on the sofa that is closest to the lamp.")
+    assert plan.target is not None
+    assert [cl.pred.value for cl in plan.target.clauses] == ["on"]
+    anchor = plan.target.clauses[0].anchors[0]
+    assert anchor.noun == "sofa"
+    assert anchor.disambiguator is not None
+    assert anchor.disambiguator.pred.value == "closest_to"
+
+
+def test_counting_superlative_does_not_surface():
+    """'How many X on the Y closest to Z' keeps the superlative disambiguating Y.
+
+    A superlative cannot rank a cardinality; for counting it selects the anchor Y (the
+    table closest to Z), so it must stay nested — surfacing would drop the anchor filter
+    and over-count.
+    """
+    plan = parse_regex(
+        "How many computer monitors are on the table closest to the map wall decal?"
+    )
+    assert plan.target is not None
+    assert [cl.pred.value for cl in plan.target.clauses] == ["on"]
+    anchor = plan.target.clauses[0].anchors[0]
+    assert anchor.disambiguator is not None
+    assert anchor.disambiguator.pred.value == "closest_to"

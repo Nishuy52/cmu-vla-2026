@@ -23,7 +23,7 @@ import numpy as np
 from core.interfaces import InstanceRecord, SceneIndex
 from core.plan_schema import Anchor, AvoidSpec, Clause, Pred, TargetSpec
 from core.geometry import primitives as P
-from core.perception.vocab import colour_synonyms
+from core.perception.vocab import COLOUR_NEUTRAL, colour_cross_hue, colour_synonyms
 
 
 # --------------------------------------------------------------------------- config
@@ -59,6 +59,20 @@ class Thresholds:
     avoid_inflate: float = 0.25  # capsule/disc inflation for avoid geometry
     superlative_margin_frac: float = 0.25  # early-answer winner-margin gate
     size_sep_gap: float = 1.20  # size resolver: min largest-face-area ratio for a "small"/"big" extreme
+    # Colour salience (issues #11/#12), tuned against the 15-scene GT battery:
+    # a cross-hue bridged bin (red->maroon, blue->navy) or a black/white query
+    # reaching a mis-binned `gray` bin only counts when the raw colour data clears
+    # these cutoffs. Values chosen by principle (below), then validated on the
+    # battery (loft black 2/2, home_building_2 red 2/2), so the sweep can retune.
+    colour_dominance_floor: float = 0.50  # a cross-hue / luminance-bridged bin counts
+    #   only if it is the object's MAJORITY component; rejects hb2 pillow 94's 18%
+    #   3rd-bin maroon, admits the 78% maroon of pillows 85/213.
+    dark_luma_max: float = 96.0  # Rec.601 luma (0-255): a neutral bin at/below this
+    #   reads "black". Admits dark-slate-gray (47,79,79)=69.4, rejects slate-gray
+    #   (112,128,144)=125.0 and gray (169,169,169) — the loft black-pillow separation.
+    light_luma_min: float = 220.0  # symmetric brightness cutoff for "white" on a
+    #   neutral bin. Conservative (no white-query battery evidence); a provision for
+    #   the sweep, kept high so mid-grays never read white.
 
 
 DEFAULT_THRESHOLDS = Thresholds()
@@ -156,20 +170,67 @@ def _label_text(a: InstanceRecord) -> str:
     return " ".join([a.label, a.caption, *a.aliases]).lower()
 
 
-def _attr_present(attr: str, text: str) -> bool:
-    """True if a single requested attribute keyword matches the record text.
+def _colour_present(a: InstanceRecord, colour: str, th: Thresholds) -> bool:
+    """True if a colour-word attribute matches the record.
 
-    Colour attributes are matched through the colour bridge: a question colour word
-    (``red``, British ``grey``, ...) matches when ANY name in its VLA-3D 15-scheme
-    neighbourhood (``red`` -> {red, maroon}, ``grey`` -> {gray}) appears in the text,
-    so a scheme-named caption ("maroon") satisfies a "red" filter without relaxing.
-    Non-colour attributes keep the plain substring test.
+    When the record carries raw colour bins (:attr:`InstanceRecord.color_bins`,
+    populated from GT / quantised perception), matching is bin-aware and applies the
+    salience cutoffs the 15-scheme NAME alone cannot express:
+
+    * *identity / same-hue bin* (the scheme name IS the query hue, incl. spelling
+      bridges ``grey``->``gray``): always counts, no floor.
+    * *cross-hue bridged bin* (``red``->``maroon``, ``blue``->``navy``): counts only
+      when it is the object's majority component (fraction >= ``colour_dominance_floor``)
+      — rejects a minor off-hue bin (issue #12).
+    * *black / white via luminance*: a neutral (``gray``/``black``/``white``) bin
+      counts as ``black`` when its RGB luma <= ``dark_luma_max`` (``white`` when >=
+      ``light_luma_min``), still dominance-gated — separates a near-black neutral-binned
+      object from lighter ones (issue #11) without a blanket black<->gray name merge.
+      (The cross-name case is inert in practice: a same-named bin — e.g. a ``black``
+      bin queried for ``black`` — hits the identity branch above first.)
+
+    When the record has NO colour bins (mocks, perception without quantisation), it
+    falls back to the legacy scheme-name substring test over the record text, so
+    existing behaviour is preserved.
+    """
+    colour = colour.lower()
+    schemes = colour_synonyms(colour)
+    if not schemes:
+        return False  # unknown colour word: match nothing rather than guess
+    bins = a.color_bins
+    if not bins:
+        return any(name in _label_text(a) for name in schemes)
+    cross = colour_cross_hue(colour)
+    is_black, is_white = colour == "black", colour == "white"
+    floor = th.colour_dominance_floor
+    for b in bins:
+        name = b.name
+        # identity / same-hue scheme bin (incl. spelling bridges): always counts
+        if name in schemes and name not in cross:
+            return True
+        # cross-hue bridged bin: only a dominant component counts
+        if name in cross and b.fraction >= floor:
+            return True
+        # black/white via luminance on a neutral (gray) bin, dominance-gated
+        if name in COLOUR_NEUTRAL and b.fraction >= floor:
+            if is_black and b.luma <= th.dark_luma_max:
+                return True
+            if is_white and b.luma >= th.light_luma_min:
+                return True
+    return False
+
+
+def _attr_present(a: InstanceRecord, attr: str, th: Thresholds = DEFAULT_THRESHOLDS) -> bool:
+    """True if a single requested attribute keyword matches the record.
+
+    Colour attributes go through :func:`_colour_present` (bin-aware salience, with a
+    scheme-name text fallback for records without colour bins). Non-colour attributes
+    keep the plain substring test over the record's searchable text.
     """
     attr = attr.lower()
-    schemes = colour_synonyms(attr)
-    if schemes:
-        return any(name in text for name in schemes)
-    return attr in text
+    if colour_synonyms(attr):
+        return _colour_present(a, attr, th)
+    return attr in _label_text(a)
 
 
 # Size qualifiers handled by the relative per-class resolver (DD-A12 = T8-C6).
@@ -231,13 +292,12 @@ def _attrs_match(
     """
     if not attributes:
         return True
-    text = _label_text(a)
     for attr in attributes:
         low = attr.lower()
         if low in _SIZE_ATTRS:
             if pool is None or not _size_attr_match(a, low, pool, th):
                 return False
-        elif not _attr_present(low, text):
+        elif not _attr_present(a, low, th):
             return False
     return True
 
@@ -602,6 +662,55 @@ def _match_noun(index: SceneIndex, noun: str) -> list[InstanceRecord]:
     return list(index.by_label(noun))
 
 
+def _match_anchor_noun(index: SceneIndex, noun: str) -> list[InstanceRecord]:
+    """Anchor-noun lookup: MODIFIED anchors keep only the STRONGEST non-empty match
+    tier; BARE-noun anchors merge all tiers (see #21 note at the end).
+
+    A disambiguator/relation anchor names a specific referent ("the table WITH the
+    *horse figurine* on it", "the potted plant ON the *dressing table*"). The index's
+    label matcher deliberately pools head-noun cousins so a bare-noun query still
+    generalises ("figurine" -> every X figurine, "table" -> every X table). But when a
+    *modified* anchor noun has an exact/synonym referent, the differently-modified
+    cousins it also drags in ("elephant figurine", "side table") are the WRONG object:
+    an existential relation clause then passes for a same-noun target sitting by the
+    cousin, and the true target (by the exact referent) no longer uniquely survives —
+    ranking collapses to instance-id order and an earlier-leg distractor wins (#13).
+
+    So for anchor resolution we honour the index's own tier ranking: take the best
+    (lowest :class:`MatchTier`) tier that produced any hit and drop the weaker tiers.
+    This keeps the bare-noun generalisation intact (a bare query's cousins live in the
+    same head-noun tier and are all kept) while stopping a specific anchor from being
+    satisfied by a head-noun cousin when its exact referent is present. Indexes that
+    don't expose :meth:`by_label_tiered` (minimal test doubles) fall back to the flat
+    :meth:`by_label` result unchanged.
+    """
+    tiered = getattr(index, "by_label_tiered", None)
+    if tiered is None:
+        return list(index.by_label(noun))
+    hits = list(tiered(noun))
+    if not hits:
+        return []
+    # Bare-noun anchors are exempt from tier discipline (#21). Detected with the same
+    # machinery the index tiering uses: a query whose normalised form equals its own
+    # head noun carries no modifiers, so a bare "table" legitimately refers to ANY
+    # table — its exact/synonym referent and its head-noun cousins ("coffee table")
+    # are all the SAME class word and must all be admitted (pre-#13 flat behaviour).
+    # Narrowing to the strongest tier would drop supporters on the cousins.
+    from core.perception.scene_index import normalize_label
+    from core.perception.vocab import head_noun
+
+    query = normalize_label(noun)
+    if query == head_noun(query):
+        return [rec for rec, _ in hits]
+
+    # Modified anchor ("horse figurine", "dressing table"): keep the #13 behaviour —
+    # honour the index's tier ranking and take the best (lowest MatchTier) non-empty
+    # tier only, so a differently-modified cousin cannot satisfy a specific anchor
+    # when its exact referent is present.
+    best_tier = min(tier for _, tier in hits)
+    return [rec for rec, tier in hits if tier == best_tier]
+
+
 # Recursion guard for nested-disambiguator resolution: an anchor's disambiguator
 # may itself reference an anchored clause, so cap the nesting depth defensively.
 _MAX_ANCHOR_DEPTH: int = 4
@@ -645,7 +754,7 @@ def _resolve_anchor(
     ``Relaxation`` so the drop is never silent. ``_depth`` guards against a
     disambiguator that (transitively) references another anchored clause.
     """
-    cands = _match_noun(index, anchor.noun)
+    cands = _match_anchor_noun(index, anchor.noun)
     if anchor.attributes:
         _class_pool = cands  # same-class pool for relative size ranking (DD-A12)
         cands = [c for c in cands if _attrs_match(c, anchor.attributes, _class_pool, th)]

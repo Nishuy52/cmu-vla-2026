@@ -54,3 +54,11 @@
   (`tools/llm_parse_battery.py`, all 75 questions; run confounded by full
   sim-stack contention — 2/75 reached the LLM tier; re-run on a quiet box
   recommended). No Ollama wire quirk found. Issues #44/#45/#46 filed.
+- **T13** issue-sweep — clear all nine open GitHub issues
+  (#10–#13, #15–#19) on branch `fix/issue-sweep`: battery-diff
+  fixture schema, provenance untracked-content digest, gt_battery
+  cal/answer-key/CLI polish + test split, anchored-disambiguator
+  terminal-goal fix (#13, verifier-CONFIRMED), and the two color
+  failures via ColorBin RGB + luminance/dominance salience knobs
+  (#11/#12, numerical 13/15 → 15/15, OR/IF byte-identical,
+  verifier-CONFIRMED). Follow-ups filed: #20, #21.

@@ -10,7 +10,12 @@ import pytest
 from core.groundtruth.loader import load_scene, obb_to_aabb, parse_object_csv
 from core.interfaces import InstanceRecord
 
-from tests.groundtruth.conftest import requires_loft, LOFT_DIR
+from tests.groundtruth.conftest import (
+    FULL_UNITY_ROOT,
+    requires_full_unity,
+    requires_loft,
+    LOFT_DIR,
+)
 
 
 # --------------------------------------------------------------------------- OBB -> AABB
@@ -103,6 +108,38 @@ def test_colors_land_in_attributes():
     assert dvd.label == "dvd"
     assert "gray" in dvd.caption
     assert "gray" in dvd.aliases
+
+
+@requires_full_unity
+def test_color_bins_carry_raw_rgb_and_fraction():
+    """Colour bins carry raw RGB + fraction, not just scheme names (issues #11/#12)."""
+    scene = load_scene(FULL_UNITY_ROOT / "loft")
+    by_id = {r.instance_id: r for r in scene.instances}
+    # pillow 89 is a dark-slate-gray pillow: scheme 'gray' but RGB (47,79,79)
+    p89 = by_id[89]
+    assert p89.color_bins, "color_bins must be populated from the CSV"
+    b0 = p89.color_bins[0]
+    assert b0.name == "gray"
+    assert b0.rgb == (47, 79, 79)
+    assert b0.fraction == pytest.approx(1.0, abs=1e-6)
+    # bin scheme names stay in lock-step with the alias list (no regression there)
+    assert tuple(b.name for b in p89.color_bins) == p89.aliases
+    # a lighter gray pillow shares the scheme name but differs in raw RGB + luma
+    p54 = by_id[54]
+    assert p54.color_bins[0].rgb == (112, 128, 144)
+    assert p89.color_bins[0].luma < p54.color_bins[0].luma
+
+
+@requires_full_unity
+def test_multi_bin_object_keeps_all_bins_with_fractions():
+    """A multi-colour object exposes each bin's fraction (dominant first)."""
+    scene = load_scene(FULL_UNITY_ROOT / "loft")
+    by_id = {r.instance_id: r for r in scene.instances}
+    # loft chair 10: gray (47,79,79) 0.79 + black (0,0,0) 0.21
+    chair = by_id[10]
+    assert [b.name for b in chair.color_bins] == ["gray", "black"]
+    assert chair.color_bins[0].fraction > chair.color_bins[1].fraction
+    assert chair.color_bins[1].rgb == (0, 0, 0)
 
 
 @requires_loft

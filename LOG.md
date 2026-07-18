@@ -893,3 +893,50 @@ recommendation KEEP FLOOR for all three QTypes, reasoning grounded in an
 #48 (flattened stacked relative clauses), #49 (spurious avoid
 fabrication) for adjudication — model-content defects, no src/ changes.
 **Next:** step 3 (vision-checkpoint replay) per the runbook.
+---
+
+## 2026-07-18 (session 16) - task milestones
+
+- Started + finished task: T13 issue-sweep - record at
+  `docs/tasks/T13-issue-sweep/`. Branch `fix/issue-sweep`; all nine
+  open issues (#10-#13, #15-#19) fixed, two verifier gates CONFIRMED,
+  numerical TRUE accuracy 13/15 -> 15/15, full gate exit 0. Follow-up
+  issues filed: #20 (pre-existing hb2 speaker OR mismatch), #21
+  (anchor-tier latent caveat). PR to main opened closing all nine.
+- Environment fix: git-ignored `upstream/` clone found empty (casualty
+  of session-15 cleanup) - re-cloned Yuxin916/CMU-VLN-Challenge-2026
+  (shallow); parsing tests green again. No ubuntu_setup.md change
+  needed (no new deps; upstream clone step already documented).
+
+**Next:** merge the T13 PR; then the residual queue unchanged from
+session 15 - OR/IF image answer-key visual transcription (arch-F3),
+Gate 0 execution, local-VLM tier posture (arch-F5), SoC cluster
+detector benchmarking (arch-F2); #20/#21 now head the code follow-up
+queue. New color knobs (colour_dominance_floor, dark_luma_max,
+light_luma_min) join the CV-sweep surface.
+
+---
+
+## 2026-07-18 (session 16b) - task milestones
+
+- Extended task T13 per user: #20 + #21 fixed on the same branch -
+  record at `docs/tasks/T13-issue-sweep/` (root causes, adjudications,
+  verifier evidence). #21: bare-noun anchor tier-merge (cbfd548).
+  #20: diagnosis overturned the issue premise (GT=91 spurious, correct
+  target 122); fixed as trailing-superlative parse surfacing + 
+  superlative-aware GT matching (554f927), OR mean_iou 0.875 -> 1.0
+  over 6 scored, numerical 15/15 + IF byte-identical. Combined
+  verifier gate CONFIRMED. Battery reference rebaselined:
+  `reports/gt_battery_T13b_2026-07-18`. New issue filed: #23
+  (pre-existing leading-superlative parse quirk, zero corpus
+  occurrences). Stale LibreOffice lock removed from
+  data/vla3d/Unity/home_building_2/.
+
+**Next:** PR #22 review (pr-review-toolkit), then merge - closes
+#10-#13, #15-#21. Residual queue: #23, OR/IF image answer-key
+transcription (arch-F3), Gate 0 execution, local-VLM tier (arch-F5),
+SoC detector benchmarking (arch-F2).
+
+- (session 16b cont.) PR #22 reviewed via pr-review-toolkit (5 agents):
+  no merge blockers; follow-up polish applied (86f0c41, fast tier 1100
+  passed); architectural findings filed as #24-#27. PR ready to merge.

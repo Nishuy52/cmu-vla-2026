@@ -27,6 +27,12 @@ if TYPE_CHECKING:
 #: Repo root: src/core/runner/provenance.py -> parents[3] == the git working tree.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
+#: Untracked files larger than this are digested by name+size only, never read.
+#: A stray PLY / rosbag left in the tree can be gigabytes; reading it into memory
+#: on every battery stamp is a hazard, and its byte-exact content is not something
+#: the dirty-digest needs to distinguish.
+_MAX_UNTRACKED_DIGEST_BYTES = 16 * 1024 * 1024  # 16 MiB
+
 
 def _git(args: list[str]) -> str:
     """Run a git command at the repo root and return stripped stdout.
@@ -41,6 +47,72 @@ def _git(args: list[str]) -> str:
         check=True,
     )
     return out.stdout.strip()
+
+
+def _untracked_content_digest(status_porcelain: str) -> tuple[str, list[str]]:
+    """Deterministic digest input for the CONTENTS of untracked paths.
+
+    ``status_porcelain`` is the stripped ``git status --porcelain`` output.
+    Untracked entries are the lines starting with ``"?? "``. For each such path,
+    in sorted order, we fold in the file bytes so two trees that differ only
+    inside an untracked file get distinct digests (issue #18).
+
+    Untracked *directories* appear in porcelain collapsed to a single ``dir/``
+    entry (git does not expand their contents), so we deliberately hash the
+    directory name only — walking them could be arbitrarily large (e.g. an
+    untracked ``reports/`` tree) and is a performance hazard for a stamp that
+    runs on every battery. This is a documented, bounded trade-off: content
+    changes strictly *inside* an untracked directory are not distinguished.
+
+    Files larger than :data:`_MAX_UNTRACKED_DIGEST_BYTES` are digested by
+    name+size only (never read) — a stray PLY / rosbag can be gigabytes.
+
+    Returns ``(digest_input, notes)``. ``notes`` carries at most one human-
+    readable summary line when any per-file degradation occurred, so the
+    degradation is visible in the provenance payload.
+
+    Per-file OSErrors (deleted mid-flight, permission error, a path that
+    resolves to a directory) degrade to hashing the name only. Any OTHER
+    exception is deliberately NOT caught here: it propagates to the
+    ``collect_provenance`` git-status guard, which degrades the whole
+    dirty-digest to ``None`` with a note — so a systematic programming error
+    surfaces loudly instead of silently converging every file to ``?``.
+    """
+    parts: list[str] = []
+    unreadable = 0
+    oversized = 0
+    for line in sorted(status_porcelain.splitlines()):
+        if not line.startswith("?? "):
+            continue
+        rel = line[3:]
+        # Porcelain quotes paths with special characters (core.quotePath);
+        # such a path won't resolve on disk, so its hash falls back to the
+        # raw (quoted) name below — still deterministic.
+        if rel.endswith("/"):
+            # Untracked directory: hash the name only (see docstring).
+            parts.append(f"{rel}\0dir")
+            continue
+        path = _REPO_ROOT / rel
+        try:
+            size = path.stat().st_size
+            if size > _MAX_UNTRACKED_DIGEST_BYTES:
+                # Oversized: name+size only, deterministic, never read.
+                parts.append(f"{rel}\0size:{size}")
+                oversized += 1
+                continue
+            data = path.read_bytes()
+            parts.append(f"{rel}\0" + hashlib.sha1(data).hexdigest())
+        except OSError:
+            # Unreadable / vanished / directory: degrade to name only.
+            parts.append(f"{rel}\0?")
+            unreadable += 1
+    notes: list[str] = []
+    if unreadable or oversized:
+        notes.append(
+            f"untracked digest degraded: {unreadable} unreadable, "
+            f"{oversized} oversized (name-only in digest)"
+        )
+    return "\n".join(parts), notes
 
 
 def collect_provenance(
@@ -84,22 +156,19 @@ def collect_provenance(
         status = _git(["status", "--porcelain"])
         git_dirty = bool(status)
         if git_dirty:
-            # Digest of the full working-tree state (staged + unstaged vs HEAD, plus
-            # the contents of any untracked files) so a dirty run is identifiable
-            # without dumping the diff into the payload. `git diff HEAD` alone omits
-            # untracked files entirely (status only names them), so their contents
-            # are hashed in separately here.
+            # Digest identifying the dirty working tree without dumping it into
+            # the payload. Covers: the porcelain status line set (tracked path
+            # changes + untracked path names), the staged+unstaged diff vs HEAD
+            # for tracked files, and the CONTENTS of untracked files (issue #18)
+            # — since `git diff HEAD` omits untracked files, their bytes are
+            # folded in separately (untracked dirs by name only; see
+            # _untracked_content_digest).
             diff_text = _git(["diff", "HEAD"])
-            digest_parts = [status.encode("utf-8"), diff_text.encode("utf-8")]
-            untracked = _git(["ls-files", "--others", "--exclude-standard"])
-            for rel in untracked.splitlines():
-                if not rel:
-                    continue
-                try:
-                    digest_parts.append((_REPO_ROOT / rel).read_bytes())
-                except OSError:
-                    pass
-            dirty_digest = hashlib.sha1(b"".join(digest_parts)).hexdigest()[:12]
+            untracked_text, untracked_notes = _untracked_content_digest(status)
+            notes.extend(untracked_notes)
+            dirty_digest = hashlib.sha1(
+                (status + "\0" + diff_text + "\0" + untracked_text).encode("utf-8")
+            ).hexdigest()[:12]
     except Exception as exc:  # noqa: BLE001
         notes.append(f"git status unavailable ({exc.__class__.__name__})")
 

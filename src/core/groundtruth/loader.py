@@ -43,7 +43,7 @@ from typing import Iterable
 
 import numpy as np
 
-from core.interfaces import InstanceRecord
+from core.interfaces import ColorBin, InstanceRecord
 
 # The 15 canonical VLA-3D colour names are already human words; we attach them
 # verbatim. A very coarse size bucket is derived from AABB volume so size
@@ -162,6 +162,38 @@ def _dominant_colors(row: dict[str, str]) -> list[str]:
     return out
 
 
+def _color_bins(row: dict[str, str]) -> tuple[ColorBin, ...]:
+    """The up-to-3 dominant colour bins as (scheme name, raw RGB, fraction).
+
+    Reads the paired ``object_color_r/g/b{i}`` + ``object_color_scheme{i}`` +
+    ``object_color_scheme_percentage{i}`` columns. Carries the raw RGB and fraction
+    the scheme name alone loses, so colour matching can apply luminance / dominance
+    salience (issues #11/#12). A bin is included only when it has a scheme name AND
+    parseable RGB. This does NOT stay in lock-step with :func:`_dominant_colors`: a
+    row with a valid scheme name but corrupt/unparseable RGB diverges — the name still
+    survives as an alias in ``_dominant_colors``, but the bin is dropped here. (The
+    behaviour itself is unchanged; a separate issue tracks the signal mechanism.)"""
+    bins: list[ColorBin] = []
+    for i in (1, 2, 3):
+        name = (row.get(f"object_color_scheme{i}") or "").strip().lower()
+        if not name or name == "_" or name == "n/a":
+            continue
+        try:
+            rgb = (
+                int(float(row[f"object_color_r{i}"])),
+                int(float(row[f"object_color_g{i}"])),
+                int(float(row[f"object_color_b{i}"])),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        try:
+            frac = float(row.get(f"object_color_scheme_percentage{i}") or 0.0)
+        except (TypeError, ValueError):
+            frac = 0.0
+        bins.append(ColorBin(name=name, rgb=rgb, fraction=frac))
+    return tuple(bins)
+
+
 def _size_token(extents: np.ndarray) -> str:
     """Coarse size word from AABB volume, so 'big'/'small' attributes can match."""
     vol = float(np.prod(np.clip(extents, 0.0, None)))
@@ -230,6 +262,7 @@ def parse_object_csv(path: os.PathLike | str) -> list[InstanceRecord]:
                     points=None,
                     caption=caption,
                     aliases=tuple(colors),
+                    color_bins=_color_bins(row),
                 )
             )
     return recs

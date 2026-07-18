@@ -215,7 +215,7 @@ def test_field_counts_per_subsystem():
         "budget": len(fields(cal.budget)),
     }
     assert counts == {
-        "geometry": 15,
+        "geometry": 18,  # +3 colour-salience knobs (issues #11/#12)
         "fusion": 5,
         "tracker": 2,
         "keyframe": 3,

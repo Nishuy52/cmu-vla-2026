@@ -66,6 +66,22 @@ _REL_TOKENS: list[tuple[str, Pred | None]] = [
 ]
 
 _REL_ALTERNATION = "|".join(pat for pat, _ in _REL_TOKENS)
+
+# Superlative predicates ("closest to"/"farthest from" family) and the alternation of
+# their surface tokens — used to surface a *trailing* superlative to the head target
+# (see `_split_trailing_superlative`).
+# Canonical superlative-predicate set. core.groundtruth.scoring imports this to derive
+# its _SUPERLATIVE_PRED_VALUES (value-strings) — keep this the single source of truth.
+_SUPERLATIVE_PREDS = {Pred.CLOSEST_TO, Pred.FARTHEST_FROM}
+_SUPERLATIVE_ALTERNATION = "|".join(
+    pat for pat, pred in _REL_TOKENS if pred in _SUPERLATIVE_PREDS
+)
+_SUPERLATIVE_AT_START_RE = re.compile(rf"^({_SUPERLATIVE_ALTERNATION})\b")
+_SUPERLATIVE_SEARCH_RE = re.compile(rf"\b({_SUPERLATIVE_ALTERNATION})\b")
+# A relative-clause connector ("that is"/"which are") right before a superlative binds
+# it to the preceding anchor, not the head target — the superlative is NOT surfaced.
+_RELCLAUSE_TAIL_RE = re.compile(r"\b(that|which)\s+(is|are)\s*$")
+
 # Boundary between a noun phrase and its trailing relation chain ('is/are/that is' included).
 _REL_BOUNDARY_RE = re.compile(
     rf"\b(that\s+is|that\s+are|which\s+is|is|are|{_REL_ALTERNATION})\b"
@@ -197,17 +213,63 @@ def _split_pair(text: str, ctx: _Ctx, what: str) -> list[Anchor]:
     return [a, copy.deepcopy(a)]
 
 
-def _parse_target(text: str, ctx: _Ctx) -> TargetSpec:
-    """Parse '<NP> <relation chain>' into a TargetSpec with at most one top-level clause."""
+def _split_trailing_superlative(rel_part: str) -> tuple[str, str]:
+    """Split a target relation chain 'on the Y closest to Z' into (head, superlative).
+
+    A superlative that TRAILS an earlier relation ranks the head TARGET, not the
+    intervening anchor: "the speaker on the tv cabinet closest to the potted plant"
+    ranks the speakers by distance to the plant — it is not "the cabinet closest to
+    the plant". The default right-branching NP grammar would nest 'closest to Z' as a
+    disambiguator of Y; here we peel it off so it surfaces as a second top-level clause
+    on the target. Returns ``(head, "")`` when there is nothing to surface — no
+    superlative, or the superlative already *leads* the chain (then it is the target's
+    own single relation and stays as one clause).
+    """
+    lead = rel_part.lstrip(" ,.;")
+    m = _CONNECTOR_RE.match(lead)  # skip a leading copula/relative pronoun
+    if m is not None:
+        lead = lead[m.end() :].lstrip(" ,")
+    if _SUPERLATIVE_AT_START_RE.match(lead):
+        return rel_part, ""  # superlative already heads the chain — leave as one clause
+    sm = _SUPERLATIVE_SEARCH_RE.search(rel_part)
+    if sm is None or not rel_part[: sm.start()].strip(" ,.;"):
+        return rel_part, ""  # no trailing superlative with preceding relation content
+    head = rel_part[: sm.start()]
+    # An explicit relative pronoun binds the superlative to the immediately preceding
+    # anchor Y ("on the sofa THAT IS closest to Z" = the sofa closest to Z), NOT the
+    # head target — only the *bare* "on the Y closest to Z" surfaces to the target.
+    if _RELCLAUSE_TAIL_RE.search(head):
+        return rel_part, ""
+    return head, rel_part[sm.start() :]
+
+
+def _parse_target(text: str, ctx: _Ctx, *, surface_superlative: bool = False) -> TargetSpec:
+    """Parse '<NP> <relation chain>' into a TargetSpec (usually one top-level clause).
+
+    When ``surface_superlative`` is set (object-reference selection), a trailing
+    superlative ("... on the Y closest to Z") surfaces to the head target as a second
+    top-level clause instead of nesting under the anchor Y — see
+    :func:`_split_trailing_superlative`. Counting questions leave it OFF: a superlative
+    cannot rank a *cardinality*, so there it disambiguates the anchor Y and must stay
+    nested (else the count would drop the anchor filter and over-count).
+    """
     np_part, rel_part = _split_at_relation(_clean_segment(text))
     noun, attrs, raw, indefinite = vocab.match_noun(np_part.split())
     if indefinite:
         ctx.note(f"indefinite article on target '{raw}'")
     clauses: list[Clause] = []
     if rel_part:
-        c = _parse_clause(rel_part, ctx)
+        head, superl = (
+            _split_trailing_superlative(rel_part) if surface_superlative else (rel_part, "")
+        )
+        c = _parse_clause(head, ctx)
         if c is not None:
             clauses.append(c)
+        if superl:
+            sc = _parse_clause(superl, ctx)
+            if sc is not None:
+                clauses.append(sc)
+                ctx.note("trailing superlative surfaced to head target")
     return TargetSpec(noun=noun, raw=raw, attributes=attrs, clauses=clauses)
 
 
@@ -231,7 +293,9 @@ def _parse_numerical(text: str, ctx: _Ctx) -> TargetSpec:
 def _parse_object_reference(text: str, ctx: _Ctx) -> TargetSpec:
     """Parse a 'Find the ...' / bare-NP object-reference question into its TargetSpec."""
     m = _FIND_RE.match(text)
-    return _parse_target(m.group(1) if m is not None else text, ctx)
+    return _parse_target(
+        m.group(1) if m is not None else text, ctx, surface_superlative=True
+    )
 
 
 # ---- instruction-following ------------------------------------------------------

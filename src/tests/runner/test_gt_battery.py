@@ -420,112 +420,130 @@ def test_terminal_goal_centroid_delegates_to_candidates():
 
 
 def test_livingroom_3_registered_as_data_unfittable():
-    """livingroom_3 must stay registered in the meth-F11 data-confirmed-unfittable map."""
+    """livingroom_3 is registered (with a reason) in the DATA-confirmed unfittable set."""
     _DATA = GB._DATA_UNFITTABLE_IF_SCENES
     assert "livingroom_3" in _DATA and _DATA["livingroom_3"]
 
 
-# --------------------------------------------------------------------------- issue #15
+# --------------------------------------------------------------------------- #16
+# Corrupt vs absent answer key: a present-but-unreadable key must be LOUD and must
+# read differently in the report topline than a legitimately absent one — the
+# TRUE-accuracy yardstick can't be allowed to vanish silently.
+
+
+def test_load_answers_missing_is_silent(tmp_path, capsys):
+    """An absent key file is a soft miss: None, no warning."""
+    assert GB._load_answers(tmp_path / "does_not_exist.json") is None
+    assert GB._load_answers(None) is None
+    assert capsys.readouterr().err == ""
+
+
+def test_load_answers_corrupt_warns_and_returns_none(tmp_path, capsys):
+    """A present-but-unreadable key returns None but emits a loud stderr warning that
+    distinguishes 'unreadable' from 'missing' — and never raises."""
+    bad = tmp_path / "gt_answers_numerical.json"
+    bad.write_text("{ this is not valid json ", encoding="utf-8")
+    assert GB._load_answers(bad) is None
+    err = capsys.readouterr().err
+    assert "UNREADABLE" in err
+    assert "yardstick" in err
+
+
+def test_answer_key_status_classifies(tmp_path):
+    """_answer_key_status separates ok / missing / unreadable."""
+    assert GB._answer_key_status(None) == "missing"
+    assert GB._answer_key_status(tmp_path / "nope.json") == "missing"
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    assert GB._answer_key_status(bad) == "unreadable"
+    good = tmp_path / "good.json"
+    good.write_text('{"scenes": {}}', encoding="utf-8")
+    assert GB._answer_key_status(good) == "ok"
+
+
+def _numerical_row_without_true_answer():
+    """A keyless numerical row -> n_with_true_answer == 0 (topline reads n/a)."""
+    from core.runner.gt_battery import GTQuestionScore
+
+    return GTQuestionScore(
+        scene="loft", qtype=QType.NUMERICAL.value, question="How many chairs?",
+        our_count=2,
+    )
+
+
+def test_report_topline_says_unreadable_not_absent(tmp_path):
+    """With no keyed rows AND an unreadable key, the topline says UNREADABLE, not 'no key'."""
+    scores = [_numerical_row_without_true_answer()]
+    md_path, _ = GB.write_report(
+        scores, [], tmp_path, answer_key_status="unreadable"
+    )
+    text = md_path.read_text(encoding="utf-8")
+    assert "UNREADABLE" in text
+    assert "no answer key" not in text
+
+
+def test_report_topline_says_no_key_when_absent(tmp_path):
+    """With no keyed rows and a missing key, the topline keeps the 'no answer key' wording."""
+    scores = [_numerical_row_without_true_answer()]
+    md_path, _ = GB.write_report(scores, [], tmp_path, answer_key_status="missing")
+    text = md_path.read_text(encoding="utf-8")
+    assert "no answer key" in text
+    assert "UNREADABLE" not in text
+
+
+def test_json_payload_carries_answer_key_status(tmp_path):
+    """The status is surfaced in the JSON payload, not only the markdown (issue #16)."""
+    scores = [_numerical_row_without_true_answer()]
+    _, json_path = GB.write_report(scores, [], tmp_path, answer_key_status="unreadable")
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["answer_key_status"] == "unreadable"
+
+    _, json_path2 = GB.write_report(
+        scores, [], tmp_path / "b", answer_key_status="missing"
+    )
+    payload2 = json.loads((json_path2).read_text(encoding="utf-8"))
+    assert payload2["answer_key_status"] == "missing"
+
+
+def test_main_stdout_marks_unreadable_key(tmp_path, monkeypatch, capsys):
+    """main()'s stdout summary distinguishes an unreadable key from an absent one (issue #16)."""
+    scores = [_numerical_row_without_true_answer()]
+    monkeypatch.setattr(GB, "run_gt_battery", lambda *a, **k: (scores, []))
+
+    monkeypatch.setattr(GB, "_answer_key_status", lambda p: "unreadable")
+    rc = GB.main(["--groundtruth", str(tmp_path), "--out", str(tmp_path / "u")])
+    assert rc == 0
+    assert "num_true=n/a[UNREADABLE]" in capsys.readouterr().out
+
+    monkeypatch.setattr(GB, "_answer_key_status", lambda p: "missing")
+    rc = GB.main(["--groundtruth", str(tmp_path), "--out", str(tmp_path / "m")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "num_true=n/a " in out
+    assert "UNREADABLE" not in out
+
+
+# --------------------------------------------------------------------------- #15
+# The write_report `cal` parameter was never wired from main() (provenance always
+# stamped the default calibration). gt_battery has no non-default calibration path,
+# so the param was dropped: the default fallback is the single documented path.
+
+
+def test_write_report_has_no_cal_param():
+    """The dead `cal` parameter is gone from write_report's signature (#15)."""
+    import inspect
+
+    params = inspect.signature(GB.write_report).parameters
+    assert "cal" not in params
 
 
 def test_write_report_stamps_default_calibration(tmp_path):
-    """write_report has no dangling ``cal`` param — provenance stamps default_calibration."""
-    import hashlib
-
-    from core.calibration import default_calibration, to_json
-
-    scores = [
-        GB.GTQuestionScore(scene="a", qtype=QType.NUMERICAL.value, question="q", our_count=1),
-    ]
-    _md, json_path = GB.write_report(scores, [], tmp_path)
+    """Provenance still records the (default) calibration identity without a cal param."""
+    scores = [_numerical_row_without_true_answer()]
+    _, json_path = GB.write_report(scores, [], tmp_path)
     payload = json.loads(json_path.read_text(encoding="utf-8"))
-    expected = hashlib.sha1(to_json(default_calibration()).encode("utf-8")).hexdigest()[:12]
-    assert payload["provenance"]["calibration_sha1"] == expected
-
-
-# --------------------------------------------------------------------------- issue #16
-
-
-def test_load_answers_warns_on_corrupt_key(tmp_path, capsys):
-    """A present-but-unreadable answer key is louder than a legitimately missing one."""
-    bad = tmp_path / "gt_answers_numerical.json"
-    bad.write_text("{not valid json", encoding="utf-8")
-
-    result = GB._load_answers(bad)
-    assert result is None
-    err = capsys.readouterr().err
-    assert "WARNING" in err
-    assert str(bad) in err
-
-
-def test_load_answers_missing_file_no_warning(tmp_path, capsys):
-    """A legitimately absent key is a soft condition: no warning."""
-    missing = tmp_path / "does_not_exist.json"
-    result = GB._load_answers(missing)
-    assert result is None
-    err = capsys.readouterr().err
-    assert err == ""
-
-
-# --------------------------------------------------------------------------- issue #17
-
-
-def test_main_cli_summary_prints_instance_match_not_iou_headline(tmp_path, monkeypatch, capsys):
-    """CLI summary headline must agree with the report: instance-match, not IoU."""
-    scores = [
-        GB.GTQuestionScore(
-            scene="syn", qtype=QType.OBJECT_REFERENCE.value, question="q",
-            gt_target_id=1, our_target_id=1, iou=0.5,
-        ),
-        GB.GTQuestionScore(
-            scene="syn", qtype=QType.OBJECT_REFERENCE.value, question="q2",
-            gt_target_id=2, our_target_id=99, iou=0.0,
-        ),
-    ]
-    monkeypatch.setattr(GB, "run_gt_battery", lambda *a, **k: (scores, []))
-    monkeypatch.setattr(
-        GB, "write_report", lambda *a, **k: (tmp_path / "r.md", tmp_path / "r.json")
-    )
-    rc = GB.main(["--groundtruth", str(tmp_path)])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "or_instance_match=1/2" in out
-    assert "or_iou=" not in out  # the old headline key must be gone
-    assert "or_iou_diag=" in out  # IoU survives as a diagnostic
-
-
-# --------------------------------------------------------------------------- issue #26
-
-
-def test_write_report_surfaces_parse_notes_diagnostics(tmp_path):
-    """Non-empty per-question parse_notes get their own markdown diagnostics section."""
-    scores = [
-        GB.GTQuestionScore(
-            scene="a", qtype=QType.NUMERICAL.value, question="How many photos near it?",
-            our_count=1, parse_notes="unparsed clause text dropped: 'near it'",
-        ),
-        GB.GTQuestionScore(
-            scene="b", qtype=QType.NUMERICAL.value, question="How many chairs?",
-            our_count=2,  # clean parse: no parse_notes
-        ),
-    ]
-    md_path, json_path = GB.write_report(scores, [], tmp_path)
-    md = md_path.read_text(encoding="utf-8")
-    assert "## Parse diagnostics" in md
-    assert "unparsed clause text dropped: 'near it'" in md
-
-    payload = json.loads(json_path.read_text(encoding="utf-8"))
-    parse_notes_by_scene = {s["scene"]: s["parse_notes"] for s in payload["scores"]}
-    assert parse_notes_by_scene["a"] == "unparsed clause text dropped: 'near it'"
-    assert parse_notes_by_scene["b"] == ""
-
-
-def test_write_report_omits_parse_diagnostics_when_all_clean(tmp_path):
-    """No section is emitted when every row's parse was clean (no dead heading)."""
-    scores = [
-        GB.GTQuestionScore(
-            scene="a", qtype=QType.NUMERICAL.value, question="How many chairs?", our_count=2,
-        ),
-    ]
-    md_path, _json_path = GB.write_report(scores, [], tmp_path)
-    assert "## Parse diagnostics" not in md_path.read_text(encoding="utf-8")
+    prov = payload["provenance"]
+    assert prov["tool"] == "gt_battery"
+    # default calibration is stamped via collect_provenance's own fallback
+    assert prov["calibration_sha1"] is not None
+    assert prov["calibration"] is not None

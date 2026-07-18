@@ -18,17 +18,17 @@ is the sweep checklist.
 - **Sensitivity** — H/M/L judgement of how much sweeping this field moves behaviour,
   from reading the consuming code. Guides sweep priority, not a hard claim.
 
-**Wiring summary:** 61 fields total (geometry 15 · fusion 5 · tracker 2 · keyframe 3 ·
-nav 21 · budget 15). **Wireable today (constructor arg or function param): 47.**
+**Wiring summary:** 64 fields total (geometry 18 · fusion 5 · tracker 2 · keyframe 3 ·
+nav 21 · budget 15). **Wireable today (constructor arg or function param): 50.**
 **Wiring TODO (module constant, needs a setter/param before a sweep can move it): 14.**
 
 ---
 
-## geometry (`core.geometry.toolbox.Thresholds`) — 15 fields, all wireable
+## geometry (`core.geometry.toolbox.Thresholds`) — 18 fields, all wireable
 
 Composed live: `default_calibration().geometry is-equal DEFAULT_THRESHOLDS`. Every
 predicate in `toolbox.py` takes `th: Thresholds = DEFAULT_THRESHOLDS`, so passing a
-swept `Thresholds` at the call site wires all 15 with no code change.
+swept `Thresholds` at the call site wires all 18 with no code change.
 
 | Field | Default | Unit | Controls | Evidence / source | How wired | Sens |
 |---|---|---|---|---|---|---|
@@ -47,6 +47,9 @@ swept `Thresholds` at the call site wires all 15 with no code change.
 | geometry.avoid_inflate | 0.25 | m | Capsule/disc inflation for avoid geometry | Spec-fixed avoid inflation | function param (`avoid_capsule`) | H |
 | geometry.superlative_margin_frac | 0.25 | frac | Early-answer winner-margin gate for superlatives | Invented | function param (carried on `Thresholds`; read by the answer path) | M |
 | geometry.size_sep_gap | 1.20 | ratio | Size resolver: min largest-face-area ratio for a "small"/"big"/"largest" extreme (DD-A12) | VLA-3D gen 1.2× | function param (via `_attrs_match`) | M |
+| geometry.colour_dominance_floor | 0.50 | frac | Min bin fraction for a cross-hue bridged colour (red→maroon) or a black/white luminance-bridged `gray` bin to count (issues #11 #12) | Battery-validated (rejects hb2 18% 3rd-bin maroon, admits 78%) | function param (via `_attrs_match`→`_colour_present`) | M |
+| geometry.dark_luma_max | 96.0 | luma 0-255 | A neutral (`gray`/`black`/`white`) bin at/below this Rec.601 luma reads "black" (issue #11) | Battery-validated (admits dark-slate-gray 47,79,79=69.4; rejects 112,128,144=125.0) | function param (via `_colour_present`) | M |
+| geometry.light_luma_min | 220.0 | luma 0-255 | Symmetric brightness cutoff: a neutral bin at/above this reads "white" | Conservative (no white-query battery evidence; sweep provision) | function param (via `_colour_present`) | L |
 
 ---
 
