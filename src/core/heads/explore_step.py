@@ -165,7 +165,9 @@ class ExploreHead:
         t = float(odom.t)
         patch = io.latest_terrain(extended=False)
         if patch is not None:
-            self.grid.integrate_patch(patch)
+            # vehicle_z feeds the runtime ground-offset estimator (issue #36) used
+            # by the overhead fallback below.
+            self.grid.integrate_patch(patch, vehicle_z=float(odom.z))
         # Overhead-clearance layer: flag overhangs (bar tables/shelves) the terrain
         # slab dropped, so exploration/planning won't route under furniture the base
         # stack reads as FREE floor. Terrain first so per-cell ground_z is set.
