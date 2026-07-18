@@ -598,6 +598,10 @@ class GTQuestionScore:
     frame_aligned: bool | None = None
     fit_residual_m: float | None = None
     note: str = ""
+    #: Parse-time notes off the resolved Plan (meth issue #26) — e.g. "unparsed clause
+    #: text dropped: ..." — surfaced here so a clause-dropped resolution is reviewable
+    #: from the report instead of being parse-time-only trivia. Empty on a clean parse.
+    parse_notes: str = ""
 
 
 # --------------------------------------------------------------------------- per-scene
@@ -646,7 +650,7 @@ def score_scene(
                 annotated_targets_of_class=ns.annotated_targets_of_class,
                 csv_instances_of_class=ns.csv_instances_of_class,
                 gt_answer_true=gt_true, true_match=true_match, true_source=true_source,
-                note=note,
+                note=note, parse_notes=ns.parse_notes,
             )
         )
 
@@ -659,6 +663,7 @@ def score_scene(
                 gt_target_id=ors.gt_target_id, our_target_id=ors.our_target_id,
                 target_source=ors.target_source,
                 match_method=ors.match_method, note=ors.note,
+                parse_notes=ors.parse_notes,
             )
         )
 
@@ -718,10 +723,13 @@ def score_scene(
         mapped = frame.apply(np.asarray([start_pt], dtype=float))[0]
         spawn_xy = (float(mapped[0]), float(mapped[1]))
 
+    from core.parsing.regex_tier import parse_regex as _parse_regex_if
+
     for i, text in enumerate(if_texts):
         traj_q = _IF_TRAJ_INDEX.get(i)
         rec = GTQuestionScore(
             scene=gt.scene_name, qtype=QType.INSTRUCTION_FOLLOWING.value, question=text,
+            parse_notes=_parse_regex_if(text).notes,
         )
         traj_path = None
         if questions_dir is not None and traj_q is not None:
@@ -843,7 +851,15 @@ def _load_answers(answers_path: os.PathLike | str | None) -> dict | None:
     try:
         with open(p, encoding="utf-8") as fh:
             return json.load(fh)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        # Present but unreadable is a louder condition than legitimately absent —
+        # true accuracy will still read "n/a" like the missing-key case, but this
+        # warns so the two are not silently conflated.
+        print(
+            f"gt_battery: WARNING: answer key {p} exists but is unreadable "
+            f"({exc.__class__.__name__}: {exc}) - true accuracy will read n/a",
+            file=sys.stderr,
+        )
         return None
 
 
@@ -1113,13 +1129,28 @@ def _md_table(scores: list[GTQuestionScore]) -> str:
     return header + "\n".join(rows) + "\n"
 
 
+def _or_instance_match(scores: list[GTQuestionScore]) -> tuple[list[GTQuestionScore], int]:
+    """Object-reference instance-match count (arch-F3 headline; IoU is diagnostic).
+
+    Returns (scoreable_rows, n_instance_matched), over OR questions where a GT
+    target was matched (scoreable).
+    """
+    obj_rows = [s for s in scores if s.qtype == QType.OBJECT_REFERENCE.value]
+    or_scored = [s for s in obj_rows if s.gt_target_id is not None]
+    or_instance_match = sum(
+        1
+        for s in or_scored
+        if s.our_target_id is not None and s.our_target_id == s.gt_target_id
+    )
+    return or_scored, or_instance_match
+
+
 def write_report(
     scores: list[GTQuestionScore],
     missing: list[str],
     out_dir: os.PathLike | str,
     *,
     argv: list[str] | None = None,
-    cal=None,
 ) -> tuple[Path, Path]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -1193,13 +1224,7 @@ def write_report(
     )
     # Instance-match (arch-F3): resolved instance id == gt_target_id, over the OR
     # questions where a GT target was matched (scoreable). Real-perception IoU pending.
-    obj_rows = [s for s in scores if s.qtype == QType.OBJECT_REFERENCE.value]
-    or_scored = [s for s in obj_rows if s.gt_target_id is not None]
-    or_instance_match = sum(
-        1
-        for s in or_scored
-        if s.our_target_id is not None and s.our_target_id == s.gt_target_id
-    )
+    or_scored, or_instance_match = _or_instance_match(scores)
 
     lines.append("## Topline (per type)\n")
     lines.append(
@@ -1224,11 +1249,23 @@ def write_report(
     lines.append("\n## Per-question\n")
     lines.append(_md_table(scores))
 
+    # Parse diagnostics (issue #26): parse-time notes (e.g. "unparsed clause text
+    # dropped: ...") are otherwise invisible outside a one-off debug run — surface any
+    # non-empty ones here so a clause-dropped resolution is reviewable from the report.
+    parse_diag_rows = [s for s in scores if s.parse_notes]
+    if parse_diag_rows:
+        lines.append("\n## Parse diagnostics\n")
+        lines.append("| Scene | Type | Question | Parse notes |\n|---|---|---|---|\n")
+        for s in parse_diag_rows:
+            q = s.question if len(s.question) <= 55 else s.question[:52] + "..."
+            lines.append(f"| {s.scene} | {s.qtype[:4]} | {q} | {s.parse_notes} |")
+        lines.append("")
+
     md_path.write_text("\n".join(lines), encoding="utf-8")
 
     payload = {
         "date": date.today().isoformat(),
-        "provenance": collect_provenance("gt_battery", argv, cal),
+        "provenance": collect_provenance("gt_battery", argv),
         "n_questions": len(scores),
         "scenes": scenes,
         "missing_scenes": missing,
@@ -1307,10 +1344,19 @@ def main(argv: list[str] | None = None) -> int:
         if n["n_with_true_answer"]
         else "n/a"
     )
+    # Headline OR metric matches the report: instance-match / scoreability
+    # (IoU is a diagnostic pending real perception, see write_report).
+    or_scored, or_instance_match = _or_instance_match(scores)
+    or_instance_str = (
+        f"{or_instance_match}/{len(or_scored)} (scoreable {len(or_scored)}/{o['n']})"
+        if o["n"]
+        else "n/a"
+    )
     print(
         f"gt_battery: {len(scores)} questions / {len({s.scene for s in scores})} scenes  "
         f"num_true={num_true_str} "
-        f"or_iou={_num(o['mean_iou'])} "
+        f"or_instance_match={or_instance_str} "
+        f"or_iou_diag={_num(o['mean_iou'])} "
         f"if_rubric={_num(i['mean_rubric_score'])} "
         f"if_thread_viol={i['total_threading_violations']} "
         f"if_avoid_viol={i['total_avoid_violations']}"

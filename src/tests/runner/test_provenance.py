@@ -55,6 +55,39 @@ def test_calibration_digest_matches_serialised_snapshot():
     assert st["calibration_sha1"] == expected
 
 
+def test_dirty_digest_changes_with_untracked_file_contents(tmp_path, monkeypatch):
+    """dirty_digest must reflect untracked-file *contents*, not just their names."""
+    import subprocess
+
+    real_run = subprocess.run
+
+    def fake_git(args, cwd, capture_output, text, check):
+        if args[:1] == ["status"]:
+            return subprocess.CompletedProcess(args, 0, stdout="?? scratch_untracked.txt\n", stderr="")
+        if args[:1] == ["diff"]:
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if args[:2] == ["ls-files", "--others"] or args[:1] == ["ls-files"]:
+            return subprocess.CompletedProcess(args, 0, stdout="scratch_untracked.txt\n", stderr="")
+        return real_run(["git", *args], cwd=cwd, capture_output=capture_output, text=text, check=check)
+
+    def fake_subprocess_run(cmd, cwd, capture_output, text, check):
+        assert cmd[0] == "git"
+        return fake_git(cmd[1:], cwd, capture_output, text, check)
+
+    monkeypatch.setattr(prov, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(prov.subprocess, "run", fake_subprocess_run)
+
+    scratch = tmp_path / "scratch_untracked.txt"
+    scratch.write_text("version one", encoding="utf-8")
+    st1 = prov.collect_provenance("gt_battery")
+
+    scratch.write_text("version two", encoding="utf-8")
+    st2 = prov.collect_provenance("gt_battery")
+
+    assert st1["dirty_digest"] is not None
+    assert st1["dirty_digest"] != st2["dirty_digest"]
+
+
 def test_graceful_degradation_when_git_unavailable(monkeypatch):
     """Any subprocess failure degrades git fields to None + a note, never raising."""
 

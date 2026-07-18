@@ -84,12 +84,22 @@ def collect_provenance(
         status = _git(["status", "--porcelain"])
         git_dirty = bool(status)
         if git_dirty:
-            # Digest of the full working-tree state (staged + unstaged vs HEAD) so a
-            # dirty run is identifiable without dumping the diff into the payload.
+            # Digest of the full working-tree state (staged + unstaged vs HEAD, plus
+            # the contents of any untracked files) so a dirty run is identifiable
+            # without dumping the diff into the payload. `git diff HEAD` alone omits
+            # untracked files entirely (status only names them), so their contents
+            # are hashed in separately here.
             diff_text = _git(["diff", "HEAD"])
-            dirty_digest = hashlib.sha1(
-                (status + diff_text).encode("utf-8")
-            ).hexdigest()[:12]
+            digest_parts = [status.encode("utf-8"), diff_text.encode("utf-8")]
+            untracked = _git(["ls-files", "--others", "--exclude-standard"])
+            for rel in untracked.splitlines():
+                if not rel:
+                    continue
+                try:
+                    digest_parts.append((_REPO_ROOT / rel).read_bytes())
+                except OSError:
+                    pass
+            dirty_digest = hashlib.sha1(b"".join(digest_parts)).hexdigest()[:12]
     except Exception as exc:  # noqa: BLE001
         notes.append(f"git status unavailable ({exc.__class__.__name__})")
 
