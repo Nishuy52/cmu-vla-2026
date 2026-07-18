@@ -79,6 +79,23 @@ def test_openai_vision_attaches_image_parts(fake_openai):
     assert parts[2]["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
 
+def test_openai_sets_request_level_timeout_from_call_timeout(fake_openai):
+    # Issue #46: the configured call timeout must be threaded into the openai SDK's
+    # own request-level ``timeout=`` kwarg (not just the outer thread-based backstop),
+    # so a timed-out call closes the HTTP connection and the local server aborts.
+    adapter = OpenAIChatAdapter("http://host/v1", "gpt-x", "sk-key", call_timeout_s=7.5)
+    adapter(MESSAGES)
+    payload = FakeOpenAIClient.last.create_calls[0]
+    assert payload["timeout"] == 7.5
+
+
+def test_openai_omits_request_timeout_when_unconfigured(fake_openai):
+    adapter = OpenAIChatAdapter("http://host/v1", "gpt-x", "sk-key")
+    adapter(MESSAGES)
+    payload = FakeOpenAIClient.last.create_calls[0]
+    assert "timeout" not in payload
+
+
 def test_openai_missing_sdk_raises_clear_error(monkeypatch):
     # ensure no fake openai is present
     monkeypatch.setitem(__import__("sys").modules, "openai", None)

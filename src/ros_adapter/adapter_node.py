@@ -612,10 +612,14 @@ class AdapterNode(Node):
         * ``verifier`` (CP4), ``anchor_confirmer`` (CP3), ``miss_recoverer`` (CP2),
           ``frontier_selector`` (CP5) come from core.checkpoints, bound to the configured
           chat_fns + the controller's ledger/clock.
-        * ``budget_frac`` / ``remaining_s`` are late-bound closures over the controller's
-          BudgetState (which only exists after question intake). Without ``budget_frac`` the
-          H4c provisional-terminal gate is inert (commits immediately — safe but the
-          withholding guard never fires), so wiring it is load-bearing (H8 verifier note).
+        * ``budget_frac`` / ``remaining_s`` / ``forced_assembly`` are late-bound closures
+          over the controller's BudgetState (which only exists after question intake).
+          Without ``budget_frac`` the H4c provisional-terminal gate is inert (commits
+          immediately — safe but the withholding guard never fires), so wiring it is
+          load-bearing (H8 verifier note). ``forced_assembly`` (issue #33) is the inverse:
+          unwired it defaults to "not forced", so the single-observation route-prefix
+          commit floor stays STRICT (n_obs >= 2 required) rather than silently permissive
+          — wiring it is what lets the T-90 time-pressure gate ever relax that floor.
         * ``detector=self._detector`` (issue #34) — the SAME GroundingDinoDetector instance
           ``self._perception`` calls every keyframe. Passing it here lets
           ``HeadState.bind`` (core/heads/factory.py) rebuild its ``.prompt`` from the
@@ -645,13 +649,23 @@ class AdapterNode(Node):
             frac = float(ctrl.budget.elapsed()) / QUESTION_BUDGET_S
             return max(0.0, min(1.0, frac))
 
+        def _forced_assembly() -> bool:
+            # Issue #33: the T-90 forced-assembly gate straight off BudgetState — feeds
+            # the IF head's single-observation route-prefix commit gate. Before latch
+            # (controller/budget not yet built) nothing is forced.
+            ctrl = self._controller
+            if ctrl is None or ctrl.budget is None:
+                return False
+            return bool(ctrl.budget.forced_assembly)
+
         if not self._llm_configured:
             # Offline path: regex-only parse, all checkpoint seams off. budget_frac/
-            # remaining_s are still wired (they are pure BudgetState reads, no network) so the
-            # H4c gate is live even without an LLM.
+            # remaining_s/forced_assembly are still wired (they are pure BudgetState reads,
+            # no network) so the H4c / issue #33 commit gates are live even without an LLM.
             return build_callables(
                 self._scene_index,
                 budget_frac=_budget_frac,
+                forced_assembly=_forced_assembly,
                 remaining_s=_remaining_s,
                 detector=self._detector,
             )
@@ -678,6 +692,7 @@ class AdapterNode(Node):
             miss_recoverer=seams.get("miss_recoverer"),
             frontier_selector=seams.get("frontier_selector"),
             budget_frac=_budget_frac,
+            forced_assembly=_forced_assembly,
             remaining_s=_remaining_s,
             detector=self._detector,
         )

@@ -58,6 +58,15 @@ ARRIVAL_TOL_M: float = 0.8  # within this of a leg goal -> arrived (mark progres
 VIA_NEAR_CLEARANCE_M: float = 0.45
 MIN_GROUND_OBS: int = 3  # per architecture: grounded == confirmed with >= 3 obs
 
+# Issue #33 — route-prefix commitment floor: a leg backed by only a SINGLE observation
+# (n_obs == 1) is too weak to drive on. Such a leg may still be PLANNED (geometry
+# computed, feeding explore affinity/probing) but is withheld from the COMMITTED route
+# — the driven prefix stops just short of it — until either it gathers a second
+# observation (n_obs >= MIN_COMMIT_OBS) or the forced-assembly time-pressure gate
+# (core.fsm.budget.BudgetState.forced_assembly, T-90) is reached, at which point
+# late-stage expected points favor acting on the single-obs leg anyway.
+MIN_COMMIT_OBS: int = 2
+
 # H11 / IF-F8 / SYS-F10: cap re-plans per question so a pathological stall/violation loop
 # cannot burn the whole budget replanning every tick. Each replan trigger (stall, no-LOS,
 # follower-exhausted-not-arrived, capsule tripwire) counts against this.
@@ -106,6 +115,12 @@ class _GroundedLeg:
     #: category_only / drop_disambiguator / relax_attributes). A provisional TERMINAL
     #: leg is withheld from the committed route while explore budget remains.
     provisional: bool = False
+    #: Issue #33 — the minimum ``n_obs`` across this leg's resolved anchor record(s).
+    #: A leg with fewer than MIN_COMMIT_OBS observations is PLANNED (geom present) but
+    #: withheld from the COMMITTED route prefix (see ``_committable_prefix_len``) absent
+    #: forced-assembly time pressure. A very large default keeps an ungrounded leg
+    #: (geom is None, min_n_obs never set) from spuriously gating a shorter prefix.
+    min_n_obs: int = 1 << 30
 
 
 @dataclass
@@ -120,6 +135,15 @@ class InstructionHead:
     #: is withheld from the route (keep exploring for the disambiguator). None == no
     #: pressure signal, so a provisional terminal commits immediately.
     budget_frac: Callable[[], float] | None = None
+    #: Issue #33 — zero-arg callable -> True once the T-90 forced-assembly gate
+    #: (core.fsm.budget.BudgetState.forced_assembly) has been reached. Feeds the
+    #: single-observation route-prefix commit gate: below MIN_COMMIT_OBS a leg is
+    #: withheld from the committed prefix until either it gathers a second observation
+    #: or this hook reports the forced-assembly gate reached. None (unconfigured, or a
+    #: broken/raising hook) == not yet forced, so the strict n_obs >= MIN_COMMIT_OBS
+    #: floor applies (this is a NEW correctness gate, not a legacy behaviour to
+    #: preserve — unlike ``budget_frac``'s None-means-commit-immediately default).
+    forced_assembly: Callable[[], bool] | None = None
 
     grid: OccupancyGrid = field(default_factory=OccupancyGrid)
     _costmap: Costmap | None = None
@@ -236,9 +260,10 @@ class InstructionHead:
         else:  # GOTO
             geom = self._goto_point(recs[0])
         runner_up = self._resolve_anchor(leg.anchors[0], scene, prev_xy)[1]
+        min_n_obs = min(r.n_obs for r in recs)
         return _GroundedLeg(
             leg.kind, grounded, geom, nouns, record=recs[0], runner_up=runner_up,
-            provisional=provisional,
+            provisional=provisional, min_n_obs=min_n_obs,
         )
 
     def _resolve_leg_anchors(
@@ -431,19 +456,56 @@ class InstructionHead:
     def _committable_prefix_len(self) -> int:
         """The grounded-prefix length we will actually commit to the route this tick.
 
-        H4c — provisional terminal: if the grounded prefix reaches the FINAL route leg
-        and that terminal was resolved via a relaxation rung, hold it back (drive only
-        the legs before it) until budget pressure forces the commit, so exploration can
-        still find the missing disambiguator/anchor. Non-terminal provisional legs are
-        NOT withheld — partial credit on ordered early legs is banked regardless.
+        Two independent withhold gates apply, in order:
+
+        1. Issue #33 — single-observation floor: the prefix is first truncated at the
+           earliest leg backed by fewer than MIN_COMMIT_OBS observations (n_obs == 1
+           legs are PLANNED — geometry already computed by ``_ground_legs`` — but not
+           COMMITTED), unless the T-90 forced-assembly gate has been reached.
+        2. H4c — provisional terminal: if the (obs-gated) prefix reaches the FINAL route
+           leg and that terminal was resolved via a relaxation rung, hold it back (drive
+           only the legs before it) until budget pressure forces the commit, so
+           exploration can still find the missing disambiguator/anchor. Non-terminal
+           provisional legs are NOT withheld — partial credit on ordered early legs is
+           banked regardless.
         """
-        n = self._grounded_prefix_len()
+        n = self._obs_gated_prefix_len(self._grounded_prefix_len())
         if n == 0 or n < len(self._legs):
             return n  # terminal not yet in the prefix; nothing to withhold
         terminal = self._legs[-1]
         if terminal.provisional and not self._commit_forced():
             return n - 1  # withhold the provisional terminal; drive the rest
         return n
+
+    def _obs_gated_prefix_len(self, n: int) -> int:
+        """Issue #33: truncate a geometry-grounded prefix of length ``n`` at the first
+        leg backed by fewer than MIN_COMMIT_OBS observations.
+
+        A leg with n_obs == 1 stays PLANNED (its geometry is already in ``self._legs``,
+        feeding explore affinity / the WorldView probe) but is withheld from the
+        COMMITTED route — the driven prefix stops just short of it — until it gathers a
+        second observation, EXCEPT once the T-90 forced-assembly gate is reached: late-
+        stage time pressure favors acting on the single-obs leg over stalling further.
+        """
+        if self._forced_assembly_reached():
+            return n
+        for i in range(n):
+            if self._legs[i].min_n_obs < MIN_COMMIT_OBS:
+                return i
+        return n
+
+    def _forced_assembly_reached(self) -> bool:
+        """True once the T-90 forced-assembly gate (issue #33) has been reached.
+
+        No injected hook (``forced_assembly is None``), or a hook that raises, means NOT
+        yet forced — this is a new correctness floor (single obs is too weak to commit
+        on), not legacy behaviour to preserve, so the unconfigured default is strict."""
+        if self.forced_assembly is None:
+            return False
+        try:
+            return bool(self.forced_assembly())
+        except Exception:  # noqa: BLE001 — a broken signal must not strand the route
+            return False
 
     def _commit_forced(self) -> bool:
         """True once budget pressure forces committing even a provisional terminal.

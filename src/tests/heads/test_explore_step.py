@@ -7,8 +7,8 @@ from core.interfaces import OdomState, WaypointCmd
 from core.mocks.synthetic_scene import SyntheticScene
 from core.perception.scene_index import BasicSceneIndex
 from core.nav.exploration import ExplorationStatus
-from core.plan_schema import Anchor, LegKind, RouteLeg
-from tests.heads._helpers import instruction_plan, numerical_plan, object_plan
+from core.plan_schema import Anchor, Clause, LegKind, Pred, RouteLeg
+from tests.heads._helpers import inst, instruction_plan, numerical_plan, object_plan, scene
 
 
 class _ExploreIO:
@@ -64,6 +64,76 @@ def test_affinity_factory_invoked_with_plan_nouns():
     io = _ExploreIO(sc)
     head.advance(io, BasicSceneIndex(sc.instances()))
     assert captured["nouns"] == ["chair"]
+
+
+# --------------------------------------------------------------- issue #43b affinity
+def test_object_ref_affinity_stays_on_target_when_eligible():
+    """Target noun has an answer-eligible instance -> no anchor-seeking bias."""
+    sc = scene(inst(1, "table", n_obs=3, score=0.9, centroid=(1.0, 1.0, 0.0)))
+    captured = {}
+
+    def factory(nouns):
+        captured["nouns"] = list(nouns)
+        return lambda xy: 1.0
+
+    plan = object_plan("table", clauses=[Clause(pred=Pred.NEAR, anchors=[Anchor(noun="lamp")])])
+    head = ExploreHead(plan=plan, affinity_fn=factory)
+    io = _ExploreIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert captured["nouns"][0] == "table"
+
+
+def test_object_ref_affinity_seeks_anchor_when_target_absent():
+    """Target noun absent from the scene entirely -> bias toward the anchor noun."""
+    sc = scene(inst(1, "lamp", n_obs=3, score=0.9, centroid=(1.0, 1.0, 0.0)))
+    captured = {}
+
+    def factory(nouns):
+        captured["nouns"] = list(nouns)
+        return lambda xy: 1.0
+
+    plan = object_plan("teapot", clauses=[Clause(pred=Pred.NEAR, anchors=[Anchor(noun="lamp")])])
+    head = ExploreHead(plan=plan, affinity_fn=factory)
+    io = _ExploreIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert captured["nouns"][0] == "lamp"
+    assert "teapot" in captured["nouns"]  # target kept as a fallback tail
+
+
+def test_object_ref_affinity_seeks_anchor_when_target_ineligible():
+    """Target present but under the answer-eligibility bar (low n_obs / low score) is
+    treated as starved just like an absent target — bias toward the anchor."""
+    sc = scene(
+        inst(1, "teapot", n_obs=1, score=0.9, centroid=(1.0, 1.0, 0.0)),  # n_obs < 2
+        inst(2, "lamp", n_obs=3, score=0.9, centroid=(2.0, 2.0, 0.0)),
+    )
+    captured = {}
+
+    def factory(nouns):
+        captured["nouns"] = list(nouns)
+        return lambda xy: 1.0
+
+    plan = object_plan("teapot", clauses=[Clause(pred=Pred.NEAR, anchors=[Anchor(noun="lamp")])])
+    head = ExploreHead(plan=plan, affinity_fn=factory)
+    io = _ExploreIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert captured["nouns"][0] == "lamp"
+
+
+def test_object_ref_affinity_no_anchor_falls_back_to_target():
+    """No anchor noun on the plan (bare 'the teapot') -> unchanged target-noun affinity,
+    even though the target is starved (nothing to seek toward instead)."""
+    sc = scene()
+    captured = {}
+
+    def factory(nouns):
+        captured["nouns"] = list(nouns)
+        return lambda xy: 1.0
+
+    head = ExploreHead(plan=object_plan("teapot"), affinity_fn=factory)
+    io = _ExploreIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert captured["nouns"] == ["teapot"]
 
 
 def test_if_delegates_to_instruction_head():

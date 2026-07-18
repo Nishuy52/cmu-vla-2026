@@ -27,6 +27,7 @@ from core.interfaces import (
     SceneIndex,
     WaypointCmd,
 )
+from core.perception.detector import is_answer_eligible
 from core.perception.dimension_priors import clamp_record_marker
 
 MODAL_COUNT: int = 2  # most-common integer answer in the training distribution (architecture §4)
@@ -186,8 +187,12 @@ class FloorAnswers:
         # 2. best-scored candidate handed down by the ranking head
         if partial.best_candidate is not None:
             return clamp_record_marker(partial.best_candidate)
-        # 3. largest instance matching the target noun
-        matches = _instances_for_noun(scene, noun)
+        # 3. largest ANSWER-ELIGIBLE instance matching the target noun (issue #43a: a
+        # target-noun instance under-observed (n_obs < 2) or too weakly scored
+        # (peak score < 0.30) is a question-pass recall hit, not an answer — it stays in
+        # the scene index (recall floor 0.25 untouched) but is skipped here so the floor
+        # falls through to the anchor rung / final rung instead of marking a ghost.
+        matches = [m for m in _instances_for_noun(scene, noun) if is_answer_eligible(m)]
         if matches:
             return clamp_record_marker(max(matches, key=_volume))
         # 4. anchor-guided (issue #42): the target noun is absent from the scene index,

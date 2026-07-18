@@ -189,6 +189,58 @@ DEFAULT_GDINO_QUESTION_BOX_THRESHOLD: float = 0.25
 ENV_GDINO_VOCAB_PASS_CADENCE = "GDINO_VOCAB_PASS_CADENCE"
 DEFAULT_GDINO_VOCAB_PASS_CADENCE: int = 3
 
+# --------------------------------------------------------------------------- answer eligibility
+
+# Issue #43(a): DEFAULT_GDINO_QUESTION_BOX_THRESHOLD (0.25) above is a RECALL floor — low
+# enough that a weakly-scored, barely-observed instance still enters the scene index and
+# feeds exploration/frontier scoring. That is deliberately permissive; it must not also be
+# the bar an instance clears to WIN an answer. A question-pass-derived instance (i.e. one
+# resolved for the question's own target noun — the noun the short question-noun caption
+# pass grounds on) is ANSWER-eligible only once it has been independently re-observed
+# (n_obs >= the min below) AND its peak detector confidence clears a higher score floor —
+# both stricter than the 0.25 recall floor, which stays untouched for index/exploration.
+
+#: Minimum distinct-keyframe observation count for a target-noun instance to be
+#: ANSWER-eligible (win the object-ref ranking head, or populate object-ref floor rung 3).
+ENV_GDINO_ANSWER_MIN_OBS = "GDINO_ANSWER_MIN_OBS"
+DEFAULT_GDINO_ANSWER_MIN_OBS: int = 2
+
+#: Minimum peak detector confidence (``InstanceRecord.score``, max over observations) for
+#: answer eligibility. Above the 0.25 recall floor by design (issue #43(a)).
+ENV_GDINO_ANSWER_MIN_SCORE = "GDINO_ANSWER_MIN_SCORE"
+DEFAULT_GDINO_ANSWER_MIN_SCORE: float = 0.30
+
+
+def answer_min_obs() -> int:
+    """Resolve the answer-eligibility min-observation floor (env override > default)."""
+    try:
+        return int(os.environ.get(ENV_GDINO_ANSWER_MIN_OBS, DEFAULT_GDINO_ANSWER_MIN_OBS))
+    except (TypeError, ValueError):
+        return DEFAULT_GDINO_ANSWER_MIN_OBS
+
+
+def answer_min_score() -> float:
+    """Resolve the answer-eligibility min peak-score floor (env override > default)."""
+    try:
+        return float(os.environ.get(ENV_GDINO_ANSWER_MIN_SCORE, DEFAULT_GDINO_ANSWER_MIN_SCORE))
+    except (TypeError, ValueError):
+        return DEFAULT_GDINO_ANSWER_MIN_SCORE
+
+
+def is_answer_eligible(record: object) -> bool:
+    """True iff ``record`` (an :class:`~core.interfaces.InstanceRecord`) clears both the
+    answer-eligibility observation and peak-score floors (issue #43a).
+
+    Duck-typed on ``.n_obs`` / ``.score`` (avoids importing ``core.interfaces`` from this
+    module purely for a type hint); a record missing either attribute is treated as
+    ineligible rather than raising, so a malformed/partial record never wins an answer.
+    """
+    n_obs = getattr(record, "n_obs", None)
+    score = getattr(record, "score", None)
+    if n_obs is None or score is None:
+        return False
+    return n_obs >= answer_min_obs() and score >= answer_min_score()
+
 
 def build_gdino_prompt(question_nouns: Sequence[str], vocab_nouns: Sequence[str]) -> str:
     """Build the GroundingDINO text prompt from question + vocab nouns.
