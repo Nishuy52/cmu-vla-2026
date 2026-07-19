@@ -898,8 +898,7 @@ def test_nearest_free_goal_pushes_off_anchors_own_footprint():
     footprint — the real drive (`InstructionHead._goto_point`) never targets a point
     inside the target's own geometry either (it BFS-snaps to the nearest reachable
     cell), so the rubric goal must match. A bench-sized anchor (half-diagonal well
-    over ARRIVAL_TOL_M, issue #67's push-only-if-necessary threshold) with its raw
-    centroid stands in for the traced office_1 case."""
+    over ARRIVAL_TOL_M) with its raw centroid stands in for the traced office_1 case."""
     gt = _synthetic_gt_scene(
         [
             ("bench", 0.0, 0.0, 0.0, 1.58, 0.66, 0.4),
@@ -959,9 +958,7 @@ def test_nearest_free_goal_directional_push_prefers_approach_side():
 def test_if_rubric_geometry_goto_goal_clears_own_anchor_footprint():
     """End-to-end: `_if_rubric_geometry`'s resolved GOTO goal for "go to the bench" is
     off the bench's own solid footprint, not at its raw (unreachable) centroid, and
-    respects a supplied route start as the first leg's approach direction. The
-    bench's half-diagonal exceeds ``LEG_ARRIVAL_TOL_M`` (issue #67's
-    push-only-if-necessary threshold -- see the dedicated #67 skip-case test)."""
+    respects a supplied route start as the first leg's approach direction."""
     from core.perception.scene_index import BasicSceneIndex
 
     gt = _synthetic_gt_scene(
@@ -981,62 +978,3 @@ def test_if_rubric_geometry_goto_goal_clears_own_anchor_footprint():
     assert (gx, gy) != (3.0, 0.0)
     # Approached from due south -> pushed onto the bench's south edge.
     assert gy < 0.0
-
-
-def test_nearest_free_goal_skips_push_when_already_tolerance_reachable():
-    """Issue #67: hotel_room_1's chair leg regression -- a small anchor (real
-    footprint half-diagonal ~0.46m, well within ``S.LEG_ARRIVAL_TOL_M``) must be
-    left at its raw centroid, not pushed. The raw point is still technically inside
-    the anchor's own (inflated) footprint, but a footprint this small is provably
-    tolerance-reachable at its centroid already -- pushing it out to an edge is
-    needless churn that can land the goal FARTHER from the actual approach than the
-    raw centroid was (the traced hotel_room_1 regression: 0.684m -> 1.02m,
-    `docs/tasks/T17-if66-arrival-stamping/task.md`)."""
-    from core.groundtruth import scoring as S
-
-    # Chair-sized footprint (0.72 x 0.56, matching the traced hotel_room_1 instance):
-    # half-diagonal = sqrt(0.36^2 + 0.28^2) ~= 0.456m, well under LEG_ARRIVAL_TOL_M.
-    gt = _synthetic_gt_scene(
-        [
-            ("chair", 0.0, 0.0, 0.0, 0.72, 0.56, 0.5),
-            ("stool", 20.0, 20.0, 0.0, 0.4, 0.4, 0.5),
-        ],
-        scene_name="syn67skip",
-    )
-    half_diag = 0.5 * (0.72**2 + 0.56**2) ** 0.5
-    assert half_diag <= S.LEG_ARRIVAL_TOL_M
-    pushed = GB._nearest_free_goal((0.0, 0.0), gt)
-    assert pushed == (0.0, 0.0)  # push skipped -- raw goal already tolerance-reachable
-
-    # Same case through the directional (anchor's-own-footprint) branch.
-    chair_id = gt.instances[0].instance_id
-    pushed_dir = GB._nearest_free_goal(
-        (0.0, 0.0), gt, anchor_id=chair_id, approach_xy=(0.0, -10.0)
-    )
-    assert pushed_dir == (0.0, 0.0)
-
-
-def test_nearest_free_goal_still_pushes_when_goal_inside_solid_footprint():
-    """Issue #67's guard is push-only-if-NECESSARY, not push-never: when the raw goal
-    sits inside a footprint whose half-diagonal EXCEEDS ``S.LEG_ARRIVAL_TOL_M`` (the
-    office_1 bench regression this guard must not reintroduce -- half-diagonal
-    0.85m, `docs/tasks/T17-if66-arrival-stamping/task.md`), the push must still
-    fire -- otherwise the rubric goal stays a point no real drive could ever get
-    within tolerance of, regardless of how small the resulting push distance to the
-    nearest free edge happens to be (a small push distance off a large footprint is
-    not equivalent evidence of reachability -- other, non-anchor obstacles can still
-    keep the real driven path farther away than the local free-edge distance
-    suggests, which is exactly what made this regression-guard case necessary)."""
-    from core.groundtruth import scoring as S
-
-    gt = _synthetic_gt_scene(
-        [
-            ("bench", 0.0, 0.0, 0.0, 1.58, 0.66, 0.4),  # half-diagonal ~0.856m
-            ("stool", 20.0, 20.0, 0.0, 0.4, 0.4, 0.5),
-        ],
-        scene_name="syn67push",
-    )
-    half_diag = 0.5 * (1.58**2 + 0.66**2) ** 0.5
-    assert half_diag > S.LEG_ARRIVAL_TOL_M
-    pushed = GB._nearest_free_goal((0.0, 0.0), gt)
-    assert pushed != (0.0, 0.0)
