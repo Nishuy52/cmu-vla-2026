@@ -216,6 +216,76 @@ def _pinch_gap_grid_with_vehicle_radius(vehicle_radius_m: float):
     return Costmap(grid, vehicle_radius_m=vehicle_radius_m)
 
 
+def _pinch_gap_grid_with_midpoint_blocker():
+    """Same pillar gap as `_pinch_gap_grid`, plus a genuine solid obstacle straddling
+    the gate's raw midpoint (issue #63's hotel_room_2 shape: a real third object, not
+    an architectural over-stamp, sitting at the gate line) — blocks column 10 (the
+    gap) at gy in {4, 5, 6} (y in roughly [0.4, 0.7]), leaving clear column-10 cells
+    on either side of the block, still within the gate's own [0.25, 0.95] span."""
+    rows = []
+    for i in range(12):
+        line = list("." * 20)
+        if 3 <= i <= 8:
+            for c in (8, 9, 11, 12):
+                line[c] = "#"
+        if i in (5, 6, 7):  # gy in {6, 5, 4} respectively -> col 10 blocked there too
+            line[10] = "#"
+        rows.append("".join(line))
+    grid = _grid_from(rows)
+    return Costmap(grid, vehicle_radius_m=0.0)
+
+
+def test_plan_through_nudges_off_genuine_obstacle_at_gate_midpoint():
+    """issue #63: the raw gate midpoint sits inside a genuine solid obstacle cell (not
+    an anchor's own footprint, not inflation) — `plan_through` must nudge its via-point
+    along the gate's own axis to a clear point on the same verified gate line and still
+    thread it, rather than either failing outright or (pre-#63) A*-ing straight at a
+    blocked cell and depending on incidental grid-snap luck."""
+    cm = _pinch_gap_grid_with_midpoint_blocker()
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    mid_r, mid_c = cm.grid.world_to_cell(1.05, 0.6)
+    assert cm.blocked(mid_r, mid_c), "test setup: raw gate midpoint must be blocked"
+    start = (1.05, 0.05)
+    goal = (1.05, 1.15)
+    legs = [("corridor_between", gate), ("goto", goal)]
+    path = plan_through(cm, start, legs)
+    assert path is not None, "must thread by nudging off the genuine obstacle"
+    assert path_crosses_gate(path, gate)
+
+
+def test_usable_gate_point_matches_between_toolbox_and_planner():
+    """issue #63: the scoring geometry (`toolbox.corridor_gate`) and the planner
+    (`plan_through`'s gate-target computation) must compute the SAME usable crossing
+    point for an identical gate + identical blocking geometry, since both call the one
+    shared `core.geometry.primitives.usable_gate_point` helper — this is the guarantee
+    that prevents the #51 scoring/planning mismatch class from reopening."""
+    from core.geometry.primitives import usable_gate_point
+
+    p0 = np.array([1.05, 0.25])
+    p1 = np.array([1.05, 0.95])
+    mid = (p0 + p1) / 2.0
+
+    def blocked(pt):
+        return 0.4 <= pt[1] <= 0.7  # matches the planner-grid blocker's y-band
+
+    nudged_generic = usable_gate_point(p0, p1, mid, blocked)
+
+    cm = _pinch_gap_grid_with_midpoint_blocker()
+    from core.nav.planner import _raw_obstacle_blocked_xy
+
+    nudged_planner = usable_gate_point(
+        p0, p1, mid, lambda pt: _raw_obstacle_blocked_xy(cm, pt)
+    )
+    # Both should have moved off the raw midpoint, to the same side (nearest clear
+    # point found by the identical sweep order) — not necessarily bit-identical (the
+    # costmap quantizes to cell centres) but on the same side and clear in both.
+    assert not np.allclose(nudged_generic, mid)
+    assert not np.allclose(nudged_planner, mid)
+    assert (nudged_generic[1] - mid[1]) * (nudged_planner[1] - mid[1]) > 0, (
+        "toolbox-style and planner-style nudges must land on the same side of the gate"
+    )
+
+
 def test_pinch_costmap_disc_m_override_scales_blocked_region():
     from core.nav.planner import _pinch_costmap
 

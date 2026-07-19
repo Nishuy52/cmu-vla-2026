@@ -28,6 +28,56 @@ def test_corridor_gate_midpoint_offset_boxes():
     assert np.allclose(g.midpoint, [0.0, 2.0])
 
 
+# --------------------------------------------------------------------------- issue #63
+
+
+def test_corridor_gate_without_index_ignores_third_object_at_midpoint():
+    """Pre-#63 behaviour preserved when no ``index`` is passed: the midpoint is never
+    nudged, even if a third object's footprint would otherwise block it."""
+    b1 = rec(1, "sofa", (-2, 0, 0), (1.0, 1.0, 1.0))
+    b2 = rec(2, "shelf", (2, 0, 0), (1.0, 1.0, 1.0))
+    blocker = rec(3, "bed frame", (0, 0, 0), (1.0, 1.0, 1.0))  # sits ON the raw midpoint
+    idx = FakeIndex([b1, b2, blocker])
+    g_no_index = T.corridor_gate(b1, b2)
+    assert np.allclose(g_no_index.midpoint, [0.0, 0.0])
+    assert idx is not None  # (idx unused: this asserts the no-index path is unaffected)
+
+
+def test_corridor_gate_nudges_off_genuine_third_object_at_midpoint():
+    """issue #63 (hotel_room_2 shape): a genuine third GT instance's footprint sits at
+    the raw midpoint. With ``index`` given, the returned midpoint must be nudged clear
+    of it, along the gate's own axis, while ``p0``/``p1`` (the verified anchor line
+    used by threading checks) stay untouched."""
+    b1 = rec(1, "bed", (-2, 0, 0), (1.0, 1.0, 1.0))  # x face at -1.5
+    b2 = rec(2, "bench", (2, 0, 0), (1.0, 1.0, 1.0))  # x face at 1.5
+    # A duplicate "bed frame" instance for the same physical bed, straddling the raw
+    # midpoint (0, 0) but not either anchor's own AABB.
+    blocker = rec(3, "bed frame", (0, 0, 0), (0.8, 0.8, 1.0))
+    idx = FakeIndex([b1, b2, blocker])
+    g = T.corridor_gate(b1, b2, idx)
+    assert np.allclose(g.p0, [-1.5, 0.0])
+    assert np.allclose(g.p1, [1.5, 0.0])
+    assert not np.allclose(g.midpoint, [0.0, 0.0]), "midpoint must move off the blocker"
+    # Nudged point must stay ON the gate's own axis (y == 0) and inside the segment.
+    assert abs(float(g.midpoint[1])) < 1e-9
+    assert -1.5 < float(g.midpoint[0]) < 1.5
+    # And it must actually be clear of the blocker's footprint.
+    assert not T.P.point_in_footprint_2d(g.midpoint, blocker.aabb_min, blocker.aabb_max)
+
+
+def test_corridor_gate_falls_back_to_midpoint_when_gate_fully_blocked():
+    """When nothing within the bounded slide clears (a blocker spanning the whole
+    gate), corridor_gate must fall back to the untouched midpoint rather than nudge
+    past a verified anchor."""
+    b1 = rec(1, "wallA", (-2, 0, 0), (1.0, 1.0, 1.0))
+    b2 = rec(2, "wallB", (2, 0, 0), (1.0, 1.0, 1.0))
+    # Blocker footprint spans the entire gate span (x in [-1.5, 1.5]).
+    blocker = rec(3, "unknown", (0, 0, 0), (10.0, 10.0, 1.0))
+    idx = FakeIndex([b1, b2, blocker])
+    g = T.corridor_gate(b1, b2, idx)
+    assert np.allclose(g.midpoint, [0.0, 0.0])
+
+
 # --------------------------------------------------------------------------- threading
 
 

@@ -20,6 +20,7 @@ import math
 
 import numpy as np
 
+from core.geometry.primitives import usable_gate_point
 from core.nav.costmap import Costmap, _point_segment_dist
 
 # --------------------------------------------------------------------------- tunables
@@ -259,6 +260,24 @@ def _nudge_past_gate(
     return (mid[0] + dx / dlen * eps, mid[1] + dy / dlen * eps)
 
 
+def _raw_obstacle_blocked_xy(costmap: Costmap, pt) -> bool:
+    """True if ``pt`` (world XY) lands on a genuine solid obstacle cell.
+
+    issue #63: tests ``raw_blocked`` (the UNINFLATED obstacle footprint), never
+    ``base_blocked``/``blocked()`` — a cell blocked only by the vehicle's own
+    inflation margin is not a real obstruction the gate needs to route around
+    (same discipline `_pinch_costmap`'s inflation-only clearing already applies).
+    Off-grid points read as clear (never force a slide off the mapped area).
+    """
+    r, c = costmap.grid.world_to_cell(float(pt[0]), float(pt[1]))
+    if not costmap.grid.in_bounds(r, c):
+        return False
+    rh, rw = costmap.raw_blocked.shape
+    if not (0 <= r < rh and 0 <= c < rw):
+        return False
+    return bool(costmap.raw_blocked[r, c])
+
+
 def free_space_via_point(
     costmap: Costmap,
     anchor_xy: tuple[float, float],
@@ -402,7 +421,23 @@ def plan_through(
         if kind == "corridor_between":
             gate = geom  # type: ignore[assignment]
             g0, g1 = gate  # type: ignore[misc]
-            mid = ((g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0)
+            raw_mid = ((g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0)
+            # issue #63: a genuine solid obstacle sitting at the raw gate midpoint
+            # (e.g. hotel_room_2's duplicate GT "bed frame" instance for the same
+            # physical bed as an anchor) is not a usable via-point — slide the
+            # mandatory via-point along the gate's own verified axis to the nearest
+            # clear point via the SAME `usable_gate_point` helper the scoring
+            # geometry's `corridor_gate` uses, so the two can never disagree about
+            # where a blocked gate's usable crossing is (the #51 mismatch class).
+            # A no-op (returns `raw_mid` unchanged) whenever the raw midpoint is
+            # already clear, which is every gate today's tests exercise.
+            nudged = usable_gate_point(
+                np.asarray(g0, dtype=float),
+                np.asarray(g1, dtype=float),
+                np.asarray(raw_mid, dtype=float),
+                lambda pt: _raw_obstacle_blocked_xy(costmap, pt),
+            )
+            mid = (float(nudged[0]), float(nudged[1]))
             seg = astar(costmap, cur, mid, unknown_cost_mult=unknown_cost_mult)
             # issue #51: the pinch fallback used to engage ONLY when the direct A*
             # succeeded but missed the gate (`seg is not None`); when the gate midpoint

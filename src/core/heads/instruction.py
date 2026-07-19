@@ -257,7 +257,7 @@ class InstructionHead:
             return _GroundedLeg(leg.kind, False, None, nouns, provisional=provisional)
         grounded = all(r.n_obs >= MIN_GROUND_OBS for r in recs)
         if leg.kind is LegKind.CORRIDOR_BETWEEN:
-            gate = TB.corridor_gate(recs[0], recs[1])
+            gate = TB.corridor_gate(recs[0], recs[1], scene)
             geom = (
                 (float(gate.p0[0]), float(gate.p0[1])),
                 (float(gate.p1[0]), float(gate.p1[1])),

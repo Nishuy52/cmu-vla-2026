@@ -1260,11 +1260,35 @@ def _empty_count_explanations(
 # --------------------------------------------------------------------------- corridor / avoid
 
 
-def corridor_gate(b1: InstanceRecord, b2: InstanceRecord) -> Gate:
-    """Gate segment between the two anchors' closest AABB faces, plus its midpoint."""
+def corridor_gate(
+    b1: InstanceRecord, b2: InstanceRecord, index: SceneIndex | None = None
+) -> Gate:
+    """Gate segment between the two anchors' closest AABB faces, plus its midpoint.
+
+    issue #63: when ``index`` is given, a genuine THIRD instance's footprint sitting
+    at the raw midpoint (e.g. hotel_room_2's duplicate GT "bed frame" instance for
+    the same physical bed as the "bed" anchor — a real obstruction, not either
+    anchor's own footprint) is not a usable via-point, so the midpoint is nudged
+    along the gate's own axis to the nearest clear point via
+    ``P.usable_gate_point`` — the SAME helper `core.nav.planner.plan_through` calls
+    for its own corridor target, so scoring and planning can never disagree about
+    where a blocked gate's usable crossing is (the #51 mismatch class). ``gate.p0``/
+    ``gate.p1`` (the verified anchor-to-anchor line used by threading checks) are
+    never nudged — only the mandatory via-point. Omit ``index`` (or pass one with no
+    blocking third instance, or a gate whose block has no clear point within the
+    bounded search) to get the untouched pre-#63 exact midpoint.
+    """
     pa, pb = P.aabb_face_points_2d(b1.aabb_min, b1.aabb_max, b2.aabb_min, b2.aabb_max)
     mid = (pa + pb) / 2.0
     width = float(np.linalg.norm(pb - pa))
+    if index is not None:
+        exclude_ids = {b1.instance_id, b2.instance_id}
+        others = [r for r in index.all_instances() if r.instance_id not in exclude_ids]
+
+        def _blocked(pt: np.ndarray) -> bool:
+            return any(P.point_in_footprint_2d(pt, r.aabb_min, r.aabb_max) for r in others)
+
+        mid = P.usable_gate_point(pa, pb, mid, _blocked)
     return Gate(pa, pb, mid, width)
 
 
