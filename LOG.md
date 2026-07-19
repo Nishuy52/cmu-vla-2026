@@ -1390,3 +1390,29 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
 - Trajectory: 0.150 -> 0.378 -> 0.433 -> 0.461 -> 0.511 -> 0.483(truer)
   -> 0.539 -> **0.589**. tv 7->3. Ceiling 0.819 (structural ledger will
   refine the honest max).
+
+## 2026-07-20 (overnight close-out) - IF 0.611; structural ledger 9; 0.8 verdict
+
+- 77c MERGED (ca8fae7): goto goal-widening through threaded gates (reuses
+  plan_through's pinch schedule + validates via _gate_crossing_extension).
+  Credit 0.633, headline 0.611, zero regressions. #78 closed as fixed-by-77c
+  with final blast-radius classification.
+- 77d: evidence-only close (merged 16da7f7). All 3 threading roots
+  STRUCTURAL (pre-grounding pocket-clamp x1 with per-tick proof;
+  wall-unavailable scenes x2); home_building_2 joint trade-off = design doc
+  (85% of gate physically blocked). No code change - correctly refused.
+- **STRUCTURAL LEDGER FINAL: 9 legs** -> honest max credit ~0.875, max
+  headline ~0.83 (3 violations attached to structural roots effectively
+  permanent under current architecture).
+- **0.8 VERDICT (numbers, not vibes): reachable only if essentially ALL
+  ~17 remaining fixable arrival-blocked legs land AND nothing regresses -
+  0.03 slack against the 0.83 architectural max. The one lever that
+  changes the arithmetic: pre-grounding movement (Plan being drafted,
+  APPROVAL-GATED - also competition-real behavior). Overnight yield:
+  0.461 -> 0.611 headline, tv 7->3, alongside truer grading.**
+- RUNNING at close-out: 77e arrival grind (top-6 cheapest legs), Plan
+  agent (pre-grounding movement design for user review).
+- Night discipline record: 8 merges, 3 evidence-backed negatives/refusals,
+  2 correctness-over-score decisions, every close on integrated batteries;
+  1 stall caught by user (pgrep self-match; bracket rule added), 1 caught
+  by deadline probe.
