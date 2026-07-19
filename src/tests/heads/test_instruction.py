@@ -273,6 +273,37 @@ def test_corridor_route_threads_gate_and_respects_avoid():
     assert capsule_violated(traj, cap)[0] is False
 
 
+def test_planner_seams_default_to_planner_module_constants():
+    """InstructionHead's calibration seams (nav.unknown_cost_mult / nav.pinch_disc_m /
+    nav.pinch_corridor_half_w_m) default to the live planner.py constants — an
+    unconfigured head reproduces today's behaviour exactly."""
+    from core.nav import planner as _planner
+
+    head = InstructionHead(plan=instruction_plan([_goto("sofa")]))
+    assert head.unknown_cost_mult == _planner.UNKNOWN_COST_MULT
+    assert head.pinch_disc_m == _planner.PINCH_DISC_M
+    assert head.pinch_corridor_half_w_m == _planner.PINCH_CORRIDOR_HALF_W_M
+
+
+def test_corridor_route_threads_gate_with_overridden_planner_seams():
+    """Overriding the injected planner constants (still at their default VALUES) must
+    thread the gate identically to the unconfigured head — the seam is plumbed end to
+    end through _build_route/plan_through without changing behaviour."""
+    from core.nav import planner as _planner
+
+    sc, idx = _if_scene()
+    head = InstructionHead(
+        plan=instruction_plan([_corridor("table", "chair"), _goto("sofa")]),
+        unknown_cost_mult=_planner.UNKNOWN_COST_MULT,
+        pinch_disc_m=_planner.PINCH_DISC_M,
+        pinch_corridor_half_w_m=_planner.PINCH_CORRIDOR_HALF_W_M,
+    )
+    io = _DriveIO(sc, start=(0.7, 3.0))
+    traj = _run(head, io, idx)
+    gate = corridor_gate(idx.by_label("table")[0], idx.by_label("chair")[0])
+    assert threading_check(traj, gate)[0] is True
+
+
 def test_avoid_capsule_stamped_once():
     sc, idx = _if_scene()
     head = InstructionHead(

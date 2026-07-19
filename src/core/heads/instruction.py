@@ -39,6 +39,7 @@ from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.nav.breadcrumbs import BreadcrumbFollower
 from core.nav.costmap import Costmap
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
+from core.nav import planner as _planner
 from core.nav.planner import astar, free_space_via_point, plan_through
 from core.plan_schema import Anchor, LegKind, Plan, Pred, RouteLeg, TargetSpec
 
@@ -129,6 +130,12 @@ class InstructionHead:
 
     plan: Plan | None = None
     thresholds: Thresholds = DEFAULT_THRESHOLDS
+    #: Calibration seams for ``nav.unknown_cost_mult`` / ``nav.pinch_disc_m`` /
+    #: ``nav.pinch_corridor_half_w_m`` (planner.py module constants). Defaults
+    #: reproduce today's planner behaviour; a sweep overrides these on construction.
+    unknown_cost_mult: float = _planner.UNKNOWN_COST_MULT
+    pinch_disc_m: float = _planner.PINCH_DISC_M
+    pinch_corridor_half_w_m: float = _planner.PINCH_CORRIDOR_HALF_W_M
     anchor_confirm: AnchorConfirmFn | None = None
     #: H4c — zero-arg callable -> explored-budget fraction [0,1]. Feeds the provisional
     #: terminal commit gate: below PROVISIONAL_COMMIT_FRAC a relaxation-audited terminal
@@ -562,7 +569,14 @@ class InstructionHead:
         if any(l.geom is None for l in prefix):
             return
         legs = [self._leg_tuple(l) for l in prefix]
-        path = plan_through(self._costmap, start_xy, legs)
+        path = plan_through(
+            self._costmap,
+            start_xy,
+            legs,
+            unknown_cost_mult=self.unknown_cost_mult,
+            pinch_disc_m=self.pinch_disc_m,
+            pinch_corridor_half_w_m=self.pinch_corridor_half_w_m,
+        )
         if path is None:
             # Unreachable with the hard capsules in place: drive to the nearest legal
             # point to the terminal goal and answer from there (architecture row 4).
@@ -591,7 +605,9 @@ class InstructionHead:
         goal = legs[-1].geom
         goal_xy = goal[1] if isinstance(goal[0], tuple) else goal  # corridor->2nd pt
         legal = self._costmap.nearest_reachable_point(goal_xy, start_xy)
-        path = astar(self._costmap, start_xy, legal)
+        path = astar(
+            self._costmap, start_xy, legal, unknown_cost_mult=self.unknown_cost_mult
+        )
         if path is None:
             _LOG.warning(
                 "IF recovery: A* to nearest reachable point %s from %s failed despite "
