@@ -1265,6 +1265,18 @@ def corridor_gate(
 ) -> Gate:
     """Gate segment between the two anchors' closest AABB faces, plus its midpoint.
 
+    issue #69 (D1): the gate's face points walk the anchors' CENTROID-to-centroid
+    line out to each footprint's own boundary
+    (:func:`P.centroid_axis_face_points_2d`) — the same axis :func:`between` already
+    uses to define "a between b1 and b2" — rather than the independent per-axis
+    footprint-overlap projection this used before (:func:`P.aabb_face_points_2d`,
+    still available for callers that want the old axis-aligned construction). The
+    old projection degenerates to a near-zero-width, unusable "gate" whenever the
+    two footprints already touch or overlap (adjacent furniture — no gap exists to
+    project a shared-overlap midpoint from) and can misplace the gate entirely for a
+    diagonally-offset anchor pair; the centroid axis stays well-defined (and
+    consistent with the module's own "between" semantics) in both cases.
+
     issue #63: when ``index`` is given, a genuine THIRD instance's footprint sitting
     at the raw midpoint (e.g. hotel_room_2's duplicate GT "bed frame" instance for
     the same physical bed as the "bed" anchor — a real obstruction, not either
@@ -1276,9 +1288,11 @@ def corridor_gate(
     ``gate.p1`` (the verified anchor-to-anchor line used by threading checks) are
     never nudged — only the mandatory via-point. Omit ``index`` (or pass one with no
     blocking third instance, or a gate whose block has no clear point within the
-    bounded search) to get the untouched pre-#63 exact midpoint.
+    bounded search) to get the untouched exact midpoint.
     """
-    pa, pb = P.aabb_face_points_2d(b1.aabb_min, b1.aabb_max, b2.aabb_min, b2.aabb_max)
+    pa, pb = P.centroid_axis_face_points_2d(
+        b1.centroid, b1.aabb_min, b1.aabb_max, b2.centroid, b2.aabb_min, b2.aabb_max
+    )
     mid = (pa + pb) / 2.0
     width = float(np.linalg.norm(pb - pa))
     if index is not None:
