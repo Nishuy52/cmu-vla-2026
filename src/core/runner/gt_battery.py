@@ -636,6 +636,29 @@ def _nearest_free_goal(
     :func:`_synthetic_from_gt`, so not a real local footprint to push off of) and
     elevated instances (base z at/above the terrain slab, i.e. overhangs) never
     blocked the floor to begin with.
+
+    Issue #67: the push above is unconditional once ``xy`` falls inside a
+    footprint+clearance box, even for a footprint small enough that its raw
+    centroid already sits within ``S.LEG_ARRIVAL_TOL_M``-reachable free space
+    (a real drive approaching from outside the footprint is already within
+    tolerance of the raw centroid without any push) — pushing anyway is
+    needless churn that can accidentally land the goal FARTHER from the
+    actual approach (traced concretely: hotel_room_1's chair leg,
+    `docs/tasks/T17-if66-arrival-stamping/task.md`). So: push only if
+    necessary, using the SAME static invariant this function's own docstring
+    already relies on above — a footprint's real (uninflated) half-diagonal
+    bounds the worst-case distance from its centroid to any point on its own
+    boundary. When that half-diagonal is within ``S.LEG_ARRIVAL_TOL_M``, the
+    centroid is provably close to its own boundary (and, empirically, close
+    to the nearby free edge just outside it) regardless of push side, so the
+    push for THAT footprint is skipped and the point is left where it is;
+    when the half-diagonal exceeds tolerance (the office_1 bench, half-diag
+    0.85m, in #66's classification table), the goal is provably unreachable
+    at the raw centroid and the push still fires. This is a per-footprint
+    property of the OBJECT being pushed off, not of the push distance itself
+    (a small object can need a large push distance to clear OTHER crowding
+    obstacles and still be correctly skipped here; a same-magnitude push
+    distance off a large object is not equivalent evidence of reachability).
     """
     x0, y0, x1, y1 = _gt_footprint_bounds(gt, 0.0)
     room_w, room_h = x1 - x0, y1 - y0
@@ -652,6 +675,14 @@ def _nearest_free_goal(
             axmax = float(rec.aabb_max[0]) + _RUBRIC_GOAL_CLEARANCE_M
             aymax = float(rec.aabb_max[1]) + _RUBRIC_GOAL_CLEARANCE_M
             if not (axmin <= x <= axmax and aymin <= y <= aymax):
+                continue
+            half_diag = 0.5 * (
+                (float(rec.aabb_max[0] - rec.aabb_min[0])) ** 2
+                + (float(rec.aabb_max[1] - rec.aabb_min[1])) ** 2
+            ) ** 0.5
+            if half_diag <= S.LEG_ARRIVAL_TOL_M:
+                # Issue #67: this footprint is small enough that its centroid is
+                # already provably tolerance-reachable -- push only if necessary.
                 continue
             if (
                 approach_xy is not None
