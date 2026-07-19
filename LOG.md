@@ -1091,3 +1091,33 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
 4. if54-pinch-seal worktree: fix the hang, battery, merge -> #54, then
    re-evaluate #51/#53 chain.
 5. Then: #50 adjudication, LLM-route A/B (holdout rules), Aug 3 MVS prep.
+
+## 2026-07-19 (session 17b, post-reboot) - Phase 3 verified; #54 closed; #59 found; THIRD WEDGE
+
+- Hardening v1 SILENTLY OVERRIDDEN: Ubuntu's /lib/modprobe.d/nvidia-runtimepm.conf
+  (=0x02) lexically outsorts nvidia-disable-rtd3.conf. Fixed with zz- prefix
+  (1003fdb); NEEDS: sudo tools/gpu_hardening/install.sh rerun + reboot to arm.
+- Fork restage v2 (correct procedure: upstream/CMU-VLN-Challenge-2026 clone +
+  docker/ai_module_fork/sync_to_fork.sh + compose copy). Found+fixed #57
+  (env_file hard-required broke clean-clone boot). Image rebuilt; 28.1 GB is
+  CORRECT (runbook's 11-12 GB bar was a stale pre-build estimate).
+- Phase 3 VERIFIED for real (task 8 closed): keep-alive 5m pin works, prewarm
+  completes ~25-40s (wrapper cap 20->60s, dff9a57), ladder parses via baked
+  LOCAL tier (ollama GIN log: adapter /v1/chat/completions 200s at latch).
+  Stale "DESCOPED" log line fixed. NOTE: image predates dff9a57 - rebuild
+  before next checkpoint run.
+- #54 closed honestly (merge 7d5eb8e): bounded pinch relax in, hang never
+  reproduced (was the wedged host), battery effect ZERO.
+- **#58 found+fixed** (478ecef): IF rubric scored pose-wise arrival over
+  undensified waypoints. Real latent bug, unit-proven - and STILL zero battery
+  effect, which yielded **#59: routes miss GT leg goals by >0.8m even on plain
+  gotos (credit 0.161; Frechet 4.17m/coverage 49% = right rooms, wrong stop
+  points)**. IF headline 0.150 invariant across four code states. All evidence
+  in reports/gt_battery_{if54_post,if54_densified,main_densified}_2026-07-19.
+- **THIRD WEDGE mid-teapot-run** (P8/210MHz, SW power cap, all ollama calls 500
+  at the 20s cap): this boot ran the overridden hardening. Teapot/Gate-4
+  evidence INVALID; task 6 stays open, blocked on hardened reboot.
+- USER DIRECTIVE: next session = fix #59 first, then remaining open issues
+  (#53/#51 re-triage post-#59; #50 adjudication; #47-49 local-parse defects).
+- Stack STOPPED at session end. Worktree if54-pinch-seal merged; cleanup of
+  worktrees pending (2 stale agent worktrees at b507eb9 unchecked).
