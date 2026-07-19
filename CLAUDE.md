@@ -27,7 +27,20 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
    questions for method comparisons — full rules in
    `docs/calibration.md` "Generalization protocol". Applies to every
    tunable, prompt, threshold, and A/B from here on.
-7. **Detected issues become GitHub issues.** Any defect, failure, or
+7. **No-stall orchestration (added 19 Jul 2026 after repeated user callouts).**
+   Never end a turn purely waiting: while any collector/agent runs, work the
+   backlog (docs debt, cleanup, triage, next-step prep) or dispatch more.
+   Never claim "no work left" without the mechanical sweep — `gh issue list
+   --state open` cross-referenced against active agents' owned surfaces;
+   every unowned open issue on a free surface is dispatchable NOW.
+   Score-driving work (the IF chain, anything on the rubric) outranks
+   ceremony (gates, evidence passes) in dispatch order — ceremony rides
+   triggers. An agent that reports "waiting/pausing" is a STOPPED agent:
+   take over its wait condition or re-message it with a finish-now
+   directive; briefs must forbid agents from ending turns in a wait.
+   Deadline every wait with an expected-arrival time and probe immediately
+   when overdue.
+8. **Detected issues become GitHub issues.** Any defect, failure, or
    open problem detected (by review, verification, battery/diagnosis
    runs, or agents) that is not fixed in the same session gets filed
    as a GitHub issue on `origin` (`gh issue create`) — one issue per
