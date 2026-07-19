@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -82,7 +83,7 @@ from core.interfaces import (
     TerrainPatch,
     WaypointCmd,
 )
-from core.fsm.controller import QuestionController
+from core.fsm.controller import QuestionController, State
 from core.heads import build_callables
 from core.llm.config import build_chat_fns_with_tiers, load_config
 from core.parsing import ladder as parse_ladder
@@ -188,6 +189,11 @@ TICK_HZ = 5.0  # QuestionController.tick() cadence (core/fsm/controller.py docst
 DEBUG_VIZ_HZ = 1.0  # instance-map republish cadence when debug_viz is on
 DEBUG_PATH_MAX = 500  # cap on retained waypoint breadcrumb points (bounded memory)
 DEBUG_CLOUD_PERIOD_S = 2.0  # publish the FULL colored map at most this often (RVIZ stays responsive)
+# issue #60: waypoints stream at the 5 Hz drive rate during DRIVE_OUT (IF-F4) — logging one
+# INFO line per waypoint would spam at 0.6 Hz sustained. Log the running count at most this
+# often instead.
+WAYPOINT_COUNT_LOG_PERIOD_S = 30.0
+EVENTS_TAIL_ON_DONE = 10  # issue #60: how many flight-recorder events to surface at DONE
 
 
 def _reliable_transient_qos(depth: int = 5) -> QoSProfile:
@@ -423,6 +429,11 @@ class AdapterNode(Node):
         else:
             self._scene_index = BasicSceneIndex([])
         self._controller: QuestionController | None = None
+        # issue #60: waypoint publish count since latch (throttled log, not per-waypoint) and
+        # a one-shot guard so the DONE events-tail line is emitted exactly once per question.
+        self._waypoint_count = 0
+        self._waypoint_count_last_log = time.monotonic()
+        self._done_events_logged = False
 
         # SUBMISSION-BLOCKER shout: the node came up with the empty BasicSceneIndex([]) stub —
         # perception is NOT wired into this node (VLA_DETECTOR=none), so every question is
@@ -573,6 +584,30 @@ class AdapterNode(Node):
         except Exception as exc:  # perception must never crash the drive loop
             self.get_logger().error("perception error: %s" % exc)
 
+    # ------------------------------------------------------------------ observability (issue #60)
+    def _controller_logger(self, level: str, msg: str) -> None:
+        """QuestionController's injected logger callback: transitions INFO, swallowed WARN."""
+        if level == "warn":
+            self.get_logger().warn(msg)
+        else:
+            self.get_logger().info(msg)
+
+    def _log_events_tail_on_done(self) -> None:
+        """On reaching State.DONE, surface the last EVENTS_TAIL_ON_DONE flight-recorder
+        events at INFO, one line, so the controller's events ring (QuestionController.events,
+        core.fsm.events.EventLog) is visible in the node log instead of only post-hoc replay.
+        """
+        if self._done_events_logged or self._controller is None:
+            return
+        if self._controller.state is not State.DONE:
+            return
+        self._done_events_logged = True
+        tail = self._controller.events.dump()[-EVENTS_TAIL_ON_DONE:]
+        rendered = " | ".join(
+            "%.1f:%s:%s:%s" % (r.t, r.state, r.event, r.detail) for r in tail
+        )
+        self.get_logger().info("controller DONE; last %d events: %s" % (len(tail), rendered))
+
     # ------------------------------------------------------------------ timer / drive
     def _on_tick(self) -> None:
         """5 Hz: feed perception, build the controller on first question, tick it once.
@@ -587,12 +622,14 @@ class AdapterNode(Node):
                 if self.question() is None:
                     return  # no question yet — nothing to drive
                 callables = self._build_controller_callables()
+                callables["logger"] = self._controller_logger
                 self._controller = QuestionController(**callables)
                 self.get_logger().info(
                     "QuestionController constructed; driving (llm=%s, perception=%s)"
                     % (self._llm_configured, self._perception is not None)
                 )
             self._controller.tick(self)
+            self._log_events_tail_on_done()
         except Exception as exc:  # a dead adapter must never crash the node
             self.get_logger().error("tick error: %s" % exc)
 
@@ -936,6 +973,16 @@ class AdapterNode(Node):
         msg.y = float(wp.y)
         msg.theta = 0.0  # heading ignored this year (gotcha 4)
         self._pub_waypoint.publish(msg)
+        # issue #60: waypoints stream at up to 5 Hz during DRIVE_OUT (IF-F4) — one INFO line
+        # per waypoint would spam, so only the running COUNT is logged, throttled to at most
+        # once per WAYPOINT_COUNT_LOG_PERIOD_S.
+        self._waypoint_count += 1
+        now = time.monotonic()
+        if now - self._waypoint_count_last_log >= WAYPOINT_COUNT_LOG_PERIOD_S:
+            self._waypoint_count_last_log = now
+            self.get_logger().info(
+                "published %d waypoints since latch" % self._waypoint_count
+            )
         # Debug breadcrumb only (guarded): record the goal we just commanded so the 1 Hz
         # debug timer can render it as a LINE_STRIP. No effect when debug_viz is false.
         if self._debug_viz:
@@ -965,11 +1012,16 @@ class AdapterNode(Node):
         msg.color.b = 1.0
         msg.color.a = 0.5  # matches the dummy's blue translucent box
         self._pub_marker.publish(msg)
+        self.get_logger().info(
+            "published marker answer: label=%r centroid=(%.2f, %.2f, %.2f)"
+            % (box.label, box.cx, box.cy, box.cz)
+        )
 
     def publish_int(self, ans: IntAnswer) -> None:
         msg = Int32()
         msg.data = int(ans.value)
         self._pub_int.publish(msg)
+        self.get_logger().info("published int answer: %d" % msg.data)
 
 
 def main(args=None) -> None:
