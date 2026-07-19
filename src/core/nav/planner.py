@@ -26,6 +26,15 @@ from core.nav.costmap import Costmap
 UNKNOWN_COST_MULT: float = 3.0  # traversing an UNKNOWN cell costs 3x a FREE cell
 PINCH_DISC_M: float = 3.0  # radius of the local pinch overlay around a gate
 PINCH_CORRIDOR_HALF_W_M: float = 0.5  # half-width of the forced corridor through the gate
+# issue #54: cap on the start-seal relaxation rounds `plan_through` runs when the pinch
+# overlay's default disc doesn't fully clear the vehicle's own local inflation halo (a
+# halo wider than `pinch_disc_m` can leave `cur` still boxed in even with the start-disc
+# exemption). Each round widens the disc by PINCH_RELAX_GROWTH and retries; almost every
+# real geometry converges in round 1. Bounded so a pathological halo whose edge keeps
+# landing just past the exemption every round can never relax->replan->re-seal forever —
+# past the cap, `plan_through` falls back to the pre-#54 behaviour (leg unreachable).
+MAX_PINCH_RELAX_ROUNDS: int = 4
+PINCH_RELAX_GROWTH: float = 1.75  # disc growth multiplier applied each relax round
 
 _DIAG = math.sqrt(2.0)
 _STEPS = (
@@ -169,6 +178,7 @@ def _pinch_costmap(
     *,
     pinch_disc_m: float = PINCH_DISC_M,
     pinch_corridor_half_w_m: float = PINCH_CORRIDOR_HALF_W_M,
+    start_xy: tuple[float, float] | None = None,
 ) -> Costmap:
     """Overlay: within ``pinch_disc_m`` of the gate, block everything outside a narrow
     corridor (``pinch_corridor_half_w_m`` half-width) around the gate segment, forcing
@@ -183,7 +193,20 @@ def _pinch_costmap(
     overlay above only ever ADDS blocking outside the band — it never had a way to
     open one up. Clearing is scoped tightly (inflation halo only, band only) so a real
     solid obstacle footprint is never driven through, only the safety margin around it,
-    and only across the verified gate span."""
+    and only across the verified gate span.
+
+    ``start_xy`` (issue #54): the corridor band is centred on the GATE, with no regard
+    for where the vehicle currently is. When ``start_xy`` sits within ``pinch_disc_m``
+    of the gate but off the forced corridor line, the overlay above would newly stamp
+    the vehicle's OWN cell impassable (``outside_corridor`` has no notion of "already
+    occupied") — the forced-corridor A* is then DOA before it can even leave, sealing a
+    route that was reachable pre-overlay. Symmetric with the gate-side treatment: a
+    same-radius (``pinch_disc_m``) disc around ``start_xy`` is exempted from the
+    overlay's ADDED blocking (never removes a pre-existing real obstacle — the vehicle
+    is already sitting in that space, unharmed, so its own neighbourhood can never
+    legitimately need MORE blocking than the base costmap already has), and inflation-
+    only cells inside that disc are cleared too (same discipline as the gate-side
+    clearing above — only the safety margin, never a real footprint)."""
     g0, g1 = gate
     gmx, gmy = (g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0
     pinch = costmap.clone()
@@ -198,11 +221,42 @@ def _pinch_costmap(
     dist_to_gate = _point_segment_dist(cx, cy, g0[0], g0[1], g1[0], g1[1])
     inside_corridor = dist_to_gate <= pinch_corridor_half_w_m
     outside_corridor = ~inside_corridor
+    in_start_disc = None
+    if start_xy is not None:
+        in_start_disc = (cx - start_xy[0]) ** 2 + (cy - start_xy[1]) ** 2 <= pinch_disc_m**2
+        outside_corridor = outside_corridor & ~in_start_disc
     pinch.capsule_blocked = pinch.capsule_blocked | (in_disc & outside_corridor)
     clear = in_disc & inside_corridor & pinch.inflation_only_mask()
+    if in_start_disc is not None:
+        clear = clear | (in_start_disc & pinch.inflation_only_mask())
     if clear.any():
         pinch.base_blocked = pinch.base_blocked & ~clear
     return pinch
+
+
+def _nudge_past_gate(
+    cur: tuple[float, float],
+    mid: tuple[float, float],
+    cell_m: float,
+    pinch_corridor_half_w_m: float,
+) -> tuple[float, float]:
+    """A point just past the gate midpoint, continuing ``cur``'s approach (issue #54).
+
+    Nudges ``eps`` past ``mid``, CONTINUING the cur->mid direction (rather than the
+    gate's own normal — a corridor can be oriented parallel to travel, e.g. a narrow
+    gap threaded lengthwise, where a normal-based nudge would push straight into the
+    flanking obstacle), so a genuinely threaded path's final approach lands past the
+    line it was already heading toward. ``eps`` is kept small (two grid cells, capped
+    at the forced corridor's half-width) so the nudged target stays inside the pinch
+    corridor band. Falls back to the raw midpoint if ``cur`` is (numerically) already
+    at the gate.
+    """
+    dx, dy = mid[0] - cur[0], mid[1] - cur[1]
+    dlen = math.hypot(dx, dy)
+    if dlen < 1e-9:
+        return mid
+    eps = min(2.0 * cell_m, pinch_corridor_half_w_m)
+    return (mid[0] + dx / dlen * eps, mid[1] + dy / dlen * eps)
 
 
 def free_space_via_point(
@@ -358,14 +412,62 @@ def plan_through(
             # overlay that exists precisely to force a path through a tight verified
             # gate. Try the pinch fallback in BOTH cases; only report the leg
             # unreachable once the forced-corridor attempt has also failed.
+            direct_seg_was_none = seg is None
             if seg is None or not path_crosses_gate(seg, gate):  # type: ignore[arg-type]
-                pinch = _pinch_costmap(
-                    costmap,
-                    gate,  # type: ignore[arg-type]
-                    pinch_disc_m=pinch_disc_m,
-                    pinch_corridor_half_w_m=pinch_corridor_half_w_m,
-                )
-                seg = astar(pinch, cur, mid, unknown_cost_mult=unknown_cost_mult)
+                # issue #54: the pinch overlay's forced corridor band is centred on the
+                # GATE only, with no regard for the vehicle's OWN position — when `cur`
+                # sits within `pinch_disc_m` of the gate but off the forced corridor
+                # line, the overlay would newly stamp the vehicle's own cell impassable
+                # (`outside_corridor` has no notion of "already occupied"), so the
+                # forced-corridor A* is DOA before it can leave. `start_xy` exempts a
+                # same-radius disc around `cur` from the overlay's ADDED blocking
+                # (never removes a pre-existing real obstacle — the vehicle is already
+                # sitting there, unharmed) and clears inflation-only cells inside it
+                # (same discipline as the existing gate-side clearing, #51). Safe on
+                # every corridor attempt: it only ever widens what stays passable near
+                # the vehicle, never narrows it.
+                target = mid
+                if direct_seg_was_none:
+                    # The direct (un-pinched) attempt found NO route to the gate at all
+                    # — this leg has never threaded this gate before, so there is no
+                    # already-driven progress to protect. Target a point nudged just
+                    # past the midpoint, continuing `cur`'s approach direction, rather
+                    # than the exact midpoint: A*-ing straight to `mid` can land its
+                    # snapped goal cell fractionally on the SAME side of the gate line
+                    # `cur` approached from (a grid-quantization near-miss), so the
+                    # mandatory `path_crosses_gate` check below fails even though the
+                    # corridor was genuinely threaded. This nudge is scoped to the
+                    # "never reached the gate at all" case only: when the direct attempt
+                    # DID reach the gate (just without crossing), `cur` may already be
+                    # on the far side of a gate this route threaded earlier in a prior
+                    # replan — nudging there would force a spurious detour BACK through
+                    # an already-threaded gate instead of leaving it unreachable (and
+                    # falling through to the caller's own recovery), which is what the
+                    # pre-#54 behaviour safely did.
+                    target = _nudge_past_gate(cur, mid, costmap.cell_m, pinch_corridor_half_w_m)
+                # issue #54: bounded start-seal relaxation. Round 0 uses the caller's
+                # own pinch_disc_m (today's behaviour, unchanged for the common case);
+                # if the start-disc exemption still doesn't free a route (the local
+                # inflation halo around `cur` is wider than the disc), widen the disc
+                # and retry. Capped at MAX_PINCH_RELAX_ROUNDS rounds — never an
+                # unbounded relax->replan->re-seal cycle. If no round threads the gate,
+                # fall back to the pre-#54 behaviour: leg unreachable.
+                pinch_seg = None
+                relax_disc_m = pinch_disc_m
+                for _relax_round in range(MAX_PINCH_RELAX_ROUNDS):
+                    pinch = _pinch_costmap(
+                        costmap,
+                        gate,  # type: ignore[arg-type]
+                        pinch_disc_m=relax_disc_m,
+                        pinch_corridor_half_w_m=pinch_corridor_half_w_m,
+                        start_xy=cur,
+                    )
+                    attempt = astar(pinch, cur, target, unknown_cost_mult=unknown_cost_mult)
+                    if attempt is not None and path_crosses_gate(attempt, gate):  # type: ignore[arg-type]
+                        pinch_seg = attempt
+                        break
+                    relax_disc_m *= PINCH_RELAX_GROWTH
+                seg = pinch_seg
                 if seg is None or not path_crosses_gate(seg, gate):  # type: ignore[arg-type]
                     return None
             full.extend(seg[1:])

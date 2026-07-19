@@ -6,6 +6,7 @@ import numpy as np
 from core.nav.costmap import Costmap
 from core.nav.occupancy import OccupancyGrid
 from core.nav.planner import (
+    MAX_PINCH_RELAX_ROUNDS,
     PINCH_CORRIDOR_HALF_W_M,
     PINCH_DISC_M,
     UNKNOWN_COST_MULT,
@@ -203,6 +204,18 @@ def _pinch_gap_grid():
     return Costmap(grid, vehicle_radius_m=0.0)
 
 
+def _pinch_gap_grid_with_vehicle_radius(vehicle_radius_m: float):
+    rows = []
+    for i in range(12):
+        line = list("." * 20)
+        if 3 <= i <= 8:
+            for c in (8, 9, 11, 12):
+                line[c] = "#"
+        rows.append("".join(line))
+    grid = _grid_from(rows)
+    return Costmap(grid, vehicle_radius_m=vehicle_radius_m)
+
+
 def test_pinch_costmap_disc_m_override_scales_blocked_region():
     from core.nav.planner import _pinch_costmap
 
@@ -348,6 +361,208 @@ def test_plan_through_open_space_unaffected_by_pinch_seam_overrides():
         unknown_cost_mult=999.0,
     )
     assert default_path == overridden_path
+
+
+# --------------------------------------------------------------------------- issue #54
+
+
+def _off_axis_gap_grid():
+    """20x24 grid: a horizontal gate (gap at row 10, cols 8-12 open) between two solid
+    blocks, plus a large open area to the SIDE of the gate (off the corridor axis) so a
+    start point placed there is within pinch_disc_m of the gate but off the forced band."""
+    rows = []
+    for i in range(24):
+        line = list("." * 20)
+        if i == 10:
+            for c in range(0, 8):
+                line[c] = "#"
+            for c in range(13, 20):
+                line[c] = "#"
+        rows.append("".join(line))
+    grid = _grid_from(rows)
+    return Costmap(grid, vehicle_radius_m=0.0)
+
+
+def test_pinch_costmap_start_xy_exempts_vehicles_own_neighbourhood_from_added_blocking():
+    """issue #54: a start point within pinch_disc_m of the gate but off the forced
+    corridor band must never be newly blocked by the overlay — the vehicle is already
+    standing there, so the overlay adding a block there can only ever seal a route that
+    was reachable before the overlay existed."""
+    from core.nav.planner import _pinch_costmap
+
+    cm = _off_axis_gap_grid()
+    gate = ((1.05, 0.95), (1.05, 1.05))  # the gap at row 10 (x~1.05), thin band
+    start = (0.35, 0.35)  # well off the corridor axis, within pinch_disc_m of the gate
+    grid = cm.grid
+    sr, sc = grid.world_to_cell(*start)
+    assert cm.passable(sr, sc), "test setup: start must be passable pre-overlay"
+
+    no_exempt = _pinch_costmap(cm, gate, pinch_disc_m=1.0)
+    assert not no_exempt.passable(sr, sc), (
+        "test setup: without start_xy, the overlay newly blocks the start cell"
+    )
+
+    exempt = _pinch_costmap(cm, gate, pinch_disc_m=1.0, start_xy=start)
+    assert exempt.passable(sr, sc), "start_xy must exempt the vehicle's own cell"
+
+
+def test_pinch_costmap_start_xy_never_clears_a_real_obstacle():
+    """The start-disc exemption only ever prevents ADDED blocking / clears inflation-only
+    halo — it must never un-block a real (raw) obstacle cell, even one right next to the
+    exempted start."""
+    from core.nav.planner import _pinch_costmap
+
+    cm = _pinch_gap_grid()
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    grid = cm.grid
+    start = (0.35, 0.6)  # off-axis, near one of the real pillar cells
+    obstacle_r, obstacle_c = grid.world_to_cell(0.85, 0.6)  # pillar column 8
+    assert cm.raw_blocked[obstacle_r, obstacle_c], "test setup: must be a real obstacle"
+
+    pinch = _pinch_costmap(cm, gate, start_xy=start)
+    assert pinch.blocked(obstacle_r, obstacle_c), "a real obstacle must never be un-blocked"
+
+
+def test_plan_through_pinch_never_seals_vehicles_own_start_cell():
+    """Integration shape of issue #54's home_building_1/home_building_2 traces: the
+    start sits off the corridor axis, within pinch_disc_m of the gate, and the gate is
+    inflation-sealed end-to-end pre-pinch (the direct attempt cannot thread it). Pre-#54
+    the pinch fallback would then ALSO fail (its own overlay newly blocks the start
+    cell, off the forced corridor band) and the whole leg would be reported
+    unreachable; post-#54 the leg must thread."""
+    cm = _pinch_gap_grid_with_vehicle_radius(0.4)
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    start = (0.35, 0.6)  # off-axis, within pinch_disc_m (3.0 default) of the gate
+    goal = (1.05, 1.15)
+    grid = cm.grid
+    sr, sc = grid.world_to_cell(*start)
+    assert cm.passable(sr, sc), "test setup: start must be passable"
+    mid_r, mid_c = grid.world_to_cell(1.05, 0.6)
+    assert cm.blocked(mid_r, mid_c), "test setup: gate mid sealed by inflation pre-pinch"
+    from core.nav.planner import _pinch_costmap
+
+    # Without the exemption the overlay newly blocks the start's OWN cell (verified
+    # directly, matching test_pinch_costmap_start_xy_exempts_...  above) — a real
+    # vehicle standing there would be unable to even begin the forced-corridor plan.
+    pinch_no_exempt = _pinch_costmap(cm, gate)
+    assert not pinch_no_exempt.passable(sr, sc), (
+        "test setup: without start_xy the overlay must newly block the start cell"
+    )
+
+    legs = [("corridor_between", gate), ("goto", goal)]
+    path = plan_through(cm, start, legs)
+    assert path is not None, "the pinch fallback must thread once start-blocking is fixed"
+    assert path_crosses_gate(path, gate)
+
+
+def test_plan_through_nudge_only_engages_when_direct_route_is_wholly_unreachable():
+    """Safety guard (issue #54 regression found during verification): nudging the pinch
+    retry's target past the gate is only sound when the leg has never reached the gate
+    at all pre-pinch (the direct A* returned None). Nudging when the direct attempt
+    already reached the gate (just without crossing) can force a path back THROUGH an
+    already-threaded gate on a later replan (the vehicle may legitimately already be on
+    the far side, having threaded it earlier before a route rebuild) — reproduced during
+    verification as a live oscillation/regression in `tests/heads/test_instruction.py`'s
+    `test_corridor_route_threads_gate_with_overridden_planner_seams`. When the direct
+    attempt reaches the gate without crossing, the pinch retry's target must stay at the
+    exact midpoint (the pre-#54 behaviour) — never nudged."""
+    from unittest.mock import patch
+
+    from core.nav import planner as P
+
+    cm = _pinch_gap_grid()
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    legs = [("corridor_between", gate), ("goto", (1.05, 1.15))]
+    start = (1.05, 0.05)
+
+    orig_astar = P.astar
+
+    def _direct_call_returns(first_result):
+        """First astar() call (the direct, un-pinched corridor attempt) returns
+        `first_result`; every other call (pinch retry, other legs) runs for real."""
+        calls = {"n": 0}
+
+        def fake(costmap, s, g, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return first_result
+            return orig_astar(costmap, s, g, **kw)
+
+        return fake
+
+    with (
+        patch.object(P, "_nudge_past_gate", wraps=P._nudge_past_gate) as nudge_spy,
+        patch.object(P, "astar", side_effect=_direct_call_returns(None)),
+    ):
+        # Case A: the direct (first) astar call returns None -> nudge IS used on the
+        # pinch retry.
+        P.plan_through(cm, start, legs)
+        assert nudge_spy.call_count == 1, "direct astar was None -> nudge must be attempted"
+
+    near_miss = [(0.2, 0.6), (0.5, 0.6), (0.9, 0.6)]  # stays on one side, never crosses
+    assert not path_crosses_gate(near_miss, gate), "test setup: near_miss must not cross"
+    with (
+        patch.object(P, "_nudge_past_gate", wraps=P._nudge_past_gate) as nudge_spy,
+        patch.object(P, "astar", side_effect=_direct_call_returns(near_miss)),
+    ):
+        # Case B: the direct (first) astar call reaches the gate but doesn't cross it
+        # (any non-None, non-crossing path) -> nudge must NOT be used.
+        P.plan_through(cm, start, legs)
+        assert nudge_spy.call_count == 0, (
+            "direct astar succeeded (even without crossing) -> nudge must not engage"
+        )
+
+
+def test_plan_through_pinch_relax_is_bounded_and_falls_back_when_never_converging():
+    """issue #54 termination guard: a geometry whose start-disc exemption can never
+    free a route (every relax round's pinch overlay still fails to thread the gate)
+    must NOT relax->replan->re-seal forever. `plan_through` must call astar at most
+    once for the direct attempt plus MAX_PINCH_RELAX_ROUNDS pinch retries, then fall
+    back to the pre-#54 behaviour (leg reported unreachable, i.e. None) — never hang."""
+    from unittest.mock import patch
+
+    from core.nav import planner as P
+
+    cm = _pinch_gap_grid()
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    legs = [("corridor_between", gate), ("goto", (1.05, 1.15))]
+    start = (0.35, 0.6)
+
+    calls = {"n": 0}
+
+    def _always_non_crossing(costmap, s, g, **kw):
+        calls["n"] += 1
+        # Every attempt (direct + every relax round) "reaches" somewhere but never
+        # crosses the gate segment — the pathological case that would have cycled
+        # relax->replan->re-seal forever pre-cap.
+        return [s, s]
+
+    with patch.object(P, "astar", side_effect=_always_non_crossing):
+        result = P.plan_through(cm, start, legs)
+
+    assert result is None, "must fall back to leg-unreachable, not hang or fabricate a plan"
+    # 1 direct attempt + MAX_PINCH_RELAX_ROUNDS pinch retries, never more.
+    assert calls["n"] == 1 + MAX_PINCH_RELAX_ROUNDS, (
+        f"relax loop must be capped at {MAX_PINCH_RELAX_ROUNDS} rounds, got {calls['n'] - 1}"
+    )
+
+
+def test_plan_through_pinch_relax_converges_once_disc_widens_enough():
+    """A geometry where the DEFAULT pinch_disc_m's start-disc exemption is too small to
+    clear the vehicle's local inflation halo, but a later (widened) relax round's disc
+    does: the leg must still thread within the cap, proving relaxation is functional
+    (not just a no-op cap) and terminates as soon as a round succeeds."""
+    cm = _pinch_gap_grid_with_vehicle_radius(0.4)
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    # A tiny caller-supplied pinch_disc_m means round 0's start-disc exemption is too
+    # small to clear the inflation halo around `start`; PINCH_RELAX_GROWTH widens it
+    # each round until it does.
+    start = (0.35, 0.6)
+    legs = [("corridor_between", gate), ("goto", (1.05, 1.15))]
+
+    path = plan_through(cm, start, legs, pinch_disc_m=0.15)
+    assert path is not None, "later relax round must thread the gate within the cap"
+    assert path_crosses_gate(path, gate)
 
 
 def test_plan_through_unreachable_leg_returns_none():
