@@ -28,7 +28,9 @@ set -uo pipefail   # deliberately NOT -e: individual LLM warm-up steps are allow
 OLLAMA_NATIVE_URL="http://${OLLAMA_HOST:-127.0.0.1:11434}"
 MODEL="${VLA_LLM_LOCAL_MODEL:-qwen2.5vl:3b}"
 READY_TIMEOUT_S="${VLA_LLM_WARMUP_READY_TIMEOUT_S:-15}"
-WARMUP_TIMEOUT_S="${VLA_LLM_WARMUP_TIMEOUT_S:-20}"
+# 60s default: measured dev-box cold load is ~25-40s (2026-07-19, RTX 4060 Laptop);
+# 20s produced a spurious "prewarm failed" warning while the load finished anyway.
+WARMUP_TIMEOUT_S="${VLA_LLM_WARMUP_TIMEOUT_S:-60}"
 
 log() { echo "[launch_with_llm] $*" >&2; }
 

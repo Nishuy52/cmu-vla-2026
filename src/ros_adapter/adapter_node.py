@@ -377,8 +377,8 @@ class AdapterNode(Node):
         self._llm_configured = bool(self._chat_fns)
         if self._llm_configured:
             self.get_logger().info(
-                "LLM ladder configured: %d provider tier(s) (parse via api->api2->regex; "
-                "local tier is DESCOPED — see build_callables wiring)." % len(self._chat_fns)
+                "LLM ladder configured: %d provider tier(s): %s (regex floor always last)."
+                % (len(self._chat_fns), ", ".join(self._chat_tier_names))
             )
         else:
             self.get_logger().info(
