@@ -1416,3 +1416,21 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   2 correctness-over-score decisions, every close on integrated batteries;
   1 stall caught by user (pgrep self-match; bracket rule added), 1 caught
   by deadline probe.
+
+## 2026-07-20 (overnight FINAL) - grind complete: 0.611 IS the current-architecture ceiling
+
+- 77e (evidence merged 5d0bbca): all 14 remaining fixable legs = ONE
+  mechanism (spawn-pose BFS disconnection from furniture-AABB stamping;
+  wall hypothesis falsified by dilation sweep + zero-wall control).
+  Candidate ledger addition -> 23/72 structural -> architectural max
+  ~0.64 headline. Current 0.6111 is effectively AT that ceiling.
+- **FINAL VERDICT: 0.8 is unreachable by further grinding under the
+  current architecture. The path runs through the approval-gated plan
+  (docs/proposals/pre_grounding_movement_plan.md): Stage 1 mirror-truth
+  carve + Stage 3 progressive re-grounding attack exactly the blocking
+  mechanism; #80 (ORIENT dead-air) and #81 (battery gate parity) ride
+  the same gates. All open work is user-gated; grind suspended.**
+- Overnight totals: 10 merges, 4 evidence-backed negatives/refusals,
+  2 correctness-over-score decisions, headline 0.461 -> 0.611 (from
+  0.150 at yesterday's start), tv 7 -> 3, every close on integrated
+  batteries, zero unverified claims.
