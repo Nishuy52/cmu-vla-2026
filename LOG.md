@@ -1226,3 +1226,47 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   fixes / 90 min). 0.8 verdict: inside the 0.819 ceiling with 0.019 slack -
   requires near-perfect conversion + zero penalties; re-verdict after this
   lane's probe.
+## 2026-07-19 (session 20) - IF conversion probe (#71), no code shipped
+
+- Fresh per-leg-segment probe of every non-in-order IF leg under the #70
+  yardstick, off `reports/gt_battery_post70` (already HEAD's own evidence,
+  credit 0.4389/headline 0.3778/tv=7 — no rerun needed). Full breakdown:
+  reports/conversion_probe.md + .json. Cascade effects are negligible (1/39
+  legs) — the ordered cursor never regresses on a miss, so ranking fixes by
+  "legs unlocked incl. cascades" collapses to ranking by bucket size:
+  structurally-unreachable 9/72, arrival-blocked 29/72 (the dominant, broad
+  bucket — 13/15 scenes).
+- Two fixes attempted for arrival-blocked, BOTH reverted after measurement
+  (neither ships): (1) substituting `InstructionHead`'s own driven-toward
+  goal for the rubric's independent goal recovered credit 0.44->0.79
+  integrated, but per-leg diffs showed 4-12 m goal jumps — a different
+  RESOLVED INSTANCE, not a projection refinement — rejected as a
+  self-referential/gamed metric ("measures determinism, not truth"), same
+  trap the codebase already flags for `pipeline_gt`. (2) Mirroring only
+  `InstructionHead`'s salience tie-break in the rubric's own resolve had
+  ~zero effect (credit unchanged, headline down on one more threading
+  violation) — rejected, and it rules out tie-breaking as fix (1)'s
+  explanation. Working conclusion: the residual gap is a genuine
+  navigation-quality shortfall, not a scoring-geometry artifact. Stop
+  condition (b) (two consecutive fixes fail to improve integrated numbers)
+  reached; no further fix attempted this session.
+- Issue #67 ruled OBSOLETE under the new tolerance (closed, comment with
+  evidence) — the wide #70 tolerance band dwarfs `_nearest_free_goal`'s
+  bounded push distance, so the raw-vs-pushed-goal failure mode #67 tracked
+  cannot reproduce; remaining hotel_room_1 failures are arrival-blocked
+  (#62), not goal-placement.
+- Phase 3 threading trace: only 2/7 threading violations are actually
+  attempted corridors (hotel_room_1 leg1, hotel_room_2 leg0 — arrive near
+  the gate midpoint, never cross); the #64 nudge's tight quantization-only
+  guard (miss < 1 grid cell) correctly does NOT engage for either (both miss
+  by 6-12x that band) — no threading code defect traced. The other 5
+  violations are corridors never approached at all (same arrival-blocked/
+  structurally-unreachable legs already covered). No threading fix
+  attempted.
+- Filed #71 (rubric-vs-head anchor-resolve divergence, the unexplained
+  4-12 m deltas from fix attempt 1 — a real resolve-outcome mismatch worth
+  its own audit, separate from the tie-break already ruled out) and posted
+  fresh-data comments on #61/#62 with the current bucket sizes. Integrated
+  numbers UNCHANGED from `gt_battery_post70` (no code shipped). Next step:
+  `core/nav` route-precision investigation for arrival-blocked (#62), and
+  the #71 resolver-parity audit, before either bucket is touched again.
