@@ -163,31 +163,92 @@ concrete next step for threading specifically (see "Deferred" below).
 `nav: derive leg-goal dwell release from the follower's own reach radius (#77)`
 — see git log in this worktree.
 
+### Fix 2 (attempted, DRY — reverted) — literal gate-crossing release for corridor legs
+
+**Hypothesis.** Fix 1 closed the near-miss cluster but left all 3 attempted-
+corridor legs `threaded=False`. Theory: the dwell-proximity release (even at
+the now-tighter `REACH_M`) is still a PROXIMITY test, not a LITERAL crossing
+test — `core.geometry.toolbox.threading_check` requires an actual
+segment-intersection between a driven-trajectory edge and the gate's own
+`(p0, p1)` line (the same unnudged anchor-to-anchor axis
+`core.heads.instruction._ground_one` already computes via `TB.corridor_gate`
+and passes as a `corridor_between` leg's `geom`), so a follower that releases
+on proximity to the (possibly obstacle-nudged) via-point can move on before
+ever literally crossing that line.
+
+**Implementation (reverted).** Threaded `plan_through`'s already-known gate
+segments (`geom` for each `corridor_between` leg — literally the same
+`(p0, p1)` scoring's `threading_check` uses) through a new opt-in
+`record_corridor_gates=True` return value, wired to a new
+`BreadcrumbFollower.leg_goal_gates` field; a corridor leg's ceiling then
+released only once an incremental driven-motion segment
+(`core.geometry.primitives.segments_intersect_2d`) was detected crossing its
+own gate, instead of dwell-proximity. Files touched: `core/nav/planner.py`
+(opt-in third return value, `_unreachable` helper), `core/heads/instruction.py`
+(pass `record_corridor_gates=True`, wire `leg_goal_gates`),
+`core/nav/breadcrumbs.py` (`leg_goal_gates`, `_prev_pose`,
+`_crossed_gate_ptrs`, `_update_gate_crossings`, gated `_advance_leg_goals`).
+Fast tier: green.
+
+**Measurement — dry.** Integrated battery
+(`reports/gt_battery_if77_fix2_gatecross`, since deleted with the revert):
+credit 0.6000 (unchanged), headline 0.5389 (unchanged), threading violations
+7 (unchanged). All 3 corridor legs' `dist_driven` moved marginally closer
+(e.g. `hotel_room_1` leg1 0.55 -> 0.419 m) but **none crossed** —
+`threaded` stayed `False` for all 3, identical to Fix 1. Zero leg outcomes
+changed anywhere in the battery.
+
+**Why it didn't land, and why reverted rather than kept as a no-op.** The
+underlying `astar` path DOES cross the gate line by construction
+(`plan_through` already rejects any corridor-leg plan that fails
+`path_crosses_gate` against this exact segment, falling back to the pinch
+overlay). But `BreadcrumbFollower` doesn't drive the literal path polyline —
+crumb selection picks the farthest LOS-clear point within lookahead, which
+capped at the ceiling still just aims the vehicle AT the (single) via-point,
+never past it, and whatever downstream kinematics/controller loop drives the
+pose toward that crumb apparently converges asymptotically close (0.4-0.75 m
+observed) without the incremental per-tick motion segment ever numerically
+intersecting a zero-width line — a controller-precision limit outside
+`BreadcrumbFollower`'s own view (it only sees the poses it's handed; nothing
+in this class controls how close the actual stepping gets). Requiring a
+literal crossing at the follower level is therefore necessary but provably
+not sufficient on its own — with no measurable improvement and real added
+surface/complexity (2 new fields, a new cross-module return-value contract,
+a new import), this fails the "keep only improvements" bar and was
+**reverted** (`git checkout` back to the Fix 1 commit; verified clean diff
+and fast tier still green after revert). Counts as 1 dry fix (not yet the
+2-consecutive-dry-fix stop condition, but combined with the session's time
+budget this is where Phase 2 stops).
+
 ## Stop condition
 
 Ending Phase 2 here for this session: Fix 1 landed the largest single
 identified mechanism win in the residual bucket (+0.0556 credit/headline,
 4 legs, matching the near-miss cluster prediction exactly) with a
-one-constant, fully justified change. Threading (3 legs, ~0.04 headline
-per the brief's estimate) needs a structurally different, larger change
-(gate geometry threaded into the follower) that was not attempted this
-session — not a "dry fix" in the two-consecutive-dry-fix sense (nothing was
-tried and reverted), just descoped for time. Headline after Fix 1: **0.5389**
-— short of the 0.60 stop target, so this is a time-budget stop, not a
-dry-fix stop.
+one-constant, fully justified change. Fix 2 (threading) was a legitimate,
+principled attempt at the SAME investigation the brief asked for
+("trace WHY dwell doesn't produce a crossing") but measured dry and was
+reverted — 1 dry fix, not yet the 2-consecutive stop condition, but combined
+with the ~2-hour session budget this is where Phase 2 stops. Headline after
+Fix 1 (final, shipped state): **0.5389** — short of the 0.60 stop target, so
+this is a time-budget stop, not a dry-fix stop.
 
 ## Deferred / next steps
 
-1. **Threading fix (3 legs, ~0.04 headline).** Thread gate geometry
-   (`Gate.p0`/`p1`, not just the midpoint) into `BreadcrumbFollower` so a
-   corridor leg's ceiling release requires an actual crossing (matching
-   `core.geometry.toolbox.threading_check`'s own segment-intersection
-   predicate), not just dwell-proximity to the midpoint. Needs
-   `core/nav/planner.py`'s `plan_through` to pass gate segments alongside
-   `leg_bounds`, and `core/heads/instruction.py`'s `BreadcrumbFollower(...)`
-   construction call site to wire them through — larger surface than Fix 1,
-   still fully within the open `core/nav`/`core/heads` surface (not
-   frozen).
+1. **Threading fix (3 legs, ~0.04 headline) — needs controller-level work,
+   not follower-level.** Fix 2's finding narrows this: the follower-level
+   release mechanism is not where the gap lives — the driven trajectory's
+   own poses never get close enough to numerically cross a zero-width gate
+   line even when the follower keeps aiming at the exact via-point
+   indefinitely. The next attempt should look at whatever produces the pose
+   stream between crumb commands (the FSM/controller stepping this
+   follower drives, outside `core/nav/breadcrumbs.py`'s own surface) for a
+   convergence/precision limit, or consider widening the CREDITED
+   "threaded" check itself (out of reach — `core/geometry/toolbox.py`'s
+   `threading_check` sits inside the frozen "resolve semantics" boundary
+   only in the loose sense that it's the same file; it is NOT part of
+   `resolve()`'s own semantics and may be back in scope pending
+   clarification, but was not touched this session out of caution).
 2. **Remaining near-miss / broad "(e) other" legs** (22 of the ranked 30,
    excess 0.66-9.65 m after removing the 8-leg near-miss cluster Fix 1
    landed) — no new signature found beyond probe-v2's "genuine
