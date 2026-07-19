@@ -1,0 +1,52 @@
+====================================================================================================
+SCENE=arabic_room  Q='First, go to the potted plant furthest from the hookah, then take the path between the two columns, and stop at the tray on the table.'
+  parsed route legs: [(<LegKind.GOTO: 'goto'>, ['potted plant']), (<LegKind.CORRIDOR_BETWEEN: 'corridor_between'>, ['column', 'column']), (<LegKind.GOTO: 'goto'>, ['tray'])]
+    astar: start=(-3.789490143637561, -2.041476116925741) goal=(-4.650000000000001, 2.0500000000000007) -> 46 pts, first=(-3.950000000000001, -2.3499999999999996), last=(-4.650000000000001, 2.0500000000000007)
+    astar: start=(-4.650000000000001, 2.0500000000000007) goal=(-0.9929995732363845, -0.025999836588987524) -> 194 pts, first=(-4.650000000000001, 2.0500000000000007), last=(-0.9500000000000011, -0.049999999999998934)
+    path_crosses_gate -> False  (path len=194, gate=((-0.9929995732363845, 0.8296061116279432), (-0.9929995732363845, -0.8816057848059182)))
+    pinch overlay: gate=((-0.9929995732363845, 0.8296061116279432), (-0.9929995732363845, -0.8816057848059182)) real_gate_width=1.711 m disc_m=3.0 corridor_half_w_m=0.5 (forced corridor total width=1.00 m)
+    pinch overlay newly blocks 2577 cells
+    astar: start=(-4.650000000000001, 2.0500000000000007) goal=(-0.9929995732363845, -0.025999836588987524) -> None
+    astar: start=(-3.789490143637561, -2.041476116925741) goal=(-4.650000000000001, 2.0500000000000007) -> 46 pts, first=(-3.950000000000001, -2.3499999999999996), last=(-4.650000000000001, 2.0500000000000007)
+    astar: start=(-4.650000000000001, 2.0500000000000007) goal=(-0.9929995732363845, -0.025999836588987524) -> 194 pts, first=(-4.650000000000001, 2.0500000000000007), last=(-0.9500000000000011, -0.049999999999998934)
+    path_crosses_gate -> False  (path len=194, gate=((-0.9929995732363845, 0.8296061116279432), (-0.9929995732363845, -0.8816057848059182)))
+    pinch overlay: gate=((-0.9929995732363845, 0.8296061116279432), (-0.9929995732363845, -0.8816057848059182)) real_gate_width=1.711 m disc_m=3.0 corridor_half_w_m=0.5 (forced corridor total width=1.00 m)
+    pinch overlay newly blocks 2577 cells
+    astar: start=(-4.650000000000001, 2.0500000000000007) goal=(-0.9929995732363845, -0.025999836588987524) -> None
+  leg_goals=[('goto', (-3.7469267938938318, 2.0008681648556874)), ('corridor_between', (-0.9929995732363845, -0.025999836588987524)), ('goto', (2.455656924593247, -0.6364619708635756))]
+  corridor_gates=[(1, Gate(p0=array([-0.99299957,  0.82960611]), p1=array([-0.99299957, -0.88160578]), midpoint=array([-0.99299957, -0.02599984]), width=1.7112118964338614))]
+  RESULT rubric=0.000 legs=0/3 thread_viol=1 avoid_viol=0
+    threading_detail: leg 1: threading: trajectory never crossed the gate segment
+  driven path: 70 poses, first=[-3.78949014 -2.04147612], last=[ 1.05 -1.25]
+====================================================================================================
+SCENE=home_building_2  Q='Take the path between the sofa and the coffee table and go to the kettle on the dining table, then go to the potted plant between the curtain and the TV.'
+  parsed route legs: [(<LegKind.CORRIDOR_BETWEEN: 'corridor_between'>, ['sofa', 'coffee table']), (<LegKind.GOTO: 'goto'>, ['kettle']), (<LegKind.GOTO: 'goto'>, ['potted plant'])]
+    astar: start=(-13.955748965848162, -7.5250014077872525) goal=(2.233196157762428, 1.989636981263083) -> 163 pts, first=(-13.950000000000001, -8.45), last=(2.25, -8.45)
+    path_crosses_gate -> False  (path len=163, gate=((2.693999181733921, 1.989636981263083), (1.7723931337909349, 1.989636981263083)))
+    pinch overlay: gate=((2.693999181733921, 1.989636981263083), (1.7723931337909349, 1.989636981263083)) real_gate_width=0.922 m disc_m=3.0 corridor_half_w_m=0.5 (forced corridor total width=1.00 m)
+    pinch overlay newly blocks 2653 cells
+    astar: start=(-13.955748965848162, -7.5250014077872525) goal=(2.233196157762428, 1.989636981263083) -> 163 pts, first=(-13.950000000000001, -8.45), last=(2.25, -8.45)
+    path_crosses_gate -> False  (path len=163, gate=((2.693999181733921, 1.989636981263083), (1.7723931337909349, 1.989636981263083)))
+    astar: start=(-13.955748965848162, -7.5250014077872525) goal=(2.233196157762428, 1.989636981263083) -> 163 pts, first=(-13.950000000000001, -8.45), last=(2.25, -8.45)
+    path_crosses_gate -> False  (path len=163, gate=((2.693999181733921, 1.989636981263083), (1.7723931337909349, 1.989636981263083)))
+    pinch overlay: gate=((2.693999181733921, 1.989636981263083), (1.7723931337909349, 1.989636981263083)) real_gate_width=0.922 m disc_m=3.0 corridor_half_w_m=0.5 (forced corridor total width=1.00 m)
+    pinch overlay newly blocks 2653 cells
+    astar: start=(-13.955748965848162, -7.5250014077872525) goal=(2.233196157762428, 1.989636981263083) -> 163 pts, first=(-13.950000000000001, -8.45), last=(2.25, -8.45)
+    path_crosses_gate -> False  (path len=163, gate=((2.693999181733921, 1.989636981263083), (1.7723931337909349, 1.989636981263083)))
+  leg_goals=[('corridor_between', (2.233196157762428, 1.989636981263083)), ('goto', (3.46397830448581, 11.027123219300286)), ('goto', (-3.803853304009978, -0.7176745735671239))]
+  corridor_gates=[(0, Gate(p0=array([2.69399918, 1.98963698]), p1=array([1.77239313, 1.98963698]), midpoint=array([2.23319616, 1.98963698]), width=0.9216060479429862))]
+  RESULT rubric=0.000 legs=0/3 thread_viol=1 avoid_viol=0
+    threading_detail: leg 0: threading: trajectory never crossed the gate segment
+  driven path: 151 poses, first=[-13.95574897  -7.52500141], last=[-3.35 18.35]
+====================================================================================================
+SCENE=hotel_room_1  Q='First, go near the bedside table closest to the bench, then take the path between the TV and the bed to the picture closest to the TV.'
+  parsed route legs: [(<LegKind.GOTO: 'goto'>, ['bedside table']), (<LegKind.CORRIDOR_BETWEEN: 'corridor_between'>, ['tv', 'bed']), (<LegKind.GOTO: 'goto'>, ['picture'])]
+    astar: start=(-6.502862885722335, -5.647253464637097) goal=(-2.6500000000000004, 0.15000000000000036) -> 58 pts, first=(-6.35, -5.549999999999999), last=(-2.6500000000000004, 0.15000000000000036)
+    astar: start=(-2.6500000000000004, 0.15000000000000036) goal=(-0.34945082088684676, -1.708030449842029) -> None
+    astar: start=(-6.502862885722335, -5.647253464637097) goal=(-2.6500000000000004, 0.15000000000000036) -> 58 pts, first=(-6.35, -5.549999999999999), last=(-2.6500000000000004, 0.15000000000000036)
+    astar: start=(-2.6500000000000004, 0.15000000000000036) goal=(-0.34945082088684676, -1.708030449842029) -> None
+  leg_goals=[('goto', (3.5302891681562993, 0.18100886235272912)), ('corridor_between', (-0.34945082088684676, -1.708030449842029)), ('goto', (-1.9112202547363737, -3.0735329564189446))]
+  corridor_gates=[(1, Gate(p0=array([-1.85941568, -1.70803045]), p1=array([ 1.16051404, -1.70803045]), midpoint=array([-0.34945082, -1.70803045]), width=3.0199297260699356))]
+  RESULT rubric=0.000 legs=1/3 thread_viol=1 avoid_viol=0
+    threading_detail: leg 1: threading: trajectory never crossed the gate segment
+  driven path: 19 poses, first=[-6.50286289 -5.64725346], last=[-2.65 -3.05]

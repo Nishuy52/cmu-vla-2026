@@ -68,3 +68,14 @@
   headline 0.117 → 0.100 (one flip, marginal-fit scene), numerical
   15/15 and OR 6/6 unchanged; livingroom_3 frame-fit-unfittable
   status re-confirmed (data defect, not a code bug).
+- **T15** if2-corridor-threading (#52 + #51) — tighter wall-derivation
+  frame-fit gate (0.8 m vs the 1.0 m scoring gate, #52) reverts
+  livingroom_1's flip, headline 0.100 → 0.117. Then #51: traced 3
+  failing corridor legs, overturned its "one defect" premise, fixed
+  three distinct defects (rubric anchor-distinctness mismatch,
+  resolver tier-priority loss, pinch-corridor never opening a real
+  gate / never retried on a total miss); threading violations 9 → 7
+  (target 0-2 not reached), headline 0.117 → 0.150, numerical 15/15 +
+  OR 6/6 unchanged. Remaining 7 trace to a 4th, broader defect (GT
+  obstacle-stamping fidelity) filed as #53; #51 left open with a
+  status comment.

@@ -228,6 +228,91 @@ def test_pinch_costmap_corridor_half_w_m_override_narrows_gap():
     assert narrow.capsule_blocked.sum() >= wide.capsule_blocked.sum()
 
 
+# --------------------------------------------------------------------------- issue #51
+
+
+def test_pinch_costmap_clears_inflation_only_cells_inside_corridor_band():
+    """A real (GT-verified) gate narrower than 2*vehicle_radius gets sealed end-to-end
+    by the vehicle's OWN inflation margin from both anchor pillars, not by the pillars'
+    raw footprint — the pinch overlay used to only ever ADD blocking, so it could never
+    open a corridor an inflated vehicle would otherwise seal. The overlay must clear
+    inflation-only cells (never a raw obstacle cell) inside the forced corridor band."""
+    from core.nav.planner import _pinch_costmap
+
+    rows = []
+    for i in range(12):
+        line = list("." * 20)
+        if 3 <= i <= 8:
+            for c in (8, 9, 11, 12):
+                line[c] = "#"
+        rows.append("".join(line))
+    grid = _grid_from(rows)
+    # vehicle_radius=0.4 (4 cells) merges the two pillars' inflation across the 1-cell
+    # (0.1 m) gap at col 10 -> the un-pinched costmap already has the gate mid blocked.
+    cm = Costmap(grid, vehicle_radius_m=0.4)
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    mid_r, mid_c = grid.world_to_cell(1.05, 0.6)
+    assert cm.blocked(mid_r, mid_c), "test setup: gate mid should start inflation-sealed"
+    assert not cm.raw_blocked[mid_r, mid_c], "test setup: mid is inflation, not a real obstacle"
+
+    pinch = _pinch_costmap(cm, gate)
+    assert not pinch.blocked(mid_r, mid_c), "inflation-only gate mid must be cleared"
+    # The pillars themselves (raw obstacle cells) must NEVER be cleared.
+    for r, c in [grid.world_to_cell(1.05, 0.35), grid.world_to_cell(1.05, 0.85)]:
+        if cm.raw_blocked[r, c]:
+            assert pinch.blocked(r, c), "a real obstacle cell must never be un-blocked"
+
+
+def test_pinch_costmap_never_clears_raw_obstacle_outside_disc():
+    """The inflation-clearing is scoped to the forced corridor band; nothing beyond the
+    disc is touched (unaffected obstacles far from the gate stay exactly as before)."""
+    from core.nav.planner import _pinch_costmap
+
+    rows = []
+    for i in range(12):
+        line = list("." * 20)
+        if 3 <= i <= 8:
+            for c in (8, 9, 11, 12):
+                line[c] = "#"
+        rows.append("".join(line))
+    grid = _grid_from(rows)
+    cm = Costmap(grid, vehicle_radius_m=0.4)
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    pinch = _pinch_costmap(cm, gate, pinch_disc_m=0.3)
+    # A far-away inflation-halo cell (well outside the 0.3 m disc) must be unchanged.
+    far_r, far_c = grid.world_to_cell(1.85, 0.05)
+    assert pinch.blocked(far_r, far_c) == cm.blocked(far_r, far_c)
+
+
+def test_plan_through_tries_pinch_even_when_direct_astar_to_mid_fails_outright():
+    """issue #51: when the gate midpoint is unreachable in the UN-pinched costmap
+    (direct A* returns None, not just 'reached but missed the gate'), the corridor leg
+    used to give up immediately without ever trying the pinch fallback that exists to
+    force a path through a tight, verified gate. A narrow real gate sealed by inflation
+    (mid itself unreachable pre-pinch) must still be threaded once the pinch clears the
+    inflation-only halo."""
+    rows = []
+    for i in range(12):
+        line = list("." * 20)
+        if 3 <= i <= 8:
+            for c in (8, 9, 11, 12):
+                line[c] = "#"
+        rows.append("".join(line))
+    grid = _grid_from(rows)
+    cm = Costmap(grid, vehicle_radius_m=0.4)
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    start = (1.05, 0.05)
+    goal = (1.05, 1.15)
+    mid_r, mid_c = grid.world_to_cell(1.05, 0.6)
+    # Confirm the direct (un-pinched) target is genuinely unreachable-from-blocked, the
+    # precondition this test exercises.
+    assert cm.blocked(mid_r, mid_c)
+    legs = [("corridor_between", gate), ("goto", goal)]
+    path = plan_through(cm, start, legs)
+    assert path is not None, "the pinch fallback must still be attempted and succeed"
+    assert path_crosses_gate(path, gate)
+
+
 def test_plan_through_pinch_seams_reproduce_default_when_omitted():
     cm = _pinch_gap_grid()
     gate = ((1.05, 0.25), (1.05, 0.95))

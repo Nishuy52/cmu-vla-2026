@@ -761,3 +761,44 @@ def test_wall_derivation_proceeds_just_below_residual_gate(tmp_path, monkeypatch
     residual = GB.WALL_FIT_MAX_RESIDUAL_M - 0.01
     frame_seen = _score_scene_with_residual(tmp_path, monkeypatch, residual)
     assert frame_seen is not None
+
+
+# ----------------------------------------------------------------------- issue #51
+
+
+def test_if_rubric_geometry_corridor_leg_resolves_distinct_anchors():
+    """A "between the two X" corridor leg (both anchors share a noun) must resolve
+    DISTINCT instances for the rubric's gate, mirroring InstructionHead's own
+    distinctness enforcement (`_resolve_leg_anchors`'s `used` set) — the old
+    independent-per-anchor resolve collapsed both anchors onto the SAME top-ranked
+    instance, producing a zero-width gate no real trajectory can ever cross even when
+    the actually-driven route correctly threads the real (distinct-instance) gate."""
+    from core.perception.scene_index import BasicSceneIndex
+
+    gt = _synthetic_gt_scene(
+        [
+            ("column", -1.0, 1.0, 0.0, 0.4, 0.4, 2.0),  # column A (lower id)
+            ("column", -1.0, -1.0, 0.0, 0.4, 0.4, 2.0),  # column B (higher id)
+        ],
+        scene_name="syn51",
+    )
+    idx = BasicSceneIndex(gt.instances)
+    text = "Take the path between the two columns."
+    leg_goals, corridor_gates, _ = GB._if_rubric_geometry(text, gt, idx)
+    assert len(corridor_gates) == 1
+    _, gate = corridor_gates[0]
+    assert gate.width > 0.5, f"expected a real (non-degenerate) gate, got width={gate.width}"
+
+
+def test_if_rubric_geometry_non_corridor_legs_unaffected():
+    """Distinctness enforcement is scoped to a corridor leg's OWN two anchors; a plain
+    GOTO leg's resolution is unchanged."""
+    from core.perception.scene_index import BasicSceneIndex
+
+    gt = _synthetic_gt_scene(
+        [("stool", -4.0, 0.0, 0.0, 0.4, 0.4, 0.6)], scene_name="syn51b"
+    )
+    idx = BasicSceneIndex(gt.instances)
+    leg_goals, corridor_gates, _ = GB._if_rubric_geometry("Go to the stool.", gt, idx)
+    assert corridor_gates == []
+    assert leg_goals == [("goto", (-4.0, 0.0))]

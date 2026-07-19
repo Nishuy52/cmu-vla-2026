@@ -539,3 +539,57 @@ def test_match_anchor_noun_flat_fallback_ignores_tier_discipline():
     got = T._match_anchor_noun(idx, "dressing table")
     assert got == list(idx.by_label("dressing table"))
     assert {r.instance_id for r in got} == {1, 2}
+
+
+# --------------------------------------------------------------------------- issue #51
+# Top-level target resolution: with no disambiguating clause/superlative, `resolve()`
+# used to fall straight to instance-id order (`_stable_by_id`), so an exact-label
+# match could lose a tie to an unrelated head-noun cousin purely by having a HIGHER
+# instance id. Root cause of the "coffee table" -> "dressing table" corridor-gate
+# misresolution (both scoring AND real navigation targeted the wrong object).
+
+
+def test_resolve_exact_beats_headnoun_cousin_with_no_clause():
+    from core.perception.scene_index import BasicSceneIndex
+
+    # Lower instance id is the WRONG (head-noun cousin) object; the exact match has
+    # the HIGHER id, so plain instance-id order would pick the cousin.
+    cousin = rec(1, "dressing table", (0, 0, 0.25), (2.0, 2.0, 0.5))
+    exact = rec(2, "coffee table", (6, 0, 0.25), (2.0, 2.0, 0.5))
+    idx = BasicSceneIndex([cousin, exact])
+    res = T.resolve(_spec("coffee table"), idx)
+    assert [c.instance_id for c in res.candidates_ranked][:1] == [2]
+
+
+def test_resolve_bare_noun_keeps_instance_id_order_with_no_clause():
+    # Dual case: a BARE noun query must NOT get tier discipline even in the no-clause
+    # tie-break — "table" legitimately means every table, so stable instance-id order
+    # (the pre-#51 behaviour) is preserved for bare queries.
+    from core.perception.scene_index import BasicSceneIndex
+
+    cousin = rec(1, "dressing table", (0, 0, 0.25), (2.0, 2.0, 0.5))
+    exact = rec(2, "table", (6, 0, 0.25), (2.0, 2.0, 0.5))
+    idx = BasicSceneIndex([cousin, exact])
+    res = T.resolve(_spec("table"), idx)
+    assert [c.instance_id for c in res.candidates_ranked][:1] == [1]
+
+
+def test_resolve_tier_priority_untiered_index_falls_back_to_stable_by_id():
+    # No by_label_tiered -> no tier signal to act on -> unchanged (pre-#51)
+    # instance-id order, same defensive fallback as `_match_anchor_noun` (#13/#21).
+    class _UntieredIndex:
+        def __init__(self, records):
+            self._inner = FakeIndex(records)
+
+        def all_instances(self):
+            return self._inner.all_instances()
+
+        def by_label(self, noun):
+            return self._inner.by_label(noun)
+
+    a = rec(2, "coffee table", (0, 0, 0))
+    b = rec(1, "coffee table", (5, 0, 0))
+    idx = _UntieredIndex([a, b])
+    assert not hasattr(idx, "by_label_tiered")
+    res = T.resolve(_spec("coffee table"), idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [1, 2]

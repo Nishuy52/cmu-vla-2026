@@ -173,7 +173,17 @@ def _pinch_costmap(
     """Overlay: within ``pinch_disc_m`` of the gate, block everything outside a narrow
     corridor (``pinch_corridor_half_w_m`` half-width) around the gate segment, forcing
     A* through the gap. Defaults are the calibration seams for ``nav.pinch_disc_m`` /
-    ``nav.pinch_corridor_half_w_m``."""
+    ``nav.pinch_corridor_half_w_m``.
+
+    Also CLEARS inflation-only cells (``Costmap.inflation_only_mask``) inside the
+    forced corridor band (issue #51): ``gate`` is GT-derived (the two anchors' closest
+    AABB faces — a verified real doorway), but a physical gap narrower than
+    ``2 * vehicle_radius_m`` gets sealed end-to-end by the vehicle's own inflation
+    margin from BOTH anchors regardless of how the corridor is forced, since the
+    overlay above only ever ADDS blocking outside the band — it never had a way to
+    open one up. Clearing is scoped tightly (inflation halo only, band only) so a real
+    solid obstacle footprint is never driven through, only the safety margin around it,
+    and only across the verified gate span."""
     g0, g1 = gate
     gmx, gmy = (g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0
     pinch = costmap.clone()
@@ -186,8 +196,12 @@ def _pinch_costmap(
 
     in_disc = (cx - gmx) ** 2 + (cy - gmy) ** 2 <= pinch_disc_m**2
     dist_to_gate = _point_segment_dist(cx, cy, g0[0], g0[1], g1[0], g1[1])
-    outside_corridor = dist_to_gate > pinch_corridor_half_w_m
+    inside_corridor = dist_to_gate <= pinch_corridor_half_w_m
+    outside_corridor = ~inside_corridor
     pinch.capsule_blocked = pinch.capsule_blocked | (in_disc & outside_corridor)
+    clear = in_disc & inside_corridor & pinch.inflation_only_mask()
+    if clear.any():
+        pinch.base_blocked = pinch.base_blocked & ~clear
     return pinch
 
 
@@ -336,9 +350,15 @@ def plan_through(
             g0, g1 = gate  # type: ignore[misc]
             mid = ((g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0)
             seg = astar(costmap, cur, mid, unknown_cost_mult=unknown_cost_mult)
-            if seg is None:
-                return None
-            if not path_crosses_gate(seg, gate):  # type: ignore[arg-type]
+            # issue #51: the pinch fallback used to engage ONLY when the direct A*
+            # succeeded but missed the gate (`seg is not None`); when the gate midpoint
+            # was itself unreachable in the un-pinched costmap (`seg is None`) — e.g. its
+            # cell sits inside the vehicle's own inflation halo from the two anchor
+            # objects — the leg gave up immediately without ever trying the pinch
+            # overlay that exists precisely to force a path through a tight verified
+            # gate. Try the pinch fallback in BOTH cases; only report the leg
+            # unreachable once the forced-corridor attempt has also failed.
+            if seg is None or not path_crosses_gate(seg, gate):  # type: ignore[arg-type]
                 pinch = _pinch_costmap(
                     costmap,
                     gate,  # type: ignore[arg-type]

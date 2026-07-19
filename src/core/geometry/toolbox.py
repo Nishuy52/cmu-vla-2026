@@ -20,7 +20,7 @@ from typing import Sequence
 
 import numpy as np
 
-from core.interfaces import InstanceRecord, SceneIndex
+from core.interfaces import InstanceRecord, MatchTier, SceneIndex
 from core.plan_schema import Anchor, AvoidSpec, Clause, Pred, TargetSpec
 from core.geometry import primitives as P
 from core.perception.vocab import COLOUR_NEUTRAL, colour_cross_hue, colour_synonyms
@@ -968,14 +968,16 @@ def resolve(
             audit.append(
                 Relaxation("superlative_anchor_missing", f"{sup.anchors[0].noun} not found")
             )
-            survivors = _stable_by_id(survivors)
+            survivors = _tier_priority_order(survivors, index, target.noun)
     elif len(survivors) > 1:
         # No top-level superlative: if a surviving hard clause's anchor carried a
         # nested superlative disambiguator, break ties by that nested metric rather
-        # than by instance id (OR-F1: two-tables-two-bowls). Otherwise stable-by-id.
-        survivors = _nested_superlative_order(survivors, hard_clauses, index, th)
+        # than by instance id (OR-F1: two-tables-two-bowls). Otherwise tier-priority
+        # (issue #51): an exact/synonym label match must not lose a tie to an
+        # unrelated head-noun cousin merely by carrying a lower instance id.
+        survivors = _nested_superlative_order(survivors, hard_clauses, index, th, target.noun)
     else:
-        survivors = _stable_by_id(survivors)
+        survivors = _tier_priority_order(survivors, index, target.noun)
 
     # --- pass matrix (over the clauses actually applied) ---------------------
     pass_matrix: dict[int, list[PredResult]] = {}
@@ -991,9 +993,11 @@ def _nested_superlative_order(
     hard_clauses: Sequence[Clause],
     index: SceneIndex,
     th: Thresholds,
+    noun: str | None = None,
 ) -> list[InstanceRecord]:
     """Order survivors by the nested superlative metric of the first hard clause
-    whose anchor carries one; fall back to stable-by-id when none applies.
+    whose anchor carries one; fall back to tier-priority (then stable-by-id) when
+    none applies.
 
     Each survivor is scored by the distance from the survivor to its own
     best-matching disambiguated anchor (the anchor kept by the nested superlative),
@@ -1015,7 +1019,42 @@ def _nested_superlative_order(
         # the survivor most bound to the selected anchor wins, never instance id.
         dists = {c.instance_id: _centroid_dist(c, target_anchor) for c in survivors}
         return sorted(survivors, key=lambda c: (dists[c.instance_id], c.instance_id))
+    if noun is not None:
+        return _tier_priority_order(survivors, index, noun)
     return _stable_by_id(survivors)
+
+
+def _tier_priority_order(
+    recs: Sequence[InstanceRecord], index: SceneIndex, noun: str
+) -> list[InstanceRecord]:
+    """Stable-by-id, but an EXACT/SYNONYM label match is never outranked by a
+    HEAD_NOUN cousin dragged in by the same-class pool (issue #51 root cause: with
+    no disambiguating clause, ``resolve()`` fell straight to instance-id order, so a
+    query like "coffee table" could rank an unrelated "dressing table" (lower
+    instance id, HEAD_NOUN tier) ahead of the exact "coffee table" — both a scoring
+    artifact AND a real navigation defect, since corridor-leg anchors ("the sofa and
+    the coffee table") carry no disambiguator by construction.
+
+    BARE-noun queries are exempt (mirrors ``_match_anchor_noun``'s #21 exemption):
+    "table" legitimately means every table, cousins and exact alike, so imposing a
+    tier preference there would wrongly bias a same-class superlative/count pool.
+    Falls back to plain stable-by-id when the index exposes no tiered lookup (test
+    doubles) or the noun is bare.
+    """
+    from core.perception.scene_index import normalize_label
+    from core.perception.vocab import head_noun
+
+    query = normalize_label(noun)
+    if query == head_noun(query):
+        return _stable_by_id(recs)
+    tiered = getattr(index, "by_label_tiered", None)
+    if tiered is None:
+        return _stable_by_id(recs)
+    tier_by_id = {rec.instance_id: tier for rec, tier in tiered(noun)}
+    worst = MatchTier.TYPO
+    return sorted(
+        recs, key=lambda r: (tier_by_id.get(r.instance_id, worst), r.instance_id)
+    )
 
 
 def _filter_and(

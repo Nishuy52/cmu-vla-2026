@@ -94,6 +94,11 @@ class Costmap:
         blocked_seed = grid.state == OBSTACLE
         if has_overhead and overhead_hard:
             blocked_seed = blocked_seed | grid.overhead
+        #: UNINFLATED obstacle footprint (the raw seed before ``_inflate``). Lets a
+        #: consumer (the pinch-corridor overlay) tell a real solid obstacle cell
+        #: apart from an inflation-halo cell that is only blocked because it sits
+        #: within ``vehicle_radius_m`` of one (see ``inflation_only_mask``).
+        self.raw_blocked = blocked_seed
         self.base_blocked = self._inflate(blocked_seed, vehicle_radius_m)
         # Soft-overhead mask (inflated like an obstacle so the vehicle FOOTPRINT is
         # discouraged near furniture, not just the centre cell) — empty unless the
@@ -207,12 +212,27 @@ class Costmap:
         # Fold the soft-overhead cells into the hard mask for the corridor plan.
         if self.overhead_soft.any():
             cm.base_blocked = self.base_blocked | self.overhead_soft
+            # raw_blocked stays consistent with base_blocked: fold the RAW (uninflated)
+            # overhead seed in too, so inflation_only_mask still only ever reports true
+            # inflation halo, never a real (overhead) obstacle cell.
+            cm.raw_blocked = self.raw_blocked | (
+                self.grid.overhead if self.grid.overhead is not None
+                else np.zeros(self.raw_blocked.shape, dtype=bool)
+            )
         else:
             cm.base_blocked = self.base_blocked  # shared read-only
+            cm.raw_blocked = self.raw_blocked
         cm.overhead_soft = np.zeros(self.overhead_soft.shape, dtype=bool)
         cm.capsule_blocked = self.capsule_blocked.copy()
         cm.unknown = self.unknown
         return cm
+
+    def inflation_only_mask(self) -> np.ndarray:
+        """Cells blocked ONLY by vehicle-radius inflation, never by a real obstacle
+        footprint (``base_blocked & ~raw_blocked``). Lets a consumer relax the
+        inflation margin (e.g. the pinch-corridor overlay squeezing a verified GT
+        gate) without ever letting the vehicle drive through solid geometry."""
+        return self.base_blocked & ~self.raw_blocked
 
     # ------------------------------------------------------------- recovery
     def reachable_mask(self, start_xy: tuple[float, float]) -> np.ndarray | None:

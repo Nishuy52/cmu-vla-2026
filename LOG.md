@@ -949,3 +949,26 @@ SoC detector benchmarking (arch-F2).
   `docs/tasks/T14-if-wall-realism/`. Full battery re-run:
   `reports/gt_battery_walls_2026-07-19/`. Fast + full (`-m ""`) test
   gates green.
+
+## 2026-07-19 (session cont.) - task milestone (branch if2-corridor, worktree)
+
+- T15 if2-corridor-threading (issues #52 + #51). Fixed #52: tighter
+  `WALL_FIT_MAX_RESIDUAL_M=0.8` wall-derivation gate (vs the 1.0 scoring
+  gate); livingroom_1's marginal-fit flip reverts, IF headline
+  0.100 -> 0.117 (`reports/gt_battery_fixA_2026-07-19/`), registered in
+  docs/calibration.md. Then #51: per-leg traced 3 failing corridor
+  questions BEFORE fixing (`reports/if2_corridor_trace_2026-07-19/`);
+  issue's "one defect" premise overturned — found and fixed THREE
+  distinct defects (rubric anchor-distinctness mismatch vs
+  InstructionHead's own enforcement; resolver tier-priority loss
+  letting an exact label match lose to a head-noun cousin by instance
+  id — a real nav defect, not just scoring; pinch-corridor fallback
+  never tried on a total direct-astar miss, and never able to open a
+  real gate narrower than 2x vehicle_radius since it only ever ADDED
+  blocking). Threading violations 9 -> 7 (target 0-2 NOT reached),
+  headline 0.117 -> 0.150, numerical 15/15 + OR 6/6 unchanged
+  throughout. Remaining 7 trace to a 4th, broader defect (GT
+  obstacle-stamping fidelity for architectural "wall" labels) filed as
+  #53, left #51 open (commented with status) rather than falsely
+  closing it. Record at `docs/tasks/T15-if2-corridor-threading/`. Fast
+  + full (`-m ""`) test gates green.

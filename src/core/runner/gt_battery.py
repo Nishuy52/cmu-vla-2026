@@ -542,18 +542,30 @@ def _if_rubric_geometry(
     if not plan.route:
         return leg_goals, corridor_gates, avoid_capsules
 
-    def _resolve_anchor_rec(anchor):
+    def _resolve_anchor_rec(anchor, exclude_id: int | None = None):
         spec = TargetSpec(
             noun=anchor.noun, raw=anchor.raw, attributes=list(anchor.attributes),
             clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
         )
         res = resolve(spec, idx)
-        return res.candidates_ranked[0] if res.candidates_ranked else None
+        for c in res.candidates_ranked:
+            if exclude_id is None or c.instance_id != exclude_id:
+                return c
+        return None
 
     for i, leg in enumerate(plan.route):
         if leg.kind is LegKind.CORRIDOR_BETWEEN and len(leg.anchors) == 2:
             r0 = _resolve_anchor_rec(leg.anchors[0])
-            r1 = _resolve_anchor_rec(leg.anchors[1])
+            # DISTINCT instances across a corridor leg's two anchors (issue #51):
+            # "the two columns" / "between the two X" repeats the same noun for
+            # both anchors, and independently resolving each lands on the SAME
+            # top-ranked instance -> a zero-width gate the driven path can never
+            # cross. Mirrors InstructionHead._resolve_leg_anchors' `used` set so the
+            # rubric's scoring gate matches the gate the real planner threads
+            # against, instead of scoring a degenerate point no path can cross.
+            r1 = _resolve_anchor_rec(
+                leg.anchors[1], exclude_id=r0.instance_id if r0 is not None else None
+            )
             if r0 is None or r1 is None:
                 continue
             gate = corridor_gate(r0, r1)
