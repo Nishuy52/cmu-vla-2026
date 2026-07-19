@@ -1,6 +1,6 @@
 """Unit tests for core.parsing.normalize -- deterministic LLM-tier post-processing for
-issues #47 (via_near/goto mislabeling), #48 (flattened stacked relative clauses), and
-#49 (fabricated avoid corridors)."""
+issues #47 (via_near/goto mislabeling), #48 (flattened stacked relative clauses), #49
+(fabricated avoid corridors), and #65 (misplaced between-disambiguator)."""
 from __future__ import annotations
 
 from core.interfaces import QType
@@ -179,6 +179,70 @@ def test_already_disambiguated_first_anchor_left_alone():
     normalize_llm_plan(plan, "Find the cup on the table near the window closest to the screen.")
     # anchor already has a disambiguator -- normalizer must not clobber it
     assert len(plan.target.clauses) == 2
+
+
+# --------------------------------------------------------------------------- #65
+
+
+def test_misplaced_between_disambiguator_merged_into_terminal_goto():
+    """Regression per issue #65's livingroom_1 example: the model splits "stop at the
+    vase between the TV and the door" into a spurious corridor_between(TV, door) leg
+    followed by a bare goto(vase) leg, instead of one goto(vase) leg whose anchor
+    carries a between(TV, door) disambiguator (rule 6's explicit exception)."""
+    question = (
+        "Go to the potted plant closest to the pyramid candle holder and stop at the "
+        "vase between the TV and the door."
+    )
+    plan = _plan(
+        route=[
+            _leg(LegKind.GOTO, "potted plant", disambiguator=Clause(pred=Pred.CLOSEST_TO, anchors=[Anchor(noun="pyramid candle holder")])),
+            RouteLeg(kind=LegKind.CORRIDOR_BETWEEN, anchors=[Anchor(noun="tv", raw="TV"), Anchor(noun="door")]),
+            _leg(LegKind.GOTO, "vase"),
+        ]
+    )
+    normalize_llm_plan(plan, question)
+    assert [leg.kind for leg in plan.route] == [LegKind.GOTO, LegKind.GOTO]
+    final = plan.route[-1]
+    assert final.anchors[0].noun == "vase"
+    dis = final.anchors[0].disambiguator
+    assert dis is not None
+    assert dis.pred is Pred.BETWEEN
+    assert [a.noun for a in dis.anchors] == ["tv", "door"]
+
+
+def test_genuine_corridor_leg_before_terminal_goto_left_alone():
+    """A real corridor leg ("take the path between...") immediately followed by an
+    unrelated terminal goto must NOT be merged -- this is the exact shape (non-terminal
+    corridor_between -> bare goto) that #65's fix could otherwise misfire on."""
+    question = (
+        "First, go near the lamp closest to the black chair, then take the path "
+        "between the sofa and the round tables, and stop at the cabinet with a "
+        "picture above it."
+    )
+    plan = _plan(
+        route=[
+            _leg(LegKind.GOTO, "lamp", disambiguator=Clause(pred=Pred.CLOSEST_TO, anchors=[Anchor(noun="black chair")])),
+            RouteLeg(kind=LegKind.CORRIDOR_BETWEEN, anchors=[Anchor(noun="sofa"), Anchor(noun="round table", raw="round tables")]),
+            _leg(LegKind.GOTO, "cabinet"),
+        ]
+    )
+    normalize_llm_plan(plan, question)
+    assert [leg.kind for leg in plan.route] == [LegKind.GOTO, LegKind.CORRIDOR_BETWEEN, LegKind.GOTO]
+    assert len(plan.route) == 3
+
+
+def test_between_merge_skipped_when_terminal_goto_already_disambiguated():
+    """If the following goto leg already carries a disambiguator, the corridor leg is
+    left alone rather than clobbering existing structure."""
+    question = "Stop at the vase between the TV and the door near the sofa."
+    plan = _plan(
+        route=[
+            RouteLeg(kind=LegKind.CORRIDOR_BETWEEN, anchors=[Anchor(noun="tv"), Anchor(noun="door")]),
+            _leg(LegKind.GOTO, "vase", disambiguator=Clause(pred=Pred.NEAR, anchors=[Anchor(noun="sofa")])),
+        ]
+    )
+    normalize_llm_plan(plan, question)
+    assert [leg.kind for leg in plan.route] == [LegKind.CORRIDOR_BETWEEN, LegKind.GOTO]
 
 
 # --------------------------------------------------------------------------- #49

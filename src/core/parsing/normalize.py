@@ -22,6 +22,17 @@ against the live local model — see ``reports/local_llm_phase2/parse_battery.md
 * #49 -- a spurious ``avoid`` entry gets fabricated by pairing two anchors that
   belong to different, unrelated disambiguators elsewhere in the Plan, on a question
   that contains no "avoid"/"without" language at all.
+* #65 -- "stop at X between Y and Z" (rule 6's explicit exception: a goto leg whose
+  anchor X carries a ``between`` disambiguator, NOT a corridor -- see prompts.py's
+  own worked-example NOTE) sometimes comes back as a spurious ``corridor_between``
+  leg (anchors Y, Z) immediately followed by a bare terminal ``goto`` leg (anchor X)
+  instead of one ``goto`` leg with the disambiguator correctly nested. Distinguished
+  from a genuine corridor leg (also a non-terminal ``corridor_between`` leg followed
+  by a ``goto``, e.g. "take the path between the sofa and the tables, and stop at
+  the cabinet") purely by the surface marker immediately before "between": a real
+  corridor is introduced by "take the path between"/"go between"; the misplaced-
+  disambiguator case has no such marker and instead has the terminal goto anchor's
+  own noun immediately before "between".
 
 Every rule here only ever *removes or reshapes* structure the model invented; it never
 adds anchors, nouns, or predicates the model didn't already emit. Applied only to the
@@ -33,7 +44,7 @@ from __future__ import annotations
 import re
 
 from core.interfaces import QType
-from core.plan_schema import LegKind, Plan, Pred, RouteLeg
+from core.plan_schema import Clause, LegKind, Plan, Pred, RouteLeg
 
 # --------------------------------------------------------------------- #47: route legs
 
@@ -167,6 +178,67 @@ def _normalize_stacked_target_clauses(plan: Plan, qtext: str) -> None:
         plan.target.clauses = [c0]
 
 
+# ------------------------------------------------------- #65: misplaced between-disambiguator
+
+#: Surface markers that genuinely introduce a corridor leg (mirrors regex_tier._CORRIDOR_KEYS
+#: plus its "path between" variant) -- rule 6's ONLY legitimate `corridor_between` triggers.
+_CORRIDOR_MARKERS: tuple[str, ...] = ("take the path between", "go between", "path between")
+
+#: How far back from a "between" occurrence to look for a corridor marker / the terminal
+#: goto anchor's surface form. Generous enough for "take the path between the sofa and",
+#: short enough not to accidentally reach across an unrelated earlier clause.
+_BETWEEN_LOOKBACK = 40
+
+
+def _merge_misplaced_between_disambiguator(plan: Plan, qtext: str) -> None:
+    """Fix #65: merge a `corridor_between` leg into an immediately-following bare `goto`
+    leg when the text shows this was really "stop at X between Y and Z" (rule 6's
+    between-disambiguator exception), not a genuine corridor leg. See module docstring.
+    """
+    if len(plan.route) < 2:
+        return
+    qlower = qtext.lower()
+    merged: list[RouteLeg] = []
+    i = 0
+    while i < len(plan.route):
+        leg = plan.route[i]
+        nxt = plan.route[i + 1] if i + 1 < len(plan.route) else None
+        if (
+            leg.kind is LegKind.CORRIDOR_BETWEEN
+            and len(leg.anchors) == 2
+            and nxt is not None
+            and nxt.kind is LegKind.GOTO
+            and len(nxt.anchors) == 1
+            and nxt.anchors[0].disambiguator is None
+        ):
+            goto_anchor = nxt.anchors[0]
+            candidate = (goto_anchor.raw or goto_anchor.noun or "").strip().lower()
+            if candidate and _anchor_precedes_bare_between(qlower, candidate):
+                goto_anchor.disambiguator = Clause(pred=Pred.BETWEEN, anchors=leg.anchors)
+                merged.append(RouteLeg(kind=LegKind.GOTO, anchors=[goto_anchor]))
+                i += 2
+                continue
+        merged.append(leg)
+        i += 1
+    plan.route = merged
+
+
+def _anchor_precedes_bare_between(qlower: str, candidate: str) -> bool:
+    """True if `candidate` (the terminal goto anchor's surface form) sits immediately
+    before some "between" occurrence in the text, with no corridor marker in that same
+    lookback window -- the "the vase between the TV and the door" lexical signature.
+    """
+    pos = 0
+    while True:
+        bpos = qlower.find("between", pos)
+        if bpos < 0:
+            return False
+        window = qlower[max(0, bpos - _BETWEEN_LOOKBACK):bpos]
+        if candidate in window and not any(m in window for m in _CORRIDOR_MARKERS):
+            return True
+        pos = bpos + len("between")
+
+
 # ------------------------------------------------------------------- #49: fabricated avoid
 
 _AVOID_MARKERS: tuple[str, ...] = ("avoid", "without")
@@ -192,8 +264,9 @@ def _drop_fabricated_avoid(plan: Plan, qtext: str) -> None:
 
 
 def normalize_llm_plan(plan: Plan, qtext: str) -> Plan:
-    """Apply all three LLM-tier normalization rules in place; returns `plan` for chaining."""
+    """Apply all four LLM-tier normalization rules in place; returns `plan` for chaining."""
     _normalize_route_legs(plan, qtext)
+    _merge_misplaced_between_disambiguator(plan, qtext)
     _normalize_stacked_target_clauses(plan, qtext)
     _drop_fabricated_avoid(plan, qtext)
     return plan
