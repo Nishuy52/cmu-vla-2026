@@ -328,7 +328,7 @@ def test_if_scoring_uses_frozen_rubric_geometry_across_configs():
     def _rubric_geom_plain(geom):
         """(leg_goals, corridor_gates, avoid_capsules) -> plain, array-free, comparable
         tuple (Capsule/Gate hold numpy arrays, whose == is elementwise, not a bool)."""
-        leg_goals, corridor_gates, avoid_capsules = geom
+        leg_goals, corridor_gates, avoid_capsules, _leg_iids = geom
         legs = [(kind, tuple(round(v, 9) for v in xy)) for kind, xy in leg_goals]
         gates = [
             (i, tuple(np.asarray(g.a).round(9).tolist()), tuple(np.asarray(g.b).round(9).tolist()))

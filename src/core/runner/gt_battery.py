@@ -573,14 +573,20 @@ def _if_rubric_geometry(
     list[tuple[str, tuple[float, float]]],
     list[tuple[int, object]],
     list[object],
+    list[tuple[int, ...] | None],
 ]:
     """Resolve the ordered leg goals, corridor gates, and avoid capsules for the rubric.
 
-    Returns ``(leg_goals, corridor_gates, avoid_capsules)`` in the GT (object) frame:
+    Returns ``(leg_goals, corridor_gates, avoid_capsules, leg_instance_ids)`` in the GT
+    (object) frame:
       * leg_goals: ``(kind, (x, y))`` per route leg, in order. GOTO/VIA_NEAR -> the
         resolved anchor centroid; CORRIDOR_BETWEEN -> the gate midpoint.
       * corridor_gates: ``(leg_index, Gate)`` per corridor leg (for threading_check).
       * avoid_capsules: one :class:`Capsule` per resolvable AvoidSpec.
+      * leg_instance_ids: parallel to ``leg_goals`` — the resolved anchor's
+        ``instance_id`` (a 1-tuple for GOTO/VIA_NEAR, a 2-tuple for CORRIDOR_BETWEEN)
+        (issue #59 probe: lets the probe report which instance our resolver grounded
+        each leg to, independent of the goal xy).
     Legs/avoids whose anchors don't resolve are skipped (an unscored, not a wrong, leg).
     """
     from core.parsing.regex_tier import parse_regex
@@ -597,8 +603,9 @@ def _if_rubric_geometry(
     leg_goals: list[tuple[str, tuple[float, float]]] = []
     corridor_gates: list[tuple[int, object]] = []
     avoid_capsules: list[object] = []
+    leg_instance_ids: list[tuple[int, ...] | None] = []
     if not plan.route:
-        return leg_goals, corridor_gates, avoid_capsules
+        return leg_goals, corridor_gates, avoid_capsules, leg_instance_ids
 
     def _resolve_anchor_rec(anchor, exclude_id: int | None = None):
         spec = TargetSpec(
@@ -630,6 +637,7 @@ def _if_rubric_geometry(
             mid = (float(gate.midpoint[0]), float(gate.midpoint[1]))
             leg_goals.append(("corridor_between", mid))
             corridor_gates.append((i, gate))
+            leg_instance_ids.append((r0.instance_id, r1.instance_id))
         else:
             rec = _resolve_anchor_rec(leg.anchors[0]) if leg.anchors else None
             if rec is None:
@@ -637,13 +645,80 @@ def _if_rubric_geometry(
             c = P._as3(rec.centroid)
             kind = "via_near" if leg.kind is LegKind.VIA_NEAR else "goto"
             leg_goals.append((kind, (float(c[0]), float(c[1]))))
+            leg_instance_ids.append((rec.instance_id,))
 
     for spec in plan.avoid:
         try:
             avoid_capsules.append(avoid_capsule(spec, idx))
         except ValueError:
             continue
-    return leg_goals, corridor_gates, avoid_capsules
+    return leg_goals, corridor_gates, avoid_capsules, leg_instance_ids
+
+
+def _min_dist_to_polyline(point: tuple[float, float], traj_xy: np.ndarray) -> float | None:
+    """Euclidean distance from ``point`` to the nearest VERTEX of ``traj_xy`` (N, 2).
+
+    Vertex-only (not segment-projected) — matches :func:`gt_leg_ceiling.measure`'s
+    ``gt_min_dist_m`` metric so the two probes agree. ``None`` when ``traj_xy`` is
+    empty (no reference trajectory to compare against).
+    """
+    arr = np.asarray(traj_xy, dtype=float)
+    if arr.ndim != 2 or arr.shape[0] == 0:
+        return None
+    p = np.asarray(point, dtype=float)[:2]
+    return float(np.min(np.linalg.norm(arr[:, :2] - p, axis=1)))
+
+
+def _min_dist_driven_to_goal(
+    driven_traj: np.ndarray, goal: tuple[float, float]
+) -> float | None:
+    """Minimum distance from the DRIVEN trajectory (densified, matching the rubric's own
+    arrival check) to ``goal`` — the magnitude version of the rubric's boolean "reached"
+    (issue #59 probe): lets the probe histogram *how far* a missed leg fell short, not
+    just whether it cleared the tolerance.
+    """
+    from core.groundtruth.scoring import _densify_polyline, ARRIVAL_RESAMPLE_STEP_M
+
+    traj = np.asarray(driven_traj, dtype=float)
+    if traj.ndim != 2 or traj.shape[0] == 0:
+        return None
+    traj = _densify_polyline(traj, ARRIVAL_RESAMPLE_STEP_M)
+    g = np.asarray(goal, dtype=float)[:2]
+    return float(np.min(np.linalg.norm(traj[:, :2] - g, axis=1)))
+
+
+def _leg_probe_rows(
+    leg_goals: list[tuple[str, tuple[float, float]]],
+    leg_instance_ids: list[tuple[int, ...] | None],
+    driven: np.ndarray,
+    gt_traj_xy: np.ndarray | None,
+) -> list[dict]:
+    """Per-leg probe diagnostics (issue #59): OUR resolved goal/instance, how far our
+    OWN driven path fell short of that goal, and how far our goal sits from the GT
+    reference path — split failure into wrong-instance/leg-mismatch (goal far from the
+    GT path) vs stop-point/planning offset (goal is near the GT path but our own driven
+    trajectory never gets close to it).
+    """
+    rows: list[dict] = []
+    for i, (kind, goal) in enumerate(leg_goals):
+        iid = leg_instance_ids[i] if i < len(leg_instance_ids) else None
+        dist_driven = _min_dist_driven_to_goal(driven, goal)
+        dist_gt_path = (
+            _min_dist_to_polyline(goal, gt_traj_xy) if gt_traj_xy is not None else None
+        )
+        rows.append({
+            "i": i,
+            "kind": kind,
+            "our_goal": [float(goal[0]), float(goal[1])],
+            "our_instance_id": list(iid) if iid is not None else None,
+            "min_dist_driven_to_goal_m": (
+                round(dist_driven, 4) if dist_driven is not None else None
+            ),
+            "dist_goal_to_gt_traj_m": (
+                round(dist_gt_path, 4) if dist_gt_path is not None else None
+            ),
+        })
+    return rows
 
 
 def _terminal_goal_candidates(
@@ -803,6 +878,12 @@ class GTQuestionScore:
     #: read straight off the rubric scorer (never recomputed here).
     leg_goals: list | None = None
     leg_outcomes: list | None = None
+    #: Issue #59 probe: per-leg diagnostic rows — our resolved instance id, how far our
+    #: OWN driven trajectory fell short of our resolved goal (magnitude, not just the
+    #: rubric's boolean "reached"), and how far our resolved goal sits from the GT
+    #: reference trajectory. See :func:`_leg_probe_rows`. Diagnostic-only: never read by
+    #: scoring, does not affect ``rubric_score``/``ordered_leg_credit``.
+    leg_probe: list | None = None
     # instruction_following — SECONDARY diagnostics only (never headline)
     frechet_m: float | None = None
     coverage_1m: float | None = None
@@ -989,7 +1070,9 @@ def score_scene(
         driven = _drive_if_trajectory(
             text, gt, idx, start_xy=spawn_xy, wall_cells=wall_cells
         )
-        leg_goals, corridor_gates, avoid_caps = _if_rubric_geometry(text, gt, idx)
+        leg_goals, corridor_gates, avoid_caps, leg_instance_ids = _if_rubric_geometry(
+            text, gt, idx
+        )
         rub = S.score_instruction_rubric(
             driven,
             leg_goals,
@@ -1021,6 +1104,14 @@ def score_scene(
             }
             for o in rub.leg_outcomes
         ]
+        # Issue #59 probe: per-leg goal/instance + distance diagnostics, computed
+        # independently of the scorer (no scoring semantics touched) so a failing leg's
+        # failure mode is directly readable off the row.
+        traj_arr_i = if_traj[i]
+        gt_traj_xy = None
+        if traj_arr_i is not None and traj_arr_i.shape[0] > 0:
+            gt_traj_xy = frame.apply(traj_arr_i) if frame is not None else traj_arr_i[:, :2]
+        rec.leg_probe = _leg_probe_rows(leg_goals, leg_instance_ids, driven, gt_traj_xy)
         # our_n_waypoints mirrors the driven pose count for the IF rubric path (the
         # trajectory we scored). It stayed None after the wave rebuilt IF scoring onto
         # the rubric proxy, which broke test_score_scene_if_produces_two_numbers — a

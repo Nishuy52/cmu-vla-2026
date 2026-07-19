@@ -90,7 +90,7 @@ def measure(groundtruth: Path, questions: Path, questions_dir: Path) -> dict:
                 per_question.append(row)
                 continue
             gt_xy = frame.apply(arr) if frame is not None else arr[:, :2]
-            leg_goals, _gates, _avoid = _if_rubric_geometry(text, gt, idx)
+            leg_goals, _gates, _avoid, _iids = _if_rubric_geometry(text, gt, idx)
             for k, (kind, goal) in enumerate(leg_goals):
                 d = float(np.min(np.linalg.norm(gt_xy - np.array(goal), axis=1)))
                 reached = d <= tol

@@ -335,7 +335,7 @@ def test_driven_trajectory_reaches_ordered_legs():
     gt = GTScene(scene_name="t", instances=insts, regions=[])
     idx = BasicSceneIndex(insts)
     q = "First go to the door, then go to the table."
-    leg_goals, gates, caps = B._if_rubric_geometry(q, gt, idx)
+    leg_goals, gates, caps, _ = B._if_rubric_geometry(q, gt, idx)
     assert [k for k, _ in leg_goals] == ["goto", "goto"]
     traj = B._drive_if_trajectory(q, gt, idx, start_xy=(0.5, 0.5))
     assert traj.shape[0] > 2  # a real motion stream, not a point

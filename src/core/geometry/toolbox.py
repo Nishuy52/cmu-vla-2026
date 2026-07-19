@@ -357,7 +357,16 @@ def on(a: InstanceRecord, b: InstanceRecord, th: Thresholds = DEFAULT_THRESHOLDS
     passed = bool(vert_ok and over_ok and anchor_larger)
     # signed slack to the nearest z-band edge (positive = inside the band)
     vmargin = min(a_bottom - band_lo, band_hi - a_bottom)
-    score = float(max(0.0, min(1.0, frac)) * (1.0 if (vert_ok and anchor_larger) else 0.0))
+    # score (soft ranking signal, NOT the hard pass/fail above) is gated on vertical
+    # alignment only, not `anchor_larger` (issue #59): a wide-canopy plant sitting
+    # squarely atop a small side table (strong footprint overlap, correct height)
+    # should still rank as a plausible "on" match over an unrelated candidate even
+    # though the coarse anchor-size sanity check keeps `passed` False — the size
+    # gate exists to block hard misclassifications ("a sofa on a cushion"), not to
+    # zero out every near-miss's ranking signal (see resolve()'s category-only
+    # fallback, which ranks by this score when no candidate can pass as a hard
+    # filter).
+    score = float(max(0.0, min(1.0, frac)) * (1.0 if vert_ok else 0.0))
     expl = (
         f"on: bottom {a_bottom:.2f} in upper z-band [{band_lo:.2f}, {band_hi:.2f}] "
         f"-> {'ok' if vert_ok else 'FAIL'}; footprint IoM {frac*100:.0f}% "
@@ -913,6 +922,11 @@ def resolve(
     # attribute-filtered pool (base is the same-class pool for relative size ranking)
     pool = [c for c in base if _attrs_match(c, target.attributes, base, th)]
     hard_clauses = [c for c in target.clauses if c.pred not in _SUPERLATIVE_PREDS]
+    #: The relation clauses as originally stated, kept even once the fallback ladder
+    #: relaxes/drops them from ``hard_clauses`` (issue #59 probe): lets the
+    #: category-only rung rank by how well a candidate still MATCHES the dropped
+    #: relation instead of discarding it outright (see the ranking step below).
+    original_hard_clauses = list(hard_clauses)
     sup = _superlative_clause(target)
 
     survivors = _filter_and(pool, hard_clauses, index, th)
@@ -969,6 +983,21 @@ def resolve(
                 Relaxation("superlative_anchor_missing", f"{sup.anchors[0].noun} not found")
             )
             survivors = _tier_priority_order(survivors, index, target.noun)
+    elif not hard_clauses and original_hard_clauses and len(survivors) > 1:
+        # issue #59: the fallback ladder dropped every relation clause (category-only
+        # rung) because no candidate passed it as a HARD filter — e.g. "the potted
+        # plant on the table" where the plant's own footprint AABB (a wide canopy)
+        # narrowly fails the `on()` anchor-larger gate against a small side table
+        # despite strong overlap and correct height. Ranking then fell through to
+        # `_tier_priority_order` (effectively instance-id order), an arbitrary
+        # tie-break with no relation to the dropped clause — so an unrelated
+        # candidate (e.g. a floor-standing plant nowhere near any table) could
+        # outrank the one that actually sits on a table in every way but the exact
+        # gate. Rank by best-effort match to the ORIGINAL clauses instead (soft
+        # PredResult.score, never a hard requirement) so the candidate closest to
+        # satisfying the dropped relation wins, before falling back to the same
+        # deterministic tie-break for genuine ties.
+        survivors = _relaxed_relation_order(survivors, original_hard_clauses, index, th)
     elif len(survivors) > 1:
         # No top-level superlative: if a surviving hard clause's anchor carried a
         # nested superlative disambiguator, break ties by that nested metric rather
@@ -986,6 +1015,26 @@ def resolve(
         pass_matrix[c.instance_id] = row
 
     return ResolveResult(survivors, pass_matrix, margins, audit)
+
+
+def _relaxed_relation_order(
+    survivors: list[InstanceRecord],
+    dropped_clauses: Sequence[Clause],
+    index: SceneIndex,
+    th: Thresholds,
+) -> list[InstanceRecord]:
+    """Order survivors by best-effort match to relation clauses the fallback ladder
+    dropped as a hard filter (issue #59), instead of an arbitrary id-order tie-break.
+
+    Score = sum of each dropped clause's soft ``PredResult.score`` (in [0, 1] per
+    clause; never a HARD requirement, so this never re-excludes a survivor — it only
+    orders the category-only pool by relevance). Ties broken by instance_id for
+    determinism, matching every other tie-break in this module.
+    """
+    def _score(c: InstanceRecord) -> float:
+        return sum(_eval_clause(c, cl, index, th).score for cl in dropped_clauses)
+
+    return sorted(survivors, key=lambda c: (-_score(c), c.instance_id))
 
 
 def _nested_superlative_order(
