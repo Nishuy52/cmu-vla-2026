@@ -1121,3 +1121,33 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   (#53/#51 re-triage post-#59; #50 adjudication; #47-49 local-parse defects).
 - Stack STOPPED at session end. Worktree if54-pinch-seal merged; cleanup of
   worktrees pending (2 stale agent worktrees at b507eb9 unchecked).
+
+## 2026-07-19 (session 17c) - hardened GPU verified; in-container drive PROVEN; issue sweep
+
+- Hardened reboot VERIFIED: DynamicPowerManagement=0 live, clocks ramp under
+  load (P0/2490 under sim+module), no wedge through multiple full-stack runs.
+- **In-container autonomy PROVEN end-to-end**: latch -> local-tier parse ->
+  60s ORIENT -> EXPLORE_EXECUTE with /way_point_with_heading at ~0.58 Hz ->
+  DONE at budget. The earlier "no waypoints" scare was OUR observation error
+  (Pose2D grep shape + windows misaligned with the 60s ORIENT + post-budget
+  checks) - no code defect. Diagnosed via 3 hot-patch cycles in the container
+  (image untouched; final evidentiary run recreates the container clean).
+- Coexistence evidence: 3B + GDINO + Unity + RVIZ resident at 7.2 GB stable,
+  P0 sustained, prewarm 12-44s (fits new 60s cap), parse 7-10s under load;
+  separately captured the 5m-keep-alive OOM-then-recover sequence with #39
+  backoff working as designed.
+- Issue sweep (parallel executors, disjoint worktrees):
+  #59 FIXED+merged (resolver ranking; credit 0.161->0.172; remainder split
+  into #61/#62), #50 adjudicated+dead API removed, #51 closed superseded,
+  #57 fixed (env_file optional), #58 fixed earlier, #60 filed+scoped
+  (silent seams + unobservable answer publication), #47-49 root-caused with
+  normalize.py + 15 unit tests (battery rerun in flight, worktree
+  llm-parse-47-49). Stale pre-reboot agent worktrees archived to
+  stale-archive-* branches and removed.
+- ubuntu_setup §7a as-built gotchas + BUILD_AND_VERIFY 28 GB size bar
+  corrected (418bb89, 5c9e941).
+- Pending to close task 6: final clean-container teapot run with armed
+  answer-topic subscribers (script staged in scratchpad) - queued behind the
+  #47-49 battery rerun for GPU. User directive recorded in memory: no-idle
+  orchestration rules (never end a turn purely waiting; pausing agents are
+  stopped agents; deadline+probe every wait).
