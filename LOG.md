@@ -1171,3 +1171,13 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   contention-tainted run (timeout-cluster fingerprint). Clean rerun next.
 - CLAUDE.md standing rule 7 added (no-stall orchestration) per user directive;
   same rules in global memory.
+
+## 2026-07-19 (session 18) - T17 if66-arrival-stamping wrapped up
+
+- Started/finished T17 (issue #66, worktree if66-arrival-stamping): traced
+  all 26 #61/#62 "goal plausible, drive never arrives" legs; shipped a
+  directional own-anchor-footprint push fix to `_nearest_free_goal`, rejected
+  a door/door-frame pass-through candidate on negative evidence. IF headline
+  0.1667 -> 0.2000, ordered-leg credit 0.1889 -> 0.2222, numerical/OR
+  unchanged. See docs/tasks/T17-if66-arrival-stamping/task.md,
+  reports/gt_battery_post66/.

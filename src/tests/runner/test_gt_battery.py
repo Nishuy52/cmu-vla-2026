@@ -888,3 +888,93 @@ def test_synthetic_from_gt_still_stamps_real_thin_wall():
     sc = GB._synthetic_from_gt(gt)
     labels = [o.label for o in sc.objects]
     assert "wall" in labels, "a genuinely thin wall panel must still be stamped"
+
+
+# ----------------------------------------------------------------------- issue #66
+
+
+def test_nearest_free_goal_pushes_off_anchors_own_footprint():
+    """Issue #66: a GOTO leg goal must not sit inside its OWN resolved anchor's solid
+    footprint — the real drive (`InstructionHead._goto_point`) never targets a point
+    inside the target's own geometry either (it BFS-snaps to the nearest reachable
+    cell), so the rubric goal must match. A bench-sized anchor (half-diagonal well
+    over ARRIVAL_TOL_M) with its raw centroid stands in for the traced office_1 case."""
+    gt = _synthetic_gt_scene(
+        [
+            ("bench", 0.0, 0.0, 0.0, 1.58, 0.66, 0.4),
+            # A distant marker so the room bounds aren't degenerately equal to the
+            # bench's own footprint (which would make it read as "room-scale" itself).
+            ("stool", 20.0, 20.0, 0.0, 0.4, 0.4, 0.5),
+        ],
+        scene_name="syn66own",
+    )
+    pushed = GB._nearest_free_goal((0.0, 0.0), gt)
+    assert pushed != (0.0, 0.0)
+    # Pushed clear of the bench's own (inflated) half-extent on the shorter axis.
+    dist = (pushed[0] ** 2 + pushed[1] ** 2) ** 0.5
+    assert dist >= 0.33 - 1e-6  # half of sy (0.66) -- the nearest edge
+
+
+def test_nearest_free_goal_spares_room_scale_instances():
+    """A room-scale-architectural instance the point falls inside is never a push
+    source (issue #53) -- it isn't really stamped."""
+    gt = _synthetic_gt_scene(
+        [("wall", 0.0, 0.0, 0.0, 9.0, 9.0, 2.4)],  # room-scale in a 10x10 room
+        scene_name="syn66spare",
+    )
+    pushed = GB._nearest_free_goal((0.0, 0.0), gt)
+    assert pushed == (0.0, 0.0)
+
+
+def test_nearest_free_goal_directional_push_prefers_approach_side():
+    """Issue #66: with ``anchor_id``/``approach_xy`` given, the anchor's own-footprint
+    push picks the SIDE actually approached (the previous leg's goal / route start),
+    not just the geometrically nearest of 4 edges — a plain nearest-edge choice on a
+    symmetric footprint traced worse against both the driven path and the GT
+    reference path (issue #66 classification table: hotel_room_1, livingroom_4)."""
+    gt = _synthetic_gt_scene(
+        [
+            ("table", 0.0, 0.0, 0.0, 2.0, 2.0, 0.4),  # a perfect square -- no single
+            # geometrically-nearest edge; direction must be the tie-breaker.
+            ("stool", 20.0, 20.0, 0.0, 0.4, 0.4, 0.5),
+        ],
+        scene_name="syn66dir",
+    )
+    table_id = gt.instances[0].instance_id
+    # Approaching from due east -> pushed goal must land on the table's EAST edge.
+    east = GB._nearest_free_goal(
+        (0.0, 0.0), gt, anchor_id=table_id, approach_xy=(10.0, 0.0)
+    )
+    assert east[0] > 0.9  # east of the table's own half-extent (1.0 m)
+    assert east[1] == pytest.approx(0.0)
+    # Approaching from due south -> pushed goal must land on the table's SOUTH edge.
+    south = GB._nearest_free_goal(
+        (0.0, 0.0), gt, anchor_id=table_id, approach_xy=(0.0, -10.0)
+    )
+    assert south[1] < -0.9
+    assert south[0] == pytest.approx(0.0)
+
+
+def test_if_rubric_geometry_goto_goal_clears_own_anchor_footprint():
+    """End-to-end: `_if_rubric_geometry`'s resolved GOTO goal for "go to the bench" is
+    off the bench's own solid footprint, not at its raw (unreachable) centroid, and
+    respects a supplied route start as the first leg's approach direction."""
+    from core.perception.scene_index import BasicSceneIndex
+
+    gt = _synthetic_gt_scene(
+        [
+            ("bench", 3.0, 0.0, 0.0, 1.58, 0.66, 0.4),
+            ("stool", 20.0, 20.0, 0.0, 0.4, 0.4, 0.5),
+        ],
+        scene_name="syn66rubric",
+    )
+    idx = BasicSceneIndex(gt.instances)
+    leg_goals, _, _, _ = GB._if_rubric_geometry(
+        "Go to the bench.", gt, idx, start_xy=(3.0, -5.0)
+    )
+    assert len(leg_goals) == 1
+    kind, (gx, gy) = leg_goals[0]
+    assert kind == "goto"
+    assert (gx, gy) != (3.0, 0.0)
+    # Approached from due south -> pushed onto the bench's south edge.
+    assert gy < 0.0

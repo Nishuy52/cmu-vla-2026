@@ -98,3 +98,22 @@
   "bed frame" at the gate) traced but not fixed this session
   (deferred). #53 left open with a status comment (root cause fixed,
   headline metric didn't move — see #54).
+- **T17** if66-arrival-stamping (#66) — traced all 26 "goal plausibly
+  placed, drive never arrives" legs from the #61/#62 lane; dominant
+  class (10/26) is a rubric goal-definition mismatch, not a stamping
+  defect: `_nearest_free_goal` (#61) excluded the leg's OWN resolved
+  anchor from its free-space push, leaving many GOTO/VIA_NEAR goals
+  at the anchor's raw centroid — literally inside the anchor's own
+  solid, stamped footprint, arrival-tolerance-unreachable by any real
+  drive. Fixed: the anchor's own footprint is now pushed too, and
+  DIRECTIONALLY (toward the side the route actually approaches from
+  — the previous leg's goal / scene spawn — not a plain nearest-of-4-
+  edges guess, which traced worse on a symmetric footprint). A second
+  candidate fix (door/door-frame pass-through stamping, targeting the
+  issue's other named bucket) was implemented, measured, and REJECTED
+  — net negative on both credit and headline with zero corroborating
+  gain across all 15 scenes. Result: ordered-leg credit 0.1889 →
+  0.2222 (+17.6%), IF headline 0.1667 → 0.2000 (+20%), numerical
+  15/15 + OR 6/6 byte-identical. One traced residual regression
+  (hotel_room_1) and 10/26 unresolved legs (`_pinch_costmap`
+  territory / #62 leg-goal-semantics territory) left for follow-up.

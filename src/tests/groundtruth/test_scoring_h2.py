@@ -330,14 +330,23 @@ def test_annotation_coverage_flags_underannotated_class():
 
 
 def test_driven_trajectory_reaches_ordered_legs():
-    """The constant-speed follower actually drives through both ordered leg goals."""
-    insts = [_rec(0, "door", 1.0, 1.0), _rec(1, "table", 5.0, 5.0)]
+    """The constant-speed follower actually drives through both ordered leg goals.
+
+    The table's footprint is a perfect square about its own centroid, so
+    ``_nearest_free_goal`` (issue #66: now pushes a leg goal off its OWN anchor's
+    footprint too, same as the real ``_goto_point``/``_via_point`` navigation) picks
+    its nearest edge by an exact floating-point tie across all four sides — here it
+    resolves to the SOUTH edge (verified directly). The pole (leg 1) sits due south
+    of the table so leg 2's straight approach lands on that same south edge, keeping
+    the rubric's pushed goal and the real driven path in agreement.
+    """
+    insts = [_rec(0, "pole", 6.0, -2.0), _rec(1, "table", 6.0, 1.0)]
     gt = GTScene(scene_name="t", instances=insts, regions=[])
     idx = BasicSceneIndex(insts)
-    q = "First go to the door, then go to the table."
+    q = "First go to the pole, then go to the table."
     leg_goals, gates, caps, _ = B._if_rubric_geometry(q, gt, idx)
     assert [k for k, _ in leg_goals] == ["goto", "goto"]
-    traj = B._drive_if_trajectory(q, gt, idx, start_xy=(0.5, 0.5))
+    traj = B._drive_if_trajectory(q, gt, idx, start_xy=(6.0, -2.5))
     assert traj.shape[0] > 2  # a real motion stream, not a point
     r = score_instruction_rubric(traj, leg_goals, corridor_gates=gates, avoid_capsules=caps)
     assert r.n_legs_reached_in_order == 2
