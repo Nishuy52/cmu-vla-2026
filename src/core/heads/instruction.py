@@ -361,16 +361,33 @@ class InstructionHead:
         provisional = any(r.step in _PROVISIONAL_STEPS for r in res.audit)
         # Only re-order when the toolbox left an instance-id-only tie (no superlative
         # margin distinguishing the top survivors) and we have a previous leg to anchor on.
+        #
+        # Issue #71 (resolve-outcome parity audit): reordering the FULL survivor pool by
+        # raw distance discarded whatever label discrimination the toolbox's own ranking
+        # already encoded whenever survivors carried DIFFERENT labels (e.g. an exact "tv
+        # cabinet" match losing to an alias-matched "sink cabinet", or an exact "crystal
+        # ball decoration" losing to a "dice decoration", purely for sitting closer to the
+        # previous leg) — a genuine product bug, not the intended "instance-id-only tie"
+        # the docstring above promises. Restrict the reorder to the group of survivors
+        # sharing the toolbox's OWN top-ranked label: a same-label group is the only case
+        # where "arbitrary detection-order pick" is actually true; a different-label
+        # survivor was placed where it is by real (tier/clause) evidence the salience
+        # signal has no business overriding.
         if prev_xy is not None and len(ranked) > 1 and not _has_superlative(anchor):
             px, py = prev_xy
-            ranked = sorted(
-                ranked,
-                key=lambda c: (
-                    (float(TB.P._as3(c.centroid)[0]) - px) ** 2
-                    + (float(TB.P._as3(c.centroid)[1]) - py) ** 2,
-                    getattr(c, "instance_id", 0),
-                ),
-            )
+            top_label = ranked[0].label
+            same = [c for c in ranked if c.label == top_label]
+            rest = [c for c in ranked if c.label != top_label]
+            if len(same) > 1:
+                same = sorted(
+                    same,
+                    key=lambda c: (
+                        (float(TB.P._as3(c.centroid)[0]) - px) ** 2
+                        + (float(TB.P._as3(c.centroid)[1]) - py) ** 2,
+                        getattr(c, "instance_id", 0),
+                    ),
+                )
+            ranked = same + rest
         return ranked, provisional
 
     def _resolve_anchor(
