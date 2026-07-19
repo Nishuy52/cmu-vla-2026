@@ -42,7 +42,12 @@ from core.groundtruth import scoring as S
 from core.groundtruth.loader import GTScene, load_scene
 from core.interfaces import QType, WaypointCmd
 from core.mocks.mock_io import FakeClock, MockRobotIO
-from core.mocks.synthetic_scene import FLOOR_SPACING, Room, SyntheticScene
+from core.mocks.synthetic_scene import (
+    FLOOR_SPACING,
+    TERRAIN_SLAB_MAX_Z,
+    Room,
+    SyntheticScene,
+)
 from core.perception.scene_index import BasicSceneIndex
 from core.runner.provenance import collect_provenance
 
@@ -87,6 +92,51 @@ def _gt_footprint_bounds(gt: GTScene, pad: float) -> tuple[float, float, float, 
     return x0, y0, x1, y1
 
 
+#: Issue #53 — a GT instance whose raw AABB footprint spans more than this fraction of
+#: the SCENE'S OWN room footprint in BOTH x and y is "room-scale": VLA-3D sometimes
+#: records an architectural aggregate (a room's whole wall shell, or an unclassified
+#: scene-level mesh labelled "unknown") as one bounding box rather than the real thin
+#: element it stands in for. Stamping that box solid seals most/all of the room's
+#: interior — the real wall is thin, the AABB just happens to span the room. Purely
+#: geometric and self-referential per scene (a fraction of THAT scene's own footprint,
+#: never a fixed metres constant), so it needs no cross-scene tuning: swept over all 15
+#: GT scenes, every floor-level instance clearing this bar in BOTH axes is labelled
+#: "wall", "floor", or "unknown" (home_building_1 id 25/82, home_building_2 id 126/132/
+#: 167, hotel_room_2 id 89, japanese_room id 12, livingroom_2 id 10, studio id 31) —
+#: zero real furniture instance across those scenes clears it (the closest, a hotel_
+#: room_2 bed frame, sits at 0.38/0.28 — short on the y axis). Objects like this are
+#: skipped by :func:`_synthetic_from_gt` rather than stamped: the traversable-mesh-
+#: derived ``wall_cells`` (IF-F2, already wired) become the sole source of interior-wall
+#: geometry for the room, and the room's own outer boundary (``SyntheticScene._is_wall``)
+#: still seals the exterior — avoiding a double representation where the same walls are
+#: both a raw solid AABB AND mesh-derived wall cells.
+ARCHITECTURAL_AABB_ROOM_FRACTION: float = 0.3
+
+
+def _is_architectural_room_scale_aabb(
+    rec_aabb_min: np.ndarray, rec_aabb_max: np.ndarray, room_w: float, room_h: float
+) -> bool:
+    """True if ``rec``'s footprint is room-scale in both axes AND floor-level.
+
+    See :data:`ARCHITECTURAL_AABB_ROOM_FRACTION`. Floor-level (not an overhang) uses
+    the same :data:`~core.mocks.synthetic_scene.TERRAIN_SLAB_MAX_Z` cutoff the terrain
+    mirror itself uses to tell floor obstacles from tabletop/ceiling overhangs — an
+    elevated room-scale slab (a real ceiling) already reads as an overhang and was
+    never the problem.
+    """
+    cz = float(rec_aabb_min[2])
+    if cz >= TERRAIN_SLAB_MAX_Z:
+        return False
+    sx = float(rec_aabb_max[0] - rec_aabb_min[0])
+    sy = float(rec_aabb_max[1] - rec_aabb_min[1])
+    if room_w <= 0 or room_h <= 0:
+        return False
+    return (
+        sx / room_w > ARCHITECTURAL_AABB_ROOM_FRACTION
+        and sy / room_h > ARCHITECTURAL_AABB_ROOM_FRACTION
+    )
+
+
 def _synthetic_from_gt(
     gt: GTScene, pad: float = 1.5, *, wall_cells: set[tuple[int, int]] | None = None
 ) -> SyntheticScene:
@@ -98,16 +148,24 @@ def _synthetic_from_gt(
     realism) additionally stamps interior walls derived off the scene's
     ``traversable_area.ply`` (see :func:`_scene_wall_cells`) — ``None`` reproduces the
     old boundary-only behaviour (object obstacles + outer boundary, no interior walls).
+
+    Room-scale architectural AABBs (issue #53 — see
+    :data:`ARCHITECTURAL_AABB_ROOM_FRACTION`) are NOT stamped as solid boxes: the raw
+    box is a VLA-3D bounding-box-of-an-aggregate, not the real thin element, and
+    stamping it solid seals interior area the room-scale box only happens to cover.
     """
-    x0, y0, x1, y1 = _gt_footprint_bounds(gt, pad)
+    x0, y0, x1, y1 = _gt_footprint_bounds(gt, 0.0)
+    room_w, room_h = x1 - x0, y1 - y0
 
     sc = SyntheticScene(0, extra_wall_cells=wall_cells)
     # Shift into non-negative coords is unnecessary — Room accepts arbitrary bounds.
-    sc.rooms = [Room(x0, y0, x1, y1)]
+    sc.rooms = [Room(x0 - pad, y0 - pad, x1 + pad, y1 + pad)]
     sc._split_x = None
     sc.doorway = None
     sc.objects = []
     for rec in gt.instances:
+        if _is_architectural_room_scale_aabb(rec.aabb_min, rec.aabb_max, room_w, room_h):
+            continue
         cx = float((rec.aabb_min[0] + rec.aabb_max[0]) / 2)
         cy = float((rec.aabb_min[1] + rec.aabb_max[1]) / 2)
         sx = float(max(rec.aabb_max[0] - rec.aabb_min[0], 0.05))
