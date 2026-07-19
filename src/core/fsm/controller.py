@@ -28,6 +28,7 @@ latches the first receipt and ignores the 1 Hz republish of the same text (upstr
 """
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
@@ -111,6 +112,11 @@ ExploreFn = Callable[[RobotIO, object | None, WorldView], None]
 VerifyFn = Callable[[RobotIO, object | None, WorldView], object | None]
 ProbeFn = Callable[[RobotIO], WorldView]
 
+# Optional injected logger callback (issue #60): (level, message) -> None. level is
+# "info" (state transitions) or "warn" (a swallowed exception in a _safe_* seam).
+# Default None preserves the original total silence (pure-core tests stay byte-identical).
+LogFn = Callable[[str, str], None]
+
 
 class QuestionController:
     """Drives one question end-to-end. tick(io) is called externally at ~5 Hz."""
@@ -126,6 +132,7 @@ class QuestionController:
         events: EventLog | None = None,
         forced_assembly_s: float = DEFAULT_FORCED_ASSEMBLY_S,
         watchdog_floor_s: float = DEFAULT_WATCHDOG_FLOOR_S,
+        logger: LogFn | None = None,
     ) -> None:
         self._parse = parse
         self._explore = explore
@@ -133,6 +140,10 @@ class QuestionController:
         self._probe = probe
         self.floors = floors if floors is not None else FloorAnswers()
         self.events = events if events is not None else EventLog()
+        # Runtime observability (issue #60): None (default) is total silence, matching the
+        # pre-#60 behaviour exactly, so pure-core tests stay byte-identical without a logger.
+        self._logger = logger
+        self._swallow_counts: dict[str, int] = {}
         # Answer gates the budget will use (pulled in from the interface constants to hedge
         # the evaluator-clock skew; see core.fsm.budget). Kept as controller params so a
         # launch/config layer can override them from measured Ubuntu-gate skew.
@@ -160,10 +171,33 @@ class QuestionController:
         t = self.budget.elapsed() if self.budget is not None else 0.0
         self.events.record(t, self.state.value, event, detail)
 
+    def _emit(self, level: str, msg: str) -> None:
+        """Forward a line to the injected logger callback, if any (issue #60)."""
+        if self._logger is not None:
+            self._logger(level, msg)
+
+    def _note_swallowed(self, seam: str, exc: BaseException) -> None:
+        """Record a swallowed exception from a _safe_* seam (issue #60).
+
+        Logs the first occurrence per seam with a full traceback, then every 50th repeat
+        (count kept per seam) so a persistently failing seam does not silently vanish nor
+        spam the log every tick.
+        """
+        n = self._swallow_counts.get(seam, 0) + 1
+        self._swallow_counts[seam] = n
+        if n == 1 or n % 50 == 0:
+            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            self._emit(
+                "warn",
+                f"seam {seam!r} swallowed exception (occurrence {n}): {exc!r}\n{tb}",
+            )
+
     def _to(self, state: State, why: str = "") -> None:
         if state is self.state:
             return
-        self._log("transition", f"{self.state.value}->{state.value} {why}".strip())
+        line = f"{self.state.value}->{state.value} {why}".strip()
+        self._log("transition", line)
+        self._emit("info", line)
         self.state = state
 
     # ------------------------------------------------------------------ intake
@@ -203,7 +237,7 @@ class QuestionController:
                 return  # still idle, no question yet
 
         # From here budget/ledger exist. Refresh world + floors every tick.
-        self.world = _safe_probe(self._probe, io)
+        self.world = _safe_probe(self._probe, io, self._note_swallowed)
         self.floors.update(self.world.scene, self.plan, self.world.partial)
 
         # WATCHDOG overlay — checked before normal state work.
@@ -226,7 +260,7 @@ class QuestionController:
     # ------------------------------------------------------------------ states
     def _tick_parsing(self, io: RobotIO) -> None:
         if self.plan is None and self.ledger is not None and self.ledger.allow("parse"):
-            plan = _safe_call(self._parse, self.question)
+            plan = _safe_call(self._parse, self.question, on_error=self._note_swallowed)
             self.ledger.record("parse", 0.0, "api")
             if plan is not None:
                 self.plan = plan
@@ -254,7 +288,7 @@ class QuestionController:
             self._to(State.EXPLORE_EXECUTE, "orientation window closed")
 
     def _tick_explore(self, io: RobotIO) -> None:
-        _safe_explore(self._explore, io, self.plan, self.world)
+        _safe_explore(self._explore, io, self.plan, self.world, self._note_swallowed)
         if self._early_answer_ready():
             self._to(State.VERIFY, "early-answer gate open")
             return
@@ -264,7 +298,7 @@ class QuestionController:
     def _tick_verify(self, io: RobotIO) -> None:
         ans = None
         if self.ledger is not None and self.ledger.allow("verification"):
-            ans = _safe_verify(self._verify, io, self.plan, self.world)
+            ans = _safe_verify(self._verify, io, self.plan, self.world, self._note_swallowed)
             self.ledger.record("verification", 0.0, "api")
         if ans is not None:
             self._pending_answer = ans
@@ -305,11 +339,11 @@ class QuestionController:
         every tick) remains the hard backstop: if the drive hangs, the >=540 s floor forces
         DONE regardless — this state cannot shadow or delay it.
         """
-        _safe_explore(self._explore, io, self.plan, self.world)
+        _safe_explore(self._explore, io, self.plan, self.world, self._note_swallowed)
         # Re-read the world AFTER driving this tick so completion is observed the moment it
         # happens (the top-of-tick probe reflects the PRE-drive state), rather than lagging a
         # tick and emitting one crumb past arrival.
-        self.world = _safe_probe(self._probe, io)
+        self.world = _safe_probe(self._probe, io, self._note_swallowed)
         if self.world.drive_complete:
             self._to(State.DONE, "route drive complete")
 
@@ -433,30 +467,37 @@ def _dispatch(io: RobotIO, ans: object) -> bool:
     return False  # unrecognized type: caller discards and falls back to the floor
 
 
-def _safe_probe(probe: ProbeFn, io: RobotIO) -> WorldView:
+def _safe_probe(probe: ProbeFn, io: RobotIO, on_error=None) -> WorldView:
     try:
         wv = probe(io)
         return wv if isinstance(wv, WorldView) else WorldView()
-    except Exception:
+    except Exception as exc:
+        if on_error is not None:
+            on_error("probe", exc)
         return WorldView()
 
 
-def _safe_call(fn, *args):
+def _safe_call(fn, *args, on_error=None):
     try:
         return fn(*args)
-    except Exception:
+    except Exception as exc:
+        if on_error is not None:
+            on_error("parse", exc)
         return None
 
 
-def _safe_explore(fn: ExploreFn, io: RobotIO, plan, world) -> None:
+def _safe_explore(fn: ExploreFn, io: RobotIO, plan, world, on_error=None) -> None:
     try:
         fn(io, plan, world)
-    except Exception:
-        pass
+    except Exception as exc:
+        if on_error is not None:
+            on_error("explore", exc)
 
 
-def _safe_verify(fn: VerifyFn, io: RobotIO, plan, world):
+def _safe_verify(fn: VerifyFn, io: RobotIO, plan, world, on_error=None):
     try:
         return fn(io, plan, world)
-    except Exception:
+    except Exception as exc:
+        if on_error is not None:
+            on_error("verify", exc)
         return None
