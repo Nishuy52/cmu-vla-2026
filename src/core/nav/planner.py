@@ -21,6 +21,7 @@ import math
 import numpy as np
 
 from core.geometry.primitives import usable_gate_point
+from core.nav.breadcrumbs import REACH_M
 from core.nav.costmap import Costmap, _point_segment_dist
 
 # --------------------------------------------------------------------------- tunables
@@ -36,6 +37,17 @@ PINCH_CORRIDOR_HALF_W_M: float = 0.5  # half-width of the forced corridor throug
 # past the cap, `plan_through` falls back to the pre-#54 behaviour (leg unreachable).
 MAX_PINCH_RELAX_ROUNDS: int = 4
 PINCH_RELAX_GROWTH: float = 1.75  # disc growth multiplier applied each relax round
+# issue #79 (reinstating the #77b dry attempt): once a corridor_between leg's mandatory
+# gate-crossing segment lands ON the gate line (`mid`/`usable_gate_point`, by
+# construction), a short straight hop PAST the line along the gate's own normal makes
+# the leg's own waypoint-of-record sit strictly on the far side -- so ordinary
+# proximity-based dwell release (`BreadcrumbFollower`'s existing REACH_M mechanism)
+# can only fire once the driven pose is itself past the line, which geometrically
+# guarantees the trajectory crossed it en route. Two candidate margins, widest first;
+# `REACH_M` (imported from `core.nav.breadcrumbs`, no import cycle -- breadcrumbs
+# imports nothing from planner) sets the scale so the extension reliably clears the
+# follower's own reach radius.
+GATE_CROSSING_MARGINS_M: tuple[float, ...] = (REACH_M + 0.5, REACH_M + 0.2)
 
 _DIAG = math.sqrt(2.0)
 _STEPS = (
@@ -289,6 +301,132 @@ def _raw_obstacle_blocked_xy(costmap: Costmap, pt) -> bool:
     return bool(costmap.raw_blocked[r, c])
 
 
+def _gate_extension_keeps_route_planned(
+    costmap: Costmap,
+    candidate: tuple[float, float],
+    next_leg: tuple[str, object] | None,
+    gate: tuple[tuple[float, float], tuple[float, float]],
+    *,
+    unknown_cost_mult: float,
+    pinch_disc_m: float,
+    pinch_corridor_half_w_m: float,
+) -> bool:
+    """One-leg lookahead safety guard (issue #77b dry attempt, reused for #79).
+
+    Before committing a goto/via_near leg to a pinch-overlay gate crossing, verify
+    the VERY NEXT leg (if any) stays reachable from the candidate point ``plan_through``
+    is about to commit to — either directly, or via the same gate's own pinch overlay
+    (the next leg gets no special help here beyond what ``plan_through`` would give it
+    on its own turn). Necessary because pushing this leg across the gate could
+    otherwise turn an route that was fine at the PREVIOUS leg boundary into a dead end
+    for the one immediately following. No next leg (this is the route's last leg)
+    always passes — nothing downstream to strand.
+    """
+    if next_leg is None:
+        return True
+    next_kind, next_geom = next_leg
+    if next_kind == "corridor_between":
+        g0, g1 = next_geom  # type: ignore[misc]
+        raw_mid = ((g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0)
+        nudged = usable_gate_point(
+            np.asarray(g0, dtype=float),
+            np.asarray(g1, dtype=float),
+            np.asarray(raw_mid, dtype=float),
+            lambda pt: _raw_obstacle_blocked_xy(costmap, pt),
+        )
+        target = (float(nudged[0]), float(nudged[1]))
+    else:
+        target = next_geom  # type: ignore[assignment]
+    if astar(costmap, candidate, target, unknown_cost_mult=unknown_cost_mult) is not None:
+        return True
+    pinch = _pinch_costmap(
+        costmap,
+        gate,
+        pinch_disc_m=pinch_disc_m,
+        pinch_corridor_half_w_m=pinch_corridor_half_w_m,
+        start_xy=candidate,
+    )
+    return astar(pinch, candidate, target, unknown_cost_mult=unknown_cost_mult) is not None
+
+
+def _raw_segment_clear(
+    costmap: Costmap, p0: tuple[float, float], p1: tuple[float, float]
+) -> bool:
+    """True if the straight hop ``p0``->``p1`` never touches a genuine (uninflated)
+    obstacle cell (issue #79, reinstating the #77b dry attempt).
+
+    Samples at half the grid resolution and tests ``_raw_obstacle_blocked_xy`` at each
+    sample -- same raw-obstacle discipline as that helper (issue #63): the vehicle's own
+    inflation halo routinely boxes in the cells right around a just-threaded gate, the
+    same reason `_pinch_costmap`'s start-disc exemption exists, so gating this short hop
+    on the INFLATED costmap would reject genuinely open floor.
+    """
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    dist = math.hypot(dx, dy)
+    if dist < 1e-9:
+        return not _raw_obstacle_blocked_xy(costmap, p0)
+    step = max(costmap.cell_m * 0.5, 1e-6)
+    n = max(1, int(math.ceil(dist / step)))
+    for i in range(n + 1):
+        t = i / n
+        pt = (p0[0] + dx * t, p0[1] + dy * t)
+        if _raw_obstacle_blocked_xy(costmap, pt):
+            return False
+    return True
+
+
+def _gate_crossing_extension(
+    costmap: Costmap,
+    leg_start: tuple[float, float],
+    gate: tuple[tuple[float, float], tuple[float, float]],
+    seg_end: tuple[float, float],
+    next_leg: tuple[str, object] | None,
+    *,
+    unknown_cost_mult: float,
+    pinch_disc_m: float,
+    pinch_corridor_half_w_m: float,
+) -> tuple[float, float] | None:
+    """Short straight hop past a just-threaded gate's line (issue #79, reinstating the
+    #77b dry attempt's ``_gate_crossing_extension``).
+
+    ``seg_end`` (the corridor leg's own mandatory gate-crossing segment's final vertex,
+    on/at the line by construction) is pushed along the gate's own NORMAL, oriented away
+    from ``leg_start``'s approach side, at each of ``GATE_CROSSING_MARGINS_M`` in turn
+    (widest first) -- accepting the first candidate with clear raw floor (`
+    _raw_segment_clear`) AND that keeps the very next leg reachable
+    (`_gate_extension_keeps_route_planned`, issue #77b's lookahead guard: without it, an
+    ordinary goto leg immediately after could be stranded by pushing further across
+    first -- issue #79 gives goto/via_near legs their own pinch fallback specifically so
+    this guard can pass for the cases it used to reject). Returns ``None`` (no
+    extension -- caller keeps ``seg`` exactly as planned) if no margin qualifies.
+    """
+    g0, g1 = gate
+    dx, dy = g1[0] - g0[0], g1[1] - g0[1]
+    dlen = math.hypot(dx, dy)
+    if dlen < 1e-9:
+        return None
+    nx, ny = -dy / dlen, dx / dlen
+    # orient the normal continuing the leg's own approach direction (away from
+    # `leg_start`'s side of the gate), not backward into it.
+    if (seg_end[0] - leg_start[0]) * nx + (seg_end[1] - leg_start[1]) * ny < 0:
+        nx, ny = -nx, -ny
+    for margin in GATE_CROSSING_MARGINS_M:
+        candidate = (seg_end[0] + nx * margin, seg_end[1] + ny * margin)
+        if not _raw_segment_clear(costmap, seg_end, candidate):
+            continue
+        if _gate_extension_keeps_route_planned(
+            costmap,
+            candidate,
+            next_leg,
+            gate,
+            unknown_cost_mult=unknown_cost_mult,
+            pinch_disc_m=pinch_disc_m,
+            pinch_corridor_half_w_m=pinch_corridor_half_w_m,
+        ):
+            return candidate
+    return None
+
+
 def free_space_via_point(
     costmap: Costmap,
     anchor_xy: tuple[float, float],
@@ -423,7 +561,11 @@ def plan_through(
     calibration seams for ``nav.unknown_cost_mult`` / ``nav.pinch_disc_m`` /
     ``nav.pinch_corridor_half_w_m``; defaults reproduce today's behaviour. The pinch
     overlay is engaged ONLY as a fallback for a ``corridor_between`` leg whose direct
-    A* plan misses the gate — open (non-corridor) legs never see it.
+    A* plan misses the gate. A later ``goto``/``via_near`` leg gets a narrower version
+    of the same fallback (issue #79): ONLY when its own direct A* is wholly unreachable
+    AND this call has already threaded a gate, retried once through THAT gate's pinch
+    overlay, and only committed if the very next leg stays reachable afterward — never
+    a preference over the direct route.
 
     Returns the concatenated world-frame path, or None if any leg is unreachable.
 
@@ -438,7 +580,13 @@ def plan_through(
     full: list[tuple[float, float]] = [start_xy]
     leg_bounds: list[int] = []
     cur = start_xy
-    for kind, geom in legs:
+    # issue #79: the most recently threaded gate (raw endpoints), so a LATER goto/
+    # via_near leg whose direct route needs to re-cross it can get the same pinch-
+    # overlay help corridor_between legs already have. `None` until this call threads
+    # its first gate; persists across subsequent legs (any of them may need to
+    # re-cross it), and is overwritten whenever a new corridor_between leg threads.
+    last_gate: tuple[tuple[float, float], tuple[float, float]] | None = None
+    for _leg_idx, (kind, geom) in enumerate(legs):
         if kind == "corridor_between":
             gate = geom  # type: ignore[assignment]
             g0, g1 = gate  # type: ignore[misc]
@@ -554,12 +702,64 @@ def plan_through(
                 seg = pinch_seg
                 if seg is None or not path_crosses_gate(seg, gate):  # type: ignore[arg-type]
                     return (None, []) if record_leg_bounds else None
+            # issue #79: this leg is now verified to have threaded `gate` (either the
+            # direct segment crossed it, or the pinch fallback above did) -- remember
+            # it so a later goto/via_near leg needing to re-cross gets the same help.
+            last_gate = gate  # type: ignore[assignment]
+            # issue #79 (reinstating the #77b dry attempt): the leg's own
+            # waypoint-of-record (`seg[-1]`) sits ON the gate line by construction --
+            # push it a short hop past, when a clear raw hop exists and doing so does
+            # not strand the very next leg. A no-op (route unchanged) whenever no
+            # margin qualifies.
+            _next_leg = legs[_leg_idx + 1] if _leg_idx + 1 < len(legs) else None
+            _ext = _gate_crossing_extension(
+                costmap,
+                cur,
+                gate,  # type: ignore[arg-type]
+                seg[-1],
+                _next_leg,
+                unknown_cost_mult=unknown_cost_mult,
+                pinch_disc_m=pinch_disc_m,
+                pinch_corridor_half_w_m=pinch_corridor_half_w_m,
+            )
+            if _ext is not None:
+                seg = list(seg) + [_ext]
             full.extend(seg[1:])
             cur = full[-1]
             leg_bounds.append(len(full) - 1)
         else:  # goto / via_near
             pt = geom  # type: ignore[assignment]
             seg = astar(costmap, cur, pt, unknown_cost_mult=unknown_cost_mult)  # type: ignore[arg-type]
+            # issue #79: direct astar found no route at all -- if this call has already
+            # threaded a gate, the target may legitimately require re-crossing it (the
+            # goto's own goal sits on the far side of a gate the route already threaded
+            # for an earlier leg). Only engages when the direct route is WHOLLY
+            # unreachable (never a preference over the direct route -- matches the #54
+            # nudge-guard discipline this design explicitly reuses), and only commits
+            # if the very next leg stays reachable from `pt` afterward (the #77b
+            # lookahead guard), so this can't turn a fine route into a dead end one
+            # leg later.
+            if seg is None and last_gate is not None:
+                pinch = _pinch_costmap(
+                    costmap,
+                    last_gate,
+                    pinch_disc_m=pinch_disc_m,
+                    pinch_corridor_half_w_m=pinch_corridor_half_w_m,
+                    start_xy=cur,
+                )
+                attempt = astar(pinch, cur, pt, unknown_cost_mult=unknown_cost_mult)  # type: ignore[arg-type]
+                if attempt is not None:
+                    next_leg = legs[_leg_idx + 1] if _leg_idx + 1 < len(legs) else None
+                    if _gate_extension_keeps_route_planned(
+                        costmap,
+                        pt,  # type: ignore[arg-type]
+                        next_leg,
+                        last_gate,
+                        unknown_cost_mult=unknown_cost_mult,
+                        pinch_disc_m=pinch_disc_m,
+                        pinch_corridor_half_w_m=pinch_corridor_half_w_m,
+                    ):
+                        seg = attempt
             if seg is None:
                 return (None, []) if record_leg_bounds else None
             full.extend(seg[1:])
