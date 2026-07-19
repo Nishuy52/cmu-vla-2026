@@ -622,13 +622,14 @@ class InstructionHead:
         if any(l.geom is None for l in prefix):
             return
         legs = [self._leg_tuple(l) for l in prefix]
-        path = plan_through(
+        path, leg_bounds = plan_through(
             self._costmap,
             start_xy,
             legs,
             unknown_cost_mult=self.unknown_cost_mult,
             pinch_disc_m=self.pinch_disc_m,
             pinch_corridor_half_w_m=self.pinch_corridor_half_w_m,
+            record_leg_bounds=True,
         )
         if path is None:
             # Unreachable with the hard capsules in place: drive to the nearest legal
@@ -637,8 +638,16 @@ class InstructionHead:
             # straight segment, which could cut through a hard capsule (the very
             # violation the capsule exists to prevent).
             path = self._recover_path(start_xy, prefix)
+            # Issue #74: the recovery path collapses the ordered legs into a single
+            # best-effort segment to the nearest legal point — it no longer threads
+            # each leg's own goal, so there is nothing for leg-boundary hard-stops to
+            # protect (and capping crumb selection at a leg-goal index that isn't
+            # actually ON this path would just wedge the follower for no benefit).
+            leg_bounds = []
         self._terminal_xy = path[-1]
-        self._follower = BreadcrumbFollower(path=path, costmap=self._costmap)
+        self._follower = BreadcrumbFollower(
+            path=path, costmap=self._costmap, leg_goal_indices=leg_bounds
+        )
         self._driven_prefix = prefix_len
 
     def _recover_path(
