@@ -676,26 +676,6 @@ class InstructionHead:
                 return False
         return True
 
-    def avoid_nouns(self) -> list[str]:
-        """All distinct nouns of avoid specs (frontier-affinity bias, IF-F5).
-
-        Exposed so exploration biases toward avoid anchors too — an ungrounded avoid
-        anchor is as much a reason to keep exploring as an ungrounded leg anchor.
-        """
-        out: list[str] = []
-        if self.plan is None:
-            return out
-        for spec in self.plan.avoid:
-            anchors: list[Anchor] = []
-            if spec.between is not None:
-                anchors.extend(spec.between)
-            if spec.near is not None:
-                anchors.append(spec.near)
-            for a in anchors:
-                if a.noun and a.noun not in out:
-                    out.append(a.noun)
-        return out
-
     # ------------------------------------------------------------------ replanning
     def _can_replan(self) -> bool:
         return self._replans < MAX_REPLANS_PER_QUESTION
@@ -887,41 +867,6 @@ class InstructionHead:
                 g = leg.geom
                 return g[1] if isinstance(g[0], tuple) else g
         return None
-
-    def next_noun_affinity_target(self) -> str | None:
-        """The noun of the earliest still-ungrounded leg (interleaved explore bias)."""
-        for leg in self._legs:
-            if not leg.grounded and leg.nouns:
-                return leg.nouns[0]
-        # No grounding attempted yet (empty scene at t=0): the plan's route still names
-        # the anchors we must explore toward, so bias toward the first leg's noun (H3b).
-        if not self._legs and self.plan is not None and self.plan.route:
-            for leg in self.plan.route:
-                if leg.anchors and leg.anchors[0].noun:
-                    return leg.anchors[0].noun
-        return None
-
-    def ungrounded_nouns(self) -> list[str]:
-        """All distinct nouns of not-yet-grounded legs (frontier affinity bias, H3b).
-
-        Before any grounding attempt (empty ``_legs``) this is every route anchor noun,
-        so exploration is biased from the very first tick against an empty scene.
-        """
-        out: list[str] = []
-        if not self._legs:
-            if self.plan is not None:
-                for leg in self.plan.route:
-                    for a in leg.anchors:
-                        if a.noun and a.noun not in out:
-                            out.append(a.noun)
-            return out
-        for leg in self._legs:
-            if leg.grounded:
-                continue
-            for n in leg.nouns:
-                if n and n not in out:
-                    out.append(n)
-        return out
 
     def drive_complete(self) -> bool:
         """True once the IF drive has nothing left to do (IF-F4 continue-drive).

@@ -218,15 +218,6 @@ def test_first_anchor_pt_reported():
     assert pt is not None and len(pt) == 2
 
 
-def test_next_noun_affinity_target():
-    sc, idx = _if_scene()
-    # sofa present, unicorn absent -> affinity should target the ungrounded noun
-    head = InstructionHead(plan=instruction_plan([_goto("sofa"), _goto("unicorn")]))
-    io = _DriveIO(sc)
-    head.advance(io, idx)
-    assert head.next_noun_affinity_target() == "unicorn"
-
-
 # --------------------------------------------------------------------------- driving
 
 

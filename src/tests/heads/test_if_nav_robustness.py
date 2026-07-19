@@ -154,14 +154,6 @@ def test_avoid_commit_forced_under_budget_pressure():
     assert inst._follower is not None, "budget pressure commits the route despite the gap"
 
 
-def test_avoid_nouns_exposed_for_affinity_bias():
-    """The head exposes avoid nouns so exploration biases toward avoid anchors too (IF-F5)."""
-    route = [_goto("sofa")]
-    avoid = [AvoidSpec(near=Anchor(noun="tv"))]
-    inst = InstructionHead(plan=instruction_plan(route, avoid=avoid))
-    assert inst.avoid_nouns() == ["tv"]
-
-
 # --------------------------------------------------------------------------- IF-F5 tripwire
 def test_capsule_breach_mid_drive_triggers_stop_and_replan():
     """A driven pose that ENTERS a stamped avoid capsule mid-route trips the runtime
