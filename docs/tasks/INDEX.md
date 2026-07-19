@@ -62,3 +62,9 @@
   failures via ColorBin RGB + luminance/dominance salience knobs
   (#11/#12, numerical 13/15 → 15/15, OR/IF byte-identical,
   verifier-CONFIRMED). Follow-ups filed: #20, #21.
+- **T14** if-wall-realism — derive interior walls for the IF mirror
+  costmap from each scene's `traversable_area.ply` (mapped via the
+  scene's fitted sim->object frame, flag-gated `--no-walls`); IF
+  headline 0.117 → 0.100 (one flip, marginal-fit scene), numerical
+  15/15 and OR 6/6 unchanged; livingroom_3 frame-fit-unfittable
+  status re-confirmed (data defect, not a code bug).

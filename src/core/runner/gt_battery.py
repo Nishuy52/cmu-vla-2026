@@ -42,7 +42,7 @@ from core.groundtruth import scoring as S
 from core.groundtruth.loader import GTScene, load_scene
 from core.interfaces import QType, WaypointCmd
 from core.mocks.mock_io import FakeClock, MockRobotIO
-from core.mocks.synthetic_scene import Room, SyntheticScene
+from core.mocks.synthetic_scene import FLOOR_SPACING, Room, SyntheticScene
 from core.perception.scene_index import BasicSceneIndex
 from core.runner.provenance import collect_provenance
 
@@ -56,6 +56,14 @@ DEFAULT_OUT_ROOT = _SRC.parent / "reports"
 #: questions.pdf text layer — the PRIMARY numerical yardstick, replacing the
 #: pipeline-self-consistency proxy. Absent file -> battery still runs, true fields null.
 DEFAULT_ANSWERS = _SRC.parent / "docs" / "gt_answers_numerical.json"
+#: Root holding, per scene, ``<scene>/<scene>/traversable_area.ply`` — the ROS2/sim-side
+#: traversable-floor mesh used to derive interior walls for the IF mirror costmap
+#: (IF-F2 wall realism; see ``_scene_wall_cells``). Not part of the VLA-3D Unity root
+#: (which ships only per-region AABBs, no mesh) — a sibling dataset in the same sim/
+#: trajectory frame as ``trajectory_qN.ply``, so it needs the same sim->object
+#: :class:`~core.groundtruth.scoring.Frame2D` fit before it can be rasterized into the
+#: object-frame costmap.
+DEFAULT_UNITY_SCENES_ROS2_ROOT = _SRC.parent / "data" / "unity_scenes_ros2"
 
 # The instruction-following trajectory files sit at questions/<scene>/trajectory_q{4,5}.ply.
 # questions.json order is 1 numerical, 2 object_reference, 2 instruction_following, so the
@@ -68,23 +76,32 @@ _BATTERY_TICK_HZ = 1.0
 # --------------------------------------------------------------------------- scene mirror
 
 
-def _synthetic_from_gt(gt: GTScene, pad: float = 1.5) -> SyntheticScene:
-    """Build a SyntheticScene that mirrors the GT AABBs (for the IF costmap).
-
-    One room bounding all GT footprints (plus padding); one box per GT instance at its
-    AABB footprint centre + size. This gives the instruction head a terrain/costmap
-    consistent with the geometry the heads resolve against. Region/room walls are not
-    reproduced — the challenge trajectories are open-floor paths and the costmap only
-    needs object obstacles + an outer boundary.
-    """
+def _gt_footprint_bounds(gt: GTScene, pad: float) -> tuple[float, float, float, float]:
+    """The mirror costmap's outer rectangle: GT instance AABBs' footprint + ``pad``."""
     mins = np.array([r.aabb_min for r in gt.instances])
     maxs = np.array([r.aabb_max for r in gt.instances])
     x0 = float(mins[:, 0].min()) - pad
     y0 = float(mins[:, 1].min()) - pad
     x1 = float(maxs[:, 0].max()) + pad
     y1 = float(maxs[:, 1].max()) + pad
+    return x0, y0, x1, y1
 
-    sc = SyntheticScene(0)
+
+def _synthetic_from_gt(
+    gt: GTScene, pad: float = 1.5, *, wall_cells: set[tuple[int, int]] | None = None
+) -> SyntheticScene:
+    """Build a SyntheticScene that mirrors the GT AABBs (for the IF costmap).
+
+    One room bounding all GT footprints (plus padding); one box per GT instance at its
+    AABB footprint centre + size. This gives the instruction head a terrain/costmap
+    consistent with the geometry the heads resolve against. ``wall_cells`` (IF-F2 wall
+    realism) additionally stamps interior walls derived off the scene's
+    ``traversable_area.ply`` (see :func:`_scene_wall_cells`) — ``None`` reproduces the
+    old boundary-only behaviour (object obstacles + outer boundary, no interior walls).
+    """
+    x0, y0, x1, y1 = _gt_footprint_bounds(gt, pad)
+
+    sc = SyntheticScene(0, extra_wall_cells=wall_cells)
     # Shift into non-negative coords is unnecessary — Room accepts arbitrary bounds.
     sc.rooms = [Room(x0, y0, x1, y1)]
     sc._split_x = None
@@ -105,6 +122,116 @@ def _synthetic_from_gt(gt: GTScene, pad: float = 1.5) -> SyntheticScene:
     return sc
 
 
+#: Wall-cell grid resolution (m) — matches the terrain/occupancy lattice
+#: (``FLOOR_SPACING`` / ``core.nav.occupancy.CELL_M``) so derived wall cells line up
+#: exactly with the costmap cells the planner reasons over.
+_WALL_CELL_M: float = FLOOR_SPACING
+#: Dilation radius (cells) applied to traversable-point coverage before the complement
+#: is called "wall" — bridges point-cloud sampling gaps (the mesh is a scattered sample,
+#: not a filled raster) without erasing real doorways. At ``_WALL_CELL_M=0.1`` this is a
+#: 0.2 m pad from each covered cell; the shipped meshes sample at millimetre to
+#: low-centimetre spacing (dense), so this comfortably bridges sampling gaps while
+#: staying well under the width of a real doorway. Deliberately kept small: it is not
+#: sized to also absorb sim->object frame-fit residual (up to the 1.0 m alignment gate,
+#: see ``S._ALIGN_RESIDUAL_GATE_M``) — a scene whose fit is noisy can still wall off a
+#: real (but narrow) doorway near the fit's error radius. See the wall-realism note in
+#: the report for known caveats; ``--no-walls`` is the escape when a scene's costmap
+#: looks wrong.
+_WALL_DILATE_CELLS: int = 2
+
+
+def _traversable_ply_path(scene_name: str, root: os.PathLike | str | None = None) -> Path:
+    base = Path(root) if root is not None else DEFAULT_UNITY_SCENES_ROS2_ROOT
+    return base / scene_name / scene_name / "traversable_area.ply"
+
+
+def _derive_wall_cells(
+    traversable_xy: np.ndarray,
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    *,
+    cell_m: float = _WALL_CELL_M,
+    dilate_cells: int = _WALL_DILATE_CELLS,
+) -> set[tuple[int, int]]:
+    """Rasterize traversable-mesh XY points to the wall-cell lattice and return the
+    cells INSIDE ``[x0, x1] x [y0, y1]`` that are NOT covered (after dilation).
+
+    Pure geometry, no I/O — ``traversable_xy`` is already in the destination (object)
+    frame. Grid cells use the absolute ``round(coord / cell_m)`` lattice (see
+    ``SyntheticScene._in_extra_wall_cells``), so the returned set lines up with the
+    terrain grid without needing a shared origin.
+    """
+    ix0 = int(round(x0 / cell_m))
+    ix1 = int(round(x1 / cell_m))
+    iy0 = int(round(y0 / cell_m))
+    iy1 = int(round(y1 / cell_m))
+    nx = ix1 - ix0 + 1
+    ny = iy1 - iy0 + 1
+    if nx <= 0 or ny <= 0:
+        return set()
+
+    free = np.zeros((nx, ny), dtype=bool)
+    pts = np.asarray(traversable_xy, dtype=float)
+    if pts.size:
+        pix = np.round(pts[:, 0] / cell_m).astype(np.int64)
+        piy = np.round(pts[:, 1] / cell_m).astype(np.int64)
+        sel = (pix >= ix0) & (pix <= ix1) & (piy >= iy0) & (piy <= iy1)
+        free[pix[sel] - ix0, piy[sel] - iy0] = True
+
+    if dilate_cells > 0:
+        dilated = free.copy()
+        for dx in range(-dilate_cells, dilate_cells + 1):
+            for dy in range(-dilate_cells, dilate_cells + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                sx0, sx1 = max(0, -dx), nx - max(0, dx)
+                dx0, dx1 = max(0, dx), nx - max(0, -dx)
+                sy0, sy1 = max(0, -dy), ny - max(0, dy)
+                dy0, dy1 = max(0, dy), ny - max(0, -dy)
+                if sx1 <= sx0 or sy1 <= sy0:
+                    continue
+                dilated[dx0:dx1, dy0:dy1] |= free[sx0:sx1, sy0:sy1]
+        free = dilated
+
+    rows, cols = np.nonzero(~free)
+    return {(int(ix0 + r), int(iy0 + c)) for r, c in zip(rows.tolist(), cols.tolist())}
+
+
+def _scene_wall_cells(
+    gt: GTScene,
+    frame: "S.Frame2D | None",
+    *,
+    pad: float = 1.5,
+    unity_scenes_ros2_root: os.PathLike | str | None = None,
+) -> set[tuple[int, int]] | None:
+    """Derive interior-wall grid cells for ``gt``'s mirror costmap (IF-F2 wall realism).
+
+    Reads the scene's ``traversable_area.ply`` (sim/trajectory frame), maps it into the
+    object frame via the scene's fitted sim->object ``frame`` (the same
+    :class:`~core.groundtruth.scoring.Frame2D` the IF trajectory scoring uses), and
+    rasterizes the coverage complement inside the mirror costmap's outer rectangle
+    (:func:`_gt_footprint_bounds`) to wall cells (:func:`_derive_wall_cells`).
+
+    Returns ``None`` — the caller then reproduces the old boundary-only costmap — when
+    there is no fitted frame to align the mesh with (no IF question resolved a terminal
+    goal, or the scene is a confirmed frame-fit failure) or the scene ships no
+    ``traversable_area.ply``.
+    """
+    if frame is None:
+        return None
+    ply_path = _traversable_ply_path(gt.scene_name, unity_scenes_ros2_root)
+    if not ply_path.exists():
+        return None
+    pts = S.load_trajectory_ply(ply_path)
+    if pts.size == 0:
+        return None
+    mapped = frame.apply(pts[:, :2])
+    x0, y0, x1, y1 = _gt_footprint_bounds(gt, pad)
+    return _derive_wall_cells(mapped, x0, y0, x1, y1)
+
+
 _IF_MAX_BUILD_TICKS = 12  # ticks to let the instruction head ground legs + plan the route
 
 
@@ -115,6 +242,7 @@ def _drive_if_path(
     *,
     max_build_ticks: int = _IF_MAX_BUILD_TICKS,
     start_xy: tuple[float, float] | None = None,
+    wall_cells: set[tuple[int, int]] | None = None,
 ) -> np.ndarray:
     """Plan an instruction-following path over the GT scene and return it as (N, 2).
 
@@ -138,7 +266,7 @@ def _drive_if_path(
     if plan.qtype is not QType.INSTRUCTION_FOLLOWING or not plan.route:
         return np.empty((0, 2), dtype=float)
 
-    sc = _synthetic_from_gt(gt)
+    sc = _synthetic_from_gt(gt, wall_cells=wall_cells)
     clk = FakeClock(0.0)
     if start_xy is not None:
         start_x, start_y = float(start_xy[0]), float(start_xy[1])
@@ -196,6 +324,7 @@ def _run_instruction_head(
     *,
     start_xy: tuple[float, float] | None,
     max_build_ticks: int,
+    wall_cells: set[tuple[int, int]] | None = None,
 ):
     """Build a scene mirror + MockRobotIO and tick the InstructionHead until its route
     firms up. Returns ``(head, io, plan)`` (head is None when the question isn't IF)."""
@@ -206,7 +335,7 @@ def _run_instruction_head(
     if plan.qtype is not QType.INSTRUCTION_FOLLOWING or not plan.route:
         return None, None, plan
 
-    sc = _synthetic_from_gt(gt)
+    sc = _synthetic_from_gt(gt, wall_cells=wall_cells)
     clk = FakeClock(0.0)
     if start_xy is not None:
         start_x, start_y = float(start_xy[0]), float(start_xy[1])
@@ -231,6 +360,7 @@ def _drive_if_trajectory(
     *,
     max_build_ticks: int = _IF_MAX_BUILD_TICKS,
     start_xy: tuple[float, float] | None = None,
+    wall_cells: set[tuple[int, int]] | None = None,
 ) -> np.ndarray:
     """Simulate the DRIVEN trajectory (IF-F2), returning the pose stream as (N, 2).
 
@@ -265,7 +395,8 @@ def _drive_if_trajectory(
     ticking until the route is whole, which is exactly the general-case fidelity F2 wants.
     """
     head, io, plan = _run_instruction_head(
-        text, gt, idx, start_xy=start_xy, max_build_ticks=max_build_ticks
+        text, gt, idx, start_xy=start_xy, max_build_ticks=max_build_ticks,
+        wall_cells=wall_cells,
     )
     if head is None:
         return np.empty((0, 2), dtype=float)
@@ -617,18 +748,23 @@ def score_scene(
     answers: dict | None = None,
     drive_if: bool = True,
     no_spawn_hint: bool = False,
+    walls: bool = True,
+    unity_scenes_ros2_root: os.PathLike | str | None = None,
 ) -> list[GTQuestionScore]:
     """Score every question of one GT scene.
 
     ``no_spawn_hint`` (IF-F2 realism knob): when True, the IF planner spawns at the
     scene centroid instead of the GT trajectory's mapped start, so the exploration cost
     of *finding* the route from a neutral start is visible (eval never hands us the GT
-    start). The wall-realism alternative — adding real wall occupancy to the mirror
-    costmap — is NOT available: the VLA-3D region data ships only per-region AABBs (room
-    bounding boxes, overlapping, no door/passage geometry), so stamping region-boundary
-    walls would disconnect the free-space graph rather than model interior walls. This
-    is documented in the report header; the no-spawn-hint flag is the realism knob we
-    can honestly offer.
+    start).
+
+    ``walls`` (IF-F2 wall realism, on by default): the mirror costmap otherwise has
+    object obstacles + an outer boundary but no interior walls, so planned routes can
+    cut through where real walls would block them. When a per-scene sim->object frame
+    fit is available (below) we derive interior wall cells from the scene's
+    ``traversable_area.ply`` (see :func:`_scene_wall_cells`) and stamp them into the
+    mirror costmap for every IF question in the scene. ``walls=False`` reproduces the
+    old boundary-only costmap unconditionally (the ``--no-walls`` CLI escape).
     """
     idx = BasicSceneIndex(gt.instances)
     out: list[GTQuestionScore] = []
@@ -723,6 +859,23 @@ def score_scene(
         mapped = frame.apply(np.asarray([start_pt], dtype=float))[0]
         spawn_xy = (float(mapped[0]), float(mapped[1]))
 
+    # IF-F2 wall realism: derive interior wall cells once per scene (all IF questions in
+    # the scene share the mirror costmap) from the fitted sim->object frame above. None
+    # when disabled, no frame was fit, the fit is untrustworthy (residual past the same
+    # alignment gate that marks a scene's Frechet/coverage diagnostics unaligned — a
+    # scene we don't trust to score path SHAPE against isn't a frame we should trust to
+    # place WALLS with either; feeding it in anyway would rasterize the traversable mesh
+    # at the wrong spot and could wall off real floor), or the scene ships no traversable
+    # mesh — the planner then sees the old boundary-only costmap.
+    frame_for_walls = (
+        frame if residual is None or residual <= S._ALIGN_RESIDUAL_GATE_M else None
+    )
+    wall_cells = (
+        _scene_wall_cells(gt, frame_for_walls, unity_scenes_ros2_root=unity_scenes_ros2_root)
+        if walls
+        else None
+    )
+
     from core.parsing.regex_tier import parse_regex as _parse_regex_if
 
     for i, text in enumerate(if_texts):
@@ -750,7 +903,9 @@ def score_scene(
         # drive (constant-speed kinematic follower over the planned breadcrumbs), then
         # score ordered per-leg arrival + threading + avoid violations. The planned-path
         # Frechet/coverage are carried through the rubric as SECONDARY diagnostics only.
-        driven = _drive_if_trajectory(text, gt, idx, start_xy=spawn_xy)
+        driven = _drive_if_trajectory(
+            text, gt, idx, start_xy=spawn_xy, wall_cells=wall_cells
+        )
         leg_goals, corridor_gates, avoid_caps = _if_rubric_geometry(text, gt, idx)
         rub = S.score_instruction_rubric(
             driven,
@@ -804,10 +959,25 @@ def score_scene(
                 "frame fit unaligned — DATA-CONFIRMED unfittable (meth-F11): "
                 + _DATA_UNFITTABLE_IF_SCENES[gt.scene_name]
             )
+        # IF-F2 wall realism: note when walls were requested but unavailable, so a
+        # scene's costmap fidelity is visible from the report (not a silent fallback).
+        wall_note = ""
+        if walls and wall_cells is None:
+            if frame is None:
+                reason = "no fitted sim->object frame"
+            elif frame_for_walls is None:
+                reason = (
+                    f"frame fit unaligned (residual {residual:.2f} m > "
+                    f"{S._ALIGN_RESIDUAL_GATE_M:.1f} m gate)"
+                )
+            else:
+                reason = "no traversable_area.ply for scene"
+            wall_note = f"interior walls unavailable ({reason}); boundary-only costmap"
         detail = "; ".join(
             filter(
                 None,
-                [rub.note] + rub.threading_details + rub.avoid_details + [data_note],
+                [rub.note] + rub.threading_details + rub.avoid_details
+                + [data_note, wall_note],
             )
         )
         rec.note = detail
@@ -950,6 +1120,8 @@ def run_gt_battery(
     scenes: list[str] | None = None,
     drive_if: bool = True,
     no_spawn_hint: bool = False,
+    walls: bool = True,
+    unity_scenes_ros2_root: os.PathLike | str | None = None,
 ) -> tuple[list[GTQuestionScore], list[str]]:
     """Score every question whose scene folder is present under ``unity_root``.
 
@@ -983,6 +1155,8 @@ def run_gt_battery(
                 answers=answers,
                 drive_if=drive_if,
                 no_spawn_hint=no_spawn_hint,
+                walls=walls,
+                unity_scenes_ros2_root=unity_scenes_ros2_root,
             )
         )
     return scores, missing
@@ -1220,17 +1394,31 @@ def write_report(
         "diagnostics only — never the headline (they measure shape similarity to the "
         "reference PLY, which the challenge rubric does not score).\n"
     )
-    lines.append(
-        "> **Wall realism (IF-F2) — no usable wall source:** the mirror costmap used "
-        "for IF planning has object obstacles + an outer boundary but NO interior walls. "
-        "The VLA-3D region data ships only per-region AABBs (room bounding boxes, which "
-        "overlap and carry no door/passage geometry), so stamping region-boundary walls "
-        "would disconnect the free-space graph rather than model real interior walls. No "
-        "wall mesh is available, so none is faked. The realism knob offered instead is "
-        "`--no-spawn-hint` (spawn at the scene centroid instead of the GT-matched start), "
-        "which exposes the exploration cost eval imposes. Planned paths may still cut "
-        "through where walls are — read cross-room routes with that caveat.\n"
-    )
+    walls_disabled = argv is not None and "--no-walls" in argv
+    if walls_disabled:
+        lines.append(
+            "> **Wall realism (IF-F2) — disabled this run (`--no-walls`):** the mirror "
+            "costmap used for IF planning has object obstacles + an outer boundary but NO "
+            "interior walls, so planned paths may cut through where real walls are. Read "
+            "cross-room routes with that caveat. Interior walls CAN be derived from each "
+            "scene's `traversable_area.ply` (see the default-on note below) — this run "
+            "opted out.\n"
+        )
+    else:
+        lines.append(
+            "> **Wall realism (IF-F2) — interior walls derived from `traversable_area.ply` "
+            "(default on):** the VLA-3D region data ships only per-region AABBs (no "
+            "door/passage geometry), so those can't source real walls — but each scene's "
+            "`traversable_area.ply` (a floor-traversability point mesh in the sim/"
+            "trajectory frame) can. Its coverage is rasterized to the mirror costmap's grid "
+            "via the scene's fitted sim->object frame; grid cells inside the scene's outer "
+            "boundary that the mesh does NOT cover (after a small dilation to bridge "
+            "point-cloud sampling gaps) become OBSTACLE. A per-question row's note flags "
+            "`interior walls unavailable` when the scene had no fitted frame or no "
+            "`traversable_area.ply` to derive walls from — those fall back to the old "
+            "boundary-only costmap. `--no-walls` reproduces the old behaviour "
+            "unconditionally.\n"
+        )
 
     n, o, i = agg["numerical"], agg["object_reference"], agg["instruction_following"]
     method_str = ", ".join(
@@ -1352,6 +1540,17 @@ def main(argv: list[str] | None = None) -> int:
         help="IF realism knob: spawn at the scene centroid instead of the GT-matched "
              "start, so exploration cost from a neutral pose is visible (IF-F2).",
     )
+    ap.add_argument(
+        "--no-walls", action="store_true",
+        help="IF-F2 wall-realism escape: disable interior walls derived from each "
+             "scene's traversable_area.ply, reproducing the old boundary-only mirror "
+             "costmap (object obstacles + outer boundary, no interior walls).",
+    )
+    ap.add_argument(
+        "--unity-scenes-ros2-root", default=str(DEFAULT_UNITY_SCENES_ROS2_ROOT),
+        help="root holding <scene>/<scene>/traversable_area.ply, used to derive "
+             "interior walls (IF-F2 wall realism); ignored with --no-walls.",
+    )
     args = ap.parse_args(argv)
 
     scenes = [s.strip() for s in args.scenes.split(",")] if args.scenes else None
@@ -1365,6 +1564,8 @@ def main(argv: list[str] | None = None) -> int:
         scenes=scenes,
         drive_if=not args.no_drive_if,
         no_spawn_hint=args.no_spawn_hint,
+        walls=not args.no_walls,
+        unity_scenes_ros2_root=args.unity_scenes_ros2_root,
     )
     if not scores:
         print(f"gt_battery: no scenes found under {args.groundtruth} (missing={missing})")

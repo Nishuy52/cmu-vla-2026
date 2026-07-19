@@ -547,3 +547,157 @@ def test_write_report_stamps_default_calibration(tmp_path):
     # default calibration is stamped via collect_provenance's own fallback
     assert prov["calibration_sha1"] is not None
     assert prov["calibration"] is not None
+
+
+# --------------------------------------------------------------------------- IF-F2 walls
+# Interior-wall derivation off a scene's traversable_area.ply (mirror costmap otherwise
+# has object obstacles + an outer boundary but no interior walls, so planned routes can
+# cut through where real walls are). Pure-geometry rasterization tests need no dataset.
+
+
+def _grid_points(x0, x1, y0, y1, n=30):
+    xs = np.linspace(x0, x1, n)
+    ys = np.linspace(y0, y1, n)
+    gx, gy = np.meshgrid(xs, ys)
+    return np.column_stack([gx.ravel(), gy.ravel()])
+
+
+def test_derive_wall_cells_fully_covered_room_has_no_walls():
+    """A traversable mesh covering the whole outer rectangle yields zero wall cells."""
+    pts = _grid_points(0.05, 3.95, 0.05, 3.95)
+    walls = GB._derive_wall_cells(pts, 0.0, 0.0, 4.0, 4.0, cell_m=0.1, dilate_cells=2)
+    assert walls == set()
+
+
+def test_derive_wall_cells_blocks_solid_wall_keeps_doorway_open():
+    """A dividing wall band with a doorway gap: cells in the solid band are OBSTACLE,
+    cells at the doorway centre are NOT — the rasterization must not seal doorways."""
+    # Two 4x4 rooms separated by a 1 m wall band (x in [4, 5]) with a 0.9 m doorway gap
+    # at y in [1.55, 2.45].
+    pts = [_grid_points(0.05, 3.95, 0.05, 3.95), _grid_points(5.05, 8.95, 0.05, 3.95)]
+    pts.append(_grid_points(4.05, 4.95, 1.55, 2.45, n=10))
+    pts = np.vstack(pts)
+
+    walls = GB._derive_wall_cells(pts, 0.0, 0.0, 9.0, 4.0, cell_m=0.1, dilate_cells=2)
+
+    def cell(x, y):
+        return (round(x / 0.1), round(y / 0.1))
+
+    assert cell(4.5, 0.2) in walls, "solid wall band away from the doorway must block"
+    assert cell(4.5, 3.8) in walls, "solid wall band away from the doorway must block"
+    assert cell(4.5, 2.0) not in walls, "doorway centre must stay passable"
+
+
+def test_synthetic_scene_extra_wall_cells_mark_terrain_obstacle():
+    """SyntheticScene stamps extra_wall_cells as WALL_HEIGHT intensity in terrain_patch,
+    same as the existing boundary/doorway wall logic."""
+    from core.mocks.synthetic_scene import FLOOR_SPACING, Room, SyntheticScene, WALL_HEIGHT
+
+    ix, iy = round(2.0 / FLOOR_SPACING), round(2.0 / FLOOR_SPACING)
+    sc = SyntheticScene(0, extra_wall_cells={(ix, iy)})
+    sc.rooms = [Room(0, 0, 4, 4)]
+    sc._split_x = None
+    sc.doorway = None
+    sc.objects = []
+
+    patch = sc.terrain_patch()
+    pts = patch.points
+    near = pts[(np.abs(pts[:, 0] - 2.0) < 1e-6) & (np.abs(pts[:, 1] - 2.0) < 1e-6)]
+    assert near.shape[0] == 1
+    assert near[0, 3] == WALL_HEIGHT
+
+    # A cell well away from the marked wall cell and the border stays free.
+    away = pts[(np.abs(pts[:, 0] - 1.0) < 1e-6) & (np.abs(pts[:, 1] - 1.0) < 1e-6)]
+    assert away.shape[0] == 1
+    assert away[0, 3] == 0.0
+
+
+def test_drive_if_trajectory_routes_around_interior_wall():
+    """Feeding wall_cells that block the direct line between two GOTO legs forces the
+    planner around them — the driven path must not cross the blocked band, proving
+    wall_cells actually reaches the costmap the planner reasons over."""
+    from core.perception.scene_index import BasicSceneIndex
+    from core.mocks.synthetic_scene import FLOOR_SPACING
+
+    gt = _synthetic_gt_scene(
+        [
+            ("stool", -4.0, 0.0, 0.3, 0.4, 0.4, 0.6),
+            ("table", 4.0, 0.0, 0.4, 1.0, 1.0, 0.8),
+        ]
+    )
+    idx = BasicSceneIndex(gt.instances)
+    text = "Go to the stool and then go to the table."
+
+    # A solid wall band across x=0 (the straight-line path) spanning y in [-3, 3], with
+    # no gap — the vehicle should never end up inside the band.
+    wall_cells = set()
+    for x in np.arange(-0.3, 0.31, FLOOR_SPACING):
+        for y in np.arange(-3.0, 3.01, FLOOR_SPACING):
+            wall_cells.add((round(x / FLOOR_SPACING), round(y / FLOOR_SPACING)))
+
+    driven = GB._drive_if_trajectory(
+        gt=gt, idx=idx, text=text, start_xy=(-4.0, 0.0), wall_cells=wall_cells
+    )
+    assert driven.shape[0] > 2
+    inside_band = (np.abs(driven[:, 0]) <= 0.25) & (np.abs(driven[:, 1]) <= 2.95)
+    assert not inside_band.any(), "driven path crossed the interior wall band"
+
+
+def test_scene_wall_cells_none_without_frame():
+    """No fitted sim->object frame -> walls unavailable (old boundary-only fallback)."""
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="syn")
+    assert GB._scene_wall_cells(gt, None) is None
+
+
+def test_scene_wall_cells_none_without_ply(tmp_path):
+    """A fitted frame but no traversable_area.ply on disk -> walls unavailable."""
+    from core.groundtruth import scoring as S
+
+    gt = _synthetic_gt_scene(
+        [("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="no_such_scene_xyz"
+    )
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    assert (
+        GB._scene_wall_cells(gt, frame, unity_scenes_ros2_root=tmp_path) is None
+    )
+
+
+def test_score_scene_walls_false_skips_wall_derivation(monkeypatch):
+    """``walls=False`` (the --no-walls escape) never calls the wall-derivation path."""
+    calls = []
+    monkeypatch.setattr(
+        GB, "_scene_wall_cells", lambda *a, **k: calls.append(1) or None
+    )
+    gt = _synthetic_gt_scene(
+        [("stool", -4.0, 0.0, 0.0, 0.4, 0.4, 0.4), ("table", 4.0, 0.0, 0.0, 0.4, 0.4, 0.4)],
+        scene_name="syn",
+    )
+    GB.score_scene(gt, {"instruction_following": []}, walls=False)
+    assert calls == [], "_scene_wall_cells must not be called when walls=False"
+
+
+def test_cli_no_walls_flag_delegates(tmp_path, monkeypatch):
+    """``--no-walls`` reaches run_gt_battery as walls=False."""
+    seen = {}
+
+    def _fake_run(*args, **kwargs):
+        seen.update(kwargs)
+        return [], []
+
+    monkeypatch.setattr(GB, "run_gt_battery", _fake_run)
+    rc = GB.main(["--groundtruth", str(tmp_path), "--out", str(tmp_path), "--no-walls"])
+    assert rc == 1  # no scores from the stubbed run -> gt_battery reports none found
+    assert seen.get("walls") is False
+
+
+def test_cli_walls_default_on(tmp_path, monkeypatch):
+    """Without --no-walls, walls defaults True through the CLI."""
+    seen = {}
+
+    def _fake_run(*args, **kwargs):
+        seen.update(kwargs)
+        return [], []
+
+    monkeypatch.setattr(GB, "run_gt_battery", _fake_run)
+    GB.main(["--groundtruth", str(tmp_path), "--out", str(tmp_path)])
+    assert seen.get("walls") is True

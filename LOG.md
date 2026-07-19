@@ -940,3 +940,12 @@ SoC detector benchmarking (arch-F2).
 - (session 16b cont.) PR #22 reviewed via pr-review-toolkit (5 agents):
   no merge blockers; follow-up polish applied (86f0c41, fast tier 1100
   passed); architectural findings filed as #24-#27. PR ready to merge.
+
+## 2026-07-19 - task milestone (branch if1-walls, worktree)
+
+- Started + finished T14 if-wall-realism: derived interior walls for
+  the gt_battery IF mirror costmap from each scene's
+  `traversable_area.ply` (flag-gated, `--no-walls` escape). Record at
+  `docs/tasks/T14-if-wall-realism/`. Full battery re-run:
+  `reports/gt_battery_walls_2026-07-19/`. Fast + full (`-m ""`) test
+  gates green.
