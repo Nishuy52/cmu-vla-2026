@@ -36,6 +36,7 @@ import numpy as np
 from core.interfaces import RobotIO, WaypointCmd
 from core.geometry import toolbox as TB
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
+from core.groundtruth.arrival import NOMINAL_ARRIVAL_TOL_M
 from core.nav.breadcrumbs import BreadcrumbFollower
 from core.nav.costmap import Costmap
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
@@ -48,7 +49,24 @@ from core.plan_schema import Anchor, LegKind, Plan, Pred, RouteLeg, TargetSpec
 _LOG = logging.getLogger("core.heads.instruction")
 
 VIA_NEAR_OFFSET_M: float = 1.2  # fallback "near" offset if free-space placement fails
-ARRIVAL_TOL_M: float = 0.8  # within this of a leg goal -> arrived (mark progress)
+
+#: Within this of a leg goal -> arrived (mark progress).
+#:
+#: DERIVED, not asserted (issue #70): equals
+#: :data:`core.groundtruth.arrival.NOMINAL_ARRIVAL_TOL_M` --
+#: :func:`core.groundtruth.arrival.derived_arrival_tol_m` evaluated at that
+#: module's documented NOMINAL p95 fit residual. This constant is
+#: INTENTIONALLY COUPLED to :data:`core.groundtruth.scoring.LEG_ARRIVAL_TOL_M`
+#: (both derive from the same function; the battery scorer additionally
+#: recomputes a LIVE per-run value from its own scenes' fit residuals, which
+#: this head cannot do -- see the docstring of
+#: ``core.groundtruth.arrival`` for why the head freezes at a nominal residual
+#: instead of a live one). Kept as a plain float constant (not re-derived at
+#: import time from a live measurement) so the head stays ROS-free and
+#: dependency-light: it depends only on the small, pure-Python/numpy
+#: ``core.groundtruth.arrival`` module for this one constant, never on the
+#: GT-loading/scoring machinery itself.
+ARRIVAL_TOL_M: float = NOMINAL_ARRIVAL_TOL_M
 #: Standoff clearance (m) beyond a "near" anchor's footprint edge for the VIA_NEAR via
 #: placement. A "near" via should sit just clear of the object (about a vehicle radius),
 #: NOT a full 1.2 m away: the rubric credits a leg only when the driven pose comes within

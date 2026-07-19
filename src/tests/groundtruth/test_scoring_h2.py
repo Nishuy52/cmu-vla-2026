@@ -8,6 +8,8 @@ test over a hand-built GT scene (the constant-speed follower actually reaches th
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -18,6 +20,7 @@ from core.groundtruth.scoring import (
     ARRIVAL_RESAMPLE_STEP_M,
     _class_equal,
     _densify_polyline,
+    _is_pass_by_leg,
     score_instruction_rubric,
     score_numerical,
 )
@@ -63,9 +66,14 @@ def test_rubric_partial_credit_one_of_two_legs():
 def test_rubric_ordering_enforced_out_of_order_gets_partial():
     # Trajectory passes the SECOND goal first, then the first — order is violated, so
     # only one leg can count (whichever comes first in a monotone walk).
+    # Explicit tol=0.8 (issue #70: the DEFAULT tol is now the much larger derived
+    # nominal tolerance, ~1.75 m — big enough that both 2-m-apart goals below would
+    # be reachable from nearly anywhere on this short path, which would trivially
+    # satisfy ordering and defeat the point of this test). A small explicit tol
+    # isolates the ordering-cursor invariant under test from that default.
     traj = np.array([[3, 0], [2, 0], [1, 0]], dtype=float)
     goals = [("goto", (1.0, 0.0)), ("goto", (3.0, 0.0))]
-    r = score_instruction_rubric(traj, goals)
+    r = score_instruction_rubric(traj, goals, tol=0.8)
     # leg0 (goal 1,0) reached at index 2; leg1 (goal 3,0) must be reached at/after
     # index 3 — never — so only 1 in order.
     assert r.n_legs_reached_in_order == 1
@@ -344,10 +352,114 @@ def test_driven_trajectory_reaches_ordered_legs():
     gt = GTScene(scene_name="t", instances=insts, regions=[])
     idx = BasicSceneIndex(insts)
     q = "First go to the pole, then go to the table."
-    leg_goals, gates, caps, _ = B._if_rubric_geometry(q, gt, idx)
+    leg_goals, gates, caps, _, aabbs = B._if_rubric_geometry(q, gt, idx)
     assert [k for k, _ in leg_goals] == ["goto", "goto"]
     traj = B._drive_if_trajectory(q, gt, idx, start_xy=(6.0, -2.5))
     assert traj.shape[0] > 2  # a real motion stream, not a point
-    r = score_instruction_rubric(traj, leg_goals, corridor_gates=gates, avoid_capsules=caps)
+    r = score_instruction_rubric(
+        traj, leg_goals, corridor_gates=gates, avoid_capsules=caps,
+        leg_instance_aabbs=aabbs,
+    )
     assert r.n_legs_reached_in_order == 2
+    assert r.rubric_score == pytest.approx(1.0)
+
+
+# --------------------------------------------------------- stop vs pass-by (issue #70)
+
+
+def _aabb(cx: float, cy: float, hx: float, hy: float):
+    """A synthetic (aabb_min, aabb_max) footprint centred at (cx, cy)."""
+    return (
+        np.array([cx - hx, cy - hy, 0.0]),
+        np.array([cx + hx, cy + hy, 0.5]),
+    )
+
+
+def test_is_pass_by_leg_classification():
+    # via_near is ALWAYS pass-by, any position.
+    assert _is_pass_by_leg("via_near", 0, 1) is True
+    assert _is_pass_by_leg("via_near", 2, 3) is True  # even the last leg
+    # goto is pass-by unless it is the route's LAST leg.
+    assert _is_pass_by_leg("goto", 0, 3) is True
+    assert _is_pass_by_leg("goto", 1, 3) is True
+    assert _is_pass_by_leg("goto", 2, 3) is False  # terminal goto -> stop
+    assert _is_pass_by_leg("goto", 0, 1) is False  # single-leg route -> terminal
+    # corridor_between is always stop (out of scope for this issue's semantics).
+    assert _is_pass_by_leg("corridor_between", 0, 3) is False
+    assert _is_pass_by_leg("corridor_between", 2, 3) is False
+
+
+def test_pass_by_leg_widens_tolerance_by_instance_half_diagonal():
+    # Non-terminal goto (leg 1 of 3) at (5, 0) with a 2x2 m footprint (half-diag
+    # sqrt(8)/2 ~= 1.414 m). Base tol=0.5 m; the driven path passes 1.5 m off the
+    # goal -- inside the widened pass-by radius (1.914 m) but well outside the bare
+    # tol. Only widening the tolerance (not moving the goal point) explains a hit.
+    aabb = _aabb(5.0, 0.0, 1.0, 1.0)
+    leg_goals = [
+        ("goto", (0.0, 0.0)),
+        ("goto", (5.0, 0.0)),  # pass-by (non-terminal)
+        ("goto", (10.0, 0.0)),  # stop (terminal)
+    ]
+    aabbs = [None, aabb, None]
+    traj = np.array([[0, 0], [5, 1.5], [10, 0]], dtype=float)
+    r = score_instruction_rubric(
+        traj, leg_goals, tol=0.5, leg_instance_aabbs=aabbs
+    )
+    leg1 = r.leg_outcomes[1]
+    assert leg1.pass_by is True
+    assert leg1.tol_used == pytest.approx(math.hypot(2.0, 2.0) / 2.0 + 0.5)
+    assert leg1.reached is True
+
+
+def test_stop_leg_ignores_instance_aabb_even_when_supplied():
+    # Same geometry as above but the leg is the route's ONLY (=terminal) leg -- a
+    # stop leg must NOT get the pass-by widening even if an AABB is supplied.
+    aabb = _aabb(5.0, 0.0, 1.0, 1.0)
+    leg_goals = [("goto", (5.0, 0.0))]
+    traj = np.array([[5.0, 1.5]], dtype=float)
+    r = score_instruction_rubric(traj, leg_goals, tol=0.5, leg_instance_aabbs=[aabb])
+    leg0 = r.leg_outcomes[0]
+    assert leg0.pass_by is False
+    assert leg0.tol_used == pytest.approx(0.5)
+    assert leg0.reached is False  # 1.5 m away, outside the bare 0.5 m stop tolerance
+
+
+def test_pass_by_leg_without_aabb_falls_back_to_plain_tol():
+    # No leg_instance_aabbs supplied at all (old-caller compatibility) -- a pass-by
+    # leg must behave exactly like today: plain tol, no widening.
+    leg_goals = [("goto", (0.0, 0.0)), ("goto", (5.0, 0.0))]
+    traj = np.array([[0, 0], [5, 1.5]], dtype=float)
+    r = score_instruction_rubric(traj, leg_goals, tol=0.5)  # no leg_instance_aabbs
+    leg0 = r.leg_outcomes[0]
+    assert leg0.pass_by is True  # non-terminal goto -- still classified pass-by
+    assert leg0.tol_used == pytest.approx(0.5)  # but no AABB -> no widening
+    assert leg0.reached is True  # (0,0) is hit exactly regardless
+
+
+def test_via_near_pass_by_even_as_terminal_leg():
+    # via_near stays pass-by even when it is the LAST leg (unlike goto).
+    aabb = _aabb(3.0, 0.0, 0.5, 0.5)  # half-diag sqrt(0.5) ~= 0.707
+    leg_goals = [("via_near", (3.0, 0.0))]
+    traj = np.array([[3.0, 0.8]], dtype=float)  # 0.8 m off, outside bare 0.3 tol
+    r = score_instruction_rubric(traj, leg_goals, tol=0.3, leg_instance_aabbs=[aabb])
+    leg0 = r.leg_outcomes[0]
+    assert leg0.pass_by is True
+    assert leg0.tol_used == pytest.approx(math.hypot(1.0, 1.0) / 2.0 + 0.3)
+    assert leg0.reached is True
+
+
+def test_corridor_between_leg_stays_stop_tolerance_with_ordering_intact():
+    # corridor_between (leg 0) is a stop leg; the ordered-arrival cursor logic must
+    # still enforce sequence across a mix of pass-by (leg 1, non-terminal goto) and
+    # stop (leg 2, terminal goto) legs -- (a) changes only the per-leg RADIUS, never
+    # the cursor mechanics.
+    leg_goals = [
+        ("corridor_between", (0.0, 0.0)),
+        ("goto", (5.0, 0.0)),
+        ("goto", (10.0, 0.0)),
+    ]
+    traj = np.array([[0, 0], [5, 0], [10, 0]], dtype=float)
+    r = score_instruction_rubric(traj, leg_goals, tol=0.3)
+    assert [o.pass_by for o in r.leg_outcomes] == [False, True, False]
+    assert r.n_legs_reached_in_order == 3
     assert r.rubric_score == pytest.approx(1.0)

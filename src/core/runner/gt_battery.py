@@ -700,11 +700,12 @@ def _if_rubric_geometry(
     list[tuple[int, object]],
     list[object],
     list[tuple[int, ...] | None],
+    list[tuple[np.ndarray, np.ndarray] | None],
 ]:
     """Resolve the ordered leg goals, corridor gates, and avoid capsules for the rubric.
 
-    Returns ``(leg_goals, corridor_gates, avoid_capsules, leg_instance_ids)`` in the GT
-    (object) frame:
+    Returns ``(leg_goals, corridor_gates, avoid_capsules, leg_instance_ids,
+    leg_instance_aabbs)`` in the GT (object) frame:
       * leg_goals: ``(kind, (x, y))`` per route leg, in order. GOTO/VIA_NEAR -> the
         resolved anchor centroid; CORRIDOR_BETWEEN -> the gate midpoint.
       * corridor_gates: ``(leg_index, Gate)`` per corridor leg (for threading_check).
@@ -713,6 +714,14 @@ def _if_rubric_geometry(
         ``instance_id`` (a 1-tuple for GOTO/VIA_NEAR, a 2-tuple for CORRIDOR_BETWEEN)
         (issue #59 probe: lets the probe report which instance our resolver grounded
         each leg to, independent of the goal xy).
+      * leg_instance_aabbs (issue #70): parallel to ``leg_goals`` — the resolved
+        anchor's OWN ``(aabb_min, aabb_max)`` for GOTO/VIA_NEAR legs (the SAME
+        ``rec`` the goal was projected from, ``rec.aabb_min``/``rec.aabb_max``
+        straight off the ``InstanceRecord`` — no extra lookup); ``None`` for
+        CORRIDOR_BETWEEN legs (two anchors, no single "referenced instance" to
+        widen a pass-by radius around — corridor legs stay STOP-tolerance in
+        :func:`core.groundtruth.scoring.score_instruction_rubric`) and for any
+        leg whose anchor did not resolve.
     Legs/avoids whose anchors don't resolve are skipped (an unscored, not a wrong, leg).
 
     ``start_xy`` (issue #66, optional): the point the route departs from — passed
@@ -738,8 +747,9 @@ def _if_rubric_geometry(
     corridor_gates: list[tuple[int, object]] = []
     avoid_capsules: list[object] = []
     leg_instance_ids: list[tuple[int, ...] | None] = []
+    leg_instance_aabbs: list[tuple[np.ndarray, np.ndarray] | None] = []
     if not plan.route:
-        return leg_goals, corridor_gates, avoid_capsules, leg_instance_ids
+        return leg_goals, corridor_gates, avoid_capsules, leg_instance_ids, leg_instance_aabbs
 
     def _resolve_anchor_rec(anchor, exclude_id: int | None = None):
         spec = TargetSpec(
@@ -773,6 +783,7 @@ def _if_rubric_geometry(
             leg_goals.append(("corridor_between", mid))
             corridor_gates.append((i, gate))
             leg_instance_ids.append((r0.instance_id, r1.instance_id))
+            leg_instance_aabbs.append(None)  # two anchors -- no single AABB (issue #70)
             approach_xy = mid
         else:
             rec = _resolve_anchor_rec(leg.anchors[0]) if leg.anchors else None
@@ -786,6 +797,7 @@ def _if_rubric_geometry(
             kind = "via_near" if leg.kind is LegKind.VIA_NEAR else "goto"
             leg_goals.append((kind, goal_xy))
             leg_instance_ids.append((rec.instance_id,))
+            leg_instance_aabbs.append((rec.aabb_min, rec.aabb_max))
             approach_xy = goal_xy
 
     for spec in plan.avoid:
@@ -793,7 +805,7 @@ def _if_rubric_geometry(
             avoid_capsules.append(avoid_capsule(spec, idx))
         except ValueError:
             continue
-    return leg_goals, corridor_gates, avoid_capsules, leg_instance_ids
+    return leg_goals, corridor_gates, avoid_capsules, leg_instance_ids, leg_instance_aabbs
 
 
 def _min_dist_to_polyline(point: tuple[float, float], traj_xy: np.ndarray) -> float | None:
@@ -1042,6 +1054,109 @@ class GTQuestionScore:
 # --------------------------------------------------------------------------- per-scene
 
 
+def _fit_scene_if_frame(
+    gt: GTScene,
+    idx: BasicSceneIndex,
+    if_texts: list[str],
+    questions_dir: os.PathLike | str | None,
+) -> tuple[
+    list[np.ndarray | None],
+    list[list[np.ndarray]],
+    object | None,
+    float | None,
+    list[tuple[np.ndarray, np.ndarray]],
+]:
+    """Fit the scene's sim<->object rigid transform from IF trajectory endpoints.
+
+    Extracted from :func:`score_scene` (issue #70) so a cheap PRE-PASS can compute
+    every scene's ``fit_residual_m`` WITHOUT running the expensive simulated drive
+    (:func:`_drive_if_trajectory`) that follows it in ``score_scene`` — the residual
+    is a pure function of the loaded trajectory PLYs + resolved terminal-goal
+    candidates + a rigid least-squares fit, entirely independent of any arrival
+    tolerance or driving. This lets a battery run derive its OWN p95 residual across
+    scenes (:func:`collect_scene_fit_residuals`) and feed
+    :func:`core.groundtruth.arrival.derived_arrival_tol_m` a live measurement
+    before the real (expensive) scoring pass, rather than the frozen nominal
+    :data:`core.groundtruth.arrival.NOMINAL_FIT_RESIDUAL_P95_M` the head uses.
+
+    Returns ``(if_traj, if_cands, frame, residual, pairs)`` — identical to what
+    ``score_scene`` used to compute inline (``pairs`` added so the caller can
+    still read the first trajectory's start point for the spawn hint); pure
+    refactor, no behaviour change.
+    """
+    if_traj: list[np.ndarray | None] = []
+    if_goal: list[np.ndarray | None] = []
+    if_cands: list[list[np.ndarray]] = []
+    for i, text in enumerate(if_texts):
+        traj_q = _IF_TRAJ_INDEX.get(i)
+        traj_arr: np.ndarray | None = None
+        if questions_dir is not None and traj_q is not None:
+            cand = Path(questions_dir) / gt.scene_name / f"trajectory_q{traj_q}.ply"
+            if cand.exists():
+                traj_arr = S.load_trajectory_ply(cand)
+        if_traj.append(traj_arr)
+        cand_list = (
+            _terminal_goal_candidates(text, idx) if traj_arr is not None else []
+        )
+        if_cands.append(cand_list)
+        if_goal.append(cand_list[0] if cand_list else None)
+
+    pairs = [
+        (t, g) for t, g in zip(if_traj, if_goal) if t is not None and t.shape[0] > 0
+    ]
+    frame, residual = S.align_scene_trajectories(pairs) if pairs else (None, None)
+
+    # meth-F11 fallback: when the default top-candidate fit fails the alignment gate,
+    # a resolver terminal mis-rank is the usual cause — the correct terminal object is
+    # still in the ranked candidate set. Search candidate pairings for a rigid fit that
+    # clears the gate and adopt it if found. Gate-passing scenes never reach this branch,
+    # so the aligned scenes (and their Frechet diagnostics) are left untouched.
+    if residual is not None and residual > S._ALIGN_RESIDUAL_GATE_M:
+        alt = _fit_if_frame_over_candidates(
+            if_traj, if_cands, gate_m=S._ALIGN_RESIDUAL_GATE_M
+        )
+        if alt is not None:
+            frame, residual = alt
+
+    return if_traj, if_cands, frame, residual, pairs
+
+
+def collect_scene_fit_residuals(
+    unity_root: os.PathLike | str,
+    *,
+    questions_path: os.PathLike | str = DEFAULT_QUESTIONS,
+    questions_dir: os.PathLike | str = DEFAULT_QUESTIONS_ROOT,
+    scenes: list[str] | None = None,
+) -> dict[str, float | None]:
+    """Cheap pre-pass (issue #70): one ``fit_residual_m`` per scene, no driving.
+
+    Used to compute a battery run's LIVE p95 fit residual before the real scoring
+    pass, so :func:`core.groundtruth.arrival.derived_arrival_tol_m` is fed a
+    measurement from THIS run's own scenes rather than the frozen nominal snapshot
+    the navigation head uses. ``None`` for a scene with no fittable IF trajectory
+    (excluded from the p95 by the caller, same as any other missing measurement).
+    """
+    root = Path(unity_root)
+    with open(questions_path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    out: dict[str, float | None] = {}
+    for entry in data:
+        scene_name = entry["scene"]
+        if scenes is not None and scene_name not in scenes:
+            continue
+        folder = _find_scene_folder(root, scene_name)
+        if folder is None:
+            continue
+        gt = load_scene(folder, scene_name=scene_name)
+        idx = BasicSceneIndex(gt.instances)
+        if_texts = entry["questions"].get("instruction_following", [])
+        _traj, _cands, _frame, residual, _pairs = _fit_scene_if_frame(
+            gt, idx, if_texts, questions_dir
+        )
+        out[scene_name] = residual
+    return out
+
+
 def score_scene(
     gt: GTScene,
     questions: dict[str, list[str]],
@@ -1054,8 +1169,19 @@ def score_scene(
     no_spawn_hint: bool = False,
     walls: bool = True,
     unity_scenes_ros2_root: os.PathLike | str | None = None,
+    tol: float | None = None,
 ) -> list[GTQuestionScore]:
     """Score every question of one GT scene.
+
+    ``tol`` (issue #70): the leg-arrival tolerance passed to
+    :func:`core.groundtruth.scoring.score_instruction_rubric`. ``None`` (the
+    default) falls back to that function's own default
+    (:data:`core.groundtruth.scoring.LEG_ARRIVAL_TOL_M`, the NOMINAL derived
+    value). A caller running a full battery should instead derive a LIVE value
+    from this run's own scenes' fit residuals
+    (:func:`collect_scene_fit_residuals` + p95 +
+    :func:`core.groundtruth.arrival.derived_arrival_tol_m`) and pass it here —
+    see :func:`run_gt_battery`'s ``tol`` parameter.
 
     ``no_spawn_hint`` (IF-F2 realism knob): when True, the IF planner spawns at the
     scene centroid instead of the GT trajectory's mapped start, so the exploration cost
@@ -1111,39 +1237,9 @@ def score_scene(
     # load its GT trajectory; fit ONE scene-level sim->object transform from the
     # endpoints (+ shared start); then score each with the fitted frame applied.
     if_texts = questions.get("instruction_following", [])
-    if_traj: list[np.ndarray | None] = []
-    if_goal: list[np.ndarray | None] = []
-    if_cands: list[list[np.ndarray]] = []
-    for i, text in enumerate(if_texts):
-        traj_q = _IF_TRAJ_INDEX.get(i)
-        traj_arr: np.ndarray | None = None
-        if questions_dir is not None and traj_q is not None:
-            cand = Path(questions_dir) / gt.scene_name / f"trajectory_q{traj_q}.ply"
-            if cand.exists():
-                traj_arr = S.load_trajectory_ply(cand)
-        if_traj.append(traj_arr)
-        cand_list = (
-            _terminal_goal_candidates(text, idx) if traj_arr is not None else []
-        )
-        if_cands.append(cand_list)
-        if_goal.append(cand_list[0] if cand_list else None)
-
-    pairs = [
-        (t, g) for t, g in zip(if_traj, if_goal) if t is not None and t.shape[0] > 0
-    ]
-    frame, residual = S.align_scene_trajectories(pairs) if pairs else (None, None)
-
-    # meth-F11 fallback: when the default top-candidate fit fails the alignment gate,
-    # a resolver terminal mis-rank is the usual cause — the correct terminal object is
-    # still in the ranked candidate set. Search candidate pairings for a rigid fit that
-    # clears the gate and adopt it if found. Gate-passing scenes never reach this branch,
-    # so the aligned scenes (and their Frechet diagnostics) are left untouched.
-    if residual is not None and residual > S._ALIGN_RESIDUAL_GATE_M:
-        alt = _fit_if_frame_over_candidates(
-            if_traj, if_cands, gate_m=S._ALIGN_RESIDUAL_GATE_M
-        )
-        if alt is not None:
-            frame, residual = alt
+    if_traj, if_cands, frame, residual, pairs = _fit_scene_if_frame(
+        gt, idx, if_texts, questions_dir
+    )
 
     # The GT trajectory's (shared) start, mapped into the object frame, is the robot
     # spawn our planner should depart from — feed it so our path and the GT path start
@@ -1211,8 +1307,8 @@ def score_scene(
         driven = _drive_if_trajectory(
             text, gt, idx, start_xy=spawn_xy, wall_cells=wall_cells
         )
-        leg_goals, corridor_gates, avoid_caps, leg_instance_ids = _if_rubric_geometry(
-            text, gt, idx, start_xy=spawn_xy
+        leg_goals, corridor_gates, avoid_caps, leg_instance_ids, leg_instance_aabbs = (
+            _if_rubric_geometry(text, gt, idx, start_xy=spawn_xy)
         )
         rub = S.score_instruction_rubric(
             driven,
@@ -1221,6 +1317,8 @@ def score_scene(
             avoid_capsules=avoid_caps,
             trajectory_ply=traj_path,
             frame=frame,
+            leg_instance_aabbs=leg_instance_aabbs,
+            **({"tol": tol} if tol is not None else {}),
         )
         rec.rubric_score = round(rub.rubric_score, 4)
         rec.ordered_leg_credit = round(rub.ordered_leg_credit, 4)
@@ -1242,6 +1340,9 @@ def score_scene(
                 "goal": [float(o.goal_xy[0]), float(o.goal_xy[1])],
                 "reached_in_order": bool(o.reached_in_order),
                 "threaded": o.threaded,
+                # issue #70: which arrival semantics + tolerance actually applied.
+                "pass_by": bool(o.pass_by),
+                "tol_used": round(float(o.tol_used), 4),
             }
             for o in rub.leg_outcomes
         ]
@@ -1437,11 +1538,39 @@ def run_gt_battery(
     no_spawn_hint: bool = False,
     walls: bool = True,
     unity_scenes_ros2_root: os.PathLike | str | None = None,
+    tol: float | None = None,
+    derive_tol: bool = False,
 ) -> tuple[list[GTQuestionScore], list[str]]:
     """Score every question whose scene folder is present under ``unity_root``.
 
+    ``tol`` (issue #70): explicit leg-arrival tolerance, forwarded to every
+    :func:`score_scene` call. ``derive_tol`` (issue #70, mutually exclusive with
+    an explicit ``tol``): run the cheap :func:`collect_scene_fit_residuals`
+    pre-pass first (no driving), compute THIS run's own p95 fit residual across
+    its scenes, and derive ``tol`` from it
+    (:func:`core.groundtruth.arrival.derived_arrival_tol_m`) before the real
+    (expensive) scoring pass -- so the tolerance reflects THIS run's own
+    measured frame-fit uncertainty rather than the frozen nominal snapshot
+    :data:`core.groundtruth.scoring.LEG_ARRIVAL_TOL_M` falls back to. Both
+    ``None``/``False`` (the default) leaves every ``score_scene`` call at ITS
+    own default (the nominal constant) -- unchanged pre-#70 behaviour.
+
     Returns (scores, missing_scenes).
     """
+    if derive_tol:
+        if tol is not None:
+            raise ValueError("pass either tol= or derive_tol=True, not both")
+        residuals = collect_scene_fit_residuals(
+            unity_root,
+            questions_path=questions_path,
+            questions_dir=questions_dir,
+            scenes=scenes,
+        )
+        finite = [r for r in residuals.values() if r is not None]
+        if finite:
+            p95 = float(np.percentile(finite, 95))
+            tol = S.derived_arrival_tol_m(p95)
+
     root = Path(unity_root)
     with open(questions_path, encoding="utf-8") as fh:
         data = json.load(fh)
@@ -1472,6 +1601,7 @@ def run_gt_battery(
                 no_spawn_hint=no_spawn_hint,
                 walls=walls,
                 unity_scenes_ros2_root=unity_scenes_ros2_root,
+                tol=tol,
             )
         )
     return scores, missing
@@ -1866,6 +1996,12 @@ def main(argv: list[str] | None = None) -> int:
         help="root holding <scene>/<scene>/traversable_area.ply, used to derive "
              "interior walls (IF-F2 wall realism); ignored with --no-walls.",
     )
+    ap.add_argument(
+        "--derive-tol", action="store_true",
+        help="issue #70: derive the leg-arrival tolerance from THIS run's own "
+             "p95 fit residual across scenes (a cheap no-driving pre-pass), "
+             "instead of the frozen nominal core.groundtruth.scoring.LEG_ARRIVAL_TOL_M.",
+    )
     args = ap.parse_args(argv)
 
     scenes = [s.strip() for s in args.scenes.split(",")] if args.scenes else None
@@ -1881,6 +2017,7 @@ def main(argv: list[str] | None = None) -> int:
         no_spawn_hint=args.no_spawn_hint,
         walls=not args.no_walls,
         unity_scenes_ros2_root=args.unity_scenes_ros2_root,
+        derive_tol=args.derive_tol,
     )
     if not scores:
         print(f"gt_battery: no scenes found under {args.groundtruth} (missing={missing})")

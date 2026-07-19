@@ -45,6 +45,7 @@ from pathlib import Path
 
 import numpy as np
 
+from core.geometry import primitives as P
 from core.geometry import toolbox as T
 from core.geometry.toolbox import (
     DEFAULT_THRESHOLDS,
@@ -54,6 +55,7 @@ from core.geometry.toolbox import (
     capsule_violated,
     threading_check,
 )
+from core.groundtruth.arrival import NOMINAL_ARRIVAL_TOL_M, derived_arrival_tol_m
 from core.groundtruth.vocab_bridge import bridge_synonyms, bridged_agree
 from core.interfaces import InstanceRecord, MarkerBox, SceneIndex
 from core.parsing.regex_tier import _SUPERLATIVE_PREDS as _PARSER_SUPERLATIVE_PREDS
@@ -1094,10 +1096,39 @@ def score_instruction_following(
 
 # ----------------------------------------------------------------- IF rubric proxy (IF-F2)
 
-#: Distance (m) within which a driven pose counts as "arrived" at a leg goal. Matches
-#: the instruction head's own ``ARRIVAL_TOL_M`` so the scorer agrees with what the
-#: pipeline treats as reaching a leg.
-LEG_ARRIVAL_TOL_M: float = 0.8
+#: Distance (m) within which a driven pose counts as "arrived" at a leg goal.
+#:
+#: DERIVED, not asserted (issue #70): this is
+#: :func:`core.groundtruth.arrival.derived_arrival_tol_m` evaluated at the
+#: NOMINAL documented residual (:data:`core.groundtruth.arrival.
+#: NOMINAL_FIT_RESIDUAL_P95_M`) -- the same nominal residual
+#: :data:`core.heads.instruction.ARRIVAL_TOL_M` derives from, so the two agree
+#: by construction at that residual (coupling verified by
+#: ``tests/groundtruth/test_arrival.py::test_scoring_and_head_agree_at_nominal``).
+#:
+#: This module-level constant is a NO-LIVE-RESIDUAL FALLBACK only -- it is the
+#: default for :func:`score_instruction_rubric`'s ``tol`` argument and for any
+#: caller not yet wired to a live per-run residual. A real battery run should
+#: NOT use it blind: it should compute its OWN p95 fit residual across its
+#: scenes' :func:`fit_frame`/:func:`align_scene_trajectories` results and call
+#: :func:`core.groundtruth.arrival.derived_arrival_tol_m` on that live p95
+#: directly, passing the result as ``tol=`` -- making the tolerance
+#: per-battery-run derived rather than this fixed nominal (issue #70 Phase B
+#: wiring: ``core.runner.gt_battery``).
+LEG_ARRIVAL_TOL_M: float = NOMINAL_ARRIVAL_TOL_M
+
+
+def leg_arrival_tol_m(fit_residual_p95_m: float, **kwargs) -> float:
+    """Per-battery-run leg-arrival tolerance.
+
+    Thin re-export of :func:`core.groundtruth.arrival.derived_arrival_tol_m` so
+    a battery-run caller needs only this module to both derive ITS run's
+    tolerance (from that run's own p95 fit residual across scenes) and pass
+    the result as :func:`score_instruction_rubric`'s ``tol=`` -- see
+    :data:`LEG_ARRIVAL_TOL_M` for why the module-level constant alone is not
+    enough for a real run.
+    """
+    return derived_arrival_tol_m(fit_residual_p95_m, **kwargs)
 
 #: Step (m) the driven polyline is densified to before leg-arrival checks. The v1
 #: kinematic follower emits one pose per planned waypoint (no densification), so a
@@ -1113,6 +1144,28 @@ ARRIVAL_RESAMPLE_STEP_M: float = 0.25
 IF_PENALTY_PER_VIOLATION: float = 1.0
 
 
+#: A leg is scored PASS-BY (closest-approach within a class-conditional radius)
+#: rather than STOP (fixed-tolerance arrival) when it is a VIA_NEAR leg at any
+#: position, or a GOTO leg that is not the route's LAST leg. This mirrors the
+#: ceiling evidence (``reports/ceiling_diagnosis_2026-07-19/classification.md``,
+#: ``reports/issue59_probe.md`` terminal-vs-intermediate split: terminal legs
+#: reach the GT path 83% of the time, non-terminal legs only 31%) that GT
+#: demonstrators satisfy intermediate landmark mentions by driving PAST them,
+#: not by stopping at a projected point — only the FINAL "stop at X" leg is a
+#: genuine stop point. CORRIDOR_BETWEEN legs are left as STOP (unchanged): a
+#: gate midpoint has no single "referenced instance" to measure closest-
+#: approach against (two anchors), and the corridor-leg-specific failure mode
+#: (issue #70's classification bucket (d), the gate-midpoint-vs-crossing-point
+#: definition) is a distinct, out-of-scope-for-this-issue fix.
+def _is_pass_by_leg(kind: str, index: int, n_legs: int) -> bool:
+    is_terminal = index == n_legs - 1
+    if kind == "via_near":
+        return True
+    if kind == "goto" and not is_terminal:
+        return True
+    return False
+
+
 @dataclass
 class IFLegOutcome:
     """Per-leg ordered-arrival record for the rubric-proxy score."""
@@ -1125,6 +1178,17 @@ class IFLegOutcome:
     #: Corridor legs only: whether the driven trajectory threaded the gate
     #: (True/False). ``None`` for non-corridor legs (threading does not apply).
     threaded: bool | None = None
+    #: True when this leg was scored PASS-BY (closest-approach within a
+    #: class-conditional radius) rather than STOP (fixed-tolerance arrival) —
+    #: see :func:`_is_pass_by_leg`.
+    pass_by: bool = False
+    #: The actual tolerance (m) applied to THIS leg. Equals the caller's
+    #: ``tol`` for a STOP leg; equals ``instance_aabb_half_diagonal + tol`` for
+    #: a PASS-BY leg with a resolvable instance AABB (parameter-free —
+    #: derived from the instance's own footprint, not a new tuned constant);
+    #: falls back to the caller's ``tol`` for a PASS-BY leg with no AABB
+    #: supplied (old callers, :data:`None` in ``leg_instance_aabbs``).
+    tol_used: float = 0.0
 
 
 @dataclass
@@ -1203,6 +1267,7 @@ def score_instruction_rubric(
     trajectory_ply: os.PathLike | str | None = None,
     frame: Frame2D | None = None,
     tol: float = LEG_ARRIVAL_TOL_M,
+    leg_instance_aabbs: list[tuple[np.ndarray, np.ndarray] | None] | None = None,
 ) -> InstructionRubricScore:
     """Score a DRIVEN trajectory against the instruction rubric proxy (IF-F2).
 
@@ -1214,11 +1279,33 @@ def score_instruction_rubric(
       avoid_capsules: forbidden regions active for the whole traversal.
       trajectory_ply / frame: optional reference PLY (+ scene frame) for the SECONDARY
         Fréchet/coverage diagnostics only.
+      leg_instance_aabbs: OPTIONAL, parallel to ``leg_goals`` (issue #70) — the
+        resolved anchor's own ``(aabb_min, aabb_max)`` per leg, ``None`` where
+        unresolved/unavailable. Mirrors the existing ``leg_instance_ids``
+        parallel-list convention (``core.runner.gt_battery._if_rubric_geometry``).
+        Compatible extension: omitted entirely (the default), every leg falls
+        back to the plain STOP semantics below — old callers keep working
+        unmodified. Only consumed for PASS-BY legs (see below); STOP legs
+        never read it.
 
     Scoring:
+      * (a) per-leg-kind arrival semantics (issue #70): each leg is classified
+        STOP or PASS-BY by :func:`_is_pass_by_leg` (VIA_NEAR legs and
+        non-terminal GOTO legs are PASS-BY; the terminal GOTO/"stop-at" leg
+        and CORRIDOR_BETWEEN legs stay STOP). A STOP leg's tolerance is
+        ``tol`` unchanged. A PASS-BY leg's tolerance is widened to
+        ``instance_aabb_half_diagonal + tol`` when ``leg_instance_aabbs``
+        supplies an AABB for it (parameter-free: derived from the instance's
+        own footprint, not a new tuned constant) — modelling "the demonstrator
+        drove past the landmark" as closest-approach-within-the-object's-own-
+        reach rather than exact-point arrival, per the ceiling evidence (see
+        :func:`_is_pass_by_leg`'s docstring). Falls back to plain ``tol`` when
+        no AABB is available for a PASS-BY leg.
       * (b) ordered per-leg arrival: walk the trajectory once; a leg counts only if a
-        pose reaches it within ``tol`` AND at/after the previous ordered leg's arrival
-        index (partial credit = ordered legs reached / total legs).
+        pose reaches it within its (per-(a)) tolerance AND at/after the previous
+        ordered leg's arrival index (partial credit = ordered legs reached / total
+        legs). The ordered-arrival CURSOR logic itself is unchanged by (a) — only
+        the per-leg tolerance radius differs.
       * (c) threading_check per corridor leg and capsule_violated per avoid spec: each
         miss/breach is a penalty of :data:`IF_PENALTY_PER_VIOLATION` leg-equivalents.
       * headline ``rubric_score`` = clamp(ordered_leg_credit - penalty/n_legs, 0, 1).
@@ -1238,10 +1325,17 @@ def score_instruction_rubric(
     cursor = 0  # ordered arrival index frontier
     n_in_order = 0
     for i, (kind, goal) in enumerate(leg_goals):
+        pass_by = _is_pass_by_leg(kind, i, n_legs)
+        leg_tol = tol
+        if pass_by and leg_instance_aabbs is not None and i < len(leg_instance_aabbs):
+            aabb = leg_instance_aabbs[i]
+            if aabb is not None:
+                half_diag = P.footprint_diagonal(aabb[0], aabb[1]) / 2.0
+                leg_tol = half_diag + tol
         # "reached" ignores order (did we ever get there); "reached_in_order" requires
         # arrival at/after the previous ordered leg's arrival.
-        any_idx = _first_arrival_index(traj, goal, tol, 0)
-        ordered_idx = _first_arrival_index(traj, goal, tol, cursor)
+        any_idx = _first_arrival_index(traj, goal, leg_tol, 0)
+        ordered_idx = _first_arrival_index(traj, goal, leg_tol, cursor)
         reached = any_idx is not None
         in_order = ordered_idx is not None
         if in_order:
@@ -1252,6 +1346,7 @@ def score_instruction_rubric(
                 index=i, kind=kind,
                 goal_xy=(float(goal[0]), float(goal[1])),
                 reached=reached, reached_in_order=in_order,
+                pass_by=pass_by, tol_used=leg_tol,
             )
         )
 
