@@ -80,7 +80,47 @@ Full fast test tier (`pytest` from `src/`): all green, no failures
 
 ## Battery
 
-`gt_battery --out ../reports/gt_battery_post75` run pending final commit;
-expect the 2 recovered legs to move IF credit on `home_building_2` q1 and
-`office_2` q1, non-IF rows unchanged, tv not increasing (route
-assembly/threading untouched -- out of scope, #74 lane's surface).
+`gt_battery --groundtruth data/vla3d/Unity --out reports/gt_battery_post75`,
+compared against the existing `reports/gt_battery_post73` baseline (same
+75-question/15-scene set):
+
+| metric | post73 (baseline) | post75 (this fix) |
+|---|---|---|
+| IF headline (rubric-proxy mean) | 0.461 | 0.417 |
+| IF mean ordered-leg credit | 0.522 | 0.478 |
+| threading violations (tv) | 7 | 7 (unchanged, as required) |
+| avoid violations | 0 | 0 |
+| non-IF rows (numerical/referential) | unchanged | unchanged (confirmed by diff) |
+
+tv did not increase (met). IF headline/credit went DOWN, not up as
+naively hoped -- traced to the DRIVEN-trajectory arrival check, not to
+resolver correctness:
+
+- `office_2` q1: leg1's resolved goal moved from the old (wrong) id=118 at
+  (4.52, 0.21) to the new (GT-correct, id=69) goal at (5.13, 3.14).
+  `n_legs_reached_in_order` dropped 3/3 -> 2/3 (`reached_in_order: false`
+  for leg1) purely because the DRIVEN trajectory/arrival-tolerance check
+  fails to register arrival at the new (farther, differently-placed) goal
+  -- same pattern on `livingroom_1` and `studio` (both moved as a
+  documented side effect of the same gate firing on other same-label
+  groups; both also regressed 1.00->0.50 / 0.50->0.00 for the identical
+  reason). `home_building_2` q1 stayed rubric=0.00 either way (already
+  failing on a DIFFERENT leg's threading violation before this fix, so
+  the leg2 recovery had no headline room to show).
+- Full per-row diff (`diff <(grep '^| ' post73/report.md) <(grep '^| '
+  post75/report.md)`) confirms every regressed row is one of the 3 legs
+  whose resolved *goal position* moved (office_2, livingroom_1, studio);
+  no other row changed at all.
+
+This is arrival/driving behavior, not resolver behavior: the resolver is
+now MORE correct (verified above via the GT-trajectory-distance proxy and
+direct instance-id inspection), but the driven-path arrival check --
+owned by the concurrent #74 lane (route assembly / BreadcrumbFollower /
+threading, explicitly out of this lane's ownership) -- doesn't yet
+reliably reach a goal that moved to a new, still-valid position. Per the
+task brief: "your final numbers get re-measured on integrated main after
+the concurrent #74 lane merges -- relative deltas are your success
+metric" -- the resolver-parity delta (this lane's actual measure) is
+strictly positive (3 -> 1 id-divergent legs, both target legs recovered
+to the GT-correct id on both sides); the battery-credit regression is
+expected to close once #74's arrival/threading fixes land on top of this.
