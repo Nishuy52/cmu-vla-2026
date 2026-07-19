@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -253,16 +254,24 @@ class InstructionHead:
     def _ground_legs(self, scene) -> None:
         legs: list[_GroundedLeg] = []
         prev_xy: tuple[float, float] | None = None
+        prev_kind: LegKind | None = None
+        prev_gate: tuple[tuple[float, float], tuple[float, float]] | None = None
         for leg in self.plan.route:
-            gl = self._ground_one(leg, scene, prev_xy)
+            gl = self._ground_one(leg, scene, prev_xy, prev_kind, prev_gate)
             legs.append(gl)
             if gl.geom is not None:
                 g = gl.geom
                 prev_xy = g[1] if isinstance(g[0], tuple) else g
+                prev_gate = g if (gl.kind is LegKind.CORRIDOR_BETWEEN and isinstance(g[0], tuple)) else None
+            else:
+                prev_gate = None
+            prev_kind = gl.kind
         self._legs = legs
 
     def _ground_one(
-        self, leg: RouteLeg, scene, prev_xy: tuple[float, float] | None = None
+        self, leg: RouteLeg, scene, prev_xy: tuple[float, float] | None = None,
+        prev_kind: LegKind | None = None,
+        prev_gate: tuple[tuple[float, float], tuple[float, float]] | None = None,
     ) -> _GroundedLeg:
         nouns = tuple(a.noun for a in leg.anchors)
         if scene is None:
@@ -283,7 +292,10 @@ class InstructionHead:
         elif leg.kind is LegKind.VIA_NEAR:
             geom = self._via_point(recs[0])
         else:  # GOTO
-            geom = self._goto_point(recs[0])
+            geom = self._goto_point(
+                recs[0],
+                prev_gate=prev_gate if prev_kind is LegKind.CORRIDOR_BETWEEN else None,
+            )
         runner_up = self._resolve_anchor(leg.anchors[0], scene, prev_xy)[1]
         min_n_obs = min(r.n_obs for r in recs)
         return _GroundedLeg(
@@ -435,7 +447,10 @@ class InstructionHead:
             return (None, None)
         return (ranked[0], ranked[1] if len(ranked) > 1 else None)
 
-    def _goto_point(self, rec) -> tuple[float, float]:
+    def _goto_point(
+        self, rec,
+        prev_gate: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    ) -> tuple[float, float]:
         """Anchor centroid projected to the nearest free cell reachable from the pose.
 
         Projecting to the nearest *passable* cell is not enough: that cell can sit in a
@@ -458,7 +473,80 @@ class InstructionHead:
             r, col = self.grid.world_to_cell(*anchor_xy)
             if 0 <= r < seen.shape[0] and 0 <= col < seen.shape[1] and seen[r, col]:
                 return anchor_xy
-        return cm.nearest_reachable_point(anchor_xy, self._pose)
+        best = cm.nearest_reachable_point(anchor_xy, self._pose)
+        if prev_gate is not None:
+            best = self._goto_point_pinch_relax(cm, anchor_xy, prev_gate, best)
+        return best
+
+    def _goto_point_pinch_relax(self, cm, anchor_xy, gate, best):
+        """When a GOTO leg immediately follows a CORRIDOR_BETWEEN leg, the plain
+        reachable-mask BFS (which floods the base, non-pinch costmap) sees only the
+        near-side pocket of the just-threaded gate (#78) — the same asymmetry
+        ``plan_through`` already resolves for ROUTING via ``_pinch_costmap``, but
+        goal SELECTION never saw. Retry ``nearest_reachable_point`` through the SAME
+        gate, over the SAME relax-round schedule ``plan_through`` itself uses (#54),
+        and keep whichever candidate (plain or any relaxed round) lands CLOSER to the
+        anchor's own centroid — never farther, so this can only improve the resolved
+        goal, matching the generalization protocol (no new free parameter: reuses
+        ``plan_through``'s own ``PINCH_DISC_M``/``MAX_PINCH_RELAX_ROUNDS``/
+        ``PINCH_RELAX_GROWTH``/``PINCH_CORRIDOR_HALF_W_M`` constants and
+        ``_pinch_costmap`` helper verbatim). Confirmed (#79) this schedule genuinely
+        does NOT help every such leg — some rooms are disconnected by real geometry
+        beyond the gate — so this is a best-effort widen, not a guaranteed fix.
+
+        ``cm`` can be transiently stale relative to ``self.grid`` mid-tick (built
+        before this tick's terrain ingestion grew the live grid; ``_build_route``
+        reconciles this later in the same tick) — a pre-existing property never
+        exercised before because ``reachable_mask``'s BFS only ever touches cells it
+        actually walks to. ``_pinch_costmap`` vectorizes over the FULL grid shape
+        unconditionally, so a stale ``cm`` would raise on the shape mismatch; skip
+        the relax rather than risk it (falls back to the plain BFS result, same as
+        before this leg had a corridor predecessor)."""
+        if cm.grid.shape != cm.capsule_blocked.shape:
+            return best
+        # Guard (found via #77c integration testing): naively taking whichever
+        # relaxed candidate lands closest to the anchor can move THIS leg's own
+        # goal to a point plan_through's `_gate_crossing_extension` can no longer
+        # confirm reachable for the gate leg immediately before it — trading that
+        # corridor leg's own (already-earned) threading/credit for a goal move that
+        # doesn't even flip THIS leg (still short of its own tolerance either way).
+        # Re-run the SAME lookahead the corridor leg's own extension will use
+        # (`_gate_extension_keeps_route_planned`, already shared across both call
+        # sites in planner.py) against the gate's own usable point as a stand-in
+        # `leg_start`/extension origin — reject a candidate that would fail it,
+        # keeping the previous (narrower but non-regressing) result instead.
+        g0, g1 = gate
+        raw_mid = ((g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0)
+        seg_end = _planner.usable_gate_point(
+            np.asarray(g0, dtype=float), np.asarray(g1, dtype=float),
+            np.asarray(raw_mid, dtype=float),
+            lambda pt: _planner._raw_obstacle_blocked_xy(cm, pt),
+        )
+        seg_end_xy = (float(seg_end[0]), float(seg_end[1]))
+
+        def _keeps_corridor_threaded(candidate: tuple[float, float]) -> bool:
+            ext = _planner._gate_crossing_extension(
+                cm, self._pose, gate, seg_end_xy, ("goto", candidate),
+                unknown_cost_mult=self.unknown_cost_mult,
+                pinch_disc_m=self.pinch_disc_m,
+                pinch_corridor_half_w_m=self.pinch_corridor_half_w_m,
+            )
+            return ext is not None
+
+        best_d = math.hypot(best[0] - anchor_xy[0], best[1] - anchor_xy[1])
+        relax_disc_m = _planner.PINCH_DISC_M
+        for _round in range(_planner.MAX_PINCH_RELAX_ROUNDS):
+            pinch = _planner._pinch_costmap(
+                cm, gate, pinch_disc_m=relax_disc_m,
+                pinch_corridor_half_w_m=_planner.PINCH_CORRIDOR_HALF_W_M,
+                start_xy=self._pose,
+            )
+            cand = pinch.nearest_reachable_point(anchor_xy, self._pose)
+            d = math.hypot(cand[0] - anchor_xy[0], cand[1] - anchor_xy[1])
+            if d < best_d and _keeps_corridor_threaded(cand):
+                best, best_d = cand, d
+            relax_disc_m *= _planner.PINCH_RELAX_GROWTH
+        return best
 
     def _via_point(self, rec) -> tuple[float, float]:
         """A "path near the anchor" waypoint placed by free-space gradient (IF-F7).
