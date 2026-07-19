@@ -768,7 +768,7 @@ def _if_rubric_geometry(
             )
             if r0 is None or r1 is None:
                 continue
-            gate = corridor_gate(r0, r1)
+            gate = corridor_gate(r0, r1, idx)
             mid = (float(gate.midpoint[0]), float(gate.midpoint[1]))
             leg_goals.append(("corridor_between", mid))
             corridor_gates.append((i, gate))
