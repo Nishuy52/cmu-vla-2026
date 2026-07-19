@@ -513,6 +513,47 @@ def test_plan_through_nudge_only_engages_when_direct_route_is_wholly_unreachable
         )
 
 
+def test_plan_through_nudge_engages_on_genuine_quantization_near_miss():
+    """issue #64: the direct attempt reaches the gate but its snapped final vertex lands
+    a hair (< 1 grid cell) short of the line on the SAME side `cur` approached from — a
+    grid-quantization near-miss, not an already-threaded gate. `cur` starts well away
+    from the gate (>= 1 cell), so the #54 guard's "already resumed at the gate" signal is
+    absent. The tightened case-B condition must engage the nudge here (unlike the #54
+    guard's far near-miss, which stays > 1 cell out and must NOT engage it)."""
+    from unittest.mock import patch
+
+    from core.nav import planner as P
+
+    cm = _pinch_gap_grid()
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    legs = [("corridor_between", gate), ("goto", (1.05, 1.15))]
+    start = (1.05, 0.05)  # >= 1 cell (0.1 m) from the gate segment
+
+    orig_astar = P.astar
+    # A near-miss whose LAST vertex sits 0.03 m (< 1 cell) short of the gate line
+    # (x=1.05), on the same side `cur` approaches from, never crossing.
+    quantized_near_miss = [(1.05, 0.05), (0.99, 0.3), (1.02, 0.6)]
+    assert not path_crosses_gate(quantized_near_miss, gate), "test setup: must not cross"
+
+    def _direct_call_returns_near_miss(costmap, s, g, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return quantized_near_miss
+        return orig_astar(costmap, s, g, **kw)
+
+    calls = {"n": 0}
+    with (
+        patch.object(P, "_nudge_past_gate", wraps=P._nudge_past_gate) as nudge_spy,
+        patch.object(P, "astar", side_effect=_direct_call_returns_near_miss),
+    ):
+        path = P.plan_through(cm, start, legs)
+    assert nudge_spy.call_count == 1, (
+        "a genuine quantization near-miss (< 1 cell, cur far from the gate) must engage the nudge"
+    )
+    assert path is not None
+    assert path_crosses_gate(path, gate)
+
+
 def test_plan_through_pinch_relax_is_bounded_and_falls_back_when_never_converging():
     """issue #54 termination guard: a geometry whose start-disc exemption can never
     free a route (every relax round's pinch overlay still fails to thread the gate)
