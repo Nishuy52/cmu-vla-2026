@@ -1,0 +1,1372 @@
+{
+  "tol_m": 1.746274592188653,
+  "tol_source": "derived_live_p95",
+  "p95_fit_residual_m": 1.2256,
+  "gt_reached_legs_whole": 62,
+  "gt_reached_legs_segment": 59,
+  "total_legs": 72,
+  "ratio_whole": 0.8611,
+  "ratio_segment": 0.8194,
+  "scenes": [
+    "arabic_room",
+    "chinese_room",
+    "home_building_1",
+    "home_building_2",
+    "hotel_room_1",
+    "hotel_room_2",
+    "japanese_room",
+    "livingroom_1",
+    "livingroom_2",
+    "livingroom_3",
+    "livingroom_4",
+    "loft",
+    "office_1",
+    "office_2",
+    "studio"
+  ],
+  "how_to_regenerate": {
+    "cwd": "src/",
+    "command": "python -m core.runner.gt_leg_ceiling --groundtruth <UNITY_ROOT> --out ../reports/leg_ceiling_post70.json",
+    "data_root_note": "<UNITY_ROOT> is the VLA-3D Unity root holding the 15 battery scenes (each <scene>/ with its object CSV + scene graph). In this repo tree it is data/vla3d/Unity (git-ignored fixtures). questions-dir defaults to the challenge questions dir shipping trajectory_q{4,5}.ply."
+  },
+  "per_question": [
+    {
+      "scene": "arabic_room",
+      "traj_q": 4,
+      "question": "Go near the stool under the picture and stop at the small table farthest from the columns.",
+      "fit_residual_m": 0.574,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.1609,
+          "goal_xy": [
+            -4.4689,
+            -1.672
+          ],
+          "gt_min_dist_whole_m": 6.8602,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 6.8602,
+          "reached_segment": false
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            2.8206,
+            -0.661
+          ],
+          "gt_min_dist_whole_m": 0.8063,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.8063,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 1,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "arabic_room",
+      "traj_q": 5,
+      "question": "First, go to the potted plant furthest from the hookah, then take the path between the two columns, and stop at the tray on the table.",
+      "fit_residual_m": 0.574,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.5113,
+          "goal_xy": [
+            -3.5761,
+            1.0615
+          ],
+          "gt_min_dist_whole_m": 6.6481,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 6.6481,
+          "reached_segment": false
+        },
+        {
+          "index": 1,
+          "kind": "corridor_between",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -0.993,
+            -0.026
+          ],
+          "gt_min_dist_whole_m": 3.8534,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 3.8534,
+          "reached_segment": false
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            2.8206,
+            -0.661
+          ],
+          "gt_min_dist_whole_m": 0.3774,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.3774,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 1,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "chinese_room",
+      "traj_q": 4,
+      "question": "Go near the potted plant on the table and stop at the painting near the TV.",
+      "fit_residual_m": 0.6614,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.4967,
+          "goal_xy": [
+            5.584,
+            -2.5819
+          ],
+          "gt_min_dist_whole_m": 0.3542,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.3542,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -1.8969,
+            -3.6279
+          ],
+          "gt_min_dist_whole_m": 0.2953,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.2953,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "chinese_room",
+      "traj_q": 5,
+      "question": "First, go near the tea table with the elephant figurine on it, then stop at the table with the horse figurine on it, avoiding the path between the chair and the folding screen.",
+      "fit_residual_m": 0.6614,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.4108,
+          "goal_xy": [
+            0.3036,
+            -2.9624
+          ],
+          "gt_min_dist_whole_m": 2.0371,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 2.0371,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            5.584,
+            -2.5931
+          ],
+          "gt_min_dist_whole_m": 0.0808,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.0808,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "home_building_1",
+      "traj_q": 4,
+      "question": "Go to the coffee table with the kettle on it and stop at the dining table near the big picture.",
+      "fit_residual_m": 0.8793,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 3.0947,
+          "goal_xy": [
+            6.4345,
+            0.54
+          ],
+          "gt_min_dist_whole_m": 14.8242,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 14.8242,
+          "reached_segment": false
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -5.7539,
+            7.2193
+          ],
+          "gt_min_dist_whole_m": 1.4132,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.4132,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 1,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "home_building_1",
+      "traj_q": 5,
+      "question": "First, go to the nightstand with a clock on it, then take the path between the dining table and the picture, and stop at the trash can closest to the refridgerator.",
+      "fit_residual_m": 0.8793,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.2403,
+          "goal_xy": [
+            -2.0813,
+            -12.9622
+          ],
+          "gt_min_dist_whole_m": 13.0143,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 13.0143,
+          "reached_segment": false
+        },
+        {
+          "index": 1,
+          "kind": "corridor_between",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -0.4779,
+            -5.7254
+          ],
+          "gt_min_dist_whole_m": 7.9859,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 7.9859,
+          "reached_segment": false
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -6.1233,
+            -1.7066
+          ],
+          "gt_min_dist_whole_m": 1.1005,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.1005,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 1,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "home_building_2",
+      "traj_q": 4,
+      "question": "Go near the magazine on the ottoman, then go to the potted plant on the dressing table.",
+      "fit_residual_m": 0.1956,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.0265,
+          "goal_xy": [
+            1.261,
+            5.543
+          ],
+          "gt_min_dist_whole_m": 1.7032,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.7032,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -3.9033,
+            11.7559
+          ],
+          "gt_min_dist_whole_m": 0.5569,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.5569,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "home_building_2",
+      "traj_q": 5,
+      "question": "Take the path between the sofa and the coffee table and go to the kettle on the dining table, then go to the potted plant between the curtain and the TV.",
+      "fit_residual_m": 0.1956,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "corridor_between",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            2.2332,
+            2.0964
+          ],
+          "gt_min_dist_whole_m": 0.6583,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.6583,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 1.9488,
+          "goal_xy": [
+            2.074,
+            11.119
+          ],
+          "gt_min_dist_whole_m": 0.6838,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.6838,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -4.3642,
+            0.2147
+          ],
+          "gt_min_dist_whole_m": 0.4002,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.4002,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 3
+    },
+    {
+      "scene": "hotel_room_1",
+      "traj_q": 4,
+      "question": "Go to the bedside table closest to the window and stop at the chair closest to the TV.",
+      "fit_residual_m": 0.1953,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.3362,
+          "goal_xy": [
+            2.6942,
+            -3.79
+          ],
+          "gt_min_dist_whole_m": 1.2402,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.2402,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -0.0937,
+            -2.0344
+          ],
+          "gt_min_dist_whole_m": 0.5169,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.7002,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "hotel_room_1",
+      "traj_q": 5,
+      "question": "First, go near the bedside table closest to the bench, then take the path between the TV and the bed to the picture closest to the TV.",
+      "fit_residual_m": 0.1953,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.3363,
+          "goal_xy": [
+            3.433,
+            -0.6163
+          ],
+          "gt_min_dist_whole_m": 2.2862,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 2.2862,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "corridor_between",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -0.3495,
+            -1.7272
+          ],
+          "gt_min_dist_whole_m": 0.4819,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.4819,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -2.5335,
+            -3.0735
+          ],
+          "gt_min_dist_whole_m": 0.8157,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.8157,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 3
+    },
+    {
+      "scene": "hotel_room_2",
+      "traj_q": 4,
+      "question": "Go between the bench and the bed and stop at the lamp closest to the fireplace.",
+      "fit_residual_m": 0.975,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "corridor_between",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -0.4328,
+            1.4381
+          ],
+          "gt_min_dist_whole_m": 0.5839,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.5839,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            1.1106,
+            1.0142
+          ],
+          "gt_min_dist_whole_m": 1.1207,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": null,
+          "reached_segment": false
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "hotel_room_2",
+      "traj_q": 5,
+      "question": "First, go to the picture closest to the door, then take the path between the TV cabinet and the bed, and stop by the curtain closest to the TV.",
+      "fit_residual_m": 0.975,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 1.9935,
+          "goal_xy": [
+            2.6145,
+            -0.8982
+          ],
+          "gt_min_dist_whole_m": 0.709,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.709,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "corridor_between",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -1.6424,
+            -0.0856
+          ],
+          "gt_min_dist_whole_m": 0.2829,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.2829,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -3.9436,
+            -0.8613
+          ],
+          "gt_min_dist_whole_m": 0.5722,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.5722,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 3
+    },
+    {
+      "scene": "japanese_room",
+      "traj_q": 4,
+      "question": "Go near the small table with a vase on it and then to the flowers near the jar.",
+      "fit_residual_m": 0.459,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.0291,
+          "goal_xy": [
+            1.9507,
+            0.752
+          ],
+          "gt_min_dist_whole_m": 1.1919,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.1919,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            1.858,
+            2.3708
+          ],
+          "gt_min_dist_whole_m": 0.8185,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.8185,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "japanese_room",
+      "traj_q": 5,
+      "question": "Go to the lantern closest to the fan decoration, then take the path near the wardrobe doors to the flowers on the display ledge.",
+      "fit_residual_m": 0.459,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 1.8877,
+          "goal_xy": [
+            1.388,
+            0.3674
+          ],
+          "gt_min_dist_whole_m": 1.362,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.362,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "via_near",
+          "pass_by": true,
+          "tol_used_m": 2.4242,
+          "goal_xy": [
+            0.1395,
+            3.9745
+          ],
+          "gt_min_dist_whole_m": 0.1989,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.1989,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -1.5182,
+            3.9745
+          ],
+          "gt_min_dist_whole_m": 0.3421,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.3421,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 3
+    },
+    {
+      "scene": "livingroom_1",
+      "traj_q": 4,
+      "question": "Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.",
+      "fit_residual_m": 0.9257,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.4307,
+          "goal_xy": [
+            2.7271,
+            -4.2988
+          ],
+          "gt_min_dist_whole_m": 3.7221,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 3.7221,
+          "reached_segment": false
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -0.9164,
+            3.0404
+          ],
+          "gt_min_dist_whole_m": 1.6545,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.6545,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 1,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "livingroom_1",
+      "traj_q": 5,
+      "question": "First, go near the lamp closest to the black chair, then take the path between the sofa and the round tables, and stop at the cabinet with a picture above it.",
+      "fit_residual_m": 0.9257,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.0722,
+          "goal_xy": [
+            -0.4808,
+            1.9485
+          ],
+          "gt_min_dist_whole_m": 2.525,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 2.525,
+          "reached_segment": false
+        },
+        {
+          "index": 1,
+          "kind": "corridor_between",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -0.7105,
+            -2.3548
+          ],
+          "gt_min_dist_whole_m": 1.9074,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 1.9074,
+          "reached_segment": false
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -2.2339,
+            -5.5438
+          ],
+          "gt_min_dist_whole_m": 0.0465,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.0465,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 1,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "livingroom_2",
+      "traj_q": 4,
+      "question": "Go to the microwave on the kitchen counter and then go to the crystal ball decoration on the shelf near the TV.",
+      "fit_residual_m": 0.3817,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.0845,
+          "goal_xy": [
+            -0.1717,
+            4.3795
+          ],
+          "gt_min_dist_whole_m": 1.6044,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.6044,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            2.5119,
+            -1.5382
+          ],
+          "gt_min_dist_whole_m": 0.2969,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.2969,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "livingroom_2",
+      "traj_q": 5,
+      "question": "First, go to the chair near the window, then stop at the soccer ball near the couch, avoiding the path between the TV and the tea table.",
+      "fit_residual_m": 0.3817,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.2205,
+          "goal_xy": [
+            -1.4983,
+            1.5009
+          ],
+          "gt_min_dist_whole_m": 1.0069,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.0069,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            2.8663,
+            -6.1884
+          ],
+          "gt_min_dist_whole_m": 0.1589,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.1589,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "livingroom_3",
+      "traj_q": 4,
+      "question": "Take the path near the TV and go to the pillow farthest from the lamp.",
+      "fit_residual_m": 1.8103,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "via_near",
+          "pass_by": true,
+          "tol_used_m": 2.4198,
+          "goal_xy": [
+            1.8888,
+            -4.9576
+          ],
+          "gt_min_dist_whole_m": 2.3903,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 2.3903,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            0.6108,
+            -2.3605
+          ],
+          "gt_min_dist_whole_m": 0.9253,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.9614,
+          "reached_segment": false
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "livingroom_3",
+      "traj_q": 5,
+      "question": "First, go near the stool, then take the path near the cabinet, and stop at the bowl on the table.",
+      "fit_residual_m": 1.8103,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.1409,
+          "goal_xy": [
+            2.2495,
+            0.3454
+          ],
+          "gt_min_dist_whole_m": 1.8094,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.8094,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "via_near",
+          "pass_by": true,
+          "tol_used_m": 3.7951,
+          "goal_xy": [
+            3.122,
+            -4.9576
+          ],
+          "gt_min_dist_whole_m": 2.7028,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 2.7028,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            5.3667,
+            -4.2474
+          ],
+          "gt_min_dist_whole_m": 0.9844,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": null,
+          "reached_segment": false
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "livingroom_4",
+      "traj_q": 4,
+      "question": "Go near the chair closest to the bookcase and stop at the table with the flowers on it.",
+      "fit_residual_m": 0.6917,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.1276,
+          "goal_xy": [
+            -3.1786,
+            2.0221
+          ],
+          "gt_min_dist_whole_m": 1.3298,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.3298,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -1.172,
+            -0.6394
+          ],
+          "gt_min_dist_whole_m": 0.0928,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.7002,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "livingroom_4",
+      "traj_q": 5,
+      "question": "First, go near the fireplace, then go to the window closest to the bookcase, and stop at the chair farthest from the mirror.",
+      "fit_residual_m": 0.6917,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.5656,
+          "goal_xy": [
+            -1.227,
+            -3.7255
+          ],
+          "gt_min_dist_whole_m": 0.6883,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.6883,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.2461,
+          "goal_xy": [
+            -4.8861,
+            -1.3349
+          ],
+          "gt_min_dist_whole_m": 0.7147,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.7147,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -3.1786,
+            0.7189
+          ],
+          "gt_min_dist_whole_m": 0.3529,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.3529,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 3
+    },
+    {
+      "scene": "loft",
+      "traj_q": 4,
+      "question": "Go to the cup near the TV remote and avoid the path near the cabinet.",
+      "fit_residual_m": 0.2953,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            6.3976,
+            2.9133
+          ],
+          "gt_min_dist_whole_m": 0.606,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.606,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 1,
+      "n_reached_whole": 1,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "loft",
+      "traj_q": 5,
+      "question": "Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.",
+      "fit_residual_m": 0.2953,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.3909,
+          "goal_xy": [
+            -1.279,
+            0.97
+          ],
+          "gt_min_dist_whole_m": 0.7482,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.7482,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "via_near",
+          "pass_by": true,
+          "tol_used_m": 3.8943,
+          "goal_xy": [
+            -0.1272,
+            -0.3169
+          ],
+          "gt_min_dist_whole_m": 0.0872,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.0872,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            6.8771,
+            -2.356
+          ],
+          "gt_min_dist_whole_m": 0.9449,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.9449,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 3
+    },
+    {
+      "scene": "office_1",
+      "traj_q": 4,
+      "question": "Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.",
+      "fit_residual_m": 0.4494,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.3597,
+          "goal_xy": [
+            5.5898,
+            0.4197
+          ],
+          "gt_min_dist_whole_m": 0.9388,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.9388,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            -3.3617,
+            -4.28
+          ],
+          "gt_min_dist_whole_m": 0.0632,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.0632,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "office_1",
+      "traj_q": 5,
+      "question": "First, go near the potted plant on the shelf, then take the path between the two tables, and stop at the bench closest to the map wall decal.",
+      "fit_residual_m": 0.4494,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 1.9793,
+          "goal_xy": [
+            0.1952,
+            1.2025
+          ],
+          "gt_min_dist_whole_m": 1.5026,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.5026,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "corridor_between",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            0.0516,
+            -1.8545
+          ],
+          "gt_min_dist_whole_m": 0.3197,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.3197,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            1.593,
+            -3.8636
+          ],
+          "gt_min_dist_whole_m": 0.7635,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.7635,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 3
+    },
+    {
+      "scene": "office_2",
+      "traj_q": 4,
+      "question": "Go near the potted plant on the cabinet and stop at the window closest to the clock.",
+      "fit_residual_m": 0.3851,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 1.8981,
+          "goal_xy": [
+            4.518,
+            0.21
+          ],
+          "gt_min_dist_whole_m": 0.5256,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.5256,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            4.9055,
+            4.5747
+          ],
+          "gt_min_dist_whole_m": 0.7814,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.7814,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 2,
+      "n_reached_segment": 2
+    },
+    {
+      "scene": "office_2",
+      "traj_q": 5,
+      "question": "First, go to the trash can near the cabinet, then go to the folder on the cabinet closest to the whiteboard, and finally, to the door near the exit sign.",
+      "fit_residual_m": 0.3851,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.0672,
+          "goal_xy": [
+            2.2652,
+            -0.3414
+          ],
+          "gt_min_dist_whole_m": 0.0612,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.0612,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 1.879,
+          "goal_xy": [
+            5.1268,
+            3.1395
+          ],
+          "gt_min_dist_whole_m": 0.0678,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.0678,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            6.608,
+            -0.8907
+          ],
+          "gt_min_dist_whole_m": 0.7017,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.7017,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 3
+    },
+    {
+      "scene": "studio",
+      "traj_q": 4,
+      "question": "Go to the vases on the cabinet below the TV and stop at the guitar near the couch.",
+      "fit_residual_m": 0.5586,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 1.859,
+          "goal_xy": [
+            3.7052,
+            2.9196
+          ],
+          "gt_min_dist_whole_m": 2.1728,
+          "reached_whole": false,
+          "gt_min_dist_segment_m": 2.1728,
+          "reached_segment": false
+        },
+        {
+          "index": 1,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            3.4351,
+            -2.0163
+          ],
+          "gt_min_dist_whole_m": 1.1053,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.1053,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 2,
+      "n_reached_whole": 1,
+      "n_reached_segment": 1
+    },
+    {
+      "scene": "studio",
+      "traj_q": 5,
+      "question": "First, go to the vase closest to the easel, then, take the path between the couch and the table and stop at the window closest to the couch.",
+      "fit_residual_m": 0.5586,
+      "legs": [
+        {
+          "index": 0,
+          "kind": "goto",
+          "pass_by": true,
+          "tol_used_m": 2.0143,
+          "goal_xy": [
+            1.277,
+            1.5858
+          ],
+          "gt_min_dist_whole_m": 1.7829,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.7829,
+          "reached_segment": true
+        },
+        {
+          "index": 1,
+          "kind": "corridor_between",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            3.495,
+            -1.071
+          ],
+          "gt_min_dist_whole_m": 1.7332,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 1.7332,
+          "reached_segment": true
+        },
+        {
+          "index": 2,
+          "kind": "goto",
+          "pass_by": false,
+          "tol_used_m": 1.7463,
+          "goal_xy": [
+            3.299,
+            -3.9285
+          ],
+          "gt_min_dist_whole_m": 0.2274,
+          "reached_whole": true,
+          "gt_min_dist_segment_m": 0.2274,
+          "reached_segment": true
+        }
+      ],
+      "n_legs": 3,
+      "n_reached_whole": 3,
+      "n_reached_segment": 3
+    }
+  ]
+}
