@@ -20,7 +20,8 @@ import math
 
 import numpy as np
 
-from core.nav.costmap import Costmap
+from core.geometry.primitives import usable_gate_point
+from core.nav.costmap import Costmap, _point_segment_dist
 
 # --------------------------------------------------------------------------- tunables
 UNKNOWN_COST_MULT: float = 3.0  # traversing an UNKNOWN cell costs 3x a FREE cell
@@ -259,6 +260,24 @@ def _nudge_past_gate(
     return (mid[0] + dx / dlen * eps, mid[1] + dy / dlen * eps)
 
 
+def _raw_obstacle_blocked_xy(costmap: Costmap, pt) -> bool:
+    """True if ``pt`` (world XY) lands on a genuine solid obstacle cell.
+
+    issue #63: tests ``raw_blocked`` (the UNINFLATED obstacle footprint), never
+    ``base_blocked``/``blocked()`` — a cell blocked only by the vehicle's own
+    inflation margin is not a real obstruction the gate needs to route around
+    (same discipline `_pinch_costmap`'s inflation-only clearing already applies).
+    Off-grid points read as clear (never force a slide off the mapped area).
+    """
+    r, c = costmap.grid.world_to_cell(float(pt[0]), float(pt[1]))
+    if not costmap.grid.in_bounds(r, c):
+        return False
+    rh, rw = costmap.raw_blocked.shape
+    if not (0 <= r < rh and 0 <= c < rw):
+        return False
+    return bool(costmap.raw_blocked[r, c])
+
+
 def free_space_via_point(
     costmap: Costmap,
     anchor_xy: tuple[float, float],
@@ -402,7 +421,23 @@ def plan_through(
         if kind == "corridor_between":
             gate = geom  # type: ignore[assignment]
             g0, g1 = gate  # type: ignore[misc]
-            mid = ((g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0)
+            raw_mid = ((g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0)
+            # issue #63: a genuine solid obstacle sitting at the raw gate midpoint
+            # (e.g. hotel_room_2's duplicate GT "bed frame" instance for the same
+            # physical bed as an anchor) is not a usable via-point — slide the
+            # mandatory via-point along the gate's own verified axis to the nearest
+            # clear point via the SAME `usable_gate_point` helper the scoring
+            # geometry's `corridor_gate` uses, so the two can never disagree about
+            # where a blocked gate's usable crossing is (the #51 mismatch class).
+            # A no-op (returns `raw_mid` unchanged) whenever the raw midpoint is
+            # already clear, which is every gate today's tests exercise.
+            nudged = usable_gate_point(
+                np.asarray(g0, dtype=float),
+                np.asarray(g1, dtype=float),
+                np.asarray(raw_mid, dtype=float),
+                lambda pt: _raw_obstacle_blocked_xy(costmap, pt),
+            )
+            mid = (float(nudged[0]), float(nudged[1]))
             seg = astar(costmap, cur, mid, unknown_cost_mult=unknown_cost_mult)
             # issue #51: the pinch fallback used to engage ONLY when the direct A*
             # succeeded but missed the gate (`seg is not None`); when the gate midpoint
@@ -436,15 +471,43 @@ def plan_through(
                     # snapped goal cell fractionally on the SAME side of the gate line
                     # `cur` approached from (a grid-quantization near-miss), so the
                     # mandatory `path_crosses_gate` check below fails even though the
-                    # corridor was genuinely threaded. This nudge is scoped to the
-                    # "never reached the gate at all" case only: when the direct attempt
-                    # DID reach the gate (just without crossing), `cur` may already be
-                    # on the far side of a gate this route threaded earlier in a prior
-                    # replan — nudging there would force a spurious detour BACK through
-                    # an already-threaded gate instead of leaving it unreachable (and
-                    # falling through to the caller's own recovery), which is what the
-                    # pre-#54 behaviour safely did.
+                    # corridor was genuinely threaded.
                     target = _nudge_past_gate(cur, mid, costmap.cell_m, pinch_corridor_half_w_m)
+                else:
+                    # issue #64: the direct attempt DID reach the gate (just without
+                    # crossing it) — the case #54's guard normally leaves un-nudged,
+                    # because `cur` may legitimately already be on the far side of a
+                    # gate this route threaded earlier before a route rebuild (nudging
+                    # there forces a spurious detour BACK through an already-threaded
+                    # gate: the real #54 regression). But this same shape also covers a
+                    # genuine grid-quantization near-miss: the goal-cell snap
+                    # (`_snap_passable`) can land the direct segment's last vertex up to
+                    # half a grid cell short of the exact gate line, on the SAME side
+                    # `cur` approached from, so `path_crosses_gate` fails even though the
+                    # corridor was, in every practical sense, threaded. Distinguish the
+                    # two with a tight, two-part engagement condition rather than
+                    # broadening nudging to every case-B miss (which is exactly what
+                    # broke the #54 guard previously):
+                    #   1. the miss itself must be smaller than the quantization
+                    #      mechanism can produce (one full grid cell — double the
+                    #      half-cell bound `_snap_passable` can introduce, so real
+                    #      near-misses always qualify with margin) — an
+                    #      already-threaded-gate miss from a genuinely different route
+                    #      shape stays much farther out than that;
+                    #   2. `cur` itself must NOT already be sitting within that same
+                    #      one-cell band of the gate at the START of this leg — an
+                    #      already-threaded gate typically resumes with `cur` planted
+                    #      right at (or just past) the line it crossed earlier, whereas a
+                    #      fresh quantization near-miss approaches from farther away and
+                    #      only the direct segment's SNAPPED END lands close.
+                    # Both conditions must hold; either failing leaves `target = mid`
+                    # (the pre-#64, #54-safe behaviour) unchanged.
+                    miss_dist = float(
+                        _point_segment_dist(seg[-1][0], seg[-1][1], g0[0], g0[1], g1[0], g1[1])
+                    )
+                    cur_dist = float(_point_segment_dist(cur[0], cur[1], g0[0], g0[1], g1[0], g1[1]))
+                    if miss_dist < costmap.cell_m and cur_dist >= costmap.cell_m:
+                        target = _nudge_past_gate(cur, mid, costmap.cell_m, pinch_corridor_half_w_m)
                 # issue #54: bounded start-seal relaxation. Round 0 uses the caller's
                 # own pinch_disc_m (today's behaviour, unchanged for the common case);
                 # if the start-disc exemption still doesn't free a route (the local

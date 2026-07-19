@@ -219,3 +219,69 @@ def aabb_face_points_2d(
             pa[i] = a0[i]
             pb[i] = b1[i]
     return pa, pb
+
+
+def point_in_footprint_2d(pt: np.ndarray, box_min: np.ndarray, box_max: np.ndarray) -> bool:
+    """True if ``pt`` (XY) lies within the AABB's XY footprint (inclusive of the edge)."""
+    lo, hi = footprint_min(box_min, box_max), footprint_max(box_min, box_max)
+    p = np.asarray(pt, dtype=float).reshape(-1)[:2]
+    return bool(lo[0] - EPS <= p[0] <= hi[0] + EPS and lo[1] - EPS <= p[1] <= hi[1] + EPS)
+
+
+def usable_gate_point(
+    p0: np.ndarray,
+    p1: np.ndarray,
+    midpoint: np.ndarray,
+    is_blocked,
+    *,
+    slide_step_frac: float = 0.1,
+    max_slide_frac: float = 0.45,
+) -> np.ndarray:
+    """The usable crossing point of a (possibly partially-blocked) gate segment.
+
+    Issue #63: a genuine object at the raw gate midpoint (e.g. hotel_room_2's
+    duplicate GT "bed frame" instance sitting at the anchor-to-anchor gate line —
+    a REAL obstruction, not an anchor's own footprint) is not a usable via-point:
+    any route threading the gate has to detour around it, so a via-point placed
+    inside it demands geometry no route can satisfy. Slides the crossing point
+    away from ``midpoint``, ALONG the gate's own p0<->p1 axis (never off the
+    verified anchor-to-anchor line — a real doorway), testing outward in
+    ``slide_step_frac``-length increments alternating both directions (nearest
+    candidates first), until ``is_blocked`` clears or the bounded sweep
+    (``max_slide_frac`` of the gate's length either side, never reaching an
+    anchor) is exhausted.
+
+    Deliberately caller-agnostic about what "blocked" means: ``is_blocked`` is a
+    ``(point_xy) -> bool`` predicate the caller supplies. This is the ONE shared
+    helper both `core.geometry.toolbox.corridor_gate` (scoring, blocked = a third
+    GT instance's raw footprint) and `core.nav.planner.plan_through` (live
+    planning, blocked = a genuine solid obstacle cell in the costmap) call, so
+    the two surfaces can never disagree about where a blocked gate's usable
+    crossing is (the #51 scoring/planning-mismatch class of bug).
+
+    Returns ``midpoint`` unchanged when it is already clear, when the segment is
+    degenerate (zero length), or when nothing along the bounded sweep clears —
+    callers then fall back to the pre-#63 exact-midpoint behaviour (a genuinely
+    sealed gate is left for the caller's own existing recovery, never silently
+    misplaced past the verified anchor extent).
+    """
+    p0 = np.asarray(p0, dtype=float).reshape(-1)[:2]
+    p1 = np.asarray(p1, dtype=float).reshape(-1)[:2]
+    midpoint = np.asarray(midpoint, dtype=float).reshape(-1)[:2]
+    if not is_blocked(midpoint):
+        return midpoint
+    axis = p1 - p0
+    length = float(np.hypot(*axis))
+    if length < EPS:
+        return midpoint
+    unit = axis / length
+    max_slide_m = max_slide_frac * length
+    step_m = max(slide_step_frac * length, 1e-6)
+    d = step_m
+    while d <= max_slide_m + EPS:
+        for sign in (1.0, -1.0):
+            cand = midpoint + unit * (sign * d)
+            if not is_blocked(cand):
+                return cand
+        d += step_m
+    return midpoint
