@@ -102,19 +102,60 @@ class BreadcrumbFollower:
     #: forward ``_idx`` past it once the vehicle demonstrably reaches it, instead of
     #: only ever creeping one index at a time.
     _last_crumb_idx: int = -1
+    #: Cumulative path arc length (metres) up to and including ``path[k]``, index-
+    #: matched to ``path``. Lazily built (see ``_arc_len``) the first time a lookahead
+    #: bound is needed, then cached — ``path`` is never mutated in place after
+    #: construction (a rebuilt/replanned route gets a NEW ``BreadcrumbFollower``), so
+    #: a one-time build is always valid for the object's lifetime.
+    _cum_dist: list[float] | None = field(default=None, repr=False, compare=False)
+
+    def _arc_len(self) -> list[float]:
+        """``_cum_dist``, building it on first use."""
+        cum = self._cum_dist
+        if cum is None or len(cum) != len(self.path):
+            cum = [0.0] * len(self.path)
+            for k in range(1, len(self.path)):
+                cum[k] = cum[k - 1] + _dist(self.path[k - 1], self.path[k])
+            self._cum_dist = cum
+        return cum
 
     # ------------------------------------------------------------- crumb selection
     def _select_crumb(self, pose: tuple[float, float]) -> WaypointCmd | None:
-        """Farthest path point <= lookahead ahead of pose with clear line-of-sight."""
+        """Farthest path point <= lookahead AHEAD ON THE PATH with clear line-of-sight.
+
+        "Ahead" is measured as arc length travelled ALONG the path from ``_idx`` to the
+        candidate index, not the candidate's straight-line (Euclidean) distance from the
+        current pose. On a path that runs out to a leg's own goal and then doubles back
+        near its own earlier ground (e.g. returning past the start on the way to a later
+        corridor/leg — the same self-proximity shape issue #62 already names for
+        ``_idx`` tracking), a point many indices — and many real metres of travel —
+        ahead can sit Euclidean-CLOSE to the current pose merely because the path folds
+        back near it. Bounding by Euclidean pose distance alone then treats that distant,
+        not-yet-visited point as "nearby enough to shortcut to", skipping the entire
+        out-and-back detour (and whatever leg goal sits at its tip) even though it was
+        never actually driven. Arc length is the literal distance the vehicle would have
+        to travel along the planned route to reach the candidate, which is what
+        "how far ahead" the docstring's LOOKAHEAD_M bound was always meant to cap — LOS
+        shortcuts across a genuinely open, non-looping stretch are unaffected (arc length
+        stays close to Euclidean distance there, since the path itself does not fold).
+        """
         if self._idx >= len(self.path):
             return None
+        cum = self._arc_len()
+        # ``_idx`` can sit AHEAD of the actual pose (the within/overshoot advance in
+        # ``advance`` consumes path points close to a not-yet-moved pose — legitimate,
+        # see that method's docstring). Anchor the arc-length budget on the pose's own
+        # remaining distance to ``path[_idx]`` plus arc length from there, not on
+        # ``cum[_idx]`` alone, so a lagging pose is never granted MORE lookahead than a
+        # pose that is truly sitting at ``path[_idx]`` would get.
+        base = cum[self._idx] - _dist(pose, self.path[self._idx])
         chosen: tuple[float, float] | None = None
         chosen_idx: int | None = None
         # Scan forward from current progress index; keep the farthest LOS-clear point
         # within lookahead. Stop early once a point exceeds lookahead (path is ordered).
         for j in range(self._idx, len(self.path)):
             pt = self.path[j]
-            if _dist(pose, pt) > self.lookahead_m:
+            if cum[j] - base > self.lookahead_m:
                 # Beyond lookahead — but keep the last good one; break to bound cost.
                 if chosen is not None:
                     break

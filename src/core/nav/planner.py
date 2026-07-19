@@ -71,12 +71,20 @@ def astar(
     grid = costmap.grid
     h, w = grid.shape
     sr, sc = grid.world_to_cell(*start_xy)
-    gr, gc = grid.world_to_cell(*goal_xy)
+    gr0, gc0 = grid.world_to_cell(*goal_xy)
 
     sr, sc = _snap_passable(costmap, sr, sc)
-    gr, gc = _snap_passable(costmap, gr, gc)
+    gr, gc = _snap_passable(costmap, gr0, gc0)
     if sr is None or gr is None:
         return None
+    # The requested goal snapped to its OWN cell unchanged (it was already passable) ->
+    # the exact continuous goal_xy lies inside the searched-for cell, so the vehicle's
+    # true stopping point is goal_xy itself, not that cell's centre. Only substitute
+    # when the snap did not move (a moved snap means goal_xy was blocked, and the
+    # nearest-passable-cell centre IS the principled least-bad stand-in, same as
+    # everywhere else this snap is used) so this never invents a point outside the
+    # cell A* actually searched to.
+    exact_goal_xy = goal_xy if (gr, gc) == (gr0, gc0) else None
 
     open_heap: list[tuple[float, int, int, int]] = []
     heapq.heappush(open_heap, (0.0, 0, sr, sc))
@@ -92,7 +100,10 @@ def astar(
             continue
         closed[r, c] = True
         if (r, c) == (gr, gc):
-            return _reconstruct(grid, came, (sr, sc), (gr, gc))
+            path = _reconstruct(grid, came, (sr, sc), (gr, gc))
+            if exact_goal_xy is not None:
+                path[-1] = (float(exact_goal_xy[0]), float(exact_goal_xy[1]))
+            return path
         for dr, dc, base in _STEPS:
             nr, nc = r + dr, c + dc
             if not (0 <= nr < h and 0 <= nc < w) or closed[nr, nc]:
