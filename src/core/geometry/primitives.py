@@ -221,6 +221,64 @@ def aabb_face_points_2d(
     return pa, pb
 
 
+def _ray_footprint_exit_2d(
+    origin: np.ndarray, unit_dir: np.ndarray, box_min: np.ndarray, box_max: np.ndarray
+) -> float:
+    """Distance along ``unit_dir`` from ``origin`` (assumed inside the footprint) to
+    where the ray exits the AABB's XY footprint, metres.
+
+    Standard 2D slab march: for each axis the ray can only exit through the far
+    face it is heading toward; the exit distance is the SMALLEST such non-negative
+    crossing. Returns 0.0 if ``origin`` already sits on/outside the boundary on some
+    axis (degenerate callers get a zero-length face point rather than a negative one).
+    """
+    lo, hi = footprint_min(box_min, box_max), footprint_max(box_min, box_max)
+    t_exit = np.inf
+    for i in range(2):
+        if abs(unit_dir[i]) <= EPS:
+            continue
+        face = hi[i] if unit_dir[i] > 0 else lo[i]
+        t = (face - origin[i]) / unit_dir[i]
+        if t >= 0.0:
+            t_exit = min(t_exit, t)
+    return float(max(t_exit, 0.0)) if np.isfinite(t_exit) else 0.0
+
+
+def centroid_axis_face_points_2d(
+    c0: np.ndarray, box0_min: np.ndarray, box0_max: np.ndarray,
+    c1: np.ndarray, box1_min: np.ndarray, box1_max: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Where the centroid0<->centroid1 line exits each anchor's own XY footprint.
+
+    Corridor-between semantics (:func:`core.geometry.toolbox.between`) already define
+    "between b1 and b2" via the CENTROID-to-centroid segment (capsule radius = the
+    anchors' own half-widths) — the corridor gate's face points should use the SAME
+    axis, not the independent per-axis footprint-overlap projection
+    (:func:`aabb_face_points_2d`), which degenerates to a near-zero-width, physically
+    meaningless "gate" whenever the two footprints already touch or overlap (adjacent
+    furniture) and is blind to a diagonal (non-axis-facing) anchor arrangement.
+
+    Walking from ``c0`` toward ``c1``, ``p0`` is the point where that ray leaves box0's
+    footprint; walking from ``c1`` back toward ``c0``, ``p1`` is where that ray leaves
+    box1's footprint. Always well-defined (given two distinct centroids), including
+    when the footprints overlap — the two exit points still bound a genuine "gap
+    between the object bodies" segment along the line connecting them, in place of an
+    axis-only construction that can collapse to zero width or misplace itself for
+    diagonally-offset boxes.
+    """
+    c0a, c1a = _as3(c0)[:2], _as3(c1)[:2]
+    d = c1a - c0a
+    length = float(np.hypot(*d))
+    if length <= EPS:  # coincident centroids: no axis to walk, fall back to c0
+        return c0a.copy(), c1a.copy()
+    unit = d / length
+    t0 = _ray_footprint_exit_2d(c0a, unit, box0_min, box0_max)
+    t1 = _ray_footprint_exit_2d(c1a, -unit, box1_min, box1_max)
+    p0 = c0a + unit * t0
+    p1 = c1a - unit * t1
+    return p0, p1
+
+
 def point_in_footprint_2d(pt: np.ndarray, box_min: np.ndarray, box_max: np.ndarray) -> bool:
     """True if ``pt`` (XY) lies within the AABB's XY footprint (inclusive of the edge)."""
     lo, hi = footprint_min(box_min, box_max), footprint_max(box_min, box_max)
