@@ -784,7 +784,7 @@ def test_if_rubric_geometry_corridor_leg_resolves_distinct_anchors():
     )
     idx = BasicSceneIndex(gt.instances)
     text = "Take the path between the two columns."
-    leg_goals, corridor_gates, _, _ = GB._if_rubric_geometry(text, gt, idx)
+    leg_goals, corridor_gates, _, _, _ = GB._if_rubric_geometry(text, gt, idx)
     assert len(corridor_gates) == 1
     _, gate = corridor_gates[0]
     assert gate.width > 0.5, f"expected a real (non-degenerate) gate, got width={gate.width}"
@@ -799,7 +799,7 @@ def test_if_rubric_geometry_non_corridor_legs_unaffected():
         [("stool", -4.0, 0.0, 0.0, 0.4, 0.4, 0.6)], scene_name="syn51b"
     )
     idx = BasicSceneIndex(gt.instances)
-    leg_goals, corridor_gates, _, _ = GB._if_rubric_geometry("Go to the stool.", gt, idx)
+    leg_goals, corridor_gates, _, _, _ = GB._if_rubric_geometry("Go to the stool.", gt, idx)
     assert corridor_gates == []
     assert leg_goals == [("goto", (-4.0, 0.0))]
 
@@ -969,7 +969,7 @@ def test_if_rubric_geometry_goto_goal_clears_own_anchor_footprint():
         scene_name="syn66rubric",
     )
     idx = BasicSceneIndex(gt.instances)
-    leg_goals, _, _, _ = GB._if_rubric_geometry(
+    leg_goals, _, _, _, _ = GB._if_rubric_geometry(
         "Go to the bench.", gt, idx, start_xy=(3.0, -5.0)
     )
     assert len(leg_goals) == 1

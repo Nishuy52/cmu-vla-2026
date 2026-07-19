@@ -352,11 +352,14 @@ def test_driven_trajectory_reaches_ordered_legs():
     gt = GTScene(scene_name="t", instances=insts, regions=[])
     idx = BasicSceneIndex(insts)
     q = "First go to the pole, then go to the table."
-    leg_goals, gates, caps, _ = B._if_rubric_geometry(q, gt, idx)
+    leg_goals, gates, caps, _, aabbs = B._if_rubric_geometry(q, gt, idx)
     assert [k for k, _ in leg_goals] == ["goto", "goto"]
     traj = B._drive_if_trajectory(q, gt, idx, start_xy=(6.0, -2.5))
     assert traj.shape[0] > 2  # a real motion stream, not a point
-    r = score_instruction_rubric(traj, leg_goals, corridor_gates=gates, avoid_capsules=caps)
+    r = score_instruction_rubric(
+        traj, leg_goals, corridor_gates=gates, avoid_capsules=caps,
+        leg_instance_aabbs=aabbs,
+    )
     assert r.n_legs_reached_in_order == 2
     assert r.rubric_score == pytest.approx(1.0)
 
