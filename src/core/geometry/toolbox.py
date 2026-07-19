@@ -982,7 +982,7 @@ def resolve(
             audit.append(
                 Relaxation("superlative_anchor_missing", f"{sup.anchors[0].noun} not found")
             )
-            survivors = _tier_priority_order(survivors, index, target.noun)
+            survivors = _tier_priority_order(survivors, index, target.noun, hard_clauses, th)
     elif not hard_clauses and original_hard_clauses and len(survivors) > 1:
         # issue #59: the fallback ladder dropped every relation clause (category-only
         # rung) because no candidate passed it as a HARD filter — e.g. "the potted
@@ -1069,12 +1069,16 @@ def _nested_superlative_order(
         dists = {c.instance_id: _centroid_dist(c, target_anchor) for c in survivors}
         return sorted(survivors, key=lambda c: (dists[c.instance_id], c.instance_id))
     if noun is not None:
-        return _tier_priority_order(survivors, index, noun)
+        return _tier_priority_order(survivors, index, noun, hard_clauses, th)
     return _stable_by_id(survivors)
 
 
 def _tier_priority_order(
-    recs: Sequence[InstanceRecord], index: SceneIndex, noun: str
+    recs: Sequence[InstanceRecord],
+    index: SceneIndex,
+    noun: str,
+    hard_clauses: Sequence[Clause] = (),
+    th: Thresholds | None = None,
 ) -> list[InstanceRecord]:
     """Stable-by-id, but an EXACT/SYNONYM label match is never outranked by a
     HEAD_NOUN cousin dragged in by the same-class pool (issue #51 root cause: with
@@ -1089,6 +1093,19 @@ def _tier_priority_order(
     tier preference there would wrongly bias a same-class superlative/count pool.
     Falls back to plain stable-by-id when the index exposes no tiered lookup (test
     doubles) or the noun is bare.
+
+    Issue #73: an exact label is strictly more specific than an alias/cousin
+    label — that specificity ordering does not stop at the label tier. When
+    ``hard_clauses`` (the relation clauses this candidate pool actually survived,
+    e.g. ``between()``/``on()``) are supplied, ties WITHIN one label tier are broken
+    by each survivor's own summed clause ``PredResult.score`` before falling to
+    instance id: a same-label survivor that satisfies the SAME clause more
+    specifically (a stronger continuous margin) is a more specific match than one
+    that merely cleared the hard-filter threshold, so it must not lose a tie to a
+    detection-order accident (home_building_2/office_2, issue #71 audit residual).
+    This never re-ranks ACROSS tiers (exact still always beats alias/cousin) and
+    never fires when no clause context is given (``hard_clauses`` empty), so every
+    existing tier-only call site is unaffected.
     """
     from core.perception.scene_index import normalize_label
     from core.perception.vocab import head_noun
@@ -1101,8 +1118,21 @@ def _tier_priority_order(
         return _stable_by_id(recs)
     tier_by_id = {rec.instance_id: tier for rec, tier in tiered(noun)}
     worst = MatchTier.TYPO
+    score_by_id: dict[int, float] = {}
+    if hard_clauses and th is not None:
+        score_by_id = {
+            r.instance_id: sum(
+                _eval_clause(r, cl, index, th).score for cl in hard_clauses
+            )
+            for r in recs
+        }
     return sorted(
-        recs, key=lambda r: (tier_by_id.get(r.instance_id, worst), r.instance_id)
+        recs,
+        key=lambda r: (
+            tier_by_id.get(r.instance_id, worst),
+            -score_by_id.get(r.instance_id, 0.0),
+            r.instance_id,
+        ),
     )
 
 
