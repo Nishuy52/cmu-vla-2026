@@ -6,6 +6,11 @@ measured via the injected Clock) is enforced between tiers and before repairs. T
 deterministic regex tier is the floor: parse() never raises and always returns a Plan
 that validates.
 
+Every schema-valid Plan an LLM tier returns is run through ``core.parsing.normalize.
+normalize_llm_plan`` before being stamped and returned — deterministic post-processing
+for the three systematic semantic defects the local model exhibits (issues #47/#48/#49),
+never applied to the regex floor's own output.
+
 Ledger interaction: the fsm module owns the checkpoint call ledger (core.fsm.budget.
 CallLedger). This module duck-types it defensively so a missing or foreign ledger can
 never break parsing:
@@ -28,6 +33,7 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from core.interfaces import Clock
+from core.parsing.normalize import normalize_llm_plan
 from core.parsing.prompts import ChatFn, build_parse_messages, build_repair_messages
 from core.parsing.regex_tier import parse_regex
 from core.plan_schema import Plan
@@ -66,12 +72,12 @@ def parse(
             plan, errors, raw = _attempt(fn, build_parse_messages(qtext))
             if plan is not None and not errors:
                 _record_tier(ledger, clock, tier_t0, name)
-                return _stamp(plan, qtext, name)
+                return _stamp(normalize_llm_plan(plan, qtext), qtext, name)
             if not _expired():
                 plan, errors, _ = _attempt(fn, build_repair_messages(qtext, raw, errors))
                 if plan is not None and not errors:
                     _record_tier(ledger, clock, tier_t0, name)
-                    return _stamp(plan, qtext, name)
+                    return _stamp(normalize_llm_plan(plan, qtext), qtext, name)
             # tier exhausted (invalid + failed/skipped repair): log the attempt and fall on
             _record_tier(ledger, clock, tier_t0, name)
 
