@@ -1,0 +1,59 @@
+====================================================================================================
+home_building_1 q0 leg1  text='Go to the coffee table with the kettle on it and stop at the dining table near the big picture.'
+  anchor noun='dining table' attrs=[] disamb=Clause(pred=<Pred.NEAR: 'near'>, anchors=[Anchor(noun='picture', raw='picture', attributes=['big'], disambiguator=None)], negated=False)
+  audit=[('category_only', "fell back to all 'dining table' instances")]
+    rank0 id=165 label='table' xy=(-7.09,7.56) dist_to_gt_traj=10.371678154279207
+    rank1 id=176 label='coffee table' xy=(6.43,0.54) dist_to_gt_traj=1.2865113866068933
+    rank2 id=266 label='dining table' xy=(-0.07,-3.60) dist_to_gt_traj=1.6472663179069549
+====================================================================================================
+home_building_2 q1 leg2  text='Take the path between the sofa and the coffee table and go to the kettle on the dining table, then go to the potted plant between the curtain and the TV.'
+  anchor noun='potted plant' attrs=[] disamb=Clause(pred=<Pred.BETWEEN: 'between'>, anchors=[Anchor(noun='curtain', raw='curtain', attributes=[], disambiguator=None), Anchor(noun='tv', raw='tv', attributes=[], disambiguator=None)], negated=False)
+  audit=[]
+    rank0 id=58 label='potted plant' xy=(-3.80,-0.72) dist_to_gt_traj=0.850180123200864
+    rank1 id=221 label='potted plant' xy=(-3.34,11.70) dist_to_gt_traj=5.339047061408017
+    rank2 id=216 label='potted plant' xy=(-3.34,12.90) dist_to_gt_traj=5.614337459638093
+====================================================================================================
+hotel_room_2 q1 leg1  text='First, go to the picture closest to the door, then take the path between the TV cabinet and the bed, and stop by the curtain closest to the TV.'
+  anchor noun='tv cabinet' attrs=[] disamb=None
+  audit=[]
+    rank0 id=72 label='tv cabinet' xy=(-1.51,-1.03) dist_to_gt_traj=0.8685014487078425
+    rank1 id=43 label='sink cabinet' xy=(0.96,1.91) dist_to_gt_traj=2.044325991847642
+====================================================================================================
+japanese_room q1 leg1  text='Go to the lantern closest to the fan decoration, then take the path near the wardrobe doors to the flowers on the display ledge.'
+  anchor noun='wardrobe doors' attrs=[] disamb=None
+  audit=[]
+    rank0 id=0 label='wardrobe door' xy=(0.14,4.49) dist_to_gt_traj=0.8633118551280412
+    rank1 id=1 label='wardrobe door' xy=(1.50,4.54) dist_to_gt_traj=1.2220367971196966
+    rank2 id=2 label='door' xy=(2.39,1.26) dist_to_gt_traj=1.6652820721508834
+    rank3 id=3 label='door' xy=(2.44,2.24) dist_to_gt_traj=1.713241376549431
+    rank4 id=17 label='door' xy=(-3.03,0.91) dist_to_gt_traj=3.005077953317023
+    rank5 id=18 label='door' xy=(-3.03,3.29) dist_to_gt_traj=0.8625906724372522
+====================================================================================================
+livingroom_1 q0 leg1  text='Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.'
+  anchor noun='vase' attrs=[] disamb=Clause(pred=<Pred.BETWEEN: 'between'>, anchors=[Anchor(noun='tv', raw='tv', attributes=[], disambiguator=None), Anchor(noun='door', raw='door', attributes=[], disambiguator=None)], negated=False)
+  audit=[('category_only', "fell back to all 'vase' instances")]
+    rank0 id=11 label='vase' xy=(-1.15,2.34) dist_to_gt_traj=2.6200542689001907
+    rank1 id=23 label='vase' xy=(-2.39,-7.11) dist_to_gt_traj=4.2070070985882095
+    rank2 id=42 label='vase' xy=(2.24,-0.90) dist_to_gt_traj=0.8036832938981476
+    rank3 id=71 label='vase' xy=(-0.08,-6.59) dist_to_gt_traj=2.3755449049913513
+====================================================================================================
+livingroom_2 q0 leg1  text='Go to the microwave on the kitchen counter and then go to the crystal ball decoration on the shelf near the TV.'
+  anchor noun='crystal ball decoration' attrs=[] disamb=Clause(pred=<Pred.ON: 'on'>, anchors=[Anchor(noun='shelf', raw='shelf', attributes=[], disambiguator=Clause(pred=<Pred.NEAR: 'near'>, anchors=[Anchor(noun='tv', raw='tv', attributes=[], disambiguator=None)], negated=False))], negated=False)
+  audit=[]
+    rank0 id=59 label='crystal ball decoration' xy=(2.57,-1.48) dist_to_gt_traj=0.7916174876334623
+    rank1 id=30 label='dice decoration' xy=(2.63,-1.36) dist_to_gt_traj=0.8430713704105792
+====================================================================================================
+livingroom_3 q1 leg1  text='First, go near the stool, then take the path near the cabinet, and stop at the bowl on the table.'
+  anchor noun='cabinet' attrs=[] disamb=None
+  audit=[]
+    rank0 id=41 label='tv cabinet' xy=(3.12,-5.75) dist_to_gt_traj=4.562575376647411
+    rank1 id=88 label='cabinet' xy=(4.93,0.35) dist_to_gt_traj=0.9904710109195126
+====================================================================================================
+office_2 q1 leg1  text='First, go to the trash can near the cabinet, then go to the folder on the cabinet closest to the whiteboard, and finally, to the door near the exit sign.'
+  anchor noun='folder' attrs=[] disamb=Clause(pred=<Pred.ON: 'on'>, anchors=[Anchor(noun='cabinet', raw='cabinet', attributes=[], disambiguator=Clause(pred=<Pred.CLOSEST_TO: 'closest_to'>, anchors=[Anchor(noun='whiteboard', raw='whiteboard', attributes=[], disambiguator=None)], negated=False))], negated=False)
+  audit=[('category_only', "fell back to all 'folder' instances")]
+    rank0 id=69 label='folder' xy=(5.90,3.14) dist_to_gt_traj=0.7710750343954731
+    rank1 id=70 label='folder' xy=(5.90,3.07) dist_to_gt_traj=0.7802505392947989
+    rank2 id=76 label='folder' xy=(3.42,1.59) dist_to_gt_traj=0.8362517702102122
+    rank3 id=117 label='folder' xy=(4.23,-0.46) dist_to_gt_traj=1.0814685860877502
+    rank4 id=118 label='folder' xy=(4.16,-0.46) dist_to_gt_traj=1.0487322033372304
