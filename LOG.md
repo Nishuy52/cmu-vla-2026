@@ -972,3 +972,34 @@ SoC detector benchmarking (arch-F2).
   #53, left #51 open (commented with status) rather than falsely
   closing it. Record at `docs/tasks/T15-if2-corridor-threading/`. Fast
   + full (`-m ""`) test gates green.
+
+## 2026-07-19 (session 17, continued) - issue sweep to 5 open; IF 0.117->0.150 honest
+
+- **Full issue sweep**: 26 open -> 5 (3 parked 3B-model defects for the
+  August cloud re-test, #38/#30 close at the in-container checkpoint).
+  Included discovering + merging the parallel session's unmerged PR-22
+  branch (fixes #10-#21) before wave-1 agents finished duplicating it.
+- **Post-sweep battery: zero regressions** (15/15 numerical, 6/6 OR
+  scoreable, IF unchanged) - reports/gt_battery_postsweep_2026-07-19.
+- **Generalization protocol** encoded as standing rule 6 + calibration.md
+  section (user-raised overfitting concern): scene-level holdout,
+  spec-over-sample, generated held-out questions. Highest-risk item
+  flagged: the single-scene GDINO 0.25 question threshold.
+- **IF improvement block (user-approved items 1-4) DONE**:
+  IF-1 wall-aware offline costmap from traversable_area.ply (honest
+  baseline 0.117->0.100, frame-fit-guarded; livingroom_3 confirmed
+  data-unfittable); IF-3 pinch/unknown-cost seams wired (ledger
+  updated); IF-4 leg-ordered anchor-seeking exploration (live-regime,
+  offline no-op as expected; avoid-nouns consumption question -> #50);
+  IF-2 became a trace-driven fix: #52 wall-fit gate 0.8 m (0.100->0.117)
+  + three corridor defects fixed (rubric anchor-distinctness, resolver
+  tie-break losing match-tier priority - a REAL nav bug, pinch fallback
+  never retried/never able to open narrow gates) -> **IF 0.150, violations
+  9->7**. Residual root cause = GT obstacle-stamping fidelity -> #53;
+  #51 stays open, honestly.
+- VLA-3D Unity groundtruth (2 GB) now local (data/vla3d/) - battery runs
+  on this box.
+
+**Next:** vision-checkpoint enable matrix (chunks running), in-container
+checkpoint (closes Gate 4, #38, #30, verifies Phase-3 bake), then #53
+(GT stamping fidelity) and #33/#43-family calibration items.
