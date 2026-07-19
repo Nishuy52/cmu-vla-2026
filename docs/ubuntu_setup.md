@@ -233,6 +233,9 @@ git clone <fork-remote> /tmp/fork-clean
 #    build.context: ../ai_module ; build.dockerfile: docker/Dockerfile
 #    command: /bin/bash -lc "/opt/vla/launch_with_llm.sh"
 #    environment: RMW_IMPLEMENTATION=rmw_cyclonedds_cpp  (re-assert; OVERRIDES the Dockerfile ENV)
+#                 VLA_DETECTOR=grounding_dino  (issue #55: with no environment: block at all, this
+#                 was unset -> adapter_node.py defaulted to VLA_DETECTOR=none -> offline stub ->
+#                 SUBMISSION-BLOCKER line, failing the perception pre-submit check below)
 #                 OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}  (short dev-box default; see below)
 #    env_file: ../.env.llm  (optional; VLA_LLM_* keys)
 #    Full snippet in docker/ai_module_fork/README.md; ready-made files at
