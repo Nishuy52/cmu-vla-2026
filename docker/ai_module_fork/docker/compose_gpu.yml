@@ -65,7 +65,8 @@ services:
       # BUILD_AND_VERIFY.md — ends up recommending after the post-reboot measurement).
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}
     env_file:
-      - ../.env.llm                      # optional, gitignored: OPENAI_API_KEY=... etc.
+      - path: ../.env.llm                # gitignored dev-only keys: OPENAI_API_KEY=... etc.
+        required: false                  # evaluator clones don't have it; hard-required broke boot (#57)
     command: >
       /bin/bash -lc "/opt/vla/launch_with_llm.sh"
     stdin_open: true
