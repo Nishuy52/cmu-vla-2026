@@ -19,8 +19,8 @@ is the sweep checklist.
   from reading the consuming code. Guides sweep priority, not a hard claim.
 
 **Wiring summary:** 64 fields total (geometry 18 · fusion 5 · tracker 2 · keyframe 3 ·
-nav 21 · budget 15). **Wireable today (constructor arg or function param): 50.**
-**Wiring TODO (module constant, needs a setter/param before a sweep can move it): 14.**
+nav 21 · budget 15). **Wireable today (constructor arg or function param): 53.**
+**Wiring TODO (module constant, needs a setter/param before a sweep can move it): 11.**
 
 ---
 
@@ -117,9 +117,9 @@ are hard module constants.
 | nav.w_size | 1.0 | — | Frontier score reward on cluster size | `frontiers.W_SIZE` | function param | M |
 | nav.w_dist | 0.5 | per cell | Frontier score penalty on path distance | `frontiers.W_DIST` | function param | H |
 | nav.w_affinity | 4.0 | — | Frontier score weight on injected semantic affinity | `frontiers.W_AFFINITY` | function param | H |
-| nav.unknown_cost_mult | 3.0 | × | A* cost multiplier for an UNKNOWN cell | `planner.UNKNOWN_COST_MULT` | module constant — **wiring TODO (Phase 2)** (read in `astar`) | H |
-| nav.pinch_disc_m | 3.0 | m | Radius of the local pinch overlay around a gate | `planner.PINCH_DISC_M` | module constant — **wiring TODO (Phase 2)** (`_pinch_costmap`) | M |
-| nav.pinch_corridor_half_w_m | 0.5 | m | Half-width of the forced corridor through a gate | `planner.PINCH_CORRIDOR_HALF_W_M` | module constant — **wiring TODO (Phase 2)** | M |
+| nav.unknown_cost_mult | 3.0 | × | A* cost multiplier for an UNKNOWN cell | `planner.UNKNOWN_COST_MULT` | function param (`astar(..., unknown_cost_mult=...)`, threaded through `plan_through`; default = const); `InstructionHead.unknown_cost_mult` constructor arg carries it into the IF leg-compile path (`_build_route`/`_recover_path`) | H |
+| nav.pinch_disc_m | 3.0 | m | Radius of the local pinch overlay around a gate | `planner.PINCH_DISC_M` | function param (`_pinch_costmap(..., pinch_disc_m=...)`, threaded through `plan_through`; default = const); `InstructionHead.pinch_disc_m` constructor arg | M |
+| nav.pinch_corridor_half_w_m | 0.5 | m | Half-width of the forced corridor through a gate | `planner.PINCH_CORRIDOR_HALF_W_M` | function param (`_pinch_costmap(..., pinch_corridor_half_w_m=...)`, threaded through `plan_through`; default = const); `InstructionHead.pinch_corridor_half_w_m` constructor arg | M |
 | nav.sweep_s | 60.0 | s | Duration of the opening orientation sweep | `exploration.SWEEP_S` | constructor arg (`ExplorationPolicy.sweep_s`) | M |
 | nav.sweep_side_m | 1.0 | m | Side length of the sweep diamond | `exploration.SWEEP_SIDE_M` | constructor arg + function param (`sweep_waypoints`) | L |
 | nav.min_frontier_score | 0.0 | score | Frontiers below this aren't pursued | `exploration.MIN_FRONTIER_SCORE` | constructor arg (`ExplorationPolicy.min_frontier_score`) | M |
@@ -153,6 +153,27 @@ are hard module constants.
 > IF routes use a Costmap; frontier exploration ignores overhead) remains
 > flagged in the backlog and deferred.
 
+> **Planner corridor-pinch seam — wired 19 Jul 2026** (IF3). `nav.unknown_cost_mult` /
+> `nav.pinch_disc_m` / `nav.pinch_corridor_half_w_m` moved from bare `planner.py`
+> globals to keyword params on `astar` / `_pinch_costmap` / `plan_through`, with
+> `InstructionHead.unknown_cost_mult` / `.pinch_disc_m` / `.pinch_corridor_half_w_m`
+> constructor-arg fields (default = the module constants) carrying them into the IF
+> leg-compile path's two planner call sites (`_build_route`'s `plan_through`,
+> `_recover_path`'s `astar`). Engagement criteria were already conservative and are
+> unchanged by this wiring: the pinch overlay only ever applies inside
+> `plan_through`'s `corridor_between` branch (a leg the parser only emits for
+> "take/go between X and Y" — explicit two-anchor gate language, `regex_tier._CORRIDOR_KEYS`),
+> and only as a fallback when the direct A* segment to the gate midpoint does NOT
+> already cross the gate (`_pinch_costmap`'s own geometry check via
+> `path_crosses_gate`). GOTO/VIA_NEAR legs (including single-anchor "path near/through
+> X" phrasing, `regex_tier._VIA_KEYS`) never see the overlay — open space is
+> unaffected by construction, pinned by
+> `test_plan_through_open_space_unaffected_by_pinch_seam_overrides`
+> (`tests/nav/test_planner.py`). Defaults unchanged; see synthetic-grid coverage in
+> `tests/nav/test_planner.py` (seam override tests) and
+> `tests/heads/test_instruction.py` (`test_planner_seams_default_to_planner_module_constants`,
+> `test_corridor_route_threads_gate_with_overridden_planner_seams`).
+
 ---
 
 ## budget (`core.calibration.BudgetTunables`) — 15 fields
@@ -183,14 +204,12 @@ exactly (pinned in tests).
 
 ---
 
-## Phase-2 wiring TODO (the 14 module-constant fields)
+## Phase-2 wiring TODO (the 11 module-constant fields)
 
 Before the sweep can move these, each needs an injection seam (constructor arg,
 function param, or a module setter) added to its owning module — deliberately **not**
 done now (the task forbids touching those modules). Grouped by owner:
 
-- **`core/nav/planner.py`** — `unknown_cost_mult`, `pinch_disc_m`,
-  `pinch_corridor_half_w_m` (read as globals in `astar` / `_pinch_costmap`).
 - **`core/nav/occupancy.py`** — `grow_pad_cells` (`_ensure_bounds`).
 - **`core/nav/exploration.py`** — `coverage_saturated_free_frac` (reserved / unused).
 - **`core/interfaces.py`** — `question_budget_s`, `forced_assembly_s`,

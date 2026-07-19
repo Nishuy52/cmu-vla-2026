@@ -47,11 +47,16 @@ def _heuristic(r: int, c: int, gr: int, gc: int) -> float:
 
 
 def astar(
-    costmap: Costmap, start_xy: tuple[float, float], goal_xy: tuple[float, float]
+    costmap: Costmap,
+    start_xy: tuple[float, float],
+    goal_xy: tuple[float, float],
+    *,
+    unknown_cost_mult: float = UNKNOWN_COST_MULT,
 ) -> list[tuple[float, float]] | None:
     """A* from start to goal (world metres). Returns a list of world waypoints, or None.
 
-    UNKNOWN cells cost UNKNOWN_COST_MULT; hard-blocked cells are impassable.
+    UNKNOWN cells cost ``unknown_cost_mult`` (default ``UNKNOWN_COST_MULT``, the calibration
+    seam for ``nav.unknown_cost_mult``); hard-blocked cells are impassable.
     """
     grid = costmap.grid
     h, w = grid.shape
@@ -86,7 +91,7 @@ def astar(
                 continue
             step = base
             if costmap.is_unknown(nr, nc):
-                step *= UNKNOWN_COST_MULT
+                step *= unknown_cost_mult
             ng = g_cost[r, c] + step
             if ng < g_cost[nr, nc]:
                 g_cost[nr, nc] = ng
@@ -159,10 +164,16 @@ def path_crosses_gate(
 
 
 def _pinch_costmap(
-    costmap: Costmap, gate: tuple[tuple[float, float], tuple[float, float]]
+    costmap: Costmap,
+    gate: tuple[tuple[float, float], tuple[float, float]],
+    *,
+    pinch_disc_m: float = PINCH_DISC_M,
+    pinch_corridor_half_w_m: float = PINCH_CORRIDOR_HALF_W_M,
 ) -> Costmap:
-    """Overlay: within PINCH_DISC_M of the gate, block everything outside a narrow
-    corridor around the gate segment, forcing A* through the gap."""
+    """Overlay: within ``pinch_disc_m`` of the gate, block everything outside a narrow
+    corridor (``pinch_corridor_half_w_m`` half-width) around the gate segment, forcing
+    A* through the gap. Defaults are the calibration seams for ``nav.pinch_disc_m`` /
+    ``nav.pinch_corridor_half_w_m``."""
     g0, g1 = gate
     gmx, gmy = (g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0
     pinch = costmap.clone()
@@ -173,9 +184,9 @@ def _pinch_costmap(
     cy = grid.origin_y + (rr + 0.5) * grid.cell_m
     from core.nav.costmap import _point_segment_dist
 
-    in_disc = (cx - gmx) ** 2 + (cy - gmy) ** 2 <= PINCH_DISC_M**2
+    in_disc = (cx - gmx) ** 2 + (cy - gmy) ** 2 <= pinch_disc_m**2
     dist_to_gate = _point_segment_dist(cx, cy, g0[0], g0[1], g1[0], g1[1])
-    outside_corridor = dist_to_gate > PINCH_CORRIDOR_HALF_W_M
+    outside_corridor = dist_to_gate > pinch_corridor_half_w_m
     pinch.capsule_blocked = pinch.capsule_blocked | (in_disc & outside_corridor)
     return pinch
 
@@ -295,6 +306,10 @@ def plan_through(
     costmap: Costmap,
     start_xy: tuple[float, float],
     legs: list[tuple[str, object]],
+    *,
+    unknown_cost_mult: float = UNKNOWN_COST_MULT,
+    pinch_disc_m: float = PINCH_DISC_M,
+    pinch_corridor_half_w_m: float = PINCH_CORRIDOR_HALF_W_M,
 ) -> list[tuple[float, float]] | None:
     """Plan an ordered multi-leg route.
 
@@ -305,6 +320,12 @@ def plan_through(
         planned path MUST cross the gate (verified; recomputed on a pinch corridor
         if the direct plan misses the gap).
 
+    ``unknown_cost_mult`` / ``pinch_disc_m`` / ``pinch_corridor_half_w_m`` are the
+    calibration seams for ``nav.unknown_cost_mult`` / ``nav.pinch_disc_m`` /
+    ``nav.pinch_corridor_half_w_m``; defaults reproduce today's behaviour. The pinch
+    overlay is engaged ONLY as a fallback for a ``corridor_between`` leg whose direct
+    A* plan misses the gate — open (non-corridor) legs never see it.
+
     Returns the concatenated world-frame path, or None if any leg is unreachable.
     """
     full: list[tuple[float, float]] = [start_xy]
@@ -314,19 +335,24 @@ def plan_through(
             gate = geom  # type: ignore[assignment]
             g0, g1 = gate  # type: ignore[misc]
             mid = ((g0[0] + g1[0]) / 2.0, (g0[1] + g1[1]) / 2.0)
-            seg = astar(costmap, cur, mid)
+            seg = astar(costmap, cur, mid, unknown_cost_mult=unknown_cost_mult)
             if seg is None:
                 return None
             if not path_crosses_gate(seg, gate):  # type: ignore[arg-type]
-                pinch = _pinch_costmap(costmap, gate)  # type: ignore[arg-type]
-                seg = astar(pinch, cur, mid)
+                pinch = _pinch_costmap(
+                    costmap,
+                    gate,  # type: ignore[arg-type]
+                    pinch_disc_m=pinch_disc_m,
+                    pinch_corridor_half_w_m=pinch_corridor_half_w_m,
+                )
+                seg = astar(pinch, cur, mid, unknown_cost_mult=unknown_cost_mult)
                 if seg is None or not path_crosses_gate(seg, gate):  # type: ignore[arg-type]
                     return None
             full.extend(seg[1:])
             cur = full[-1]
         else:  # goto / via_near
             pt = geom  # type: ignore[assignment]
-            seg = astar(costmap, cur, pt)  # type: ignore[arg-type]
+            seg = astar(costmap, cur, pt, unknown_cost_mult=unknown_cost_mult)  # type: ignore[arg-type]
             if seg is None:
                 return None
             full.extend(seg[1:])
