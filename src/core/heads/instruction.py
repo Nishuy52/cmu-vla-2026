@@ -359,6 +359,24 @@ class InstructionHead:
         res = TB.resolve(spec, scene, self.thresholds)
         ranked = [c for c in res.candidates_ranked if c.instance_id not in self._demoted]
         provisional = any(r.step in _PROVISIONAL_STEPS for r in res.audit)
+
+        # Issue #73 (post-#71 parity audit, home_building_1 asymmetry): once the
+        # resolve fallback ladder has dropped every relation clause (category_only,
+        # the noisiest rung -- issue #59), the remaining soft best-effort ranking can
+        # rank a loosely/generically matched label ahead of a survivor whose label is
+        # an EXACT match for the anchor noun (e.g. a bare "table" outranking an
+        # actual "dining table"). ``gt_battery._if_rubric_geometry`` already carries
+        # this correction (issue #71 RUBRIC-WRONG fix); port the same preference here
+        # so the head converges on the same instance from its own state, independent
+        # of the rubric's. Same guard as the rubric: never runs for a superlative
+        # anchor (the toolbox already ranks those by a real margin).
+        if not _has_superlative(anchor) and any(r.step == "category_only" for r in res.audit):
+            norm = anchor.noun.strip().lower()
+            exact = [c for c in ranked if c.label.strip().lower() == norm]
+            if exact:
+                rest = [c for c in ranked if c.label.strip().lower() != norm]
+                ranked = exact + rest
+
         # Only re-order when the toolbox left an instance-id-only tie (no superlative
         # margin distinguishing the top survivors) and we have a previous leg to anchor on.
         #
