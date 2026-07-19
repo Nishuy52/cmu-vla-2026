@@ -117,3 +117,4 @@
   15/15 + OR 6/6 byte-identical. One traced residual regression
   (hotel_room_1) and 10/26 unresolved legs (`_pinch_costmap`
   territory / #62 leg-goal-semantics territory) left for follow-up.
+- **T18** architecture-refresh - as-built architecture/ folder vs 19 Jul main; archived 11 Jul snapshot superseded. IN PROGRESS
