@@ -1151,3 +1151,23 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   #47-49 battery rerun for GPU. User directive recorded in memory: no-idle
   orchestration rules (never end a turn purely waiting; pausing agents are
   stopped agents; deadline+probe every wait).
+
+## 2026-07-19 (session 17d) - GATE 4 CLOSED; issue sweep concluded
+
+- **Gate 4 / task 6 CLOSED** on clean-container evidence (reports/gate4_final/
+  evidence.log): unmodified image, hardened GPU, sim live -> prewarm OK ->
+  local-tier parse (2/2 ollama 200s) -> 44 waypoints driven -> ANSWER MARKER
+  published (ns "dining table", CUBE, map frame, full extents). VRAM trace
+  shows the 8 GB time-sharing design working: 4.3 (3B) -> 7.5 P0 (GDINO+3B
+  coexist, no OOM) -> 3.6 (3B released at 5m keep-alive). Semantic note:
+  grounded the table, not the teapot on it - grounding accuracy (#42/#61
+  lane), not packaging.
+- #53 closed (scope exhausted; already fixed in 092178b, re-verified per-gate;
+  remnant filed #63 - queued behind #61/#62's surface). #60 closed (injected
+  logger: transitions, swallowed-seam tracebacks first+every-50th, answer
+  publication + waypoint-count logging, events tail on DONE; merged e037990).
+- Parse-battery hang caught by deadline-probe (40 min at 0% CPU, stacked host
+  serves); killed, agent stood down cleanly and self-invalidated a
+  contention-tainted run (timeout-cluster fingerprint). Clean rerun next.
+- CLAUDE.md standing rule 7 added (no-stall orchestration) per user directive;
+  same rules in global memory.

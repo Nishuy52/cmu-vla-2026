@@ -1,0 +1,77 @@
+Sun Jul 19 04:47:21 PM +08 2026
+ Container iros2026_ai_module Recreate 
+ Container iros2026_ai_module Recreated 
+ Container iros2026_ai_module Starting 
+ Container iros2026_ai_module Started 
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784450914.638724406] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+publisher: beginning loop
+publishing #1: std_msgs.msg.String(data='Find the teapot on the table.')
+
+4349 MiB, P8
+4361 MiB, P8
+4361 MiB, P8
+7556 MiB, P0
+7560 MiB, P0
+7556 MiB, P0
+7556 MiB, P0
+7560 MiB, P0
+7560 MiB, P3
+7502 MiB, P0
+7498 MiB, P0
+3613 MiB, P3
+3613 MiB, P0
+3613 MiB, P3
+3613 MiB, P0
+3613 MiB, P0
+3613 MiB, P0
+3613 MiB, P0
+3613 MiB, P0
+3613 MiB, P0
+3613 MiB, P0
+3613 MiB, P3
+=== waypoint count / first+last ===
+44
+x: 0.6286682784557343
+y: -4.813642978668213
+--
+x: 0.6286682784557343
+y: -4.813642978668213
+theta: 0.0
+---
+=== marker capture ===
+header:
+  stamp:
+    sec: 1784451177
+    nanosec: 156032333
+  frame_id: map
+ns: dining table
+id: 0
+type: 1
+action: 0
+pose:
+  position:
+    x: 0.6970621347427368
+    y: -7.167070388793945
+    z: 0.48821414820849895
+  orientation:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    w: 1.0
+scale:
+  x: 2.980005979537964
+  y: 2.9912891387939453
+  z: 0.9775899387896061
+color:
+  r: 0.0
+  g: 0.0
+  b: 1.0
+  a: 0.5
+lifetime:
+  sec: 0
+---
+2
+=== ollama calls ===
+2
+2
