@@ -429,11 +429,14 @@ class ExploreHead:
     def _affinity_nouns(self) -> list[str]:
         """Nouns the frontier scorer should bias toward.
 
-        For INSTRUCTION_FOLLOWING the exploration is a bootstrap for grounding: bias the
-        frontier score toward the still-ungrounded route nouns so we drive toward where
-        the missing anchors most likely are (architecture §4 row 10, H3b). The earliest
-        ungrounded leg's noun leads (``next_noun_affinity_target``), then any other
-        ungrounded nouns, then the rest of the plan's nouns as a fallback.
+        For INSTRUCTION_FOLLOWING (issue #43c): ordered leg-seeking, mirroring the
+        OBJECT_REFERENCE mechanism below. Walk the plan's route legs in order; the FIRST
+        leg whose anchor noun has NO answer-eligible scene instance is the current
+        exploration focus (``_first_ungrounded_leg_noun``) — bias the frontier score
+        toward that noun alone (plus the plan nouns as a fallback tail). Ordered
+        discipline: leg k leads before k+1; once leg k's noun becomes answer-eligible the
+        focus advances to k+1 (architecture §4 row 10, H3b). All legs' anchor nouns
+        already answer-eligible (or an empty route): no injection, plan nouns unchanged.
 
         For OBJECT_REFERENCE (issue #43b): when the target noun has NO answer-eligible
         instances (see ``core.perception.detector.is_answer_eligible`` — the target is
@@ -446,29 +449,42 @@ class ExploreHead:
         For all other qtypes this is exactly the plan's nouns as before.
         """
         base = _plan_nouns(self.plan)
-        inst = self.instruction
         if self.plan is not None and self.plan.qtype is QType.OBJECT_REFERENCE:
             return self._object_ref_affinity_nouns(base)
-        if inst is None or self.plan is None or self.plan.qtype is not QType.INSTRUCTION_FOLLOWING:
+        if self.plan is not None and self.plan.qtype is QType.INSTRUCTION_FOLLOWING:
+            return self._instruction_affinity_nouns(base)
+        return base
+
+    def _instruction_affinity_nouns(self, base: list[str]) -> list[str]:
+        """Issue #43c: INSTRUCTION_FOLLOWING affinity — ordered leg anchor-seeking.
+
+        The first route leg (in plan order) whose anchor noun lacks an answer-eligible
+        scene instance leads the affinity list; every other leg (grounded or not) is left
+        alone this tick, so the bias stays on one anchor at a time (ordered discipline).
+        All legs already answer-eligible: fall through to the plan nouns unchanged.
+        """
+        focus = self._first_ungrounded_leg_noun()
+        if focus is None:
             return base
-        biased: list[str] = []
-        lead = inst.next_noun_affinity_target()
-        if lead:
-            biased.append(lead)
-        for n in inst.ungrounded_nouns():
-            if n not in biased:
-                biased.append(n)
-        # IF-F5: an unresolvable avoid anchor is as much a reason to explore as an
-        # ungrounded leg anchor (the route stays uncommitted until it grounds), so bias
-        # the frontier scorer toward avoid nouns too.
-        if hasattr(inst, "avoid_nouns"):
-            for n in inst.avoid_nouns():
-                if n not in biased:
-                    biased.append(n)
+        biased: list[str] = [focus]
         for n in base:  # keep the remaining plan nouns as a fallback tail
             if n not in biased:
                 biased.append(n)
-        return biased or base
+        return biased
+
+    def _first_ungrounded_leg_noun(self) -> str | None:
+        """The anchor noun of the earliest route leg with no answer-eligible instance.
+
+        None if the plan has no route, or every leg's anchor noun is already
+        answer-eligible (see ``_target_is_answer_eligible``, reused generically here).
+        """
+        if self.plan is None:
+            return None
+        for leg in self.plan.route:
+            noun = leg.anchors[0].noun if leg.anchors else None
+            if noun and not self._target_is_answer_eligible(noun):
+                return noun
+        return None
 
     def _object_ref_affinity_nouns(self, base: list[str]) -> list[str]:
         """Issue #43b: OBJECT_REFERENCE affinity — anchor-seeking when target-starved.

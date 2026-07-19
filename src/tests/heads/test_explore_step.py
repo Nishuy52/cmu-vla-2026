@@ -153,6 +153,78 @@ def test_if_delegates_to_instruction_head():
     assert inst_head.ungrounded_subgoals() == 0
 
 
+# --------------------------------------------------------------- issue #43c IF affinity
+def test_if_affinity_focuses_first_ungrounded_leg():
+    """First leg's anchor has no answer-eligible instance -> bias toward it, ahead of a
+    later leg whose anchor IS already eligible."""
+    sc = scene(inst(1, "sofa", n_obs=3, score=0.9, centroid=(2.0, 2.0, 0.0)))
+    captured = {}
+
+    def factory(nouns):
+        captured["nouns"] = list(nouns)
+        return lambda xy: 1.0
+
+    plan = instruction_plan(
+        [
+            RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="lamp")]),
+            RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="sofa")]),
+        ]
+    )
+    head = ExploreHead(plan=plan, affinity_fn=factory)
+    io = _ExploreIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert captured["nouns"][0] == "lamp"
+
+
+def test_if_affinity_advances_when_leg_grounds():
+    """Once the first leg's anchor becomes answer-eligible, focus advances to the next
+    still-ungrounded leg's anchor noun."""
+    sc = scene(
+        inst(1, "lamp", n_obs=3, score=0.9, centroid=(1.0, 1.0, 0.0)),
+        inst(2, "sofa", n_obs=1, score=0.9, centroid=(2.0, 2.0, 0.0)),  # n_obs < 2
+    )
+    captured = {}
+
+    def factory(nouns):
+        captured["nouns"] = list(nouns)
+        return lambda xy: 1.0
+
+    plan = instruction_plan(
+        [
+            RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="lamp")]),
+            RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="sofa")]),
+        ]
+    )
+    head = ExploreHead(plan=plan, affinity_fn=factory)
+    io = _ExploreIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert captured["nouns"][0] == "sofa"
+
+
+def test_if_affinity_no_injection_when_all_legs_grounded():
+    """Every leg's anchor already answer-eligible -> no bias, plan nouns unchanged."""
+    sc = scene(
+        inst(1, "lamp", n_obs=3, score=0.9, centroid=(1.0, 1.0, 0.0)),
+        inst(2, "sofa", n_obs=3, score=0.9, centroid=(2.0, 2.0, 0.0)),
+    )
+    captured = {}
+
+    def factory(nouns):
+        captured["nouns"] = list(nouns)
+        return lambda xy: 1.0
+
+    plan = instruction_plan(
+        [
+            RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="lamp")]),
+            RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="sofa")]),
+        ]
+    )
+    head = ExploreHead(plan=plan, affinity_fn=factory)
+    io = _ExploreIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert captured["nouns"] == ["lamp", "sofa"]
+
+
 def test_plan_nouns_extraction():
     from core.plan_schema import Clause, Pred, TargetSpec
 
