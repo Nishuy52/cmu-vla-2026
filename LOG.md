@@ -1200,3 +1200,29 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
 - Wrapped up T18 architecture-refresh: as-built `architecture/` folder
   (README + ch 01-10) landed; 11 Jul snapshot branch archived. See
   docs/tasks/T18-architecture-refresh/task.md.
+
+## 2026-07-19 (session 17e) - yardstick redesign landed; IF 0.378
+
+- **#70 layer-1 redesign MERGED** (16dac66, full gate green): derived arrival
+  tolerance 1.746 m (vehicle 0.4 + grid diag/2 + measured p95 fit residual
+  1.2256 + 0.05 margin; every term cited in core/groundtruth/arrival.py,
+  single source consumed by scorer AND instruction head), stop vs pass-by
+  closest-approach semantics, ceiling probe reworked to per-leg segments.
+- **IF headline trajectory today: 0.150 -> 0.167 (#59) -> 0.200 (#61/#66) ->
+  0.378 (#70)**; ordered-leg credit 0.161 -> 0.439; honest ceiling now
+  59/72 = 0.819 per-segment (0.861 whole-traj; #69's artifact ~4 pts).
+- #69 closed as corrected-map negative result: ceiling classification's
+  per-rule predictions were whole-trajectory artifacts (CAVEAT.md committed);
+  resolver exonerated; one real zero-width-gate fix merged. #67 reverted on
+  main after integration regression (+standalone/-integrated) - reopened,
+  ruling delegated to the new probe; #68 subsumed by #70.
+- Process hardening from today's failures (memory + CLAUDE.md rule 7):
+  integrated-head measurement before close; heartbeat monitor (5 min) over
+  all lanes; ownership sweep before any "no work left"; stall tally at 3.
+- Parallel session T18 (architecture refresh) active on this repo - doc
+  surface only, no src collision; pull-rebase before push is standing.
+- DISPATCHED: integrated conversion+threading lane on the new yardstick
+  (probe -> ranked fixes -> threading; stop at headline 0.55 / two dry
+  fixes / 90 min). 0.8 verdict: inside the 0.819 ceiling with 0.019 slack -
+  requires near-perfect conversion + zero penalties; re-verdict after this
+  lane's probe.
