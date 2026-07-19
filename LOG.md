@@ -1337,3 +1337,33 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   follower redesign (filed issue), and the #71 resolver-parity audit for
   the resolver-divergence majority of this bucket (`core/geometry/toolbox`,
   #73's lane).
+
+## 2026-07-20 (overnight, sessions 21+) - concurrent IF grind: 0.461 -> 0.539
+
+- Max-concurrency overnight loop per user directive (3 write lanes + read-only
+  probe; per-unit commits + incremental notes as limit-kill insurance;
+  night heartbeat 15 min; per-beat issue intake sweep).
+- **#74 leg-boundary awareness MERGED** (ec077cf): leg goals are
+  waypoints-of-record with dwell-gated ceilings, existing stall watchdog
+  reused. Credit 0.522->0.572, headline 0.461->0.511, zero regressions.
+- **#75 salience gating MERGED** (95f48f8) as explicit correctness-over-
+  score: parity divergences 3->1, both target legs to GT-correct instances;
+  integrated 0.572->0.544 credit (two wrong-instance passes un-gamed; their
+  arrival gaps transferred to #77). #73 landed earlier (parity 4->3).
+- **#76 wall derivation: investigated-NEGATIVE** (evidence merged): the
+  0.8 m residual gate is correctly calibrated (relaxation unblocks 0/6,
+  regresses 3); home_building_1 x2 = genuine ~3 m mesh-coverage gap ->
+  adjudicated structural. Probe-v2 merged (exact headline formula verified:
+  rubric = max(0, credit - tv/n_legs)).
+- **#77 dwell-release fix MERGED** (7c5582a): follower conflated the
+  frame-fit credit tolerance (~1.75 m) with physical arrival; now uses its
+  own REACH_M. Credit 0.544->0.600, headline 0.483->0.539, 4 legs, zero
+  regressions. Integrated confirmation reports/gt_battery_main_post77a.
+- Process: pgrep self-match bug bit a third time (dead wait-loop caught by
+  user); bracket-pattern rule added to silent-death memory. One lane
+  correctly reported and disregarded a mid-session prompt-injection-style
+  framing of its own revert; verified state from disk.
+- RUNNING: 77b gate pose-convergence lane (3 dwell-class corridors, traced
+  lead: pose emission near dwell, not crumb selection).
+- Trajectory: 0.150 -> 0.378 (#70) -> 0.433 (#71) -> 0.461 (#72) -> 0.511
+  (#74) -> 0.483 (truer, #75) -> **0.539 (#77a)**. Ceiling 0.819.
