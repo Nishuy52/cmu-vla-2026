@@ -49,10 +49,13 @@ enable matrix).
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import os
 import random
 import statistics
 import time
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -335,6 +338,53 @@ class CaseResult:
     latency_s: float
     dist_m: float | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "checkpoint": self.checkpoint, "scene": self.scene, "case_kind": self.case_kind,
+            "frame_idx": self.frame_idx, "noun": self.noun, "expected": self.expected,
+            "outcome_action": self.outcome_action, "outcome_fields": self.outcome_fields,
+            "latency_s": self.latency_s, "dist_m": self.dist_m,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "CaseResult":
+        return cls(
+            checkpoint=d["checkpoint"], scene=d["scene"], case_kind=d["case_kind"],
+            frame_idx=d["frame_idx"], noun=d["noun"], expected=d["expected"],
+            outcome_action=d["outcome_action"], outcome_fields=d["outcome_fields"],
+            latency_s=d["latency_s"], dist_m=d.get("dist_m"),
+        )
+
+
+class JsonlSink:
+    """Append-and-flush-per-row sink so a killed/crashed process loses at most the ONE
+    case that was in flight, never the whole run's accumulated results (see the
+    ``vision_checkpoints.jsonl`` durability note in the report). Also keeps an in-memory
+    list for this invocation's own console summary."""
+
+    def __init__(self, fh) -> None:
+        self._fh = fh
+        self.rows: list[CaseResult] = []
+
+    def add(self, row: CaseResult) -> None:
+        self.rows.append(row)
+        self._fh.write(json.dumps(row.to_dict()) + "\n")
+        self._fh.flush()
+        os.fsync(self._fh.fileno())
+
+
+def load_rows_from_jsonl(path: Path) -> list[CaseResult]:
+    """Reload every case row written so far (across one or more prior invocations)."""
+    if not path.exists():
+        return []
+    rows: list[CaseResult] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        rows.append(CaseResult.from_dict(json.loads(line)))
+    return rows
+
 
 @dataclass
 class Stats:
@@ -355,9 +405,134 @@ class _RealClock:
         return time.monotonic()
 
 
-def build_vision_chat(base_url: str, model: str, api_key: str) -> Any:
-    adapter = OpenAIChatAdapter(base_url=base_url, model=model, api_key=api_key)
-    return adapter.vision_chat
+def _is_degenerate_reply(text: str) -> bool:
+    """True for a reply that carries no usable content: empty, or entirely
+    non-alphanumeric (observed failure mode on this box -- a burst of calls to the local
+    Ollama server intermittently returns a fixed-length run of ``?`` regardless of
+    prompt/image, recovering only after the model is unloaded and reloaded; see the
+    ``vision_checkpoints.md`` infra note). Never a false positive on a real JSON reply,
+    which always contains alphanumeric characters (keys/booleans/digits)."""
+    t = text.strip()
+    return not t or not any(c.isalnum() for c in t)
+
+
+def _ollama_native_base(base_url: str) -> str:
+    """Strip the OpenAI-compat ``/v1`` suffix to get Ollama's native API base."""
+    return base_url[: -len("/v1")] if base_url.endswith("/v1") else base_url
+
+
+def _unload_and_reload(base_url: str, model: str, timeout_s: float = 30.0) -> None:
+    """Evict ``model`` from Ollama's VRAM cache (``keep_alive: 0``) and let the next
+    call reload it fresh. NOT a service restart (``ollama serve`` keeps running) --
+    matches the "don't restart it" constraint; this only cycles the one model's loaded
+    weights/KV state, which is what clears the observed degenerate-output state."""
+    native = _ollama_native_base(base_url)
+    body = json.dumps({"model": model, "prompt": "", "keep_alive": 0}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{native}/api/generate", data=body,
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        urllib.request.urlopen(req, timeout=timeout_s).read()
+    except Exception:  # noqa: BLE001 -- best-effort recovery; the retry loop still applies
+        pass
+
+
+def build_cp2_diagnostic_vision_chat(base_url: str, model: str, num_ctx: int = 16384):
+    """CP2-only DIAGNOSTIC vision_chat -- NOT the production path, NOT what the enable
+    matrix's primary CP2 numbers come from.
+
+    Root-cause note (found while replaying CP2, see the report's infra section): the
+    real production path (``OpenAIChatAdapter.vision_chat`` -> Ollama's OpenAI-compat
+    ``/v1/chat/completions``) reliably returns a degenerate all-``?`` reply for CP2's
+    4-real-tile-in-one-message payload, even immediately after a clean reload -- while
+    the SAME payload through Ollama's native ``/api/chat`` with an explicit
+    ``options.num_ctx`` override succeeds. That isolates the cause to the served
+    model's baked ``context_length`` (8192, confirmed via ``/api/tags``) being too small
+    for 4 real 480x640 images at once, combined with the OpenAI-compat endpoint on this
+    Ollama version silently ignoring any per-request ``options``/``num_ctx`` override
+    (confirmed by sending the identical payload to both endpoints). This is a serving
+    defect (baked context window / adapter surface), not a checkpoint-code defect and
+    not something fixable from ``core.checkpoints`` or the adapter's own message shape
+    -- see the filed GH issue.
+
+    Because the real path cannot be parameterised around this from the client side,
+    this diagnostic calls Ollama's native endpoint directly (bypassing the OpenAI SDK)
+    with the SAME message shape ``OpenAIChatAdapter`` would build, purely to separate
+    "is the 3B model capable of the CP2 task" from "is the currently-served CP2 request
+    shape viable at all" -- reported as a secondary column so the enable-matrix verdict
+    isn't confused with a false read on raw model capability. The production verdict
+    still comes from the primary (real-path) numbers, because that path is what would
+    actually run at eval time.
+    """
+    native = _ollama_native_base(base_url)
+
+    def _call(messages: list[dict[str, str]], images: list[bytes]) -> str:
+        msgs = [dict(m) for m in messages]
+        last_user = None
+        for i in range(len(msgs) - 1, -1, -1):
+            if msgs[i].get("role") == "user":
+                last_user = i
+                break
+        if last_user is None:
+            raise ValueError("cp2 diagnostic call has no user message to attach images to")
+        b64_images = [base64.b64encode(img).decode("ascii") for img in images]
+        native_msgs = []
+        for i, m in enumerate(msgs):
+            if i == last_user:
+                native_msgs.append({"role": m["role"], "content": m.get("content", ""),
+                                     "images": b64_images})
+            else:
+                native_msgs.append({"role": m["role"], "content": m.get("content", "")})
+        body = json.dumps({
+            "model": model, "messages": native_msgs, "stream": False,
+            "options": {"num_ctx": num_ctx},
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{native}/api/chat", data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        resp = urllib.request.urlopen(req, timeout=60).read()
+        obj = json.loads(resp.decode("utf-8"))
+        return obj.get("message", {}).get("content", "")
+
+    return _call
+
+
+class ResilientVisionChat:
+    """Wraps ``OpenAIChatAdapter.vision_chat`` with degenerate-reply detection + one
+    unload/reload/retry cycle (see :func:`_is_degenerate_reply`). Still a plain
+    ``VisionChatFn`` (``__call__(messages, images) -> str``) as far as the checkpoint
+    code is concerned -- the retry is transparent infra hardening, not a change to the
+    checkpoint contract. Tracks how often it had to intervene, for the report's infra
+    note."""
+
+    def __init__(self, base_url: str, model: str, api_key: str, max_attempts: int = 3) -> None:
+        self._adapter = OpenAIChatAdapter(base_url=base_url, model=model, api_key=api_key)
+        self.base_url = base_url
+        self.model = model
+        self.max_attempts = max_attempts
+        self.n_calls = 0
+        self.n_degenerate = 0
+        self.n_reloads = 0
+
+    def __call__(self, messages: list[dict[str, str]], images: list[bytes]) -> str:
+        self.n_calls += 1
+        reply = ""
+        for attempt in range(self.max_attempts):
+            reply = self._adapter.vision_chat(messages, images)
+            if not _is_degenerate_reply(reply):
+                return reply
+            self.n_degenerate += 1
+            if attempt < self.max_attempts - 1:
+                self.n_reloads += 1
+                _unload_and_reload(self.base_url, self.model)
+                time.sleep(1.5)
+        return reply  # exhausted retries; caller's parse_with_repair treats it as malformed
+
+
+def build_vision_chat(base_url: str, model: str, api_key: str) -> ResilientVisionChat:
+    return ResilientVisionChat(base_url, model, api_key)
 
 
 # =============================================================================== CP2 runner
@@ -365,10 +540,16 @@ def build_vision_chat(base_url: str, model: str, api_key: str) -> Any:
 
 def run_cp2_cases(
     vision_chat, scene: str, bag, frames: dict[int, FrameInfo],
-    positives: list[Cp2Candidate], negatives: list[tuple[int, str]], rows: list[CaseResult],
+    positives: list[Cp2Candidate], negatives: list[tuple[int, str]], sink: JsonlSink,
+    diag_vision_chat=None,
 ) -> None:
     """Execute CP2 (positive + negative) cases for one scene; needs re-decoded tiles per
-    needed frame -- pass 2 of the two-pass scan."""
+    needed frame -- pass 2 of the two-pass scan.
+
+    ``diag_vision_chat`` (optional): when given, ALSO runs the same case through the
+    CP2 context-window diagnostic (see :func:`build_cp2_diagnostic_vision_chat`) and
+    folds its outcome into ``outcome_fields`` under a ``diag_`` prefix -- informational
+    only, never the field the enable matrix's primary CP2 numbers read from."""
     needed = {c.frame_idx for c in positives} | {fi for fi, _ in negatives}
     tiles_by_frame: dict[int, list[np.ndarray]] = {}
     frame_idx = -1
@@ -383,6 +564,21 @@ def run_cp2_cases(
             break
 
     spec = tiling.tile_specs(N_TILES, TILE_HFOV, TILE_VFOV)[0]  # all tiles share dims
+
+    def _diag_fields(noun: str, raw: str, tiles: list[np.ndarray]) -> dict[str, Any]:
+        if diag_vision_chat is None:
+            return {}
+        try:
+            diag_outcome, diag_dt = _timed(
+                run_miss_recovery, diag_vision_chat, None, _RealClock(),
+                noun=noun, raw=raw, tiles=tiles,
+                tile_w=spec.width, tile_h=spec.height, encode_fn=jpeg_encode_fn,
+            )
+            return {"diag_action": diag_outcome.action, "diag_confidence": diag_outcome.confidence,
+                    "diag_latency_s": diag_dt}
+        except Exception as exc:  # noqa: BLE001 -- diagnostic only, never fail the primary case
+            return {"diag_error": repr(exc)}
+
     for c in positives:
         tiles = tiles_by_frame.get(c.frame_idx)
         if tiles is None:
@@ -392,11 +588,10 @@ def run_cp2_cases(
             noun=c.label, raw=c.label, tiles=tiles,
             tile_w=spec.width, tile_h=spec.height, encode_fn=jpeg_encode_fn,
         )
-        rows.append(CaseResult(
-            "CP2", scene, "positive", c.frame_idx, c.label, True,
-            outcome.action, {"tile": outcome.tile, "confidence": outcome.confidence,
-                              "gt_tile": c.tile_id}, dt, c.dist_m,
-        ))
+        fields = {"tile": outcome.tile, "confidence": outcome.confidence, "gt_tile": c.tile_id}
+        fields.update(_diag_fields(c.label, c.label, tiles))
+        sink.add(CaseResult("CP2", scene, "positive", c.frame_idx, c.label, True,
+                             outcome.action, fields, dt, c.dist_m))
 
     for fi, noun in negatives:
         tiles = tiles_by_frame.get(fi)
@@ -407,17 +602,17 @@ def run_cp2_cases(
             noun=noun, raw=noun, tiles=tiles,
             tile_w=spec.width, tile_h=spec.height, encode_fn=jpeg_encode_fn,
         )
-        rows.append(CaseResult(
-            "CP2", scene, "negative", fi, noun, False,
-            outcome.action, {"tile": outcome.tile, "confidence": outcome.confidence}, dt,
-        ))
+        fields = {"tile": outcome.tile, "confidence": outcome.confidence}
+        fields.update(_diag_fields(noun, noun, tiles))
+        sink.add(CaseResult("CP2", scene, "negative", fi, noun, False,
+                             outcome.action, fields, dt))
 
 
 # =============================================================================== CP3 runner
 
 
 def run_cp3_cases(
-    vision_chat, scene: str, bag, pairs: list[tuple[Cp3Candidate, Cp3Candidate]], rows: list[CaseResult],
+    vision_chat, scene: str, bag, pairs: list[tuple[Cp3Candidate, Cp3Candidate]], sink: JsonlSink,
 ) -> None:
     """Execute CP3 (correct, wrong) crop pairs for one scene. Each pair shares the
     *anchor description* (the correct case's label) but the wrong case's crop is centred
@@ -457,7 +652,7 @@ def run_cp3_cases(
             anchor_desc=correct.label, crop=crop, anchor_noun=correct.label,
             encode_fn=jpeg_encode_fn,
         )
-        rows.append(CaseResult(
+        sink.add(CaseResult(
             "CP3", scene, "correct", correct.frame_idx, correct.label, True,
             outcome.action, {"match": outcome.match, "actual_label": outcome.actual_label,
                               "confidence": outcome.confidence}, dt, correct.dist_m,
@@ -471,7 +666,7 @@ def run_cp3_cases(
             anchor_desc=correct.label, crop=wrong_crop, anchor_noun=correct.label,
             encode_fn=jpeg_encode_fn,
         )
-        rows.append(CaseResult(
+        sink.add(CaseResult(
             "CP3", scene, "wrong", wrong.frame_idx, correct.label, False,
             outcome2.action, {"match": outcome2.match, "actual_label": outcome2.actual_label,
                                "confidence": outcome2.confidence,
@@ -503,7 +698,7 @@ def _draw_discs(image: np.ndarray, columns: list[int]) -> bytes:
 
 
 def run_cp5_cases(
-    vision_chat, scene: str, bag, question: str, frame_idxs: list[int], rows: list[CaseResult],
+    vision_chat, scene: str, bag, question: str, frame_idxs: list[int], sink: JsonlSink,
 ) -> None:
     needed = set(frame_idxs)
     n = DEFAULT_N_FRONTIERS
@@ -524,7 +719,7 @@ def run_cp5_cases(
             run_frontier_select, vision_chat, None, _RealClock(),
             question=question, panorama=rec.msg.image, n_frontiers=n, encode_fn=encode_fn,
         )
-        rows.append(CaseResult(
+        sink.add(CaseResult(
             "CP5", scene, "single", frame_idx, question, None,
             outcome.action, {"choice": outcome.choice, "index": outcome.index,
                               "reason": outcome.reason[:120]}, dt,
@@ -542,12 +737,23 @@ def aggregate(rows: list[CaseResult]) -> dict[str, dict[str, Any]]:
 
     cp2_pos = [r for r in rows if r.checkpoint == "CP2" and r.case_kind == "positive"]
     cp2_neg = [r for r in rows if r.checkpoint == "CP2" and r.case_kind == "negative"]
+    cp2_all = cp2_pos + cp2_neg
+    cp2_diag = [r for r in cp2_all if "diag_action" in r.outcome_fields]
     out["CP2"] = {
         "n_positive": len(cp2_pos),
         "n_negative": len(cp2_neg),
         "hit_rate": _rate(cp2_pos, lambda r: r.outcome_action == "provisional"),
         "false_yes_rate": _rate(cp2_neg, lambda r: r.outcome_action == "provisional"),
-        "latency_s": _lat_stats([r.latency_s for r in cp2_pos + cp2_neg]),
+        "latency_s": _lat_stats([r.latency_s for r in cp2_all]),
+        "n_diag": len(cp2_diag),
+        "diag_hit_rate": _rate(
+            [r for r in cp2_pos if "diag_action" in r.outcome_fields],
+            lambda r: r.outcome_fields.get("diag_action") == "provisional",
+        ),
+        "diag_false_yes_rate": _rate(
+            [r for r in cp2_neg if "diag_action" in r.outcome_fields],
+            lambda r: r.outcome_fields.get("diag_action") == "provisional",
+        ),
     }
 
     cp3_correct = [r for r in rows if r.checkpoint == "CP3" and r.case_kind == "correct"]
@@ -711,6 +917,7 @@ def build_enable_matrix(agg: dict[str, dict[str, Any]]) -> str:
 def write_report(
     out_dir: Path, rows: list[CaseResult], agg: dict[str, dict[str, Any]],
     scenes_used: list[str], stride: int, model: str, base_url: str,
+    infra: dict[str, int] | None = None,
 ) -> None:
     md = []
     md.append("# Phase-2 vision-checkpoint replay (CP2/CP3/CP5)\n")
@@ -722,14 +929,50 @@ def write_report(
     )
     md.append(f"Total cases: {len(rows)}. Raw rows: `vision_checkpoints.jsonl`.\n")
 
+    if infra:
+        md.append(
+            f"**Infra note:** {infra['n_calls']} total provider calls; the local Ollama "
+            f"server intermittently returned a degenerate all-non-alphanumeric reply "
+            f"(observed as a fixed run of `?` regardless of prompt/image) "
+            f"{infra['n_degenerate']} time(s), recovered by an automatic unload+reload+retry "
+            f"({infra['n_reloads']} reload(s) issued; see `ResilientVisionChat` in the tool). "
+            f"Rows in the jsonl reflect the retried (recovered) reply where recovery "
+            f"succeeded; a case only reports a parse failure if degeneracy persisted across "
+            f"the retry budget. Latencies below include any reload+retry time on the calls "
+            f"that needed it, so they are a conservative (not optimistic) latency estimate.\n"
+        )
+
     cp2 = agg["CP2"]
     md.append("## CP2 -- detector-miss recovery (4-tile)\n")
     md.append("| metric | value | n |")
     md.append("|---|---|---|")
-    md.append(f"| hit rate (present, correct noun IS visible) | {_fmt_pct(cp2['hit_rate'])} | {cp2['n_positive']} |")
-    md.append(f"| false-yes rate (noun absent from whole scene) | {_fmt_pct(cp2['false_yes_rate'])} | {cp2['n_negative']} |")
-    md.append(f"| latency | {_fmt_lat(cp2['latency_s'])} | {cp2['n_positive'] + cp2['n_negative']} |")
+    md.append(f"| hit rate (present, correct noun IS visible) -- PRODUCTION PATH | {_fmt_pct(cp2['hit_rate'])} | {cp2['n_positive']} |")
+    md.append(f"| false-yes rate (noun absent from whole scene) -- PRODUCTION PATH | {_fmt_pct(cp2['false_yes_rate'])} | {cp2['n_negative']} |")
+    md.append(f"| latency -- PRODUCTION PATH | {_fmt_lat(cp2['latency_s'])} | {cp2['n_positive'] + cp2['n_negative']} |")
     md.append("")
+    if cp2.get("n_diag"):
+        md.append(
+            "**CP2 context-window defect + diagnostic.** The production path "
+            "(`OpenAIChatAdapter.vision_chat` -> Ollama's OpenAI-compat endpoint) reliably "
+            "returns a degenerate all-`?` reply for CP2's real 4-tile-in-one-message payload "
+            "-- confirmed via a clean-reload isolation test (1 real tile: OK; 2+ real tiles: "
+            "degenerate every time) -- because the served `qwen2.5vl:3b`'s baked "
+            "`context_length` is 8192 (`/api/tags`) and the OpenAI-compat endpoint on this "
+            "Ollama build silently ignores any per-request `options`/`num_ctx` override "
+            "(confirmed: identical payload succeeds via the native `/api/chat` endpoint with "
+            "`options.num_ctx=16384`, fails via `/v1/chat/completions` with the same override "
+            "attached). This is a serving/adapter-surface defect, not a checkpoint-code or "
+            "model-capability defect -- filed as a GH issue. A DIAGNOSTIC-ONLY column below "
+            "(native endpoint, `num_ctx=16384`, bypasses the OpenAI SDK) isolates the model's "
+            "raw capability from the broken production path; it is NOT what the enable-matrix "
+            "verdict is computed from -- the production numbers above are, because that is the "
+            "path that would actually run at eval time.\n"
+        )
+        md.append("| metric (diagnostic, num_ctx=16384, non-production) | value | n |")
+        md.append("|---|---|---|")
+        md.append(f"| diagnostic hit rate | {_fmt_pct(cp2['diag_hit_rate'])} | {cp2['n_positive']} |")
+        md.append(f"| diagnostic false-yes rate | {_fmt_pct(cp2['diag_false_yes_rate'])} | {cp2['n_negative']} |")
+        md.append("")
 
     cp3 = agg["CP3"]
     md.append("## CP3 -- single-tile anchor confirm\n")
@@ -757,18 +1000,69 @@ def write_report(
     (out_dir / "vision_checkpoints.md").write_text("\n".join(md) + "\n", encoding="utf-8")
 
 
-def write_jsonl(out_dir: Path, rows: list[CaseResult]) -> None:
-    with (out_dir / "vision_checkpoints.jsonl").open("w", encoding="utf-8") as fh:
-        for r in rows:
-            fh.write(json.dumps({
-                "checkpoint": r.checkpoint, "scene": r.scene, "case_kind": r.case_kind,
-                "frame_idx": r.frame_idx, "noun": r.noun, "expected": r.expected,
-                "outcome_action": r.outcome_action, "outcome_fields": r.outcome_fields,
-                "latency_s": r.latency_s, "dist_m": r.dist_m,
-            }) + "\n")
-
-
 # =============================================================================== main
+
+
+def _run_one_scene(
+    args, rng: random.Random, vision_chat: ResilientVisionChat, bag_name: str, gt_scene: str,
+    question: str, sink: JsonlSink, diag_vision_chat=None,
+) -> bool:
+    """Scan + sample + execute all CP2/CP3/CP5 cases for one scene, writing each case to
+    ``sink`` (flushed) as it completes. Returns False (and prints a skip note) if the
+    scene's bag/GT files are missing."""
+    bag_dir = Path(args.bags_dir) / bag_name
+    obj_path = Path(args.scenes_dir) / gt_scene / gt_scene / "object_list.txt"
+    if not bag_dir.exists() or not obj_path.exists():
+        print(f"[skip] {bag_name}: missing bag or object_list.txt")
+        return False
+
+    objects = load_object_list(obj_path)
+    labels = scene_labels(objects)
+    print(f"[{bag_name}] scanning (stride={args.stride})...")
+    t0 = time.monotonic()
+    frames, cp2_cands, cp3_cands = scan_scene(bag_dir, objects, args.stride)
+    print(f"[{bag_name}] {len(frames)} frames, {len(cp2_cands)} CP2 candidates, "
+          f"{len(cp3_cands)} CP3 candidates, scan {time.monotonic() - t0:.1f}s")
+
+    # ---- CP2 sampling
+    rng.shuffle(cp2_cands)
+    n_pos = max(1, args.n_cp2_positive // len(SCENES))
+    positives = cp2_cands[:n_pos]
+    absent_nouns = pick_absent_nouns(labels, max(1, args.n_cp2_negative // len(SCENES)), rng)
+    frame_pool = list(frames.keys())
+    negatives = [(rng.choice(frame_pool), noun) for noun in absent_nouns] if frame_pool else []
+
+    # ---- CP3 sampling: pairs of (correct, wrong) with distinct labels where possible
+    rng.shuffle(cp3_cands)
+    n_pairs = max(1, args.n_cp3_pairs // len(SCENES))
+    pairs: list[tuple[Cp3Candidate, Cp3Candidate]] = []
+    pool = list(cp3_cands)
+    for correct in pool[:n_pairs]:
+        others = [c for c in cp3_cands if c.label != correct.label]
+        if not others:
+            continue
+        wrong = rng.choice(others)
+        pairs.append((correct, wrong))
+
+    # ---- CP5 sampling: a handful of whole panoramas
+    n_cp5_here = max(1, args.n_cp5 // len(SCENES))
+    cp5_frames = rng.sample(frame_pool, min(n_cp5_here, len(frame_pool))) if frame_pool else []
+
+    t_scene0 = time.monotonic()
+    bag = BagSource(str(bag_dir))
+    print(f"[{bag_name}] CP2: {len(positives)} positive / {len(negatives)} negative cases")
+    run_cp2_cases(vision_chat, bag_name, bag, frames, positives, negatives, sink, diag_vision_chat)
+
+    bag = BagSource(str(bag_dir))
+    print(f"[{bag_name}] CP3: {len(pairs)} pairs")
+    run_cp3_cases(vision_chat, bag_name, bag, pairs, sink)
+
+    bag = BagSource(str(bag_dir))
+    print(f"[{bag_name}] CP5: {len(cp5_frames)} panoramas, question={question!r}")
+    run_cp5_cases(vision_chat, bag_name, bag, question, cp5_frames, sink)
+
+    print(f"[{bag_name}] scene wall time {time.monotonic() - t_scene0:.1f}s")
+    return True
 
 
 def main() -> None:
@@ -785,76 +1079,92 @@ def main() -> None:
     ap.add_argument("--api-key", default="dummy")
     ap.add_argument("--bags-dir", default=str(REPO_ROOT / "data" / "sim_bags"))
     ap.add_argument("--scenes-dir", default=str(REPO_ROOT / "data" / "unity_scenes_ros2"))
+    ap.add_argument(
+        "--scene", default=None, choices=[s[0] for s in SCENES],
+        help="run only this one scene's bag (foreground-chunk friendly: one Bash call "
+             "per scene, each well under any per-call timeout). Omit to run all scenes "
+             "in one invocation.",
+    )
+    ap.add_argument(
+        "--append", action="store_true",
+        help="append this invocation's cases to the existing jsonl instead of truncating "
+             "it first -- pass for scene 2+ of a multi-invocation batch (the first scene "
+             "of a fresh batch omits this to start clean).",
+    )
+    ap.add_argument(
+        "--no-run", action="store_true",
+        help="skip all bag scanning / LLM calls; just (re)generate the md report from "
+             "whatever is already in the jsonl (e.g. after a multi-invocation batch, or "
+             "to reformat the report without spending any calls).",
+    )
+    ap.add_argument(
+        "--no-cp2-diag", action="store_true",
+        help="skip the CP2 context-window diagnostic (native endpoint, num_ctx=16384) "
+             "-- see build_cp2_diagnostic_vision_chat; on by default since it roughly "
+             "doubles CP2's call count but isolates a serving defect from raw model "
+             "capability.",
+    )
     args = ap.parse_args()
+
+    # guarded_call's per-call hard timeout (core.checkpoints._runtime.timeout_s, default
+    # 20s) is a LIVE-adapter budget; ResilientVisionChat's unload+reload+retry cycle
+    # needs more headroom than that or its own recovery attempt gets timed out from
+    # underneath it (observed: a 3-attempt retry with reload can approach 20s on its
+    # own). Offline replay is not subject to the live per-question time budget, so widen
+    # it here -- setdefault so an explicit env override from the caller still wins.
+    os.environ.setdefault("VLA_LLM_CALL_TIMEOUT_S", "45")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    rng = random.Random(args.seed)
+    jsonl_path = out_dir / "vision_checkpoints.jsonl"
+    infra_path = out_dir / "vision_checkpoints.infra.jsonl"
 
-    vision_chat = build_vision_chat(args.base_url, args.model, args.api_key)
+    if not args.no_run:
+        rng = random.Random(args.seed)
+        vision_chat = build_vision_chat(args.base_url, args.model, args.api_key)
+        diag_vision_chat = (
+            None if args.no_cp2_diag
+            else build_cp2_diagnostic_vision_chat(args.base_url, args.model)
+        )
+        scenes_to_run = [s for s in SCENES if args.scene is None or s[0] == args.scene]
 
-    rows: list[CaseResult] = []
-    scenes_used: list[str] = []
-    t_wall0 = time.monotonic()
+        mode = "a" if args.append else "w"
+        if mode == "w":
+            jsonl_path.write_text("", encoding="utf-8")
+            infra_path.write_text("", encoding="utf-8")
 
-    for bag_name, gt_scene, question in SCENES:
-        bag_dir = Path(args.bags_dir) / bag_name
-        obj_path = Path(args.scenes_dir) / gt_scene / gt_scene / "object_list.txt"
-        if not bag_dir.exists() or not obj_path.exists():
-            print(f"[skip] {bag_name}: missing bag or object_list.txt")
-            continue
-        scenes_used.append(bag_name)
-        objects = load_object_list(obj_path)
-        labels = scene_labels(objects)
-        print(f"[{bag_name}] scanning (stride={args.stride})...")
-        t0 = time.monotonic()
-        frames, cp2_cands, cp3_cands = scan_scene(bag_dir, objects, args.stride)
-        print(f"[{bag_name}] {len(frames)} frames, {len(cp2_cands)} CP2 candidates, "
-              f"{len(cp3_cands)} CP3 candidates, scan {time.monotonic() - t0:.1f}s")
+        t_wall0 = time.monotonic()
+        with jsonl_path.open("a", encoding="utf-8") as fh:
+            sink = JsonlSink(fh)
+            for bag_name, gt_scene, question in scenes_to_run:
+                _run_one_scene(args, rng, vision_chat, bag_name, gt_scene, question, sink,
+                                diag_vision_chat)
+                print(f"[{bag_name}] cumulative invocation wall time "
+                      f"{time.monotonic() - t_wall0:.1f}s")
 
-        # ---- CP2 sampling
-        rng.shuffle(cp2_cands)
-        n_pos = max(1, args.n_cp2_positive // len(SCENES))
-        positives = cp2_cands[:n_pos]
-        absent_nouns = pick_absent_nouns(labels, max(1, args.n_cp2_negative // len(SCENES)), rng)
-        frame_pool = list(frames.keys())
-        negatives = [(rng.choice(frame_pool), noun) for noun in absent_nouns] if frame_pool else []
+        infra = {"scene": args.scene or "all", "n_calls": vision_chat.n_calls,
+                  "n_degenerate": vision_chat.n_degenerate, "n_reloads": vision_chat.n_reloads}
+        with infra_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(infra) + "\n")
+        print(f"[invocation done] {time.monotonic() - t_wall0:.1f}s wall time, infra={infra}")
 
-        # ---- CP3 sampling: pairs of (correct, wrong) with distinct labels where possible
-        rng.shuffle(cp3_cands)
-        n_pairs = max(1, args.n_cp3_pairs // len(SCENES))
-        pairs: list[tuple[Cp3Candidate, Cp3Candidate]] = []
-        pool = list(cp3_cands)
-        for correct in pool[:n_pairs]:
-            others = [c for c in cp3_cands if c.label != correct.label]
-            if not others:
-                continue
-            wrong = rng.choice(others)
-            pairs.append((correct, wrong))
-
-        # ---- CP5 sampling: a handful of whole panoramas
-        n_cp5_here = max(1, args.n_cp5 // len(SCENES))
-        cp5_frames = rng.sample(frame_pool, min(n_cp5_here, len(frame_pool))) if frame_pool else []
-
-        bag = BagSource(str(bag_dir))
-        print(f"[{bag_name}] CP2: {len(positives)} positive / {len(negatives)} negative cases")
-        run_cp2_cases(vision_chat, bag_name, bag, frames, positives, negatives, rows)
-
-        bag = BagSource(str(bag_dir))
-        print(f"[{bag_name}] CP3: {len(pairs)} pairs")
-        run_cp3_cases(vision_chat, bag_name, bag, pairs, rows)
-
-        bag = BagSource(str(bag_dir))
-        print(f"[{bag_name}] CP5: {len(cp5_frames)} panoramas, question={question!r}")
-        run_cp5_cases(vision_chat, bag_name, bag, question, cp5_frames, rows)
-
-        print(f"[{bag_name}] cumulative wall time {time.monotonic() - t_wall0:.1f}s")
-
+    # Always regenerate the report from the FULL accumulated jsonl on disk (durable
+    # across invocations -- a --scene chunk's report reflects everything written so far).
+    rows = load_rows_from_jsonl(jsonl_path)
     agg = aggregate(rows)
-    write_jsonl(out_dir, rows)
-    write_report(out_dir, rows, agg, scenes_used, args.stride, args.model, args.base_url)
+    infra_totals = {"n_calls": 0, "n_degenerate": 0, "n_reloads": 0}
+    for line in (infra_path.read_text(encoding="utf-8").splitlines() if infra_path.exists() else []):
+        line = line.strip()
+        if not line:
+            continue
+        rec = json.loads(line)
+        for k in infra_totals:
+            infra_totals[k] += rec.get(k, 0)
+    scenes_used = sorted({r.scene for r in rows})
+    write_report(out_dir, rows, agg, scenes_used, args.stride, args.model, args.base_url,
+                 infra_totals if rows else None)
 
-    print(f"DONE: {len(rows)} cases, {time.monotonic() - t_wall0:.1f}s wall time")
+    print(f"REPORT: {len(rows)} total cases across {scenes_used}")
     print(json.dumps(agg, indent=2, default=str))
 
 
