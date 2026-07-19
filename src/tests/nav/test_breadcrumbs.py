@@ -111,6 +111,74 @@ def test_line_of_sight_blocked_by_obstacle():
     assert line_of_sight(cm, (0.05, 0.05), (0.85, 0.05))
 
 
+# --------------------------------------------------------------------------- issue #74
+# leg_goal_indices: a leg-goal path index is a hard stop — neither crumb selection nor
+# progress-index advancement may go past it until the pose dwells within
+# leg_goal_tol_m of it, even when a farther, LOS-clear point sits within one ordinary
+# lookahead window (the exact skip mechanism the issue names).
+
+
+def test_leg_boundary_not_selected_past_without_dwelling():
+    """A leg goal sits at index 5 of a straight, fully-open path; without leg-boundary
+    awareness the farthest-within-lookahead scan would happily select a point well
+    past it (the whole path is LOS-clear and short). With ``leg_goal_indices=[5]`` the
+    crumb must never be chosen past index 5 while the pose has not yet dwelled there."""
+    cm = _open_cm()
+    path = _straight_path(n=20, step=0.3)  # spans ~5.7 m; well past LOOKAHEAD_M=2.5
+    f = BreadcrumbFollower(path=path, costmap=cm, leg_goal_indices=[5])
+    pose = (0.05, 0.05)
+    wp = f.current(pose)
+    assert wp is not None
+    # index 5 -> x = 0.3*5 + 0.05 = 1.55; must not select past it.
+    assert wp.x <= path[5][0] + 1e-6
+
+
+def test_leg_boundary_lifts_once_dwelled():
+    cm = _open_cm()
+    path = _straight_path(n=20, step=0.3)
+    f = BreadcrumbFollower(path=path, costmap=cm, leg_goal_indices=[5])
+    # Drive up to (and dwell at) the leg-goal point.
+    for k in range(6):
+        f.advance(path[k], t=float(k))
+    # Now at path[5], well within leg_goal_tol_m of itself -> the boundary should have
+    # lifted, and the crumb may again be selected past index 5.
+    wp = f.current(path[5])
+    assert wp is not None
+    assert wp.x > path[5][0] + 1e-6
+
+
+def test_leg_boundary_caps_idx_advance_even_on_stationary_tick():
+    """Mechanism 2 (issue #74): the within/overshoot loop can consume many path
+    indices in one ``advance()`` call regardless of real movement (grid resolution far
+    finer than ``reach_m``). Ordinarily ``reach_m < leg_goal_tol_m`` already keeps this
+    loop from crossing an un-dwelled leg boundary (reaching-within-reach_m of the
+    boundary itself always satisfies the looser dwell tolerance too, so
+    ``_advance_leg_goals`` pops it before the cap would even matter). Exercise the cap
+    directly with an oversized ``reach_m`` (a caller misconfiguration / edge case) to
+    prove the ceiling check is load-bearing on its own, not merely redundant with the
+    tolerance ordering."""
+    cm = _open_cm()
+    # step=0.2 m -> index 10 sits 2.0 m out, beyond leg_goal_tol_m (~1.75 m), so it is
+    # NOT already dwelled at the start pose; reach_m=5.0 m would otherwise let the
+    # within-loop consume straight past it.
+    path = [(0.2 * i + 0.05, 0.05) for i in range(60)]
+    f = BreadcrumbFollower(path=path, costmap=cm, leg_goal_indices=[10], reach_m=5.0)
+    f.advance((0.05, 0.05), t=0.0)
+    assert f._idx <= 10
+
+
+def test_leg_boundary_empty_list_preserves_prior_behaviour():
+    """No leg_goal_indices threaded (every pre-#74 caller/test) -> identical to the
+    pre-#74 unconstrained follower."""
+    cm = _open_cm()
+    path = _straight_path(n=30, step=0.3)
+    f = BreadcrumbFollower(path=path, costmap=cm)
+    pose = (0.05, 0.05)
+    wp = f.current(pose)
+    d = ((wp.x - pose[0]) ** 2 + (wp.y - pose[1]) ** 2) ** 0.5
+    assert 2.0 <= d <= 2.5 + 1e-6
+
+
 def test_crumb_respects_line_of_sight():
     grid = OccupancyGrid(cell_m=0.1)
     rows = ["." * 30 for _ in range(3)]

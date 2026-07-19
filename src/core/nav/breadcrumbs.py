@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from core.groundtruth.arrival import NOMINAL_ARRIVAL_TOL_M
 from core.interfaces import WaypointCmd
 from core.nav.costmap import Costmap
 
@@ -24,6 +25,14 @@ LOOKAHEAD_M: float = 2.5  # farthest a crumb may sit ahead of the vehicle
 REACH_M: float = 0.8  # advance to next crumb within this distance of current
 STALL_MOVE_M: float = 0.3  # movement below this over the window == stalled
 STALL_WINDOW_S: float = 10.0  # stall observation window
+#: Issue #74 — the dwell tolerance a leg-goal waypoint-of-record (see
+#: ``BreadcrumbFollower.leg_goal_indices``) must be reached within before the follower
+#: may advance past it. Reused, not reinvented: this is the SAME constant
+#: ``core.heads.instruction.ARRIVAL_TOL_M`` already uses to mark a leg arrived (that
+#: module sets its own constant equal to this one), so a crumb this follower now
+#: refuses to skip is one the calling head is already about to credit anyway — never a
+#: NEW, stricter bar than the rubric itself applies.
+LEG_GOAL_ARRIVAL_TOL_M: float = NOMINAL_ARRIVAL_TOL_M
 
 
 def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -108,6 +117,53 @@ class BreadcrumbFollower:
     #: construction (a rebuilt/replanned route gets a NEW ``BreadcrumbFollower``), so
     #: a one-time build is always valid for the object's lifetime.
     _cum_dist: list[float] | None = field(default=None, repr=False, compare=False)
+    #: Issue #74 — ascending ``path`` indices of each ordered leg's own goal (the
+    #: "waypoint-of-record" ``plan_through(..., record_leg_bounds=True)`` recorded for
+    #: that leg; see its docstring). Empty for a follower whose caller doesn't thread
+    #: leg boundaries (e.g. every existing test, and any single-leg/no-leg route) —
+    #: the follower then behaves exactly as before this issue. Not mutated after
+    #: construction; ``_next_leg_goal_ptr`` tracks progress through it instead.
+    leg_goal_indices: list[int] = field(default_factory=list)
+    #: Dwell tolerance for ``leg_goal_indices`` — see ``LEG_GOAL_ARRIVAL_TOL_M``.
+    leg_goal_tol_m: float = LEG_GOAL_ARRIVAL_TOL_M
+    #: Index into ``leg_goal_indices`` of the next leg goal not yet dwelled-at. Once it
+    #: reaches ``len(leg_goal_indices)`` every leg boundary has been visited and the
+    #: follower is unconstrained (matches pre-#74 behaviour) for the remainder of the
+    #: path (typically just the terminal tail, if any).
+    _next_leg_goal_ptr: int = 0
+
+    def _leg_ceiling(self) -> int | None:
+        """``path`` index of the next un-dwelled leg-goal waypoint-of-record, or None.
+
+        Issue #74 — while this is not None, neither crumb selection nor progress-index
+        advancement may go past it: it is a HARD STOP, not just an ordinary path point,
+        because the calling head (``core.heads.instruction.InstructionHead``) grades
+        this leg on the driven trajectory actually dwelling near it, and a flat
+        polyline follower has no other notion of "this point is the required stop for
+        leg N" (issue's root-cause framing) to protect it from a lookahead shortcut or
+        the #62 fast-forward jumping straight past it.
+        """
+        if self._next_leg_goal_ptr < len(self.leg_goal_indices):
+            return self.leg_goal_indices[self._next_leg_goal_ptr]
+        return None
+
+    def _advance_leg_goals(self, pose: tuple[float, float]) -> None:
+        """Pop every pending leg goal the pose has now dwelled within tolerance of.
+
+        A ``while`` (not a single ``if``) because two ordered legs can share the same
+        path index (e.g. a leg whose resolved goal coincides with the previous leg's,
+        or a corridor leg whose gate-crossing segment is zero-length) — both must clear
+        in the same tick the pose reaches that shared point, or the second would wedge
+        the follower at a point already physically visited.
+        """
+        ceiling = self._leg_ceiling()
+        while (
+            ceiling is not None
+            and ceiling < len(self.path)
+            and _dist(pose, self.path[ceiling]) <= self.leg_goal_tol_m
+        ):
+            self._next_leg_goal_ptr += 1
+            ceiling = self._leg_ceiling()
 
     def _arc_len(self) -> list[float]:
         """``_cum_dist``, building it on first use."""
@@ -151,9 +207,21 @@ class BreadcrumbFollower:
         base = cum[self._idx] - _dist(pose, self.path[self._idx])
         chosen: tuple[float, float] | None = None
         chosen_idx: int | None = None
+        # Issue #74 — never select a crumb past an un-dwelled leg-goal
+        # waypoint-of-record. Without this cap the farthest-within-lookahead scan
+        # below is exactly the mechanism the issue names: a leg goal that sits only
+        # 1-2 lookahead-windows off the direct polyline (or at a short leg with little
+        # remaining arc length) gets skipped in favour of a farther, LOS-clear point
+        # past it, because the scan has no notion that the intervening point is a
+        # mandatory stop rather than an ordinary path vertex. Capping the scan's own
+        # END at the ceiling (inclusive — the leg goal itself must stay selectable)
+        # makes the farthest-within-lookahead logic below select AT MOST the ceiling,
+        # never past it, with no other change to how "farthest" is chosen.
+        ceiling = self._leg_ceiling()
+        scan_end = len(self.path) if ceiling is None else min(len(self.path), ceiling + 1)
         # Scan forward from current progress index; keep the farthest LOS-clear point
         # within lookahead. Stop early once a point exceeds lookahead (path is ordered).
-        for j in range(self._idx, len(self.path)):
+        for j in range(self._idx, scan_end):
             pt = self.path[j]
             if cum[j] - base > self.lookahead_m:
                 # Beyond lookahead — but keep the last good one; break to bound cost.
@@ -176,7 +244,7 @@ class BreadcrumbFollower:
             # the whole remaining path, not just within lookahead); only if none is
             # reachable do we surface the next path vertex WITH a replan flag so the FSM
             # recomputes rather than silently driving through geometry.
-            chosen, nearest_idx = self._nearest_reachable_point(pose)
+            chosen, nearest_idx = self._nearest_reachable_point(pose, scan_end)
             if chosen is None:
                 self.replan_flag = True
                 chosen, nearest_idx = self.path[self._idx], self._idx
@@ -184,13 +252,19 @@ class BreadcrumbFollower:
         return WaypointCmd(x=float(chosen[0]), y=float(chosen[1]))
 
     def _nearest_reachable_point(
-        self, pose: tuple[float, float]
+        self, pose: tuple[float, float], scan_end: int | None = None
     ) -> tuple[tuple[float, float] | None, int]:
-        """Nearest forward path point in clear line-of-sight from ``pose`` (or (None, -1))."""
+        """Nearest forward path point in clear line-of-sight from ``pose`` (or (None, -1)).
+
+        ``scan_end`` (issue #74): bounds the scan at an un-dwelled leg-goal ceiling,
+        same discipline as ``_select_crumb``'s primary scan — defaults to the whole
+        remaining path for callers outside this leg-boundary-aware fallback.
+        """
         best: tuple[float, float] | None = None
         best_idx = -1
         best_d = float("inf")
-        for j in range(self._idx, len(self.path)):
+        end = len(self.path) if scan_end is None else scan_end
+        for j in range(self._idx, end):
             pt = self.path[j]
             if not line_of_sight(self.costmap, pose, pt):
                 continue
@@ -214,10 +288,24 @@ class BreadcrumbFollower:
         /way_point_reached-equivalent from the stack.
         """
         self._record(pose, t)
+        # Issue #74 — mark any pending leg-goal waypoint(s)-of-record the pose has now
+        # dwelled within tolerance of BEFORE computing this tick's ceiling, so a leg
+        # reached this very tick immediately lifts the hard stop below rather than
+        # costing an extra tick of wedging at (or just past) it.
+        self._advance_leg_goals(pose)
+        ceiling = self._leg_ceiling()
         # Advance the progress index past any path point we're within reach of, OR
         # that we've clearly overshot (the following point is nearer than this one, so
         # the vehicle has moved past it). Also honour the reached signal.
         while self._idx < len(self.path):
+            # Issue #74 — hard stop: `_idx` may not creep past an un-dwelled leg-goal
+            # waypoint-of-record via the ordinary within/overshoot/signalled checks
+            # below (mechanism 2 in the issue: grid resolution far finer than
+            # `reach_m` lets a single stationary tick consume many indices at once,
+            # which can itself pre-consume a short leg's approach before it is ever
+            # actually reached).
+            if ceiling is not None and self._idx >= ceiling:
+                break
             within = _dist(pose, self.path[self._idx]) <= self.reach_m
             overshot = (
                 self._idx + 1 < len(self.path)
@@ -239,6 +327,10 @@ class BreadcrumbFollower:
         # against THOSE points never fires again and `_idx` wedges forever. Safe: only
         # ever jumps ahead to a crumb the follower itself already selected and
         # LOS-verified, never past unverified path points.
+        # Issue #74: `_select_crumb`'s own scan already never selects
+        # `_last_crumb_idx` past a pending ceiling (see its `scan_end` cap), so this
+        # fast-forward is automatically leg-boundary-safe too — no separate ceiling
+        # check needed here.
         if (
             0 <= self._last_crumb_idx < len(self.path)
             and self._last_crumb_idx >= self._idx
