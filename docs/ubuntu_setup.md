@@ -247,12 +247,34 @@ xhost +
 cd /tmp/fork-clean/docker && docker compose -f compose.yml up --build -d
 ```
 
+**As-built gotchas for step 3 (19 Jul, first full in-container run):**
+
+- **`DISPLAY` propagates at `docker compose up` time** from the invoking shell into the
+  system container. A shell without `DISPLAY` (cron, detached scripts, agent sessions)
+  creates a container whose RVIZ dies with the Qt "xcb" platform error and whose sensor
+  pipeline never comes up. Find the desktop display first (`who` shows `(:N)`), then
+  `DISPLAY=:N docker compose ... up -d --force-recreate system`. Scene re-install is
+  needed after every container re-create (docker cp is per-container state, §5).
+- **Disk hygiene: run `docker builder prune -f --keep-storage 12GB` after every image
+  build.** Build cache grows ~10 GB per full build generation; three generations filled
+  the 190 GB volume mid-build on 19 Jul (ENOSPC during export).
+- **The controller holds a 60 s ORIENT (in-place sweep) window after question latch
+  before the first waypoint** — no `/way_point_with_heading` traffic for the first
+  minute is CORRECT behavior, not a hang. When watching with `ros2 topic echo`,
+  remember the message is `Pose2D` (fields `x:/y:/theta:`).
+- **One question per adapter process** (gotcha 1): a second publish is dropped with a
+  SECOND QUESTION DROPPED error; `docker restart iros2026_ai_module` for a fresh run.
+  After the 600 s budget expires the controller goes DONE and stops publishing.
+
 **Phase-3 bake (in-image Ollama, `docs/local_llm_plan.md` Phase 3 — authored-pending-build,
 `b507eb9`):** the Dockerfile now also bakes an Ollama standalone server (tarball pinned
 `OLLAMA_VERSION=v0.32.1`, non-CUDA/non-CPU runner variants pruned) plus the `qwen2.5vl:3b`
 model blobs, so the local LLM tier is served entirely in-container at eval (no host
-Ollama at eval — organisers run only this container). Image grows from the Gate-4
-baseline (6.76 GB) by roughly **+5 GB**. The bake needs network at *build* time (Ollama
+Ollama at eval — organisers run only this container). **Measured built size (19 Jul,
+first real build): 28.1 GB total** — the old "6.76 GB baseline +5 GB" was an
+authored-pending-build estimate; the real layers are base image 9.4 + ros-jazzy-desktop
+3.4 + torch/CUDA pip 5.3 + GDINO weights 1.4 + Ollama runtime/model 3.2 + assorted
+sub-GB layers, all load-bearing. The bake needs network at *build* time (Ollama
 release + model registry, same class of build-time dependency as the GDINO weights
 fetch) even though the resulting image is offline at *runtime*. Ordered post-build
 verification (size delta, boot-log grep sequence, curl smoke, in-container ladder
