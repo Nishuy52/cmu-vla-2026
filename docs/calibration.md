@@ -18,6 +18,23 @@ is the sweep checklist.
 - **Sensitivity** — H/M/L judgement of how much sweeping this field moves behaviour,
   from reading the consuming code. Guides sweep priority, not a hard claim.
 
+**Generalization protocol (added 19 Jul 2026, user-raised overfitting concern):**
+eval runs on 3 held-out scenes and freshly generated questions, so fitting the 75
+training draws is self-deception. Three standing rules for every tunable, prompt,
+or method decision from here on:
+1. **Scene-level holdout**: tune on a training-scene subset, REPORT on >=4 scenes
+   never used for tuning (mirrors eval's unseen-scene structure). No swept value is
+   trusted on tuning-scene evidence alone.
+2. **Spec over sample**: a value justified by the VLA-3D generator spec or upstream
+   stack constants outranks one justified only by "improved the 75"; sample-only
+   justifications get flagged in this ledger's Evidence column and must pass rule 1.
+3. **Generated held-out questions**: the question-generator spec (docs/prior_art/)
+   permits generating novel questions for a private test set; method-level choices
+   (e.g. LLM-route A/B) report on those, not only the shipped 75.
+Highest current fitting-risk items: GDINO question-pass threshold 0.25 (single-scene
+fit, japanese_room probe - needs rule-1 validation), parser construction fixes
+#23/#25 (generator-template-derived, acceptable under rule 2).
+
 **Wiring summary:** 64 fields total (geometry 18 · fusion 5 · tracker 2 · keyframe 3 ·
 nav 21 · budget 15). **Wireable today (constructor arg or function param): 50.**
 **Wiring TODO (module constant, needs a setter/param before a sweep can move it): 14.**
