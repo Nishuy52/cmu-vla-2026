@@ -109,12 +109,21 @@ RUN pip install --no-cache-dir --break-system-packages --ignore-installed \
 #     BertModelWarper still calls -> AttributeError on every detector load. Pin
 #     transformers==4.57.6 (verified on Ubuntu to still expose get_head_mask and load
 #     cleanly against groundingdino-py 0.4.0) to keep the resolver off the broken range.
+#     Issue #56 (clean checkpoint, 19 Jul): VLA_LLM_LOCAL_KIND=openai is baked below (Local-slot
+#     wiring section) and core/llm/providers.py imports the `openai` SDK lazily to drive that
+#     slot — but nothing in this Dockerfile pip-installs it, so the local LLM tier raised
+#     ProviderUnavailable (ModuleNotFoundError: openai) at runtime and the ladder fell straight
+#     to regex in 0.0s. src/pyproject.toml's `llm` extra already declares `openai>=1.0`; install
+#     the same spec here so the two stay in sync. Folded into this same constrained layer (rather
+#     than a separate RUN) because the openai SDK's own deps (httpx, pydantic, etc.) have no
+#     numpy involvement, so there's no reason to pay for another layer just to keep it separate.
 RUN printf 'numpy==1.26.4\ntransformers==4.57.6\n' > /tmp/pip-constraints.txt && \
     PIP_CONSTRAINT=/tmp/pip-constraints.txt pip install --no-cache-dir --break-system-packages \
       torch \
       torchvision \
       transformers==4.57.6 \
-      groundingdino-py && \
+      groundingdino-py \
+      "openai>=1.0" && \
     rm /tmp/pip-constraints.txt
 
 # --- Weight baking (Gate 4 item 1: "bake into the image (offline-capable rule)").

@@ -310,6 +310,10 @@ to actually DRIVE a configured `openai`-kind slot (local or a real cloud primary
 secondary) the SDK must be present: `pip install -e '.[llm]'` from `src/` (or
 `pip install openai` directly). Conformance/battery tooling
 (`tools/llm_conformance.py`, `tools/llm_parse_battery.py`) needs this installed.
+Fixed in the ai_module image itself (issue #56, 19 Jul): the Dockerfile's constrained
+pip layer now installs `openai>=1.0` alongside torch/transformers/groundingdino-py,
+matching `src/pyproject.toml`'s `llm` extra — the baked `VLA_LLM_LOCAL_KIND=openai`
+slot no longer hits `ProviderUnavailable (ModuleNotFoundError: openai)` at runtime.
 
 **Submission requirement:** the host install above is the DEV loop only. The
 submission image serves the model IN-CONTAINER (organisers run only our
