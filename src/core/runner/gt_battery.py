@@ -584,10 +584,14 @@ _RUBRIC_GOAL_MAX_PUSH_M: float = 2.5
 
 
 def _nearest_free_goal(
-    xy: tuple[float, float], gt: GTScene, exclude_id: int | None
+    xy: tuple[float, float],
+    gt: GTScene,
+    *,
+    anchor_id: int | None = None,
+    approach_xy: tuple[float, float] | None = None,
 ) -> tuple[float, float]:
-    """Push a raw anchor centroid off any OTHER floor-level obstacle footprint it
-    falls inside (issue #61).
+    """Push a raw anchor centroid off any floor-level obstacle footprint it falls
+    inside (issue #61; issue #66 extends this to the anchor's OWN footprint).
 
     An anchor resolved from a clause like "the magazine ON the ottoman" has its own
     raw centroid sitting squarely inside the SUPPORTER's floor footprint (the
@@ -598,13 +602,40 @@ def _nearest_free_goal(
     (real navigation), which always project onto free/reachable space — so the
     rubric could require arrival at a point our own drive would never plan to (or
     could reach at all). This mirrors that projection with a lightweight, pose-free
-    version: push straight to the nearest edge (plus a vehicle-radius clearance) of
-    any floor-level, non-architectural-room-scale instance footprint the point
-    falls inside, iterating a bounded number of times for a nested/overlapping case.
-    Architectural room-scale AABBs are excluded (issue #53 territory — a real thin
-    wall/floor recorded as one room-spanning box, not a genuine local footprint to
-    push off of) and elevated instances (base z at/above the terrain slab, i.e.
-    overhangs) never blocked the floor to begin with.
+    version: push off any floor-level, non-architectural-room-scale instance
+    footprint the point falls inside, iterating a bounded number of times for a
+    nested/overlapping case.
+
+    Issue #66: earlier this excluded the resolved anchor's OWN instance from the
+    push (only pushing off OTHER objects), on the theory that "go to X" should
+    target X's centroid. But X is itself real, solid, stamped furniture whenever
+    its footprint is large enough to register as an obstacle (``_synthetic_from_gt``
+    stamps every non-architectural instance, including the leg's own
+    target) — ``_goto_point``/``_via_point`` never target a point inside X's own
+    solid geometry either, they BFS/gradient onto the nearest free cell around it.
+    A goal left at X's raw centroid is arrival-tolerance-unreachable by construction
+    for any X whose footprint half-diagonal exceeds ``ARRIVAL_TOL_M`` (traced at
+    e.g. a bench, a guitar, a set of stairs, a soccer ball — see issue #66's
+    classification table) — not a stamping-fidelity defect, a goal-definition one.
+    So the anchor's own footprint is no longer skipped — but pushing it needs to
+    pick the correct SIDE, not just the geometrically nearest edge: a plain
+    "nearest of 4 edges" choice ignores which side is actually approached (real
+    furniture usually has one accessible side; the near edge of a square footprint
+    is a coin-flip that traced worse against both the driven path AND the GT
+    reference path in practice). When ``anchor_id``/``approach_xy`` are given (the
+    leg's own resolved instance and the point the route arrives FROM — the
+    previous leg's goal, or the scene spawn for the first leg), the anchor's own
+    push is instead directional: pushed along whichever axis the approach point is
+    furthest offset on, toward the side the approach point is actually on —
+    mirroring "walk up to X from where you are and stop at its near edge" instead
+    of an approach-blind nearest-edge guess. Pushes off OTHER (non-anchor)
+    footprints keep the original nearest-edge rule (issue #61, unchanged and
+    already validated).
+
+    Architectural room-scale AABBs are excluded (issue #53 — not stamped by
+    :func:`_synthetic_from_gt`, so not a real local footprint to push off of) and
+    elevated instances (base z at/above the terrain slab, i.e. overhangs) never
+    blocked the floor to begin with.
     """
     x0, y0, x1, y1 = _gt_footprint_bounds(gt, 0.0)
     room_w, room_h = x1 - x0, y1 - y0
@@ -612,8 +643,6 @@ def _nearest_free_goal(
     for _ in range(4):  # bounded: converges in one pass for the common single-supporter case
         moved = False
         for rec in gt.instances:
-            if rec.instance_id == exclude_id:
-                continue
             if float(rec.aabb_min[2]) >= TERRAIN_SLAB_MAX_Z:
                 continue  # elevated overhang -- never blocked the floor
             if _is_architectural_room_scale_aabb(rec.aabb_min, rec.aabb_max, room_w, room_h):
@@ -624,18 +653,33 @@ def _nearest_free_goal(
             aymax = float(rec.aabb_max[1]) + _RUBRIC_GOAL_CLEARANCE_M
             if not (axmin <= x <= axmax and aymin <= y <= aymax):
                 continue
-            # Inside this footprint (+ clearance): push to the nearest edge.
-            d_left, d_right = x - axmin, axmax - x
-            d_bottom, d_top = y - aymin, aymax - y
-            m = min(d_left, d_right, d_bottom, d_top)
-            if m == d_left:
-                x = axmin
-            elif m == d_right:
-                x = axmax
-            elif m == d_bottom:
-                y = aymin
+            if (
+                approach_xy is not None
+                and anchor_id is not None
+                and rec.instance_id == anchor_id
+            ):
+                # Issue #66: directional push off the anchor's OWN footprint, biased
+                # toward the side the route actually approaches from.
+                cx = float(rec.aabb_min[0] + rec.aabb_max[0]) / 2.0
+                cy = float(rec.aabb_min[1] + rec.aabb_max[1]) / 2.0
+                adx, ady = approach_xy[0] - cx, approach_xy[1] - cy
+                if abs(adx) >= abs(ady):
+                    x = axmax if adx >= 0 else axmin
+                else:
+                    y = aymax if ady >= 0 else aymin
             else:
-                y = aymax
+                # Push off an OTHER instance's footprint: nearest edge (issue #61).
+                d_left, d_right = x - axmin, axmax - x
+                d_bottom, d_top = y - aymin, aymax - y
+                m = min(d_left, d_right, d_bottom, d_top)
+                if m == d_left:
+                    x = axmin
+                elif m == d_right:
+                    x = axmax
+                elif m == d_bottom:
+                    y = aymin
+                else:
+                    y = aymax
             moved = True
         if not moved:
             break
@@ -646,7 +690,11 @@ def _nearest_free_goal(
 
 
 def _if_rubric_geometry(
-    text: str, gt: GTScene, idx: BasicSceneIndex
+    text: str,
+    gt: GTScene,
+    idx: BasicSceneIndex,
+    *,
+    start_xy: tuple[float, float] | None = None,
 ) -> tuple[
     list[tuple[str, tuple[float, float]]],
     list[tuple[int, object]],
@@ -666,6 +714,14 @@ def _if_rubric_geometry(
         (issue #59 probe: lets the probe report which instance our resolver grounded
         each leg to, independent of the goal xy).
     Legs/avoids whose anchors don't resolve are skipped (an unscored, not a wrong, leg).
+
+    ``start_xy`` (issue #66, optional): the point the route departs from — passed
+    through to :func:`_nearest_free_goal` as the FIRST leg's approach reference, so
+    a GOTO/VIA_NEAR goal that must be pushed off its own anchor's footprint picks
+    the side actually approached, not an approach-blind nearest-edge guess. Later
+    legs use the PREVIOUS leg's own resolved goal as their approach reference.
+    ``None`` (the default) falls back to the old undirected nearest-edge push —
+    used by callers (the #59 probe, ``cvsweep``) that don't track a route start.
     """
     from core.parsing.regex_tier import parse_regex
     from core.geometry.toolbox import (
@@ -696,6 +752,7 @@ def _if_rubric_geometry(
                 return c
         return None
 
+    approach_xy = start_xy
     for i, leg in enumerate(plan.route):
         if leg.kind is LegKind.CORRIDOR_BETWEEN and len(leg.anchors) == 2:
             r0 = _resolve_anchor_rec(leg.anchors[0])
@@ -716,17 +773,20 @@ def _if_rubric_geometry(
             leg_goals.append(("corridor_between", mid))
             corridor_gates.append((i, gate))
             leg_instance_ids.append((r0.instance_id, r1.instance_id))
+            approach_xy = mid
         else:
             rec = _resolve_anchor_rec(leg.anchors[0]) if leg.anchors else None
             if rec is None:
                 continue
             c = P._as3(rec.centroid)
             goal_xy = _nearest_free_goal(
-                (float(c[0]), float(c[1])), gt, rec.instance_id
+                (float(c[0]), float(c[1])), gt,
+                anchor_id=rec.instance_id, approach_xy=approach_xy,
             )
             kind = "via_near" if leg.kind is LegKind.VIA_NEAR else "goto"
             leg_goals.append((kind, goal_xy))
             leg_instance_ids.append((rec.instance_id,))
+            approach_xy = goal_xy
 
     for spec in plan.avoid:
         try:
@@ -1152,7 +1212,7 @@ def score_scene(
             text, gt, idx, start_xy=spawn_xy, wall_cells=wall_cells
         )
         leg_goals, corridor_gates, avoid_caps, leg_instance_ids = _if_rubric_geometry(
-            text, gt, idx
+            text, gt, idx, start_xy=spawn_xy
         )
         rub = S.score_instruction_rubric(
             driven,
