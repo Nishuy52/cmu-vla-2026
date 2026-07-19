@@ -1367,3 +1367,26 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   lead: pose emission near dwell, not crumb selection).
 - Trajectory: 0.150 -> 0.378 (#70) -> 0.433 (#71) -> 0.461 (#72) -> 0.511
   (#74) -> 0.483 (truer, #75) -> **0.539 (#77a)**. Ceiling 0.819.
+
+## 2026-07-20 (overnight cont.) - threading unlocked: IF 0.589, tv 7->3
+
+- **#79 MERGED** (77a73a9): goto/via_near pinch-overlay gate-crossing
+  fallback (astar-None-only, usable_gate_point, 77b lookahead guard) +
+  reinstated corridor crossing extension. Threading 7->3, credit 0.611,
+  headline 0.539->0.589, zero regressions, full gate green, #54 guard
+  intact. Integrated confirmation reports/gt_battery_main_post79
+  (nume 15/15).
+- #78 diagnosed (evidence merged, stays open, mechanism distinct): goal
+  BFS floods the un-pinched costmap -> goto goals pocket-clamped after
+  corridors; 6-leg blast radius; #79's probes proved the flagship case
+  DISCONNECTED beyond the gate (structural) - residue re-verification in
+  the 77c lane.
+- Cross-lane relay worked as designed: #78's diagnosis redirected #79's
+  design mid-flight (goal-side vs route-side), and #79's probes then
+  refuted the goal-side half with geometry evidence - both recorded.
+- DISPATCHED: 77c residual lane on the fresh post-79 table (blast-radius
+  split, 3 remaining threading violations classification, structural
+  ledger as key deliverable).
+- Trajectory: 0.150 -> 0.378 -> 0.433 -> 0.461 -> 0.511 -> 0.483(truer)
+  -> 0.539 -> **0.589**. tv 7->3. Ceiling 0.819 (structural ledger will
+  refine the honest max).
