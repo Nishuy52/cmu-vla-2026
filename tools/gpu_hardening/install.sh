@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the NVIDIA RTD3 hardening (see nvidia-disable-rtd3.conf for why).
+# Install the NVIDIA RTD3 hardening (see zz-nvidia-disable-rtd3.conf for why).
 # Must be run with sudo. Takes effect at the NEXT reboot.
 set -euo pipefail
 
@@ -9,9 +9,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST=/etc/modprobe.d/nvidia-disable-rtd3.conf
+DEST=/etc/modprobe.d/zz-nvidia-disable-rtd3.conf
+rm -f /etc/modprobe.d/nvidia-disable-rtd3.conf
 
-install -m 0644 "$HERE/nvidia-disable-rtd3.conf" "$DEST"
+install -m 0644 "$HERE/zz-nvidia-disable-rtd3.conf" "$DEST"
 echo "installed $DEST"
 
 # The driver also ships udev rules that put the device into runtime PM
