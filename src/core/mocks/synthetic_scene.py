@@ -107,6 +107,7 @@ class SyntheticScene:
         two_rooms: bool = False,
         wall_thickness: float = 0.15,
         doorway_width: float = 1.0,
+        extra_wall_cells: set[tuple[int, int]] | None = None,
     ) -> None:
         self.seed = int(seed)
         self.rng = np.random.default_rng(self.seed)
@@ -114,6 +115,12 @@ class SyntheticScene:
         self.wall_thickness = float(wall_thickness)
         self.doorway_width = float(doorway_width)
         self.objects: list[GTObject] = []
+        #: Extra wall cells (IF-F2 wall realism), on the ``round(coord / FLOOR_SPACING)``
+        #: integer lattice — cells derived off a scene's ``traversable_area.ply`` that fall
+        #: inside the room but aren't traversable (interior walls the AABB-only mirror
+        #: costmap otherwise has no source for). ``None``/empty = old boundary-only
+        #: behaviour. See ``core.runner.gt_battery._scene_wall_cells``.
+        self.extra_wall_cells = extra_wall_cells
 
         if two_rooms:
             # Two rooms side by side sharing the wall at x == split, with a gap.
@@ -227,6 +234,21 @@ class SyntheticScene:
     def _in_any_room(self, x: float, y: float) -> bool:
         return any(r.contains(x, y) for r in self.rooms)
 
+    def _in_extra_wall_cells(self, x: float, y: float) -> bool:
+        """True if ``(x, y)`` falls in an externally-supplied interior wall cell.
+
+        Uses the absolute ``round(coord / FLOOR_SPACING)`` lattice so a cell derived
+        independently (off scene point-cloud data) lines up with the terrain grid's own
+        ``arange(x0, x1, FLOOR_SPACING)`` sequence regardless of where ``x0`` falls —
+        consecutive terrain samples differ by exactly one lattice step, so both grids
+        share the same integer cell ids.
+        """
+        if not self.extra_wall_cells:
+            return False
+        ix = int(round(x / FLOOR_SPACING))
+        iy = int(round(y / FLOOR_SPACING))
+        return (ix, iy) in self.extra_wall_cells
+
     def _is_wall(self, x: float, y: float) -> bool:
         """A cell is a wall if within wall_thickness of a room border and not
         inside the doorway gap between two rooms."""
@@ -257,7 +279,7 @@ class SyntheticScene:
             and abs(y - self.doorway[1]) <= (self.doorway_width / 2)
         ):
             return False
-        return wall
+        return wall or self._in_extra_wall_cells(x, y)
 
     def terrain_patch(self, *, extended: bool = False, t: float = 0.0) -> TerrainPatch:
         """Floor-sampled (N, 4) [x, y, z, intensity] cloud at ~0.1 m spacing.
