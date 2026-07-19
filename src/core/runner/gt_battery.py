@@ -740,7 +740,12 @@ def _if_rubric_geometry(
         resolve,
     )
     from core.geometry import primitives as P
-    from core.plan_schema import LegKind
+    from core.plan_schema import LegKind, Pred
+
+    #: Superlative disambiguator preds (mirrors core.heads.instruction._SUPERLATIVE_PREDS):
+    #: the toolbox already ranks by a real margin for these, so neither correction below
+    #: may override it.
+    _SUPERLATIVE_PREDS = frozenset({Pred.CLOSEST_TO, Pred.FARTHEST_FROM})
 
     plan = parse_regex(text)
     leg_goals: list[tuple[str, tuple[float, float]]] = []
@@ -757,7 +762,50 @@ def _if_rubric_geometry(
             clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
         )
         res = resolve(spec, idx)
-        for c in res.candidates_ranked:
+        ranked = list(res.candidates_ranked)
+        disamb = anchor.disambiguator
+        has_superlative = disamb is not None and disamb.pred in _SUPERLATIVE_PREDS
+
+        # Issue #71 (RUBRIC-WRONG class): once the resolve fallback ladder has dropped
+        # every relation clause (category_only, the noisiest rung -- issue #59), the
+        # remaining soft best-effort ranking can rank a loosely/generically matched label
+        # ahead of a survivor whose label is an EXACT match for the anchor noun (e.g. a
+        # bare "table" outranking an actual "dining table" for a "dining table" query).
+        # Prefer an exact-label match within that fallback pool before falling through to
+        # the toolbox's own soft order. This is the rubric's OWN independent correction
+        # (reads only the anchor spec + this resolve's own audit trail, never the
+        # navigation head's state) -- not a substitution of the head's output.
+        if not has_superlative and any(r.step == "category_only" for r in res.audit):
+            norm = anchor.noun.strip().lower()
+            exact = [c for c in ranked if c.label.strip().lower() == norm]
+            if exact:
+                rest = [c for c in ranked if c.label.strip().lower() != norm]
+                ranked = exact + rest
+
+        # Same ordered-route salience InstructionHead._ranked_anchor applies (IF-F3,
+        # corrected by issue #71's parity audit to a same-label group only -- reordering
+        # the full survivor pool by raw distance let a different-label survivor leapfrog
+        # one the toolbox itself ranked ahead on real evidence). Computed independently
+        # from the rubric's OWN ``approach_xy`` walk (this leg's departure point, never
+        # read from the head), so both sides converge on the correct instance from their
+        # own state rather than one copying the other's resolved output.
+        if not has_superlative and approach_xy is not None and len(ranked) > 1:
+            top_label = ranked[0].label
+            same = [c for c in ranked if c.label == top_label]
+            rest = [c for c in ranked if c.label != top_label]
+            if len(same) > 1:
+                ax, ay = approach_xy
+                same = sorted(
+                    same,
+                    key=lambda c: (
+                        (float(P._as3(c.centroid)[0]) - ax) ** 2
+                        + (float(P._as3(c.centroid)[1]) - ay) ** 2,
+                        c.instance_id,
+                    ),
+                )
+            ranked = same + rest
+
+        for c in ranked:
             if exclude_id is None or c.instance_id != exclude_id:
                 return c
         return None
