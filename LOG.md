@@ -1270,3 +1270,70 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   numbers UNCHANGED from `gt_battery_post70` (no code shipped). Next step:
   `core/nav` route-precision investigation for arrival-blocked (#62), and
   the #71 resolver-parity audit, before either bucket is touched again.
+
+## 2026-07-19 — #72 drive-precision: BreadcrumbFollower Euclidean-lookahead fix
+
+**Done (branch `if72-drive-precision`):**
+- Rebuilt the arrival-blocked bucket from `gt_battery_post71`'s own
+  `leg_probe`/`leg_outcomes` (post-#71 re-placement): 22 (later fell
+  further as fixes landed) arrival_blocked / 11 structurally_unreachable /
+  0 cascade, of 35 non-in-order legs of 72 total.
+- Traced mechanism by comparing each arrival-blocked leg's OWN resolved
+  navigation goal (`InstructionHead._legs[i].geom`) against the rubric's
+  independent goal and the driven trajectory's closest approach: most
+  legs' driven trajectory bottoms out almost exactly where the HEAD's own
+  goal sits (resolver-instance divergence from the rubric's independent
+  resolve — `core/geometry/toolbox` territory, frozen, #73's lane, not
+  actionable here). A distinct sub-group had the head's own goal sitting
+  CLOSE to the rubric goal (well inside tolerance) while the driven
+  trajectory never got anywhere near it — a genuine navigation defect:
+  `BreadcrumbFollower._select_crumb`'s "farthest LOS-clear point within
+  `LOOKAHEAD_M`" bound used straight-line (Euclidean) distance from the
+  CURRENT POSE to each candidate. On a route that runs out to a leg's own
+  goal and then doubles back near its own earlier ground (e.g. returning
+  toward a later corridor/leg), a point many real metres of travel away
+  can sit Euclidean-close to the pose merely because the path folds back
+  — the greedy selector then shortcuts straight past the entire
+  out-and-back detour (and the leg goal at its tip), never actually
+  driving there, even though the planned path correctly visited it.
+- Fix 1 (`core/nav/planner.py` `astar`): stop the reconstructed path's
+  final vertex at the goal CELL'S CENTRE when the requested continuous
+  goal point was itself passable (unsnapped) — use the exact requested
+  point instead. Targets the <0.1 m near-misses. In isolation: DRY (credit
+  0.4944, headline 0.4333 — byte-identical to baseline; the near-miss
+  legs' true bottleneck was the rubric-vs-head resolver divergence, not
+  grid quantization). Kept staged, not reverted, because —
+- Fix 2 (`core/nav/breadcrumbs.py` `BreadcrumbFollower._select_crumb`):
+  bound the lookahead scan by arc length travelled ALONG the path from
+  the follower's progress index (anchored on the pose's own remaining
+  distance to `path[_idx]`, since `_idx` can legitimately lag/lead the
+  pose), not by straight-line pose-to-candidate distance. Fixes the
+  double-back-skip without touching the deliberate LOS-shortcut behaviour
+  on genuinely open, non-looping stretches (arc length ≈ Euclidean there).
+  Alone: credit 0.4944 → 0.5111, headline 0.4333 → 0.4500 (+2 legs
+  reached: `hotel_room_2` leg0, `chinese_room` leg0). Combined with fix 1
+  (now non-dry — the arc-length fix gets a `livingroom_4` leg close enough
+  that the leftover cell-quantization slack decides it): credit 0.4944 →
+  **0.5222**, headline 0.4333 → **0.4611** (+3 legs total), threading
+  violations unchanged at 7, avoid violations unchanged at 0, numerical
+  15/15 and object-reference 6/6 unchanged. Full fast tier green
+  (`pytest -m ""` from `src/`).
+- Residual: several arrival-blocked legs still show the same signature
+  (head's own goal close to the rubric goal, driven trajectory never
+  arrives) but with a bigger gap than fix 2 closes — traced to the SAME
+  follower design gap at a more severe scale: `BreadcrumbFollower` has no
+  concept of ordered-leg boundaries, so a short leg's own goal can still
+  get skipped within a single lookahead window even after the arc-length
+  correction, or via the separate (unfixed) `advance()` within/overshoot
+  loop's blind Euclidean consumption from a stationary pose. A full fix
+  needs the follower to be leg-boundary-aware (hard-stop each ordered leg
+  before considering the next), which is a larger design change than this
+  session's remaining budget could safely land and verify — filed as a
+  follow-up issue rather than rushed.
+- Reports: `reports/gt_battery_fix1_cellsnap` (fix 1 alone, dry, kept as
+  evidence), `reports/gt_battery_fix2_arclookahead_only` (fix 2 alone),
+  `reports/gt_battery_post72` (both fixes, final integrated state — new
+  baseline for future #72/#73 work). Next step: the leg-boundary-aware
+  follower redesign (filed issue), and the #71 resolver-parity audit for
+  the resolver-divergence majority of this bucket (`core/geometry/toolbox`,
+  #73's lane).
