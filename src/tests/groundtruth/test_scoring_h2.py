@@ -15,7 +15,9 @@ from core.geometry.toolbox import Capsule, Gate
 from core.groundtruth import scoring as S
 from core.groundtruth.loader import GTScene
 from core.groundtruth.scoring import (
+    ARRIVAL_RESAMPLE_STEP_M,
     _class_equal,
+    _densify_polyline,
     score_instruction_rubric,
     score_numerical,
 )
@@ -76,6 +78,55 @@ def test_rubric_empty_trajectory_scores_zero():
     assert r.rubric_score == pytest.approx(0.0)
     assert r.driven_n_poses == 0
     assert "empty" in r.note
+
+
+def test_rubric_arrival_over_sparse_waypoints_mid_segment_goal_reached():
+    # Issue #58 regression: goal sits 0.5 m off the midpoint of a 10 m segment whose
+    # endpoints are both farther than tol from the goal. Without densification the
+    # sparse 2-pose trajectory never counts as reaching it.
+    traj = np.array([[0, 0], [10, 0]], dtype=float)
+    goals = [("goto", (5.0, 0.5))]
+    r = score_instruction_rubric(traj, goals, tol=0.8)
+    assert r.n_legs_reached_in_order == 1
+    assert r.rubric_score == pytest.approx(1.0)
+
+
+# ------------------------------------------------------------- _densify_polyline
+
+
+def test_densify_polyline_bounds_spacing_and_keeps_endpoints():
+    traj = np.array([[0, 0], [10, 0], [10, 4]], dtype=float)
+    dense = _densify_polyline(traj, ARRIVAL_RESAMPLE_STEP_M)
+    gaps = np.linalg.norm(np.diff(dense[:, :2], axis=0), axis=1)
+    assert np.all(gaps <= ARRIVAL_RESAMPLE_STEP_M + 1e-9)
+    assert np.allclose(dense[0], traj[0])
+    assert np.allclose(dense[-1], traj[-1])
+    # original vertices preserved
+    for v in traj:
+        assert np.any(np.all(np.isclose(dense, v), axis=1))
+
+
+def test_densify_polyline_single_point_and_empty_pass_through():
+    single = np.array([[1.0, 2.0]])
+    assert np.array_equal(_densify_polyline(single, 0.25), single)
+    empty = np.empty((0, 2))
+    assert np.array_equal(_densify_polyline(empty, 0.25), empty)
+
+
+def test_densify_polyline_does_not_change_threading_verdict():
+    gate = Gate(
+        np.array([0.0, -1.0]), np.array([0.0, 1.0]), np.array([0.0, 0.0]), 2.0
+    )
+    # Sparse path crossing the gate exactly at the midpoint.
+    traj = np.array([[-5, 0], [5, 0]], dtype=float)
+    goals = [("corridor_between", (0.0, 0.0))]
+    r_sparse = score_instruction_rubric(traj, goals, corridor_gates=[(0, gate)])
+    r_dense = score_instruction_rubric(
+        _densify_polyline(traj, ARRIVAL_RESAMPLE_STEP_M), goals,
+        corridor_gates=[(0, gate)],
+    )
+    assert r_sparse.n_threading_violations == r_dense.n_threading_violations == 0
+    assert r_sparse.rubric_score == pytest.approx(r_dense.rubric_score)
 
 
 # ------------------------------------------------------- threading / avoid penalties
