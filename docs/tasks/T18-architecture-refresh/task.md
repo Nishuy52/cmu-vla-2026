@@ -19,15 +19,15 @@ than merged.
 
 ## Acceptance criteria
 
-- [ ] `architecture/README.md` — index, ELI10, how-it-runs, PlantUML overview
-- [ ] Chapters 01–10 (contracts, core loop, time budgeting, parsing,
+- [x] `architecture/README.md` — index, ELI10, how-it-runs, PlantUML overview
+- [x] Chapters 01–10 (contracts, core loop, time budgeting, parsing,
       perception, answer heads, navigation, evaluation/calibration,
       runtimes/deployment, gaps/risks)
-- [ ] Every file/line anchor verified against current main (spot-checked
+- [x] Every file/line anchor verified against current main (spot-checked
       by an independent verification pass before merge)
-- [ ] Gaps chapter cross-referenced with open GitHub issues
+- [x] Gaps chapter cross-referenced with open GitHub issues
       (#61 #62 #63 #64 #67 #68 #69 #70) and the reverted #67 fix (bbb66bd)
-- [ ] No AI/tooling attribution anywhere
+- [x] No AI/tooling attribution anywhere
 
 ## Notes
 
@@ -36,3 +36,16 @@ than merged.
   dispatched to executor tier in three isolated worktrees (A: README+01–03,
   B: 04–06+08, C: 07+09+10); integration + verifier pass owned by the
   main session.
+- 19 Jul (cont.): all 11 files delivered (3,006 lines) and integrated.
+  Writer findings worth keeping: interfaces.py budget constants (510/570)
+  vs budget.py effective defaults (480/540) called out explicitly;
+  `_nearest_free_goal` lives in runner/gt_battery.py, not nav/; production
+  perception defaults to `VLA_DETECTOR=none`; design-doc self-consistency
+  pass is budget-only scaffolding, never implemented; ch10 reflects the
+  #69 closure + ceiling-diagnosis caveat (460ea33) that merged mid-task.
+  Independent verifier pass dispatched before commit.
+- 19 Jul (close): verifier CONFIRMED — 50+ anchors and all material-claim
+  clusters correct; single discrepancy (wrong module path in ch10's
+  "where to change what" table, `core/groundtruth/` → `core/runner/`)
+  fixed before commit. CLAUDE.md Layout table gained an `architecture/`
+  row with a refresh-on-drift note. Task done.

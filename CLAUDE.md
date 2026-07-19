@@ -129,6 +129,7 @@ every branch created from here on follows this.
 | `docs/io_contract_crosscheck.md` | Independent source-inspection of the dev-kit I/O contract - corroborates `challenge_brief.md`/`upstream_notes.md` (which stay authoritative) |
 | `docs/organizer_playbook.md` | Organiser theses distilled + 2025 winner intel |
 | `docs/proposals/` | Architecture debate record: 3 proposals + 3 critiques |
+| `architecture/` | **As-built architecture reference** (19 Jul 2026) — navigable chapters 01–10 + README with verified file:line anchors; documents what is actually built vs `docs/architecture.md`'s design record. Refresh anchors when the cited code moves |
 | `LOG.md` | Running session log — append, never rewrite history |
 | `docs/tasks/` | Task records - one folder per task + `INDEX.md`; see "Task-record workflow" below |
 | `upstream/` | Clone of the official challenge repo — **read-only reference, git-ignored**; never edit; `git pull` to refresh |

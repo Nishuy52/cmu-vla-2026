@@ -1197,3 +1197,6 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   fully-merged origin branches (claude/x2, fix/issue-sweep) blocked by
   session permissions - left for manual `git push origin --delete`.
   origin docs/current-architecture kept (2 unmerged doc commits, 14 Jul).
+- Wrapped up T18 architecture-refresh: as-built `architecture/` folder
+  (README + ch 01-10) landed; 11 Jul snapshot branch archived. See
+  docs/tasks/T18-architecture-refresh/task.md.
