@@ -429,7 +429,9 @@ def _score_if(
         # shrink the rubric denominator by de-resolving anchors instead of driving
         # better (see module docstring "Threshold injection"). Delegate to gt_battery's
         # copy, which hard-wires the default Thresholds.
-        leg_goals, corridor_gates, avoid_caps, _leg_iids = GB._if_rubric_geometry(text, gt, idx)
+        leg_goals, corridor_gates, avoid_caps, _leg_iids, leg_aabbs = GB._if_rubric_geometry(
+            text, gt, idx
+        )
         rub = S.score_instruction_rubric(
             driven,
             leg_goals,
@@ -437,6 +439,7 @@ def _score_if(
             avoid_capsules=avoid_caps,
             trajectory_ply=traj_path,
             frame=frame,
+            leg_instance_aabbs=leg_aabbs,
         )
         out.if_available += _PTS_INSTRUCTION_FOLLOWING
         out.if_earned += _PTS_INSTRUCTION_FOLLOWING * float(rub.rubric_score)
