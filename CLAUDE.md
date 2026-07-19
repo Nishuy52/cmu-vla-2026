@@ -21,7 +21,13 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
    (gate exits, battery results to be trusted, §7a packaging gate,
    submissions) — rebuilds take too long for iteration. Host env pins must
    mirror the fork Dockerfile (single source of truth).
-6. **Detected issues become GitHub issues.** Any defect, failure, or
+6. **Generalization protocol (added 19 Jul 2026): no tuning decision is
+   trusted on training-sample evidence alone.** Scene-level holdout
+   reporting, spec-over-sample precedence, and generated held-out
+   questions for method comparisons — full rules in
+   `docs/calibration.md` "Generalization protocol". Applies to every
+   tunable, prompt, threshold, and A/B from here on.
+7. **Detected issues become GitHub issues.** Any defect, failure, or
    open problem detected (by review, verification, battery/diagnosis
    runs, or agents) that is not fixed in the same session gets filed
    as a GitHub issue on `origin` (`gh issue create`) — one issue per
