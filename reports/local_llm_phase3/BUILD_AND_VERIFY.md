@@ -22,7 +22,13 @@ confirm with `docker images` if compose names it differently), container
 docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' | grep ai_module
 ```
 
-**PASS:** size is the pre-bake Gate-4 baseline (**6.76 GB**, `docs/ubuntu_setup.md` §7)
+**PASS (updated 19 Jul, first real build): ~28 GB total** — the original bar below was
+authored-pending-build on a wrong 6.76 GB baseline; measured layers are base 9.4 +
+ros-jazzy-desktop 3.4 + torch/CUDA pip 5.3 + GDINO 1.4 + Ollama+3B 3.2 (all
+load-bearing; cuda_v12 runner correctly pruned, cuda_v13+cpu kept). Investigate only if
+a rebuild deviates from ~28 GB by >2 GB in either direction.
+
+~~**PASS:** size is the pre-bake Gate-4 baseline (**6.76 GB**, `docs/ubuntu_setup.md` §7)~~
 **plus roughly 5 GB** (Ollama binary/libs after the rocm/vulkan/cpu-variant prune, minus
 the kept `cuda_v13*`+`cpu*` runners, plus the `qwen2.5vl:3b` blobs, ~3.2 GB per the
 Dockerfile's own blob-size assertion) — i.e. **~11-12 GB** total. Compare against the
