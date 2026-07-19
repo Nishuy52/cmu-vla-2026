@@ -1,0 +1,1901 @@
+[
+  {
+    "scene": "arabic_room",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      34
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -3.1393839424582937,
+      -1.9811260129585473
+    ],
+    "head_ids": [
+      34
+    ],
+    "head_classes": [
+      "stool"
+    ],
+    "head_goal": [
+      2.3500000000000005,
+      -2.8499999999999996
+    ],
+    "goal_dist_m": 5.5577,
+    "divergent": false
+  },
+  {
+    "scene": "arabic_room",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      64
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.820600839340573,
+      -0.6609610784594886
+    ],
+    "head_ids": [
+      64
+    ],
+    "head_classes": [
+      "table"
+    ],
+    "head_goal": [
+      3.750000000000001,
+      0.8499999999999996
+    ],
+    "goal_dist_m": 1.7739,
+    "divergent": false
+  },
+  {
+    "scene": "arabic_room",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      0
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -2.804363444150103,
+      2.0008681648556874
+    ],
+    "head_ids": [
+      0
+    ],
+    "head_classes": [
+      "potted plant"
+    ],
+    "head_goal": [
+      3.55,
+      1.3499999999999996
+    ],
+    "goal_dist_m": 6.3876,
+    "divergent": false
+  },
+  {
+    "scene": "arabic_room",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "corridor_between",
+    "rubric_ids": [
+      23,
+      30
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -0.9929995706898187,
+      -0.025999836588987524
+    ],
+    "head_ids": [
+      23,
+      30
+    ],
+    "head_classes": [
+      "column",
+      "column"
+    ],
+    "head_goal": [
+      -0.9929995706898187,
+      -0.025999836588987524
+    ],
+    "goal_dist_m": 0.0,
+    "divergent": false
+  },
+  {
+    "scene": "arabic_room",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      19
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.820600839340573,
+      -0.6609610784594886
+    ],
+    "head_ids": [
+      19
+    ],
+    "head_classes": [
+      "tray"
+    ],
+    "head_goal": [
+      3.750000000000001,
+      0.8499999999999996
+    ],
+    "goal_dist_m": 1.7739,
+    "divergent": false
+  },
+  {
+    "scene": "chinese_room",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      41
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -1.8432515615733243,
+      1.2027494440560336
+    ],
+    "head_ids": [
+      27
+    ],
+    "head_classes": [
+      "potted plant"
+    ],
+    "head_goal": [
+      5.65,
+      0.25
+    ],
+    "goal_dist_m": 7.5536,
+    "divergent": true
+  },
+  {
+    "scene": "chinese_room",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      2
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -1.8968530418011,
+      -3.6278769843008005
+    ],
+    "head_ids": [
+      2
+    ],
+    "head_classes": [
+      "painting"
+    ],
+    "head_goal": [
+      -1.6499999999999995,
+      -3.6499999999999995
+    ],
+    "goal_dist_m": 0.2478,
+    "divergent": false
+  },
+  {
+    "scene": "chinese_room",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      76
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      0.30364801670685465,
+      -2.962416359652058
+    ],
+    "head_ids": [
+      76
+    ],
+    "head_classes": [
+      "tea table"
+    ],
+    "head_goal": [
+      -0.9499999999999993,
+      -2.1499999999999995
+    ],
+    "goal_dist_m": 1.4939,
+    "divergent": false
+  },
+  {
+    "scene": "chinese_room",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      77
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      5.583966569994756,
+      -2.5931388830339324
+    ],
+    "head_ids": [
+      77
+    ],
+    "head_classes": [
+      "table"
+    ],
+    "head_goal": [
+      2.5500000000000007,
+      0.3500000000000014
+    ],
+    "goal_dist_m": 4.2269,
+    "divergent": false
+  },
+  {
+    "scene": "home_building_1",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      176
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      6.434499791115681,
+      0.5399999845559064
+    ],
+    "head_ids": [
+      176
+    ],
+    "head_classes": [
+      "coffee table"
+    ],
+    "head_goal": [
+      6.449999999999996,
+      4.550000000000004
+    ],
+    "goal_dist_m": 4.01,
+    "divergent": false
+  },
+  {
+    "scene": "home_building_1",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      266
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.3553058690300497,
+      -3.2676988154188256
+    ],
+    "head_ids": [
+      165
+    ],
+    "head_classes": [
+      "table"
+    ],
+    "head_goal": [
+      -5.650000000000002,
+      7.150000000000006
+    ],
+    "goal_dist_m": 12.554,
+    "divergent": true
+  },
+  {
+    "scene": "home_building_1",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      427
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -2.0813449934117805,
+      -12.962221849050298
+    ],
+    "head_ids": [
+      427
+    ],
+    "head_classes": [
+      "night stand"
+    ],
+    "head_goal": [
+      -1.8500000000000014,
+      -14.549999999999997
+    ],
+    "goal_dist_m": 1.6045,
+    "divergent": false
+  },
+  {
+    "scene": "home_building_1",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "corridor_between",
+    "rubric_ids": [
+      266,
+      70
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -0.47786722893879807,
+      -5.725426579033099
+    ],
+    "head_ids": [
+      266,
+      70
+    ],
+    "head_classes": [
+      "dining table",
+      "picture"
+    ],
+    "head_goal": [
+      -0.47786722893879807,
+      -5.725426579033099
+    ],
+    "goal_dist_m": 0.0,
+    "divergent": false
+  },
+  {
+    "scene": "home_building_1",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      103
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -6.123276328115132,
+      -1.7066384146413835
+    ],
+    "head_ids": [
+      103
+    ],
+    "head_classes": [
+      "trash can"
+    ],
+    "head_goal": [
+      -6.050000000000001,
+      -1.75
+    ],
+    "goal_dist_m": 0.0851,
+    "divergent": false
+  },
+  {
+    "scene": "home_building_2",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      218
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.2610146516641076,
+      5.543000358905573
+    ],
+    "head_ids": [
+      218
+    ],
+    "head_classes": [
+      "magazine"
+    ],
+    "head_goal": [
+      1.25,
+      5.450000000000001
+    ],
+    "goal_dist_m": 0.0937,
+    "divergent": false
+  },
+  {
+    "scene": "home_building_2",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      221
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -3.9033188029483123,
+      11.755905182022717
+    ],
+    "head_ids": [
+      221
+    ],
+    "head_classes": [
+      "potted plant"
+    ],
+    "head_goal": [
+      -0.5500000000000007,
+      11.65
+    ],
+    "goal_dist_m": 3.355,
+    "divergent": false
+  },
+  {
+    "scene": "home_building_2",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "corridor_between",
+    "rubric_ids": [
+      134,
+      70
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.233196157762428,
+      2.0964172541424215
+    ],
+    "head_ids": [
+      134,
+      70
+    ],
+    "head_classes": [
+      "sofa",
+      "coffee table"
+    ],
+    "head_goal": [
+      2.233196157762428,
+      2.0964172541424215
+    ],
+    "goal_dist_m": 0.0,
+    "divergent": false
+  },
+  {
+    "scene": "home_building_2",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      142
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.0740000111907153,
+      11.119001150846623
+    ],
+    "head_ids": [
+      142
+    ],
+    "head_classes": [
+      "kettle"
+    ],
+    "head_goal": [
+      2.4499999999999993,
+      9.65
+    ],
+    "goal_dist_m": 1.5164,
+    "divergent": false
+  },
+  {
+    "scene": "home_building_2",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      221
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -3.9033188029483123,
+      11.755905182022717
+    ],
+    "head_ids": [
+      221
+    ],
+    "head_classes": [
+      "potted plant"
+    ],
+    "head_goal": [
+      -0.5500000000000007,
+      11.65
+    ],
+    "goal_dist_m": 3.355,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_1",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      85
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.6941765083571276,
+      -3.790021884549424
+    ],
+    "head_ids": [
+      85
+    ],
+    "head_classes": [
+      "bedside table"
+    ],
+    "head_goal": [
+      -0.6500000000000004,
+      -1.3499999999999996
+    ],
+    "goal_dist_m": 4.1397,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_1",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      15
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -0.09374111666169366,
+      -2.034392493562975
+    ],
+    "head_ids": [
+      15
+    ],
+    "head_classes": [
+      "chair"
+    ],
+    "head_goal": [
+      -0.8499999999999996,
+      -1.3499999999999996
+    ],
+    "goal_dist_m": 1.02,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_1",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      72
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.6941528816619726,
+      0.34262400592221953
+    ],
+    "head_ids": [
+      72
+    ],
+    "head_classes": [
+      "bedside table"
+    ],
+    "head_goal": [
+      1.0500000000000007,
+      0.75
+    ],
+    "goal_dist_m": 1.6939,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_1",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "corridor_between",
+    "rubric_ids": [
+      10,
+      11
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -0.34945082088684676,
+      -1.7271503752666515
+    ],
+    "head_ids": [
+      10,
+      11
+    ],
+    "head_classes": [
+      "tv",
+      "bed"
+    ],
+    "head_goal": [
+      -0.34945082088684676,
+      -1.7271503752666515
+    ],
+    "goal_dist_m": 0.0,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_1",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      6
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -2.533453181391348,
+      -3.0735329564189446
+    ],
+    "head_ids": [
+      6
+    ],
+    "head_classes": [
+      "picture"
+    ],
+    "head_goal": [
+      -0.8499999999999996,
+      -1.3499999999999996
+    ],
+    "goal_dist_m": 2.4093,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_2",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "corridor_between",
+    "rubric_ids": [
+      61,
+      57
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -0.43276481677540773,
+      1.4380945090988786
+    ],
+    "head_ids": [
+      61,
+      57
+    ],
+    "head_classes": [
+      "bench",
+      "bed"
+    ],
+    "head_goal": [
+      -0.43276481677540773,
+      1.4380945090988786
+    ],
+    "goal_dist_m": 0.0,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_2",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      83
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.1106090893337175,
+      1.014162142600973
+    ],
+    "head_ids": [
+      83
+    ],
+    "head_classes": [
+      "ceiling lamp"
+    ],
+    "head_goal": [
+      0.15000000000000036,
+      0.45000000000000107
+    ],
+    "goal_dist_m": 1.114,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_2",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      21
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.6144971939508657,
+      -0.8981762644816126
+    ],
+    "head_ids": [
+      21
+    ],
+    "head_classes": [
+      "picture"
+    ],
+    "head_goal": [
+      2.6500000000000004,
+      -0.8499999999999996
+    ],
+    "goal_dist_m": 0.0598,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_2",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "corridor_between",
+    "rubric_ids": [
+      72,
+      57
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -1.6424149594107,
+      -0.08556561026140674
+    ],
+    "head_ids": [
+      72,
+      57
+    ],
+    "head_classes": [
+      "tv cabinet",
+      "bed"
+    ],
+    "head_goal": [
+      -1.6424149594107,
+      -0.08556561026140674
+    ],
+    "goal_dist_m": 0.0,
+    "divergent": false
+  },
+  {
+    "scene": "hotel_room_2",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      45
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -3.9436099588450317,
+      -0.8613001156648123
+    ],
+    "head_ids": [
+      45
+    ],
+    "head_classes": [
+      "curtain"
+    ],
+    "head_goal": [
+      -3.8499999999999996,
+      -0.8499999999999996
+    ],
+    "goal_dist_m": 0.0943,
+    "divergent": false
+  },
+  {
+    "scene": "japanese_room",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      58
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.3879999216794974,
+      0.6656214650072758
+    ],
+    "head_ids": [
+      58
+    ],
+    "head_classes": [
+      "table"
+    ],
+    "head_goal": [
+      1.1499999999999986,
+      0.4499999999999993
+    ],
+    "goal_dist_m": 0.3211,
+    "divergent": false
+  },
+  {
+    "scene": "japanese_room",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      53
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.8580404206390866,
+      2.3708127341495957
+    ],
+    "head_ids": [
+      53
+    ],
+    "head_classes": [
+      "flowers"
+    ],
+    "head_goal": [
+      1.049999999999999,
+      3.1499999999999986
+    ],
+    "goal_dist_m": 1.1225,
+    "divergent": false
+  },
+  {
+    "scene": "japanese_room",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      61
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.3879999216794974,
+      0.36743696632913914
+    ],
+    "head_ids": [
+      61
+    ],
+    "head_classes": [
+      "lantern"
+    ],
+    "head_goal": [
+      0.9499999999999993,
+      0.34999999999999964
+    ],
+    "goal_dist_m": 0.4383,
+    "divergent": false
+  },
+  {
+    "scene": "japanese_room",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "via_near",
+    "rubric_ids": [
+      1
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.3905151196175063,
+      3.974481666381822
+    ],
+    "head_ids": [
+      0
+    ],
+    "head_classes": [
+      "wardrobe door"
+    ],
+    "head_goal": [
+      0.34999999999999964,
+      3.1499999999999986
+    ],
+    "goal_dist_m": 1.3276,
+    "divergent": true
+  },
+  {
+    "scene": "japanese_room",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      6
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -1.5181508557199113,
+      3.974481666381822
+    ],
+    "head_ids": [
+      6
+    ],
+    "head_classes": [
+      "flowers"
+    ],
+    "head_goal": [
+      -2.3500000000000014,
+      3.8499999999999996
+    ],
+    "goal_dist_m": 0.8411,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_1",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      36
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.735561133425712,
+      -3.9172307490843523
+    ],
+    "head_ids": [
+      36
+    ],
+    "head_classes": [
+      "potted plant"
+    ],
+    "head_goal": [
+      2.75,
+      -4.25
+    ],
+    "goal_dist_m": 1.0676,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_1",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      42
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.7271176627642584,
+      -0.9049502081091068
+    ],
+    "head_ids": [
+      42
+    ],
+    "head_classes": [
+      "vase"
+    ],
+    "head_goal": [
+      2.75,
+      -0.9500000000000011
+    ],
+    "goal_dist_m": 0.0505,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_1",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      26
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -1.7304055318779752,
+      3.0404418866028236
+    ],
+    "head_ids": [
+      26
+    ],
+    "head_classes": [
+      "lamp"
+    ],
+    "head_goal": [
+      -1.1500000000000004,
+      3.049999999999999
+    ],
+    "goal_dist_m": 0.5805,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_1",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "corridor_between",
+    "rubric_ids": [
+      0,
+      60
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -0.710472954142261,
+      -2.354761581348781
+    ],
+    "head_ids": [
+      0,
+      60
+    ],
+    "head_classes": [
+      "sofa",
+      "round table"
+    ],
+    "head_goal": [
+      -0.710472954142261,
+      -2.354761581348781
+    ],
+    "goal_dist_m": 0.0,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_1",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      2
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -2.2338874342103003,
+      -5.543848719484491
+    ],
+    "head_ids": [
+      2
+    ],
+    "head_classes": [
+      "cabinet"
+    ],
+    "head_goal": [
+      -3.25,
+      -6.550000000000001
+    ],
+    "goal_dist_m": 1.43,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_2",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      85
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -0.17170481486338363,
+      4.3795481667901965
+    ],
+    "head_ids": [
+      85
+    ],
+    "head_classes": [
+      "microwave"
+    ],
+    "head_goal": [
+      -0.25,
+      3.8499999999999996
+    ],
+    "goal_dist_m": 0.5353,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_2",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      59
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.5119251926362214,
+      -1.5382155468784227
+    ],
+    "head_ids": [
+      59
+    ],
+    "head_classes": [
+      "crystal ball decoration"
+    ],
+    "head_goal": [
+      1.950000000000001,
+      -1.4499999999999993
+    ],
+    "goal_dist_m": 0.5688,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_2",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      28
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -1.4983000295452422,
+      1.5009392887198199
+    ],
+    "head_ids": [
+      28
+    ],
+    "head_classes": [
+      "chair"
+    ],
+    "head_goal": [
+      -0.8499999999999996,
+      2.75
+    ],
+    "goal_dist_m": 1.4073,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_2",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      63
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.8662860309186997,
+      -6.188412637713578
+    ],
+    "head_ids": [
+      63
+    ],
+    "head_classes": [
+      "soccer ball"
+    ],
+    "head_goal": [
+      1.3499999999999996,
+      -2.1500000000000004
+    ],
+    "goal_dist_m": 4.3137,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_3",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "via_near",
+    "rubric_ids": [
+      18
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.888755196362927,
+      -4.9576030383927145
+    ],
+    "head_ids": [
+      18
+    ],
+    "head_classes": [
+      "tv"
+    ],
+    "head_goal": [
+      1.3500000000000005,
+      -7.050000000000001
+    ],
+    "goal_dist_m": 2.1606,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_3",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      89
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      0.6108142703263976,
+      -2.3605176559386236
+    ],
+    "head_ids": [
+      89
+    ],
+    "head_classes": [
+      "pillow"
+    ],
+    "head_goal": [
+      2.450000000000001,
+      1.3499999999999996
+    ],
+    "goal_dist_m": 4.1413,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_3",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      67
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.6463862189766911,
+      1.2745532821165748
+    ],
+    "head_ids": [
+      67
+    ],
+    "head_classes": [
+      "stool"
+    ],
+    "head_goal": [
+      1.5500000000000007,
+      1.3499999999999996
+    ],
+    "goal_dist_m": 0.1224,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_3",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "via_near",
+    "rubric_ids": [
+      41
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      3.1219996991412136,
+      -4.9576030383927145
+    ],
+    "head_ids": [
+      41
+    ],
+    "head_classes": [
+      "tv cabinet"
+    ],
+    "head_goal": [
+      0.75,
+      -7.050000000000001
+    ],
+    "goal_dist_m": 3.163,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_3",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      36
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      5.3666806657474275,
+      -4.2474228274203965
+    ],
+    "head_ids": [
+      36
+    ],
+    "head_classes": [
+      "bowl"
+    ],
+    "head_goal": [
+      6.850000000000001,
+      -6.65
+    ],
+    "goal_dist_m": 2.8236,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_4",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      48
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -3.1786361152243745,
+      1.370465389459943
+    ],
+    "head_ids": [
+      48
+    ],
+    "head_classes": [
+      "chair"
+    ],
+    "head_goal": [
+      -3.05,
+      0.6500000000000004
+    ],
+    "goal_dist_m": 0.7319,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_4",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      67
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -1.1720001679490375,
+      -0.6394080776159515
+    ],
+    "head_ids": [
+      67
+    ],
+    "head_classes": [
+      "table"
+    ],
+    "head_goal": [
+      -0.75,
+      -0.9499999999999993
+    ],
+    "goal_dist_m": 0.524,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_4",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      112
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -1.2270001062362663,
+      -3.725469354882526
+    ],
+    "head_ids": [
+      112
+    ],
+    "head_classes": [
+      "fireplace"
+    ],
+    "head_goal": [
+      -0.75,
+      -0.9499999999999993
+    ],
+    "goal_dist_m": 2.8162,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_4",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      77
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -4.886113391308062,
+      -1.3349409741564022
+    ],
+    "head_ids": [
+      77
+    ],
+    "head_classes": [
+      "window"
+    ],
+    "head_goal": [
+      -3.6499999999999995,
+      -1.25
+    ],
+    "goal_dist_m": 1.239,
+    "divergent": false
+  },
+  {
+    "scene": "livingroom_4",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      48
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -3.1786361152243745,
+      0.718874603998762
+    ],
+    "head_ids": [
+      48
+    ],
+    "head_classes": [
+      "chair"
+    ],
+    "head_goal": [
+      -3.05,
+      0.6500000000000004
+    ],
+    "goal_dist_m": 0.1459,
+    "divergent": false
+  },
+  {
+    "scene": "loft",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      108
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      6.397601579560302,
+      2.9133213075068545
+    ],
+    "head_ids": [
+      108
+    ],
+    "head_classes": [
+      "cup"
+    ],
+    "head_goal": [
+      -0.15000000000000036,
+      -0.25
+    ],
+    "goal_dist_m": 7.2717,
+    "divergent": false
+  },
+  {
+    "scene": "loft",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      12
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -1.2789777261708641,
+      0.9700002957901653
+    ],
+    "head_ids": [
+      12
+    ],
+    "head_classes": [
+      "fireplace"
+    ],
+    "head_goal": [
+      -1.1499999999999995,
+      0.6500000000000004
+    ],
+    "goal_dist_m": 0.345,
+    "divergent": false
+  },
+  {
+    "scene": "loft",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "via_near",
+    "rubric_ids": [
+      69
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -0.12716312924759465,
+      -0.316929289683928
+    ],
+    "head_ids": [
+      69
+    ],
+    "head_classes": [
+      "stairs"
+    ],
+    "head_goal": [
+      -0.6500000000000004,
+      -0.15000000000000036
+    ],
+    "goal_dist_m": 0.5488,
+    "divergent": false
+  },
+  {
+    "scene": "loft",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      56
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      6.877113061233509,
+      -2.3560223831779017
+    ],
+    "head_ids": [
+      56
+    ],
+    "head_classes": [
+      "sphere decoration"
+    ],
+    "head_goal": [
+      -0.15000000000000036,
+      -1.3499999999999996
+    ],
+    "goal_dist_m": 7.0988,
+    "divergent": false
+  },
+  {
+    "scene": "office_1",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      67
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      4.811082454591655,
+      1.1368215711234821
+    ],
+    "head_ids": [
+      67
+    ],
+    "head_classes": [
+      "potted plant"
+    ],
+    "head_goal": [
+      1.049999999999999,
+      -0.25
+    ],
+    "goal_dist_m": 4.0086,
+    "divergent": false
+  },
+  {
+    "scene": "office_1",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      23
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      -3.3617334855512517,
+      -4.279957401503226
+    ],
+    "head_ids": [
+      23
+    ],
+    "head_classes": [
+      "water cooler"
+    ],
+    "head_goal": [
+      -3.450000000000001,
+      -3.9499999999999993
+    ],
+    "goal_dist_m": 0.3416,
+    "divergent": false
+  },
+  {
+    "scene": "office_1",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      11
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      0.19519808135587502,
+      1.2024996840234783
+    ],
+    "head_ids": [
+      11
+    ],
+    "head_classes": [
+      "potted plant"
+    ],
+    "head_goal": [
+      -0.45000000000000107,
+      -0.049999999999998934
+    ],
+    "goal_dist_m": 1.4089,
+    "divergent": false
+  },
+  {
+    "scene": "office_1",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "corridor_between",
+    "rubric_ids": [
+      50,
+      53
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      0.05164762282551416,
+      -1.8544735488669049
+    ],
+    "head_ids": [
+      50,
+      53
+    ],
+    "head_classes": [
+      "table",
+      "table"
+    ],
+    "head_goal": [
+      0.05164762282551416,
+      -1.8544735488669049
+    ],
+    "goal_dist_m": 0.0,
+    "divergent": false
+  },
+  {
+    "scene": "office_1",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      99
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.5929961037235056,
+      -3.8636330089732867
+    ],
+    "head_ids": [
+      99
+    ],
+    "head_classes": [
+      "bench"
+    ],
+    "head_goal": [
+      0.8499999999999996,
+      -3.8499999999999996
+    ],
+    "goal_dist_m": 0.7431,
+    "divergent": false
+  },
+  {
+    "scene": "office_2",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      30
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      4.518049887612028,
+      0.2099625974581868
+    ],
+    "head_ids": [
+      30
+    ],
+    "head_classes": [
+      "potted plant"
+    ],
+    "head_goal": [
+      4.550000000000001,
+      -1.2499999999999991
+    ],
+    "goal_dist_m": 1.4603,
+    "divergent": false
+  },
+  {
+    "scene": "office_2",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      44
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      4.905480373619802,
+      4.574700501050688
+    ],
+    "head_ids": [
+      44
+    ],
+    "head_classes": [
+      "window"
+    ],
+    "head_goal": [
+      5.050000000000001,
+      2.6500000000000004
+    ],
+    "goal_dist_m": 1.9301,
+    "divergent": false
+  },
+  {
+    "scene": "office_2",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      16
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      2.265183421047661,
+      -0.3413515446111707
+    ],
+    "head_ids": [
+      16
+    ],
+    "head_classes": [
+      "trash can"
+    ],
+    "head_goal": [
+      2.25,
+      -0.25
+    ],
+    "goal_dist_m": 0.0926,
+    "divergent": false
+  },
+  {
+    "scene": "office_2",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      118
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      4.518049887612028,
+      0.2099625974581868
+    ],
+    "head_ids": [
+      118
+    ],
+    "head_classes": [
+      "folder"
+    ],
+    "head_goal": [
+      4.15,
+      -1.2499999999999991
+    ],
+    "goal_dist_m": 1.5056,
+    "divergent": false
+  },
+  {
+    "scene": "office_2",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      81
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      6.607973839211711,
+      -0.890737615553873
+    ],
+    "head_ids": [
+      81
+    ],
+    "head_classes": [
+      "door"
+    ],
+    "head_goal": [
+      5.550000000000001,
+      -1.7499999999999991
+    ],
+    "goal_dist_m": 1.363,
+    "divergent": false
+  },
+  {
+    "scene": "studio",
+    "q_index": 0,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      26
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      3.121137892810428,
+      1.5857816559139137
+    ],
+    "head_ids": [
+      24
+    ],
+    "head_classes": [
+      "vase"
+    ],
+    "head_goal": [
+      3.75,
+      1.5500000000000007
+    ],
+    "goal_dist_m": 0.6299,
+    "divergent": true
+  },
+  {
+    "scene": "studio",
+    "q_index": 0,
+    "leg": 1,
+    "kind": "goto",
+    "rubric_ids": [
+      48
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      3.435125147081184,
+      -2.016314008785369
+    ],
+    "head_ids": [
+      48
+    ],
+    "head_classes": [
+      "guitar"
+    ],
+    "head_goal": [
+      3.3499999999999996,
+      -0.2499999999999991
+    ],
+    "goal_dist_m": 1.7684,
+    "divergent": false
+  },
+  {
+    "scene": "studio",
+    "q_index": 1,
+    "leg": 0,
+    "kind": "goto",
+    "rubric_ids": [
+      27
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      1.866602298584871,
+      1.5857816559139137
+    ],
+    "head_ids": [
+      27
+    ],
+    "head_classes": [
+      "vase"
+    ],
+    "head_goal": [
+      1.5499999999999998,
+      1.5500000000000007
+    ],
+    "goal_dist_m": 0.3186,
+    "divergent": false
+  },
+  {
+    "scene": "studio",
+    "q_index": 1,
+    "leg": 1,
+    "kind": "corridor_between",
+    "rubric_ids": [
+      16,
+      63
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      3.49502793844907,
+      -1.0710465554295425
+    ],
+    "head_ids": [
+      16,
+      63
+    ],
+    "head_classes": [
+      "couch",
+      "table"
+    ],
+    "head_goal": [
+      3.49502793844907,
+      -1.0710465554295425
+    ],
+    "goal_dist_m": 0.0,
+    "divergent": false
+  },
+  {
+    "scene": "studio",
+    "q_index": 1,
+    "leg": 2,
+    "kind": "goto",
+    "rubric_ids": [
+      5
+    ],
+    "rubric_classes": null,
+    "rubric_goal": [
+      3.2990000511605535,
+      -3.9285173722462647
+    ],
+    "head_ids": [
+      5
+    ],
+    "head_classes": [
+      "windows"
+    ],
+    "head_goal": [
+      1.4500000000000002,
+      -1.1499999999999995
+    ],
+    "goal_dist_m": 3.3375,
+    "divergent": false
+  }
+]
