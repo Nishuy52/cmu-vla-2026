@@ -113,7 +113,7 @@ guard (`tests/nav/test_planner.py::test_plan_through_nudge_only_engages_when_dir
 unmodified and passing.
 
 Full gate (`timeout 1800 <venv>/bin/python -m pytest -m "" -q` from `src/`):
-result recorded below once the run completes.
+green — exit code 0, all dots/skips, zero failures.
 
 ## Deferred / next steps
 
