@@ -87,6 +87,27 @@ this format.
   `gpu hardening:`/`vision replay tool:` → `tools:`, `compose:` → `docker:`,
   `CLAUDE.md:`/`ubuntu_setup:`/`BUILD_AND_VERIFY:`/`master_plan:` → `docs:`.
 
+## Branch conventions (added 19 Jul 2026)
+
+Same cutoff as commit conventions: pre-existing names are grandfathered
+(the live `if69`/`if70` worktree branches finish under their old names);
+every branch created from here on follows this.
+
+- **Format: `<type>/<slug>`**, slug lowercase-kebab. Issue-driven work
+  puts the issue number(s) first in the slug: `fix/67-tolerance-push`,
+  `fix/63-64-gate-geometry`.
+- **Types (fixed):** `fix` (issue-driven fixes — the old `if<N>-…`
+  branches), `feat` (new capability), `exp` (probes/diagnosis/sweeps not
+  meant to merge as-is), `docs`, `chore`, `archive` (preserved unmerged
+  drafts kept for reference — never merge, never delete without checking
+  contents).
+- **`main` is the only long-lived branch.** Delete a work branch (local
+  and origin) once merged. Harness-generated branches (`worktree-agent-*`,
+  `claude/*`) are deleted after harvest/merge and are never pushed to
+  origin deliberately; prune any that show 0 commits ahead of main.
+- A branch sitting unmerged for more than a few days either gets a GitHub
+  issue tracking why, or is renamed into `archive/`.
+
 ## Layout
 
 | Path | What |

@@ -1189,3 +1189,11 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   CLAUDE.md: `scope: subject` format, fixed scope vocabulary mapped to
   `src/core/` package names + process scopes, one-scope rule, legacy-prefix
   reading key. History left untouched; applies from here on.
+- Branch conventions added to CLAUDE.md (`<type>/<slug>`, issue number
+  first in slug; `main` only long-lived branch; harness branches pruned
+  after harvest). Cleanup: deleted merged locals if59-goal-placement +
+  2 worktree-agent-*; renamed stale-archive-agent-* ->
+  archive/pre-reboot-draft-{a37b4db,a5997e8}. Remote prune of 3
+  fully-merged origin branches (claude/x2, fix/issue-sweep) blocked by
+  session permissions - left for manual `git push origin --delete`.
+  origin docs/current-architecture kept (2 unmerged doc commits, 14 Jul).
