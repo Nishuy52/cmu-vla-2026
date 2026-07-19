@@ -35,6 +35,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date
 from itertools import product
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 
@@ -689,6 +690,47 @@ def _nearest_free_goal(
     return (x, y)
 
 
+_SALIENCE_TIE_EPS = 1e-9  # float-equality tolerance for the issue #75 clause-score tie check
+
+
+def _same_label_group_is_tied(same: Sequence[object], clause, idx, th, eval_clause) -> bool:
+    """True iff ``same`` (a same-labeled survivor group from ``resolve()``'s own
+    ranking) carries no discriminating evidence from the anchor's own disambiguator
+    clause -- every member's ``PredResult.score`` AND ``PredResult.margin`` for that
+    clause are equal within float tolerance (or the anchor carries no disambiguator
+    at all, which is the pre-#75 genuine-tie case). Margin is checked alongside
+    score because a hard clause gate (e.g. ``on()``'s upper-z-band FAIL) can
+    quantise every survivor's soft ``score`` to the same 0.0 while ``margin``
+    (the continuous slack ``PredResult`` carries specifically "for ranking/audit")
+    still separates a near-miss from a clear miss -- office_2's folder/cabinet leg
+    (issue #75) is exactly this: every survivor's ``on()`` score is 0.0, but the
+    margin cleanly splits the group the toolbox's own soft ranking would have
+    preferred from the one raw distance-to-previous-leg alone would wrongly favour.
+
+    ``clause`` is the SAME clause ``resolve()`` itself would score for this survivor
+    pool, whether resolve returned it via a hard pass, the issue #59
+    ``_relaxed_relation_order`` soft fallback (category_only rung -- whose score
+    ``ResolveResult.pass_matrix`` does NOT carry, since ``hard_clauses`` is emptied
+    before the pass matrix is built), or a plain tier tie-break. Re-evaluating it
+    here independently (never re-deriving resolve()'s filter/relaxation ladder --
+    just probing its scoring primitive, same pattern as the exact-label correction
+    above) is the only way to see that evidence from outside ``resolve()``. A
+    same-label group is already tier-tied by construction (same label), so this
+    clause-score check is the remaining discriminator (issue #75, the #71/#73
+    convergence rule).
+    """
+    if clause is None:
+        return True
+    results = [eval_clause(c, clause, idx, th) for c in same]
+    if not results:
+        return True
+    s0, m0 = results[0].score, results[0].margin
+    return all(
+        abs(r.score - s0) <= _SALIENCE_TIE_EPS and abs(r.margin - m0) <= _SALIENCE_TIE_EPS
+        for r in results
+    )
+
+
 def _if_rubric_geometry(
     text: str,
     gt: GTScene,
@@ -734,7 +776,9 @@ def _if_rubric_geometry(
     """
     from core.parsing.regex_tier import parse_regex
     from core.geometry.toolbox import (
+        DEFAULT_THRESHOLDS,
         TargetSpec,
+        _eval_clause,
         avoid_capsule,
         corridor_gate,
         resolve,
@@ -789,11 +833,26 @@ def _if_rubric_geometry(
         # from the rubric's OWN ``approach_xy`` walk (this leg's departure point, never
         # read from the head), so both sides converge on the correct instance from their
         # own state rather than one copying the other's resolved output.
+        #
+        # Issue #75 (post-73 parity audit, home_building_2/office_2 residual): the
+        # same-label restriction above still unconditionally re-sorted the WHOLE
+        # same-label group by raw distance, even when resolve()'s own ranking already
+        # carried real discriminating evidence within that group -- e.g. a `between()`
+        # clause the survivors matched with different soft margins, or the #73
+        # category-only relaxed-relation score. Gate the reorder: only run it when the
+        # group is a genuine tie on resolve()'s own evidence (every survivor's summed
+        # clause score over ``res.pass_matrix`` is equal, within float tolerance) --
+        # the same "no discriminating evidence" bar the toolbox's own
+        # ``_tier_priority_order``/``_relaxed_relation_order`` tie-breaks apply. A
+        # same-label group is by construction already tier-tied (same label), so the
+        # clause-score check is the remaining discriminator.
         if not has_superlative and approach_xy is not None and len(ranked) > 1:
             top_label = ranked[0].label
             same = [c for c in ranked if c.label == top_label]
-            rest = [c for c in ranked if c.label != top_label]
-            if len(same) > 1:
+            if len(same) > 1 and _same_label_group_is_tied(
+                same, disamb, idx, DEFAULT_THRESHOLDS, _eval_clause
+            ):
+                rest = [c for c in ranked if c.label != top_label]
                 ax, ay = approach_xy
                 same = sorted(
                     same,
@@ -803,7 +862,7 @@ def _if_rubric_geometry(
                         c.instance_id,
                     ),
                 )
-            ranked = same + rest
+                ranked = same + rest
 
         for c in ranked:
             if exclude_id is None or c.instance_id != exclude_id:

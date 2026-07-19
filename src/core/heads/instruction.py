@@ -391,12 +391,25 @@ class InstructionHead:
         # where "arbitrary detection-order pick" is actually true; a different-label
         # survivor was placed where it is by real (tier/clause) evidence the salience
         # signal has no business overriding.
+        # Issue #75 (post-73 parity audit, home_building_2/office_2 residual): the
+        # same-label restriction above still unconditionally re-sorted the WHOLE
+        # same-label group by raw distance, even when resolve()'s own ranking already
+        # carried real discriminating evidence within that group -- e.g. a `between()`
+        # clause the survivors matched with different soft margins, or the #73
+        # category-only relaxed-relation score. Gate the reorder: only run it when the
+        # group is a genuine tie on resolve()'s own evidence (every survivor's summed
+        # clause score over ``res.pass_matrix`` is equal, within float tolerance) --
+        # the same "no discriminating evidence" bar the toolbox's own tie-breaks
+        # apply. Mirrors ``core.runner.gt_battery._if_rubric_geometry``'s
+        # ``_resolve_anchor_rec`` symmetrically (the #71/#73/#75 convergence rule).
         if prev_xy is not None and len(ranked) > 1 and not _has_superlative(anchor):
             px, py = prev_xy
             top_label = ranked[0].label
             same = [c for c in ranked if c.label == top_label]
-            rest = [c for c in ranked if c.label != top_label]
-            if len(same) > 1:
+            if len(same) > 1 and _same_label_group_is_tied(
+                same, anchor.disambiguator, scene, self.thresholds
+            ):
+                rest = [c for c in ranked if c.label != top_label]
                 same = sorted(
                     same,
                     key=lambda c: (
@@ -405,7 +418,7 @@ class InstructionHead:
                         getattr(c, "instance_id", 0),
                     ),
                 )
-            ranked = same + rest
+                ranked = same + rest
         return ranked, provisional
 
     def _resolve_anchor(
@@ -1019,6 +1032,48 @@ def _has_superlative(anchor: Anchor) -> bool:
     """
     disamb = anchor.disambiguator
     return disamb is not None and disamb.pred in _SUPERLATIVE_PREDS
+
+
+_SALIENCE_TIE_EPS = 1e-9  # float-equality tolerance for the issue #75 clause-score tie check
+
+
+def _same_label_group_is_tied(same, clause, idx, th) -> bool:
+    """True iff ``same`` (a same-labeled survivor group from ``resolve()``'s own
+    ranking) carries no discriminating evidence from the anchor's own disambiguator
+    clause -- every member's ``PredResult.score`` AND ``PredResult.margin`` for that
+    clause are equal within float tolerance (or the anchor carries no disambiguator
+    at all, which is the pre-#75 genuine-tie case). Margin is checked alongside
+    score because a hard clause gate (e.g. ``on()``'s upper-z-band FAIL) can
+    quantise every survivor's soft ``score`` to the same 0.0 while ``margin``
+    (the continuous slack ``PredResult`` carries specifically "for ranking/audit")
+    still separates a near-miss from a clear miss -- office_2's folder/cabinet leg
+    (issue #75) is exactly this: every survivor's ``on()`` score is 0.0, but the
+    margin cleanly splits the group the toolbox's own soft ranking would have
+    preferred from the one raw distance-to-previous-leg alone would wrongly favour.
+
+    Mirrors ``core.runner.gt_battery._same_label_group_is_tied`` symmetrically
+    (issue #75, the #71/#73 convergence rule). ``clause`` is the SAME clause
+    ``resolve()`` itself would score for this survivor pool, whether resolve
+    returned it via a hard pass, the issue #59 ``_relaxed_relation_order`` soft
+    fallback (category_only rung -- whose score ``ResolveResult.pass_matrix`` does
+    NOT carry, since ``hard_clauses`` is emptied before the pass matrix is built),
+    or a plain tier tie-break. Re-evaluating it here independently (never
+    re-deriving resolve()'s filter/relaxation ladder -- just probing its scoring
+    primitive, same pattern as the exact-label correction above) is the only way
+    to see that evidence from outside ``resolve()``. A same-label group is
+    already tier-tied by construction (same label), so this clause-score check is
+    the remaining discriminator.
+    """
+    if clause is None:
+        return True
+    results = [TB._eval_clause(c, clause, idx, th) for c in same]
+    if not results:
+        return True
+    s0, m0 = results[0].score, results[0].margin
+    return all(
+        abs(r.score - s0) <= _SALIENCE_TIE_EPS and abs(r.margin - m0) <= _SALIENCE_TIE_EPS
+        for r in results
+    )
 
 
 def _vehicle_z(io: RobotIO) -> float:
