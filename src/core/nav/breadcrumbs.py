@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from core.groundtruth.arrival import NOMINAL_ARRIVAL_TOL_M
 from core.interfaces import WaypointCmd
 from core.nav.costmap import Costmap
 
@@ -27,12 +26,34 @@ STALL_MOVE_M: float = 0.3  # movement below this over the window == stalled
 STALL_WINDOW_S: float = 10.0  # stall observation window
 #: Issue #74 — the dwell tolerance a leg-goal waypoint-of-record (see
 #: ``BreadcrumbFollower.leg_goal_indices``) must be reached within before the follower
-#: may advance past it. Reused, not reinvented: this is the SAME constant
-#: ``core.heads.instruction.ARRIVAL_TOL_M`` already uses to mark a leg arrived (that
-#: module sets its own constant equal to this one), so a crumb this follower now
-#: refuses to skip is one the calling head is already about to credit anyway — never a
-#: NEW, stricter bar than the rubric itself applies.
-LEG_GOAL_ARRIVAL_TOL_M: float = NOMINAL_ARRIVAL_TOL_M
+#: may advance past it.
+#:
+#: Issue #77 — was ``core.groundtruth.arrival.NOMINAL_ARRIVAL_TOL_M`` (~1.75 m, the
+#: rubric's own frame-fit-derived credit tolerance), on the theory that a crumb this
+#: follower refuses to skip should never be a NEW, stricter bar than the rubric
+#: already applies. That theory holds for whether the leg gets CREDIT, but the dwell
+#: gate does a second, unrelated job: it is what allows crumb selection to stop
+#: aiming at the leg goal and move on. Releasing that gate from ~1.75 m out — nearly
+#: double a CORRIDOR_BETWEEN leg's gate width in the observed cases — let the crumb
+#: scan jump to a farther, still-LOS-clear point beyond the goal before the vehicle
+#: had ever physically closed on it, so a corridor leg could get scored "arrived" at
+#: the gate midpoint (rubric-satisfied) while the driven trajectory swung past without
+#: ever crossing the gate segment (threading is a literal-crossing geometric check,
+#: unaffected by arrival tolerance) — and non-corridor legs lost the last ~1 m of
+#: approach that would have closed several near-miss excesses.
+#:
+#: ``REACH_M`` is the right constant instead: it is this SAME follower's own
+#: established "close enough to a path point to consider it reached" radius, already
+#: governing the ordinary within/overshoot progress-index advance a few lines below.
+#: Reusing it here makes a leg-goal waypoint-of-record use the identical physical-
+#: arrival criterion the follower already applies to every OTHER path point, rather
+#: than importing a second, much looser tolerance concept (GT frame-fit residual) that
+#: has nothing to do with the follower's own steering precision. This can only make
+#: the follower drive closer before releasing a leg goal, never farther — it does not
+#: change what counts as CREDIT (that stays keyed to the rubric's own tolerance,
+#: untouched here); it only changes when the crumb scan stops being capped at the
+#: goal.
+LEG_GOAL_ARRIVAL_TOL_M: float = REACH_M
 
 
 def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
