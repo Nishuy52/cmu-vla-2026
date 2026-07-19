@@ -139,6 +139,18 @@ _WALL_CELL_M: float = FLOOR_SPACING
 #: looks wrong.
 _WALL_DILATE_CELLS: int = 2
 
+#: Wall-derivation frame-fit gate (issue #52) — TIGHTER than the scoring alignment gate
+#: (``S._ALIGN_RESIDUAL_GATE_M`` = 1.0 m). A scene whose sim->object fit residual clears
+#: 1.0 m but sits in the 0.8-1.0 m band is aligned enough to trust for Frechet/coverage
+#: scoring (a smooth diagnostic that degrades gracefully with error) but NOT enough to
+#: rasterize the traversable mesh into hard wall cells (a binary decision that can wall
+#: off a real object location on a marginal fit — observed at livingroom_1's 0.926 m
+#: residual, which misprojected walls onto a real position and flipped an IF question
+#: 0.5->0.0 for measurement, not planning, reasons). Declining to derive walls (falling
+#: back to the boundary-only costmap) beats fabricating misplaced ones — spec-over-
+#: sample per the generalization protocol (docs/calibration.md); registered there too.
+WALL_FIT_MAX_RESIDUAL_M: float = 0.8
+
 
 def _traversable_ply_path(scene_name: str, root: os.PathLike | str | None = None) -> Path:
     base = Path(root) if root is not None else DEFAULT_UNITY_SCENES_ROS2_ROOT
@@ -861,14 +873,15 @@ def score_scene(
 
     # IF-F2 wall realism: derive interior wall cells once per scene (all IF questions in
     # the scene share the mirror costmap) from the fitted sim->object frame above. None
-    # when disabled, no frame was fit, the fit is untrustworthy (residual past the same
-    # alignment gate that marks a scene's Frechet/coverage diagnostics unaligned — a
-    # scene we don't trust to score path SHAPE against isn't a frame we should trust to
-    # place WALLS with either; feeding it in anyway would rasterize the traversable mesh
-    # at the wrong spot and could wall off real floor), or the scene ships no traversable
-    # mesh — the planner then sees the old boundary-only costmap.
+    # when disabled, no frame was fit, or the scene ships no traversable mesh — the
+    # planner then sees the old boundary-only costmap.
+    #
+    # Wall derivation uses the TIGHTER WALL_FIT_MAX_RESIDUAL_M gate (issue #52), not the
+    # looser scoring alignment gate (S._ALIGN_RESIDUAL_GATE_M) — a fit marginal enough to
+    # be untrustworthy for hard wall placement (misprojects the traversable mesh, can wall
+    # off real floor) can still be fine for the smooth Frechet/coverage diagnostics.
     frame_for_walls = (
-        frame if residual is None or residual <= S._ALIGN_RESIDUAL_GATE_M else None
+        frame if residual is None or residual <= WALL_FIT_MAX_RESIDUAL_M else None
     )
     wall_cells = (
         _scene_wall_cells(gt, frame_for_walls, unity_scenes_ros2_root=unity_scenes_ros2_root)
@@ -967,8 +980,8 @@ def score_scene(
                 reason = "no fitted sim->object frame"
             elif frame_for_walls is None:
                 reason = (
-                    f"frame fit unaligned (residual {residual:.2f} m > "
-                    f"{S._ALIGN_RESIDUAL_GATE_M:.1f} m gate)"
+                    f"frame fit residual {residual:.2f} m > "
+                    f"{WALL_FIT_MAX_RESIDUAL_M:.1f} m wall-derivation gate"
                 )
             else:
                 reason = "no traversable_area.ply for scene"

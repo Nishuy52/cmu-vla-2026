@@ -236,3 +236,30 @@ done now (the task forbids touching those modules). Grouped by owner:
 Everything else (geometry Thresholds, fusion/tracker/keyframe configs, the nav
 class-parameter fields, and the six checkpoint caps) is injectable today by passing
 the swept dataclass/args at the call site.
+
+---
+
+## groundtruth/runner harness constants (evaluation-only, NOT part of `core.calibration.Calibration`)
+
+These live in `core.groundtruth.scoring` / `core.runner.gt_battery` and gate the
+GT-battery's OWN measurement fidelity (frame fitting, wall derivation for the IF mirror
+costmap) — they never reach the shipped pipeline the challenge scores, so they sit
+outside the `Calibration` dataclass and its sweep. Listed here anyway per the
+generalization protocol: any threshold, tuned or fixed, gets a documented justification.
+
+| Field | Default | Unit | Controls | Evidence / source | How wired | Sens |
+|---|---|---|---|---|---|---|
+| groundtruth.align_residual_gate_m | 1.0 | m | Max sim->object rigid-fit residual trusted for IF scoring (Frechet/coverage) and `frame_aligned` | `scoring._ALIGN_RESIDUAL_GATE_M`; invented, sample-justified (75-question fit behavior) | module constant, read directly by `gt_battery.score_scene`/`_fit_if_frame_over_candidates` — **wiring TODO (Phase 2)** | M |
+| runner.wall_fit_max_residual_m | 0.8 | m | Max sim->object rigid-fit residual trusted to derive interior WALL cells for the IF mirror costmap (issue #52). TIGHTER than `align_residual_gate_m` on purpose: a fit marginal enough to misproject the traversable mesh can still be fine for the smooth Frechet/coverage diagnostics but not for a binary wall/no-wall rasterization that can wall off a real object location (observed: livingroom_1's 0.926 m residual walled off a real position, flipping an IF question 0.5->0.0 for measurement, not planning, reasons). Spec-over-sample: declining beats fabricating (rule 2) — a scene above the gate falls back to the pre-IF-F2 boundary-only costmap rather than emit misplaced walls | `gt_battery.WALL_FIT_MAX_RESIDUAL_M` | module constant, read directly by `gt_battery.score_scene` (`frame_for_walls` gate) — **wiring TODO (Phase 2)** | M |
+
+Scene-holdout note (rule 1): the 0.8 m value was set from ONE driving scene
+(livingroom_1, 0.926 m residual, the confirmed measurement artifact) but per the
+wall-honest battery's per-scene residuals (`reports/gt_battery_walls_2026-07-19/
+gt_battery_results.json`) it also reclassifies two scenes NOT used to pick it —
+home_building_1 (0.879 m) and hotel_room_2 (0.975 m) both cross from "walled" to
+"boundary-only" too. All three sit in the 0.8-1.0 m band; every other scene's residual
+(max 0.6917 m, livingroom_4) sits clearly below the gate and is unaffected, and
+livingroom_3 (1.81 m) was already past the 1.0 m scoring gate and had no walls before
+this fix either. The battery rerun after this fix (below) is therefore the honest
+generalization check: it reports whether home_building_1's and hotel_room_2's IF scores
+move (they were not the scene the 0.8 m constant was tuned on).

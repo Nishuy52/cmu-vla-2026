@@ -701,3 +701,63 @@ def test_cli_walls_default_on(tmp_path, monkeypatch):
     monkeypatch.setattr(GB, "run_gt_battery", _fake_run)
     GB.main(["--groundtruth", str(tmp_path), "--out", str(tmp_path)])
     assert seen.get("walls") is True
+
+
+# ----------------------------------------------------------------------- issue #52
+
+
+def _score_scene_with_residual(tmp_path, monkeypatch, residual):
+    """Drive ``score_scene`` with a fitted frame at the given fixed ``residual`` and
+    capture what ``frame`` (or ``None``) ``_scene_wall_cells`` was actually called with —
+    the observable proxy for whether wall derivation was declined or attempted."""
+    from core.groundtruth import scoring as S
+
+    gt = _synthetic_gt_scene(
+        [("stool", -4.0, 0.0, 0.0, 0.4, 0.4, 0.4), ("table", 4.0, 0.0, 0.0, 0.4, 0.4, 0.4)],
+        scene_name="syn52",
+    )
+    # A trajectory file must exist on disk to enter the alignment path; its content is
+    # irrelevant because load_trajectory_ply is monkeypatched below.
+    scene_dir = tmp_path / "syn52"
+    scene_dir.mkdir()
+    (scene_dir / "trajectory_q4.ply").write_bytes(b"")
+
+    fixed_frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    monkeypatch.setattr(
+        GB.S, "load_trajectory_ply",
+        lambda *a, **k: np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+    )
+    monkeypatch.setattr(
+        GB.S, "align_scene_trajectories", lambda pairs: (fixed_frame, residual)
+    )
+    calls = []
+    monkeypatch.setattr(
+        GB, "_scene_wall_cells",
+        lambda gt_, frame_, **k: calls.append(frame_) or None,
+    )
+    GB.score_scene(
+        gt, {"instruction_following": ["go to the stool"]},
+        questions_dir=tmp_path, drive_if=False,
+    )
+    assert len(calls) == 1
+    return calls[0]
+
+
+def test_wall_derivation_declines_just_above_residual_gate(tmp_path, monkeypatch):
+    """Residual just past WALL_FIT_MAX_RESIDUAL_M -> no frame handed to wall derivation
+    (falls back to the boundary-only costmap), even though it still clears the looser
+    scoring alignment gate (S._ALIGN_RESIDUAL_GATE_M = 1.0)."""
+    from core.groundtruth import scoring as S
+
+    residual = GB.WALL_FIT_MAX_RESIDUAL_M + 0.01
+    assert residual <= S._ALIGN_RESIDUAL_GATE_M  # still trusted for scoring, not walls
+    frame_seen = _score_scene_with_residual(tmp_path, monkeypatch, residual)
+    assert frame_seen is None
+
+
+def test_wall_derivation_proceeds_just_below_residual_gate(tmp_path, monkeypatch):
+    """Residual just under WALL_FIT_MAX_RESIDUAL_M -> the fitted frame IS handed to wall
+    derivation."""
+    residual = GB.WALL_FIT_MAX_RESIDUAL_M - 0.01
+    frame_seen = _score_scene_with_residual(tmp_path, monkeypatch, residual)
+    assert frame_seen is not None
