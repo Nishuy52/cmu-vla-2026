@@ -688,3 +688,74 @@ def test_plan_through_unreachable_leg_returns_none():
     cm = Costmap(grid, vehicle_radius_m=0.0)
     path = plan_through(cm, (0.15, 0.25), [("goto", (0.55, 0.25))])
     assert path is None
+
+
+# --------------------------------------------------------------------------- issue #74
+# record_leg_bounds: the caller-facing seam route assembly uses to thread ordered
+# leg-goal indices into BreadcrumbFollower for leg-boundary-aware following.
+
+
+def test_plan_through_record_leg_bounds_off_returns_plain_path():
+    """Default (``record_leg_bounds=False``) is unchanged: a bare path, same as every
+    existing call site (including every test above) already expects."""
+    grid = _grid_from(["." * 20 for _ in range(3)])
+    cm = Costmap(grid, vehicle_radius_m=0.0)
+    path = plan_through(cm, (0.05, 0.15), [("goto", (1.85, 0.15))])
+    assert isinstance(path, list)
+    assert isinstance(path[0], tuple)
+
+
+def test_plan_through_record_leg_bounds_indexes_each_leg_goal():
+    grid = _grid_from(["." * 30 for _ in range(3)])
+    cm = Costmap(grid, vehicle_radius_m=0.0)
+    legs = [("goto", (0.85, 0.15)), ("goto", (1.85, 0.15)), ("goto", (2.85, 0.15))]
+    path, leg_bounds = plan_through(cm, (0.05, 0.15), legs, record_leg_bounds=True)
+    assert path is not None
+    assert len(leg_bounds) == len(legs)
+    # Strictly ascending (each leg's own goal sits farther along the path than the
+    # previous leg's), and every recorded index actually falls inside the path.
+    assert leg_bounds == sorted(leg_bounds)
+    assert all(0 <= i < len(path) for i in leg_bounds)
+    # Each leg boundary's path point lands at (approximately) that leg's own goal.
+    for (_, goal), idx in zip(legs, leg_bounds):
+        gx, gy = goal
+        px, py = path[idx]
+        assert abs(px - gx) < 0.2 and abs(py - gy) < 0.2
+
+
+def test_plan_through_record_leg_bounds_unreachable_leg_returns_empty_bounds():
+    rows = [
+        "#######",
+        "#..#..#",
+        "#..#..#",
+        "#..#..#",
+        "#######",
+    ]
+    grid = _grid_from(rows)
+    cm = Costmap(grid, vehicle_radius_m=0.0)
+    path, leg_bounds = plan_through(
+        cm, (0.15, 0.25), [("goto", (0.55, 0.25))], record_leg_bounds=True
+    )
+    assert path is None
+    assert leg_bounds == []
+
+
+def test_plan_through_record_leg_bounds_corridor_leg_included():
+    rows = []
+    for i in range(12):
+        line = list("." * 20)
+        if 3 <= i <= 8:
+            for c in (8, 9, 11, 12):
+                line[c] = "#"
+        rows.append("".join(line))
+    grid = _grid_from(rows)
+    cm = Costmap(grid, vehicle_radius_m=0.0)
+    gate = ((1.05, 0.25), (1.05, 0.95))
+    start = (1.05, 0.05)
+    goal = (1.05, 1.15)
+    legs = [("corridor_between", gate), ("goto", goal)]
+    path, leg_bounds = plan_through(cm, start, legs, record_leg_bounds=True)
+    assert path is not None
+    assert len(leg_bounds) == 2
+    assert leg_bounds[0] <= leg_bounds[1]
+    assert leg_bounds[-1] == len(path) - 1  # final leg's boundary is the path's end

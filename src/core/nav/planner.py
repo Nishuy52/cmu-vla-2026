@@ -408,7 +408,8 @@ def plan_through(
     unknown_cost_mult: float = UNKNOWN_COST_MULT,
     pinch_disc_m: float = PINCH_DISC_M,
     pinch_corridor_half_w_m: float = PINCH_CORRIDOR_HALF_W_M,
-) -> list[tuple[float, float]] | None:
+    record_leg_bounds: bool = False,
+) -> list[tuple[float, float]] | None | tuple[list[tuple[float, float]] | None, list[int]]:
     """Plan an ordered multi-leg route.
 
     legs: ordered [(kind, geometry)] where
@@ -425,8 +426,17 @@ def plan_through(
     A* plan misses the gate — open (non-corridor) legs never see it.
 
     Returns the concatenated world-frame path, or None if any leg is unreachable.
+
+    Issue #74 — ``record_leg_bounds=True`` additionally returns ``(path, leg_bounds)``
+    where ``leg_bounds[i]`` is the index into ``path`` of the last point appended for
+    leg ``i`` (i.e. the path index the caller's route assembly committed as THAT leg's
+    own driven waypoint-of-record). Kept opt-in via a keyword so every existing
+    positional call site (tests included) is unaffected. ``None`` is returned in place
+    of ``leg_bounds`` when the route itself is unreachable (``path is None``) — there
+    is no path to index into.
     """
     full: list[tuple[float, float]] = [start_xy]
+    leg_bounds: list[int] = []
     cur = start_xy
     for kind, geom in legs:
         if kind == "corridor_between":
@@ -543,14 +553,16 @@ def plan_through(
                     relax_disc_m *= PINCH_RELAX_GROWTH
                 seg = pinch_seg
                 if seg is None or not path_crosses_gate(seg, gate):  # type: ignore[arg-type]
-                    return None
+                    return (None, []) if record_leg_bounds else None
             full.extend(seg[1:])
             cur = full[-1]
+            leg_bounds.append(len(full) - 1)
         else:  # goto / via_near
             pt = geom  # type: ignore[assignment]
             seg = astar(costmap, cur, pt, unknown_cost_mult=unknown_cost_mult)  # type: ignore[arg-type]
             if seg is None:
-                return None
+                return (None, []) if record_leg_bounds else None
             full.extend(seg[1:])
             cur = full[-1]
-    return full
+            leg_bounds.append(len(full) - 1)
+    return (full, leg_bounds) if record_leg_bounds else full
