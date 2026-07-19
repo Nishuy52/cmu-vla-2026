@@ -1049,3 +1049,45 @@ checkpoint (closes Gate 4, #38, #30, verifies Phase-3 bake), then #53
 
 **Next:** #54 (pinch-corridor self-block/seal defect), then hotel_room_2's
 deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
+
+## 2026-07-19 (session 17, close) - second reboot gate; state saved
+
+- **Checkpoint (clean run) verdicts**: in-image Ollama bake WORKS
+  structurally (binds, serves text+vision in-container); §7a clean-clone
+  gate PASS; two real packaging bugs found and FIXED (#55 compose env
+  VLA_DETECTOR, #56 missing openai SDK - merged 8c9682d, fork synced);
+  KEEP_ALIVE-60m coexistence OOM evidence recorded (compose now pins 5m
+  dev override). #38/#30 closed on evidence (post-reboot rates 5.8 Hz =
+  1.8x pre-reboot).
+- **GPU RE-WEDGED under load hours after the reboot** - recurrent, not
+  stale-driver. Standing recommendation: NVreg_DynamicPowerManagement=0
+  modprobe hardening (user sudo) - can be installed after this reboot to
+  apply at the next one. All checkpoint latency data under the wedge is
+  suspect; structural results stand.
+- Disk crisis mid-rebuild (93->99%): build cache 37.7 GB across 3 image
+  generations. Pruned to 12 GB keep-storage + deleted the disqualified
+  qwen2.5vl:7b (5.6 GB) + spent archives -> 29 GB free. RULE: run
+  `docker builder prune --keep-storage 12GB` after every image build.
+- #54 (pinch start-seal): fix drafted in worktree if54-pinch-seal
+  (UNCOMMITTED planner.py changes - worktree survives reboot) but the
+  fix itself HANGS tests/heads/test_instruction.py (~15th test) -
+  deadlock/unbounded relax loop; the agent's own "stalled pytests" were
+  this bug. Next session: fix non-termination (hard iteration cap +
+  terminal fallback), then battery (target: 3 unsealed legs thread,
+  IF > 0.150).
+- Image rebuild with #55/#56 fixes was mid-flight at reboot - rerun from
+  /tmp-restaged fork (upstream clone + sync_to_fork.sh + commit; cached
+  layers make it fast on today's pipe).
+
+**POST-REBOOT RUNBOOK v2:**
+1. Verify pstate under load (P0-P3) BEFORE any measurement; optionally
+   install the runtime-PM modprobe hardening first.
+2. Restage /tmp/fork-clean (clone upstream -> sync_to_fork.sh -> commit
+   -> commit packaging state), rebuild image, `builder prune` after.
+3. Boot stack from compose (stock env now correct per #55), run
+   BUILD_AND_VERIFY steps b-e clean: prewarm OK, ladder parse_tier=local,
+   KEEP_ALIVE=5m coexistence (batched forward should hold), teapot run.
+   -> closes tasks 6+8 / Gate 4 formally.
+4. if54-pinch-seal worktree: fix the hang, battery, merge -> #54, then
+   re-evaluate #51/#53 chain.
+5. Then: #50 adjudication, LLM-route A/B (holdout rules), Aug 3 MVS prep.

@@ -1099,6 +1099,12 @@ def score_instruction_following(
 #: pipeline treats as reaching a leg.
 LEG_ARRIVAL_TOL_M: float = 0.8
 
+#: Step (m) the driven polyline is densified to before leg-arrival checks. The v1
+#: kinematic follower emits one pose per planned waypoint (no densification), so a
+#: route that passes centimeters from a goal mid-segment could be scored NOT reached
+#: when the bracketing waypoints are both farther than LEG_ARRIVAL_TOL_M away — issue #58.
+ARRIVAL_RESAMPLE_STEP_M: float = 0.25
+
 #: Per-violation penalty (fraction of one leg's worth of credit) subtracted from the
 #: ordered-leg credit for each threading miss / avoid-capsule breach. Kept at one full
 #: leg-equivalent so a forbidden-region breach or a missed corridor gate costs as much
@@ -1163,6 +1169,31 @@ def _first_arrival_index(
     return None
 
 
+def _densify_polyline(traj: np.ndarray, step: float) -> np.ndarray:
+    """Linearly interpolate ``traj`` so no consecutive-point gap exceeds ``step``.
+
+    Keeps every original vertex; inserted points are evenly spaced along each
+    consecutive pair. Segment geometry is unchanged (each inserted point lies
+    exactly on the original segment), so threading/capsule checks — which are
+    segment-intersection based — see identical verdicts before/after. Single-point
+    and empty trajectories pass through unchanged.
+    """
+    if traj.ndim != 2 or traj.shape[0] < 2 or step <= 0:
+        return traj
+    out_rows = [traj[0:1]]
+    for i in range(traj.shape[0] - 1):
+        p0 = traj[i]
+        p1 = traj[i + 1]
+        dist = float(np.linalg.norm(p1[:2] - p0[:2]))
+        n_extra = int(math.ceil(dist / step)) - 1 if dist > step else 0
+        if n_extra > 0:
+            for k in range(1, n_extra + 1):
+                frac = k / (n_extra + 1)
+                out_rows.append((p0 + frac * (p1 - p0))[None, :])
+        out_rows.append(p1[None, :])
+    return np.concatenate(out_rows, axis=0)
+
+
 def score_instruction_rubric(
     driven_traj: np.ndarray,
     leg_goals: list[tuple[str, tuple[float, float]]],
@@ -1197,6 +1228,10 @@ def score_instruction_rubric(
     traj = np.asarray(driven_traj, dtype=float)
     if traj.ndim != 2 or traj.shape[1] < 2:
         traj = np.empty((0, 2), dtype=float)
+
+    # Densify before arrival/threading/capsule checks so goals can't be stepped over
+    # between sparse driven waypoints (issue #58).
+    traj = _densify_polyline(traj, ARRIVAL_RESAMPLE_STEP_M)
 
     n_legs = len(leg_goals)
     outcomes: list[IFLegOutcome] = []

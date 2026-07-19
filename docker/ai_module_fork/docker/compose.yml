@@ -44,11 +44,19 @@ services:
       # Re-assert: a compose environment/env_file entry OVERRIDES the Dockerfile ENV of the same
       # name (docs/upstream_notes.md gotcha 13). Both containers must agree on CycloneDDS.
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      # Issue #55: this service previously shipped with NO environment: block at all, so a stock
+      # `compose up` never set VLA_DETECTOR, adapter_node.py's make_detector() defaulted to
+      # VLA_DETECTOR=none (stub), and the node emitted the SUBMISSION-BLOCKER line with
+      # perception=False — failing docs/phase2_playbook.md's pre-submit checklist unless the
+      # runner hand-added the env. Set the real detector explicitly so a bare `compose up`
+      # passes that checklist out of the box.
+      - VLA_DETECTOR=grounding_dino
       # Overridable at invocation: `OLLAMA_KEEP_ALIVE=60m docker compose -f compose.yml up --build`
       # for a long-hold run; defaults short here (no-GPU-reservation file — see note above).
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}
     env_file:
-      - ../.env.llm                      # optional, gitignored: OPENAI_API_KEY=... etc.
+      - path: ../.env.llm                # gitignored dev-only keys: OPENAI_API_KEY=... etc.
+        required: false                  # evaluator clones don't have it; hard-required broke boot (#57)
     command: >
       /bin/bash -lc "/opt/vla/launch_with_llm.sh"
     stdin_open: true

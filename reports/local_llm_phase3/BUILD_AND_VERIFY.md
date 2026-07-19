@@ -185,13 +185,24 @@ raises, so a `regex` tier stamp with a plausible-looking Plan is the actual fail
 signal to look for, not an exception).
 
 **Likely failure / fix:**
-- `parse_tier == 'regex'` for every question → the local slot never got a schema-valid
-  reply within the ladder's one repair round; `docker exec iros2026_ai_module python3 -c
-  "from core.llm.config import load_config; print(load_config().local)"` to confirm the
-  slot resolved at all (kind/base_url/model non-empty). If it resolved but still falls
-  through, this mirrors the Phase-1 conformance harness (`tools/llm_conformance.py`,
-  not run here since it lives outside this scope) — check `/tmp/ollama_serve.log` for
-  request errors during the call.
+- `parse_tier == 'regex'` for every question, with the underlying exception (if you
+  drop the ladder's own swallow-and-fall-through and call `build_chat_fns_with_tiers`
+  directly) being `ProviderUnavailable: ... ModuleNotFoundError: openai` →
+  **RESOLVED by issue #56's fix**: the Dockerfile's constrained pip layer previously
+  never installed the `openai` package even though `VLA_LLM_LOCAL_KIND=openai` is
+  baked, so `core.llm.providers` raised `ProviderUnavailable` and the local slot was
+  silently skipped by `build_chat_fns_with_tiers`. The Dockerfile now installs
+  `openai>=1.0` alongside torch/transformers/groundingdino-py (matching
+  `src/pyproject.toml`'s `llm` extra) — confirm this class of failure is gone by
+  running `docker exec iros2026_ai_module python3 -c "import openai; print(openai.__version__)"`
+  before re-running this step.
+- `parse_tier == 'regex'` for every question with `openai` importable → the local slot
+  never got a schema-valid reply within the ladder's one repair round; `docker exec
+  iros2026_ai_module python3 -c "from core.llm.config import load_config; print(load_config().local)"`
+  to confirm the slot resolved at all (kind/base_url/model non-empty). If it resolved
+  but still falls through, this mirrors the Phase-1 conformance harness
+  (`tools/llm_conformance.py`, not run here since it lives outside this scope) — check
+  `/tmp/ollama_serve.log` for request errors during the call.
 - Import error on `core.llm.config` / `core.parsing.ladder` → `PYTHONPATH` isn't
   reaching this shell; confirm with `docker exec iros2026_ai_module python3 -c "import
   sys; print(sys.path)"` — should include `/opt/vla/src`. Pass `-e

@@ -233,6 +233,9 @@ git clone <fork-remote> /tmp/fork-clean
 #    build.context: ../ai_module ; build.dockerfile: docker/Dockerfile
 #    command: /bin/bash -lc "/opt/vla/launch_with_llm.sh"
 #    environment: RMW_IMPLEMENTATION=rmw_cyclonedds_cpp  (re-assert; OVERRIDES the Dockerfile ENV)
+#                 VLA_DETECTOR=grounding_dino  (issue #55: with no environment: block at all, this
+#                 was unset -> adapter_node.py defaulted to VLA_DETECTOR=none -> offline stub ->
+#                 SUBMISSION-BLOCKER line, failing the perception pre-submit check below)
 #                 OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}  (short dev-box default; see below)
 #    env_file: ../.env.llm  (optional; VLA_LLM_* keys)
 #    Full snippet in docker/ai_module_fork/README.md; ready-made files at
@@ -310,6 +313,10 @@ to actually DRIVE a configured `openai`-kind slot (local or a real cloud primary
 secondary) the SDK must be present: `pip install -e '.[llm]'` from `src/` (or
 `pip install openai` directly). Conformance/battery tooling
 (`tools/llm_conformance.py`, `tools/llm_parse_battery.py`) needs this installed.
+Fixed in the ai_module image itself (issue #56, 19 Jul): the Dockerfile's constrained
+pip layer now installs `openai>=1.0` alongside torch/transformers/groundingdino-py,
+matching `src/pyproject.toml`'s `llm` extra — the baked `VLA_LLM_LOCAL_KIND=openai`
+slot no longer hits `ProviderUnavailable (ModuleNotFoundError: openai)` at runtime.
 
 **Submission requirement:** the host install above is the DEV loop only. The
 submission image serves the model IN-CONTAINER (organisers run only our

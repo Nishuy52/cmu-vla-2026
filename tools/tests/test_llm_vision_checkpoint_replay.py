@@ -10,6 +10,8 @@ import pytest
 from core.perception import tiling
 from tools.llm_vision_checkpoint_replay import (
     Cp3Candidate,
+    _is_degenerate_reply,
+    _ollama_native_base,
     bearing_map_rad,
     cp5_choice_is_sane,
     crop_box,
@@ -205,3 +207,31 @@ def test_cp3_candidate_fields():
     c = Cp3Candidate(frame_idx=1, label="sofa", tile_id=2, dist_m=3.5, azimuth=0.1, elevation=-0.05)
     assert c.label == "sofa"
     assert c.tile_id == 2
+
+
+# --------------------------------------------------------------------------- degenerate-reply detection
+
+
+def test_is_degenerate_reply_all_question_marks():
+    assert _is_degenerate_reply("???????????????????????????????") is True
+
+
+def test_is_degenerate_reply_empty_or_whitespace():
+    assert _is_degenerate_reply("") is True
+    assert _is_degenerate_reply("   \n\t  ") is True
+
+
+def test_is_degenerate_reply_real_json_is_not_degenerate():
+    assert _is_degenerate_reply('{"present": true, "tile": 0, "confidence": 0.9}') is False
+
+
+def test_is_degenerate_reply_plain_word_is_not_degenerate():
+    assert _is_degenerate_reply("Noisy") is False
+
+
+def test_ollama_native_base_strips_v1_suffix():
+    assert _ollama_native_base("http://localhost:11434/v1") == "http://localhost:11434"
+
+
+def test_ollama_native_base_passthrough_without_v1():
+    assert _ollama_native_base("http://localhost:11434") == "http://localhost:11434"
