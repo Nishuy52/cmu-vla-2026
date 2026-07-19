@@ -86,6 +86,22 @@ class BreadcrumbFollower:
     _idx: int = 0  # index into path of the last point we've committed to passing
     _hist: list[tuple[float, float, float]] = field(default_factory=list)  # (t, x, y)
     replan_flag: bool = False
+    #: issue #62 — path index of the crumb ``_select_crumb`` most recently handed
+    #: back. The LOS scan below can jump this crumb many indices ahead of ``_idx``
+    #: (any point with a clear line-of-sight from the pose is fair game, regardless
+    #: of how far along the path it sits) — a normal, intended shortcut on an open
+    #: stretch. But ``_idx`` itself only advances via the local within/overshoot
+    #: check against ``path[_idx]``/``path[_idx+1]`` in ``advance``. On a path that
+    #: loops back near itself (e.g. after threading a corridor gate and doubling
+    #: back through the same room on the way to a later leg), the vehicle can end
+    #: up sitting exactly at the FAR crumb while ``_idx`` is still parked at an
+    #: earlier, now spatially-unrelated stretch of the path whose neighbouring
+    #: points never come within ``reach_m``/overshoot range of the actual pose —
+    #: ``_idx`` then never advances again and the follower wedges forever (T-62
+    #: sig-1). Tracking the last-selected crumb's own index lets ``advance`` fast-
+    #: forward ``_idx`` past it once the vehicle demonstrably reaches it, instead of
+    #: only ever creeping one index at a time.
+    _last_crumb_idx: int = -1
 
     # ------------------------------------------------------------- crumb selection
     def _select_crumb(self, pose: tuple[float, float]) -> WaypointCmd | None:
@@ -93,6 +109,7 @@ class BreadcrumbFollower:
         if self._idx >= len(self.path):
             return None
         chosen: tuple[float, float] | None = None
+        chosen_idx: int | None = None
         # Scan forward from current progress index; keep the farthest LOS-clear point
         # within lookahead. Stop early once a point exceeds lookahead (path is ordered).
         for j in range(self._idx, len(self.path)):
@@ -104,10 +121,12 @@ class BreadcrumbFollower:
                 # Nothing within lookahead yet: fall back to the nearest forward point
                 # even if slightly beyond, so we still make progress.
                 if line_of_sight(self.costmap, pose, pt):
-                    chosen = pt
+                    chosen, chosen_idx = pt, j
                 break
             if line_of_sight(self.costmap, pose, pt):
-                chosen = pt
+                chosen, chosen_idx = pt, j
+        if chosen_idx is not None:
+            self._last_crumb_idx = chosen_idx
         if chosen is None:
             # No LOS-clear crumb within lookahead. Never hand back a raw point whose
             # straight segment from the pose crosses a blocked cell — that is exactly the
@@ -116,17 +135,19 @@ class BreadcrumbFollower:
             # the whole remaining path, not just within lookahead); only if none is
             # reachable do we surface the next path vertex WITH a replan flag so the FSM
             # recomputes rather than silently driving through geometry.
-            chosen = self._nearest_reachable_point(pose)
+            chosen, nearest_idx = self._nearest_reachable_point(pose)
             if chosen is None:
                 self.replan_flag = True
-                chosen = self.path[self._idx]
+                chosen, nearest_idx = self.path[self._idx], self._idx
+            self._last_crumb_idx = nearest_idx
         return WaypointCmd(x=float(chosen[0]), y=float(chosen[1]))
 
     def _nearest_reachable_point(
         self, pose: tuple[float, float]
-    ) -> tuple[float, float] | None:
-        """Nearest forward path point in clear line-of-sight from ``pose`` (or None)."""
+    ) -> tuple[tuple[float, float] | None, int]:
+        """Nearest forward path point in clear line-of-sight from ``pose`` (or (None, -1))."""
         best: tuple[float, float] | None = None
+        best_idx = -1
         best_d = float("inf")
         for j in range(self._idx, len(self.path)):
             pt = self.path[j]
@@ -134,8 +155,8 @@ class BreadcrumbFollower:
                 continue
             d = _dist(pose, pt)
             if d < best_d:
-                best_d, best = d, pt
-        return best
+                best_d, best, best_idx = d, pt, j
+        return best, best_idx
 
     # ------------------------------------------------------------- public API
     def current(self, pose: tuple[float, float]) -> WaypointCmd | None:
@@ -166,6 +187,23 @@ class BreadcrumbFollower:
                 self._idx += 1
             else:
                 break
+        # issue #62: fast-forward past a far-ahead LOS-selected crumb the vehicle has
+        # actually reached, even when the local within/overshoot check above never
+        # catches up. `_select_crumb` can hand back a crumb many indices ahead of
+        # `_idx` (any point with clear line-of-sight qualifies, regardless of index
+        # gap) — normal on an open stretch. On a path that loops back near itself
+        # (e.g. after threading a corridor gate en route to a later leg), `path[_idx]`
+        # and its immediate neighbours can end up on an earlier, now spatially-
+        # unrelated stretch the vehicle no longer approaches, so within/overshoot
+        # against THOSE points never fires again and `_idx` wedges forever. Safe: only
+        # ever jumps ahead to a crumb the follower itself already selected and
+        # LOS-verified, never past unverified path points.
+        if (
+            0 <= self._last_crumb_idx < len(self.path)
+            and self._last_crumb_idx >= self._idx
+            and _dist(pose, self.path[self._last_crumb_idx]) <= self.reach_m
+        ):
+            self._idx = self._last_crumb_idx + 1
         if self._idx >= len(self.path):
             return None
         return self._select_crumb(pose)

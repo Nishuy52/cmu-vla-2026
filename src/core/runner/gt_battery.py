@@ -480,6 +480,7 @@ def _drive_if_trajectory(
     # progresses only as the vehicle really moves.
     follower._idx = 0
     follower._hist = []
+    follower._last_crumb_idx = -1
 
     odom = io.latest_odom()
     pose = (float(odom.x), float(odom.y)) if odom is not None else (0.0, 0.0)
@@ -515,6 +516,7 @@ def _drive_if_trajectory(
                     follower = new_follower
                     follower._idx = _nearest_forward_idx(follower.path, pose)
                     follower._hist = []
+                    follower._last_crumb_idx = -1
                 last_term = (
                     float(follower.path[-1][0]),
                     float(follower.path[-1][1]),
@@ -565,6 +567,82 @@ def _nearest_forward_idx(
         if d < best_d:
             best_d, best_i = d, i
     return best_i
+
+
+#: issue #61 — clearance (m) applied when pushing a GOTO/VIA_NEAR leg goal off a
+#: floor-level obstacle footprint it falls inside (see :func:`_nearest_free_goal`).
+#: Matches ``core.nav.costmap.VEHICLE_RADIUS_M`` — the same "the vehicle's own body
+#: can't be here" margin the real navigation stack already inflates every obstacle
+#: by, so the rubric goal and the drivable target agree on what counts as clear.
+_RUBRIC_GOAL_CLEARANCE_M: float = 0.4
+#: Bounded push distance (m): a local, geometric correction only (get the goal off
+#: the ONE object it's sitting on/inside), never an unbounded drift chasing some
+#: notion of "the right approach side" — if bounded pushing can't clear every
+#: overlapping footprint, the raw centroid stands (an honest near-miss beats a
+#: silently fabricated goal position).
+_RUBRIC_GOAL_MAX_PUSH_M: float = 2.5
+
+
+def _nearest_free_goal(
+    xy: tuple[float, float], gt: GTScene, exclude_id: int | None
+) -> tuple[float, float]:
+    """Push a raw anchor centroid off any OTHER floor-level obstacle footprint it
+    falls inside (issue #61).
+
+    An anchor resolved from a clause like "the magazine ON the ottoman" has its own
+    raw centroid sitting squarely inside the SUPPORTER's floor footprint (the
+    magazine sits on top of the ottoman) — a point the vehicle physically cannot
+    occupy, and not where a real path would stop (it stops at the supporter's
+    edge). ``_if_rubric_geometry`` previously used the bare, unprojected centroid as
+    the rubric's arrival target, unlike ``InstructionHead._goto_point``/``_via_point``
+    (real navigation), which always project onto free/reachable space — so the
+    rubric could require arrival at a point our own drive would never plan to (or
+    could reach at all). This mirrors that projection with a lightweight, pose-free
+    version: push straight to the nearest edge (plus a vehicle-radius clearance) of
+    any floor-level, non-architectural-room-scale instance footprint the point
+    falls inside, iterating a bounded number of times for a nested/overlapping case.
+    Architectural room-scale AABBs are excluded (issue #53 territory — a real thin
+    wall/floor recorded as one room-spanning box, not a genuine local footprint to
+    push off of) and elevated instances (base z at/above the terrain slab, i.e.
+    overhangs) never blocked the floor to begin with.
+    """
+    x0, y0, x1, y1 = _gt_footprint_bounds(gt, 0.0)
+    room_w, room_h = x1 - x0, y1 - y0
+    x, y = xy
+    for _ in range(4):  # bounded: converges in one pass for the common single-supporter case
+        moved = False
+        for rec in gt.instances:
+            if rec.instance_id == exclude_id:
+                continue
+            if float(rec.aabb_min[2]) >= TERRAIN_SLAB_MAX_Z:
+                continue  # elevated overhang -- never blocked the floor
+            if _is_architectural_room_scale_aabb(rec.aabb_min, rec.aabb_max, room_w, room_h):
+                continue  # #53 territory -- not a real local footprint
+            axmin = float(rec.aabb_min[0]) - _RUBRIC_GOAL_CLEARANCE_M
+            aymin = float(rec.aabb_min[1]) - _RUBRIC_GOAL_CLEARANCE_M
+            axmax = float(rec.aabb_max[0]) + _RUBRIC_GOAL_CLEARANCE_M
+            aymax = float(rec.aabb_max[1]) + _RUBRIC_GOAL_CLEARANCE_M
+            if not (axmin <= x <= axmax and aymin <= y <= aymax):
+                continue
+            # Inside this footprint (+ clearance): push to the nearest edge.
+            d_left, d_right = x - axmin, axmax - x
+            d_bottom, d_top = y - aymin, aymax - y
+            m = min(d_left, d_right, d_bottom, d_top)
+            if m == d_left:
+                x = axmin
+            elif m == d_right:
+                x = axmax
+            elif m == d_bottom:
+                y = aymin
+            else:
+                y = aymax
+            moved = True
+        if not moved:
+            break
+    dist = ((x - xy[0]) ** 2 + (y - xy[1]) ** 2) ** 0.5
+    if dist > _RUBRIC_GOAL_MAX_PUSH_M:
+        return xy
+    return (x, y)
 
 
 def _if_rubric_geometry(
@@ -643,8 +721,11 @@ def _if_rubric_geometry(
             if rec is None:
                 continue
             c = P._as3(rec.centroid)
+            goal_xy = _nearest_free_goal(
+                (float(c[0]), float(c[1])), gt, rec.instance_id
+            )
             kind = "via_near" if leg.kind is LegKind.VIA_NEAR else "goto"
-            leg_goals.append((kind, (float(c[0]), float(c[1]))))
+            leg_goals.append((kind, goal_xy))
             leg_instance_ids.append((rec.instance_id,))
 
     for spec in plan.avoid:
