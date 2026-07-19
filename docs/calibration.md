@@ -251,6 +251,7 @@ generalization protocol: any threshold, tuned or fixed, gets a documented justif
 |---|---|---|---|---|---|---|
 | groundtruth.align_residual_gate_m | 1.0 | m | Max sim->object rigid-fit residual trusted for IF scoring (Frechet/coverage) and `frame_aligned` | `scoring._ALIGN_RESIDUAL_GATE_M`; invented, sample-justified (75-question fit behavior) | module constant, read directly by `gt_battery.score_scene`/`_fit_if_frame_over_candidates` — **wiring TODO (Phase 2)** | M |
 | runner.wall_fit_max_residual_m | 0.8 | m | Max sim->object rigid-fit residual trusted to derive interior WALL cells for the IF mirror costmap (issue #52). TIGHTER than `align_residual_gate_m` on purpose: a fit marginal enough to misproject the traversable mesh can still be fine for the smooth Frechet/coverage diagnostics but not for a binary wall/no-wall rasterization that can wall off a real object location (observed: livingroom_1's 0.926 m residual walled off a real position, flipping an IF question 0.5->0.0 for measurement, not planning, reasons). Spec-over-sample: declining beats fabricating (rule 2) — a scene above the gate falls back to the pre-IF-F2 boundary-only costmap rather than emit misplaced walls | `gt_battery.WALL_FIT_MAX_RESIDUAL_M` | module constant, read directly by `gt_battery.score_scene` (`frame_for_walls` gate) — **wiring TODO (Phase 2)** | M |
+| runner.architectural_aabb_room_fraction | 0.3 | fraction (0-1) | Max footprint fraction, of the SCENE'S OWN room bounds, an architectural-labelled GT AABB (`"wall"`/`"unknown"`/`"floor"` observed) may occupy in EITHER axis before `_synthetic_from_gt` skips raw-solid-box stamping it (issue #53 — a room-scale bounding-box-of-an-aggregate, not the real thin element, was sealing corridor gates). Purely geometric and self-referential per scene (a fraction of THAT scene's own bounds, never a fixed metres constant) — swept over all 15 GT scenes, zero real furniture instance clears the bar in BOTH axes (closest: hotel_room_2's bed frame at 0.38/0.28, short on y) | `gt_battery.ARCHITECTURAL_AABB_ROOM_FRACTION`, gate function `gt_battery._is_architectural_room_scale_aabb` | module constant, read directly by `gt_battery._synthetic_from_gt` — **wiring TODO (Phase 2)** | M |
 
 Scene-holdout note (rule 1): the 0.8 m value was set from ONE driving scene
 (livingroom_1, 0.926 m residual, the confirmed measurement artifact) but per the
@@ -263,3 +264,12 @@ livingroom_3 (1.81 m) was already past the 1.0 m scoring gate and had no walls b
 this fix either. The battery rerun after this fix (below) is therefore the honest
 generalization check: it reports whether home_building_1's and hotel_room_2's IF scores
 move (they were not the scene the 0.8 m constant was tuned on).
+
+Scene-holdout note (rule 1) for `architectural_aabb_room_fraction`: the 0.3 value was
+picked to sit between the highest area-fraction any real furniture item reaches in
+ANY of the 15 GT scenes (hotel_room_2's bed frame, 0.28 on its short axis — the
+closest near-miss found) and the lowest fraction any of the confirmed architectural
+aggregates reaches (home_building_1's `"wall"` id 25, 0.33 on its short axis) — a
+wide, evidenced margin, not fit to a single training scene. It was derived from a
+full 15-scene sweep (`docs/tasks/T16-if53-obstacle-stamping/task.md`), not tuned on
+the one instance (#53's own home_building_2 id 126) that motivated the issue.

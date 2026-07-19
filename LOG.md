@@ -1003,3 +1003,49 @@ SoC detector benchmarking (arch-F2).
 **Next:** vision-checkpoint enable matrix (chunks running), in-container
 checkpoint (closes Gate 4, #38, #30, verifies Phase-3 bake), then #53
 (GT stamping fidelity) and #33/#43-family calibration items.
+
+## 2026-07-19 (session 18) - T16 if53-obstacle-stamping: 3/7 legs traced to a
+## room-scale AABB stamping bug, fixed; new #54 masked defect found; #53 status
+
+- Traced all 7 remaining threading violations (fixB baseline) per-leg (see
+  `docs/tasks/T16-if53-obstacle-stamping/task.md`). 3 (home_building_1,
+  home_building_2, studio) trace to room-scale architectural GT AABBs
+  ("wall"/"unknown"/"floor" aggregates spanning a large fraction of the
+  room in both axes, floor-level) stamped as solid floor-to-ceiling
+  obstacles by `_synthetic_from_gt`, sealing the corridor gate — the
+  EXACT `home_building_2` "wall" id 126 instance #53's issue text
+  named. 1 (hotel_room_2) is a genuinely different shape: a real
+  duplicate-labelled "bed frame" furniture item at the gate (not an
+  architectural over-stamp). 3 (arabic_room, hotel_room_1,
+  livingroom_1) are pre-existing, distinct defects already correctly
+  scoped out by #51/#53 (reachability, furniture crowding, degenerate
+  bare-noun gate) — untouched.
+- **Fixed** (`core/runner/gt_battery.py`): `_synthetic_from_gt` skips
+  raw-solid stamping for a floor-level GT instance whose footprint
+  spans > `ARCHITECTURAL_AABB_ROOM_FRACTION` (0.3) of its OWN scene's
+  room bounds in BOTH x and y. Purely geometric, self-referential per
+  scene, no label list. Swept over all 15 GT scenes: zero real
+  furniture instance clears the bar (closest: hotel_room_2's bed
+  frame, 0.28 on its short axis); every instance that does clear it is
+  labelled wall/floor/unknown. 6 new tests
+  (`src/tests/runner/test_gt_battery.py`).
+- **IF headline unchanged (0.150, 7 violations)** — post-fix tracing
+  (instrumented astar/path_crosses_gate/pinch wrapper) found the 3
+  shape-(a) gates are no longer sealed by a stamped obstacle (fix
+  works as intended) but a DIFFERENT, previously-MASKED planner defect
+  now blocks all 3: `_pinch_costmap` has no exemption for the
+  vehicle's own start position (can newly-block its own start cell
+  when within `pinch_disc_m` of the gate) and its forced 1 m corridor
+  band can seal the only real route through other furniture. Filed as
+  **#54** with full trace evidence. Numerical 15/15 + OR 6/6
+  unchanged; IF Frechet/coverage secondary diagnostics improved
+  (6.764m->4.225m, 38%->47%) - `reports/gt_battery_if53_2026-07-19/`.
+- Shape-(b) case (hotel_room_2) traced but not fixed — deferred
+  (needs a shared rubric/planner helper + dedicated regression
+  coverage, out of this session's budget).
+- #53 left open with a status comment (root cause fixed and verified,
+  headline metric didn't move because fixing it unmasked #54) rather
+  than a false `Fixes #53`.
+
+**Next:** #54 (pinch-corridor self-block/seal defect), then hotel_room_2's
+deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.

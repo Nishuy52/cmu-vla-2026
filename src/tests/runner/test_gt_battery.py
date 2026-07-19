@@ -802,3 +802,89 @@ def test_if_rubric_geometry_non_corridor_legs_unaffected():
     leg_goals, corridor_gates, _ = GB._if_rubric_geometry("Go to the stool.", gt, idx)
     assert corridor_gates == []
     assert leg_goals == [("goto", (-4.0, 0.0))]
+
+
+# ----------------------------------------------------------------------- issue #53
+
+
+def test_architectural_room_scale_aabb_detects_wide_flat_object():
+    """A floor-level GT instance whose footprint spans > ARCHITECTURAL_AABB_ROOM_FRACTION
+    of the room in BOTH axes is flagged room-scale — the traced home_building_2 "wall"
+    id 126 shape (x:[-10.07,6.07] y:[-1.84,14.05] in a 30x26 m room)."""
+    amin = np.array([-10.07, -1.84, -0.20])
+    amax = np.array([6.07, 14.05, 4.17])
+    assert GB._is_architectural_room_scale_aabb(amin, amax, room_w=30.02, room_h=25.99)
+
+
+def test_architectural_room_scale_aabb_spares_real_furniture():
+    """A real furniture item never spans a large fraction of the room in BOTH axes —
+    the traced hotel_room_2 bed-frame shape (0.38/0.28 of its room) sits just under the
+    bar on the SHORT axis and must not be suppressed."""
+    amin = np.array([-1.95, 0.46, -0.001])
+    amax = np.array([1.09, 2.34, 0.696])
+    room_w, room_h = (1.09 - -1.95) / 0.38, (2.34 - 0.46) / 0.28
+    assert not GB._is_architectural_room_scale_aabb(amin, amax, room_w=room_w, room_h=room_h)
+
+
+def test_architectural_room_scale_aabb_requires_both_axes():
+    """A single-axis-spanning thin real wall panel (one dimension room-scale, the other
+    genuinely thin) is NOT room-scale — only an AABB wide in BOTH axes is an aggregate."""
+    amin = np.array([-4.0, -0.05, 0.0])
+    amax = np.array([4.0, 0.05, 2.4])  # 8 m long, 0.1 m thick: a real wall panel
+    assert not GB._is_architectural_room_scale_aabb(amin, amax, room_w=8.4, room_h=6.8)
+
+
+def test_architectural_room_scale_aabb_spares_elevated_slab():
+    """A room-scale slab that sits ABOVE the terrain slab cutoff (a real ceiling) is an
+    overhang, not a floor obstacle — it was never the problem and must not be flagged."""
+    from core.mocks.synthetic_scene import TERRAIN_SLAB_MAX_Z
+
+    amin = np.array([-10.0, -10.0, TERRAIN_SLAB_MAX_Z + 0.1])
+    amax = np.array([10.0, 10.0, TERRAIN_SLAB_MAX_Z + 0.5])
+    assert not GB._is_architectural_room_scale_aabb(amin, amax, room_w=20.0, room_h=20.0)
+
+
+def test_synthetic_from_gt_skips_room_scale_architectural_object():
+    """`_synthetic_from_gt` must not stamp a room-scale architectural AABB as a solid
+    box: two real anchors with a genuine gap between them, plus a "wall" GT instance
+    whose raw AABB spans nearly the whole room (VLA-3D's room-shell-as-one-bbox
+    pattern) — the gap between the anchors must stay free, not sealed by the room-scale
+    box."""
+    gt = _synthetic_gt_scene(
+        [
+            ("sofa", -2.0, 0.0, 0.0, 1.0, 1.0, 0.8),
+            ("coffee table", 2.0, 0.0, 0.0, 1.0, 1.0, 0.5),
+            # room-scale "wall" aggregate: spans nearly the whole 10x10 room, floor
+            # level (cz well under TERRAIN_SLAB_MAX_Z), covering the gap between the
+            # two anchors above.
+            ("wall", 0.0, 0.0, 2.0, 9.0, 9.0, 4.0),
+        ],
+        scene_name="syn53",
+    )
+    sc = GB._synthetic_from_gt(gt)
+    labels = [o.label for o in sc.objects]
+    assert "wall" not in labels, "room-scale wall AABB must not be stamped as a solid box"
+    assert {"sofa", "coffee table"} <= set(labels)
+
+    # The gap between the two anchors (the corridor's real footprint) must read FREE in
+    # the terrain mirror, not sealed by the room-scale box.
+    patch = sc.terrain_patch()
+    pts = patch.points
+    mid = pts[(np.abs(pts[:, 0] - 0.0) < 1e-6) & (np.abs(pts[:, 1] - 0.0) < 1e-6)]
+    assert mid.shape[0] == 1
+    assert mid[0, 3] == 0.0, "corridor gap under a room-scale architectural AABB must be free"
+
+
+def test_synthetic_from_gt_still_stamps_real_thin_wall():
+    """A genuinely thin, localized wall panel (not room-scale) is unaffected — it still
+    stamps as a solid obstacle."""
+    gt = _synthetic_gt_scene(
+        [
+            ("sofa", -2.0, 0.0, 0.0, 1.0, 1.0, 0.8),
+            ("wall", 0.0, 3.0, 1.0, 6.0, 0.15, 2.4),  # a real thin wall segment
+        ],
+        scene_name="syn53b",
+    )
+    sc = GB._synthetic_from_gt(gt)
+    labels = [o.label for o in sc.objects]
+    assert "wall" in labels, "a genuinely thin wall panel must still be stamped"

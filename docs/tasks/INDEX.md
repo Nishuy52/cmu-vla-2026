@@ -79,3 +79,22 @@
   OR 6/6 unchanged. Remaining 7 trace to a 4th, broader defect (GT
   obstacle-stamping fidelity) filed as #53; #51 left open with a
   status comment.
+- **T16** if53-obstacle-stamping (#53) — traced all 7 remaining
+  threading violations; 3 (home_building_1, home_building_2, studio)
+  trace to room-scale architectural GT AABBs ("wall"/"unknown"/
+  "floor" aggregates spanning a large fraction of the room in both
+  axes) stamped as solid floor-to-ceiling obstacles, sealing the
+  corridor gate. Fixed: `_synthetic_from_gt` skips raw-solid stamping
+  for any floor-level GT instance whose footprint spans >30% of its
+  OWN scene's room bounds in BOTH axes (geometry-derived,
+  self-referential per scene; zero false positives swept over all 15
+  scenes). IF headline stayed 0.150/7 threading violations —
+  post-fix tracing found a DIFFERENT, previously-masked planner
+  defect (`_pinch_costmap` self-blocking the vehicle's own start
+  position / sealing the only real route) now blocks the same 3
+  legs; filed as #54. Numerical 15/15 + OR 6/6 unchanged; IF
+  Fréchet/coverage secondary diagnostics improved (6.764m→4.225m,
+  38%→47%). Shape-(b) case (hotel_room_2, a real duplicate-labelled
+  "bed frame" at the gate) traced but not fixed this session
+  (deferred). #53 left open with a status comment (root cause fixed,
+  headline metric didn't move — see #54).
