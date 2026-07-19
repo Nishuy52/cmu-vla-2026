@@ -53,8 +53,60 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
 
 1. Read `LOG.md` (last entry = where we stopped) and `docs/master_plan.md` (current phase + checkboxes).
 2. Do the work. Delegate execution to role subagents per the global orchestration policy. **Frontier-model (Fable-class) usage is restricted to planning, architecture, adjudication, and orchestration — never implementation.** All code/doc execution runs on standard executor/mech-executor tiers; verification on the verifier role. Never pass a frontier model override to an implementation agent (see `docs/claude_budget.md`). While iterating on `src/`, run the fast test tier (`pytest` from `src/`, ~40 s); it skips the slow full-controller sims and batteries.
-3. Before ending: append a dated entry to `LOG.md` (what was done, decisions made, next step), tick any completed checkboxes in `master_plan.md`, **update `docs/ubuntu_setup.md` if anything changed that affects installing/running on the Ubuntu machine**, run the full test gate (`pytest -m ""` from `src/`, or `pytest -m "" -n auto` with the `dev` extra) before a milestone commit, commit, and **push to `origin` (private backup: github.com/Nishuy52/cmu-vla-2026)**.
+3. Before ending: append a dated entry to `LOG.md` (what was done, decisions made, next step), tick any completed checkboxes in `master_plan.md`, **update `docs/ubuntu_setup.md` if anything changed that affects installing/running on the Ubuntu machine**, run the full test gate (`pytest -m ""` from `src/`, or `pytest -m "" -n auto` with the `dev` extra) before a milestone commit, commit (message per "Commit conventions" below), and **push to `origin` (private backup: github.com/Nishuy52/cmu-vla-2026)**.
 4. Documents and commits carry no AI/tooling attribution.
+
+## Commit conventions (added 19 Jul 2026)
+
+History before this date is inconsistent (~50 ad-hoc prefixes, half the
+commits unprefixed) and is left as-is; every commit from here on follows
+this format.
+
+- **Format: `<scope>: <subject>`** — scope lowercase from the fixed
+  vocabulary below, subject imperative and lowercase-first, whole line
+  ≤ 72 chars. Issue ref goes at the end of the subject when one applies:
+  `nav: tighten corridor-gate nudge (#64)`. `Fixes #N` / `Closes #N`
+  goes in the body when the commit should close the issue.
+- **Scope vocabulary (fixed — pick the closest, never invent a new one):**
+  - **Code:** the `src/core/` package name — `nav`, `geometry`, `parsing`,
+    `perception`, `heads`, `fsm`, `llm`, `calibration`, `checkpoints`,
+    `groundtruth`, `replay`, `runner`, `mocks` — plus `core` (cross-cutting
+    `src/core/` files like `interfaces.py`/`plan_schema.py`), `adapter`
+    (`src/ros_adapter/`), `tests`, `tools`, `docker`.
+  - **Process:** `docs` (anything under `docs/`, CLAUDE.md, README),
+    `reports` (battery/evidence artifacts under `reports/`), `log`
+    (LOG.md session entries), `tasks` (task records under `docs/tasks/`),
+    `chore` (repo plumbing: settings, gitignore, permissions).
+- **One scope per commit** — pick the one that motivated the change; no
+  `a/b` chains. If no single scope fits, the commit is probably too big.
+- Merge and revert commits keep git's default messages.
+- Legacy prefixes, for reference when reading old history: `LOG:` → `log:`,
+  `GT:` → `groundtruth:`, `battery:` → `nav:`/`runner:` (whichever code
+  moved), `IF:`/`gate…:`/`T<N> …:` → the code scope that changed (the
+  question category, gate, or task belongs in the subject, not the scope),
+  `gpu hardening:`/`vision replay tool:` → `tools:`, `compose:` → `docker:`,
+  `CLAUDE.md:`/`ubuntu_setup:`/`BUILD_AND_VERIFY:`/`master_plan:` → `docs:`.
+
+## Branch conventions (added 19 Jul 2026)
+
+Same cutoff as commit conventions: pre-existing names are grandfathered
+(the live `if69`/`if70` worktree branches finish under their old names);
+every branch created from here on follows this.
+
+- **Format: `<type>/<slug>`**, slug lowercase-kebab. Issue-driven work
+  puts the issue number(s) first in the slug: `fix/67-tolerance-push`,
+  `fix/63-64-gate-geometry`.
+- **Types (fixed):** `fix` (issue-driven fixes — the old `if<N>-…`
+  branches), `feat` (new capability), `exp` (probes/diagnosis/sweeps not
+  meant to merge as-is), `docs`, `chore`, `archive` (preserved unmerged
+  drafts kept for reference — never merge, never delete without checking
+  contents).
+- **`main` is the only long-lived branch.** Delete a work branch (local
+  and origin) once merged. Harness-generated branches (`worktree-agent-*`,
+  `claude/*`) are deleted after harvest/merge and are never pushed to
+  origin deliberately; prune any that show 0 commits ahead of main.
+- A branch sitting unmerged for more than a few days either gets a GitHub
+  issue tracking why, or is renamed into `archive/`.
 
 ## Layout
 

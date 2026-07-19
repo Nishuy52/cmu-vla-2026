@@ -28,6 +28,22 @@ def test_corridor_gate_midpoint_offset_boxes():
     assert np.allclose(g.midpoint, [0.0, 2.0])
 
 
+# --------------------------------------------------------------------------- issue #69 (D1)
+
+
+def test_corridor_gate_nondegenerate_when_anchor_footprints_touch():
+    """issue #69/D1: a big and a small anchor whose footprints already touch (e.g. a
+    sofa and a round table wedged into its corner) used to collapse the gate to a
+    single zero-width point via the axis-aligned face projection -- unthreadable by
+    construction. The centroid-axis construction must produce a genuine two-point
+    segment instead."""
+    big = rec(1, "sofa", (-1.5, -2.0, 0.0), (2.0, 3.0, 1.0))  # x:[-2.5,-0.5] y:[-3.5,-0.5]
+    small = rec(2, "round table", (-0.3, -2.4, 0.0), (0.8, 0.8, 0.3))  # touches big's corner
+    g = T.corridor_gate(big, small)
+    assert g.width > 0.01
+    assert not np.allclose(g.p0, g.p1)
+
+
 # --------------------------------------------------------------------------- issue #63
 
 
