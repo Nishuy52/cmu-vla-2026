@@ -1,0 +1,946 @@
+[
+  {
+    "scene": "arabic_room",
+    "q": 0,
+    "leg": 0,
+    "text": "Go near the stool under the picture and stop at the small table farthest from the columns.",
+    "head_goal": [
+      2.35,
+      -2.85
+    ],
+    "rubric_goal": [
+      -3.1394,
+      -1.9811
+    ],
+    "dist_to_rubric": 5.5577,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "arabic_room",
+    "q": 0,
+    "leg": 1,
+    "text": "Go near the stool under the picture and stop at the small table farthest from the columns.",
+    "head_goal": [
+      3.75,
+      0.85
+    ],
+    "rubric_goal": [
+      2.8206,
+      -0.661
+    ],
+    "dist_to_rubric": 1.7739,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "arabic_room",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go to the potted plant furthest from the hookah, then take the path between the two columns, and stop at the tray on the table.",
+    "head_goal": [
+      3.55,
+      1.35
+    ],
+    "rubric_goal": [
+      -2.8044,
+      2.0009
+    ],
+    "dist_to_rubric": 6.3876,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "arabic_room",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go to the potted plant furthest from the hookah, then take the path between the two columns, and stop at the tray on the table.",
+    "head_goal": [
+      3.75,
+      0.85
+    ],
+    "rubric_goal": [
+      2.8206,
+      -0.661
+    ],
+    "dist_to_rubric": 1.7739,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "chinese_room",
+    "q": 0,
+    "leg": 0,
+    "text": "Go near the potted plant on the table and stop at the painting near the TV.",
+    "head_goal": [
+      5.65,
+      0.25
+    ],
+    "rubric_goal": [
+      5.584,
+      -2.5819
+    ],
+    "dist_to_rubric": 2.8327,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "chinese_room",
+    "q": 0,
+    "leg": 1,
+    "text": "Go near the potted plant on the table and stop at the painting near the TV.",
+    "head_goal": [
+      -1.65,
+      -3.65
+    ],
+    "rubric_goal": [
+      -1.8969,
+      -3.6279
+    ],
+    "dist_to_rubric": 0.2478,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "chinese_room",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go near the tea table with the elephant figurine on it, then stop at the table with the horse figurine on it, avoiding the path between the chair and the folding screen.",
+    "head_goal": [
+      -0.95,
+      -2.15
+    ],
+    "rubric_goal": [
+      0.3036,
+      -2.9624
+    ],
+    "dist_to_rubric": 1.4939,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "chinese_room",
+    "q": 1,
+    "leg": 1,
+    "text": "First, go near the tea table with the elephant figurine on it, then stop at the table with the horse figurine on it, avoiding the path between the chair and the folding screen.",
+    "head_goal": [
+      2.55,
+      0.35
+    ],
+    "rubric_goal": [
+      5.584,
+      -2.5931
+    ],
+    "dist_to_rubric": 4.2269,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "home_building_1",
+    "q": 0,
+    "leg": 0,
+    "text": "Go to the coffee table with the kettle on it and stop at the dining table near the big picture.",
+    "head_goal": [
+      6.45,
+      4.55
+    ],
+    "rubric_goal": [
+      6.4345,
+      0.54
+    ],
+    "dist_to_rubric": 4.01,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "home_building_1",
+    "q": 0,
+    "leg": 1,
+    "text": "Go to the coffee table with the kettle on it and stop at the dining table near the big picture.",
+    "head_goal": [
+      -3.05,
+      -0.85
+    ],
+    "rubric_goal": [
+      1.3553,
+      -3.2677
+    ],
+    "dist_to_rubric": 5.0251,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "home_building_1",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go to the nightstand with a clock on it, then take the path between the dining table and the picture, and stop at the trash can closest to the refridgerator.",
+    "head_goal": [
+      -1.85,
+      -14.55
+    ],
+    "rubric_goal": [
+      -2.0813,
+      -12.9622
+    ],
+    "dist_to_rubric": 1.6045,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "home_building_1",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go to the nightstand with a clock on it, then take the path between the dining table and the picture, and stop at the trash can closest to the refridgerator.",
+    "head_goal": [
+      -6.05,
+      -1.75
+    ],
+    "rubric_goal": [
+      -6.1233,
+      -1.7066
+    ],
+    "dist_to_rubric": 0.0851,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "home_building_2",
+    "q": 0,
+    "leg": 0,
+    "text": "Go near the magazine on the ottoman, then go to the potted plant on the dressing table.",
+    "head_goal": [
+      1.25,
+      5.45
+    ],
+    "rubric_goal": [
+      1.261,
+      5.543
+    ],
+    "dist_to_rubric": 0.0937,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "home_building_2",
+    "q": 0,
+    "leg": 1,
+    "text": "Go near the magazine on the ottoman, then go to the potted plant on the dressing table.",
+    "head_goal": [
+      -0.55,
+      11.65
+    ],
+    "rubric_goal": [
+      -3.9033,
+      11.7559
+    ],
+    "dist_to_rubric": 3.355,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "home_building_2",
+    "q": 1,
+    "leg": 1,
+    "text": "Take the path between the sofa and the coffee table and go to the kettle on the dining table, then go to the potted plant between the curtain and the TV.",
+    "head_goal": [
+      2.45,
+      9.65
+    ],
+    "rubric_goal": [
+      2.074,
+      11.119
+    ],
+    "dist_to_rubric": 1.5164,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "home_building_2",
+    "q": 1,
+    "leg": 2,
+    "text": "Take the path between the sofa and the coffee table and go to the kettle on the dining table, then go to the potted plant between the curtain and the TV.",
+    "head_goal": [
+      -1.05,
+      -0.75
+    ],
+    "rubric_goal": [
+      -4.3642,
+      0.2147
+    ],
+    "dist_to_rubric": 3.4518,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "hotel_room_1",
+    "q": 0,
+    "leg": 0,
+    "text": "Go to the bedside table closest to the window and stop at the chair closest to the TV.",
+    "head_goal": [
+      -0.65,
+      -1.35
+    ],
+    "rubric_goal": [
+      2.6942,
+      -3.79
+    ],
+    "dist_to_rubric": 4.1397,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "hotel_room_1",
+    "q": 0,
+    "leg": 1,
+    "text": "Go to the bedside table closest to the window and stop at the chair closest to the TV.",
+    "head_goal": [
+      -0.85,
+      -1.35
+    ],
+    "rubric_goal": [
+      -0.0937,
+      -2.0344
+    ],
+    "dist_to_rubric": 1.02,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "hotel_room_1",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go near the bedside table closest to the bench, then take the path between the TV and the bed to the picture closest to the TV.",
+    "head_goal": [
+      1.05,
+      0.75
+    ],
+    "rubric_goal": [
+      2.6942,
+      0.3426
+    ],
+    "dist_to_rubric": 1.6939,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "hotel_room_1",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go near the bedside table closest to the bench, then take the path between the TV and the bed to the picture closest to the TV.",
+    "head_goal": [
+      -0.85,
+      -1.35
+    ],
+    "rubric_goal": [
+      -2.5335,
+      -3.0735
+    ],
+    "dist_to_rubric": 2.4093,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "hotel_room_2",
+    "q": 0,
+    "leg": 1,
+    "text": "Go between the bench and the bed and stop at the lamp closest to the fireplace.",
+    "head_goal": [
+      0.15,
+      0.45
+    ],
+    "rubric_goal": [
+      1.1106,
+      1.0142
+    ],
+    "dist_to_rubric": 1.114,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "hotel_room_2",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go to the picture closest to the door, then take the path between the TV cabinet and the bed, and stop by the curtain closest to the TV.",
+    "head_goal": [
+      2.65,
+      -0.85
+    ],
+    "rubric_goal": [
+      2.6145,
+      -0.8982
+    ],
+    "dist_to_rubric": 0.0598,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "hotel_room_2",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go to the picture closest to the door, then take the path between the TV cabinet and the bed, and stop by the curtain closest to the TV.",
+    "head_goal": [
+      -3.85,
+      -0.85
+    ],
+    "rubric_goal": [
+      -3.9436,
+      -0.8613
+    ],
+    "dist_to_rubric": 0.0943,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "japanese_room",
+    "q": 0,
+    "leg": 0,
+    "text": "Go near the small table with a vase on it and then to the flowers near the jar.",
+    "head_goal": [
+      1.15,
+      0.45
+    ],
+    "rubric_goal": [
+      1.388,
+      0.6656
+    ],
+    "dist_to_rubric": 0.3211,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "japanese_room",
+    "q": 0,
+    "leg": 1,
+    "text": "Go near the small table with a vase on it and then to the flowers near the jar.",
+    "head_goal": [
+      1.05,
+      3.15
+    ],
+    "rubric_goal": [
+      1.858,
+      2.3708
+    ],
+    "dist_to_rubric": 1.1225,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "japanese_room",
+    "q": 1,
+    "leg": 0,
+    "text": "Go to the lantern closest to the fan decoration, then take the path near the wardrobe doors to the flowers on the display ledge.",
+    "head_goal": [
+      0.95,
+      0.35
+    ],
+    "rubric_goal": [
+      1.388,
+      0.3674
+    ],
+    "dist_to_rubric": 0.4383,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "japanese_room",
+    "q": 1,
+    "leg": 2,
+    "text": "Go to the lantern closest to the fan decoration, then take the path near the wardrobe doors to the flowers on the display ledge.",
+    "head_goal": [
+      -2.35,
+      3.85
+    ],
+    "rubric_goal": [
+      -1.5182,
+      3.9745
+    ],
+    "dist_to_rubric": 0.8411,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_1",
+    "q": 0,
+    "leg": 0,
+    "text": "Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.",
+    "head_goal": [
+      2.75,
+      -4.25
+    ],
+    "rubric_goal": [
+      1.7356,
+      -3.9172
+    ],
+    "dist_to_rubric": 1.0676,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_1",
+    "q": 0,
+    "leg": 1,
+    "text": "Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.",
+    "head_goal": [
+      -1.15,
+      3.05
+    ],
+    "rubric_goal": [
+      -0.9164,
+      3.0404
+    ],
+    "dist_to_rubric": 0.2338,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_1",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go near the lamp closest to the black chair, then take the path between the sofa and the round tables, and stop at the cabinet with a picture above it.",
+    "head_goal": [
+      -1.15,
+      3.05
+    ],
+    "rubric_goal": [
+      -1.7304,
+      3.0404
+    ],
+    "dist_to_rubric": 0.5805,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_1",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go near the lamp closest to the black chair, then take the path between the sofa and the round tables, and stop at the cabinet with a picture above it.",
+    "head_goal": [
+      -3.25,
+      -6.55
+    ],
+    "rubric_goal": [
+      -2.2339,
+      -5.5438
+    ],
+    "dist_to_rubric": 1.43,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_2",
+    "q": 0,
+    "leg": 0,
+    "text": "Go to the microwave on the kitchen counter and then go to the crystal ball decoration on the shelf near the TV.",
+    "head_goal": [
+      -0.25,
+      3.85
+    ],
+    "rubric_goal": [
+      -0.1717,
+      4.3795
+    ],
+    "dist_to_rubric": 0.5353,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_2",
+    "q": 0,
+    "leg": 1,
+    "text": "Go to the microwave on the kitchen counter and then go to the crystal ball decoration on the shelf near the TV.",
+    "head_goal": [
+      1.95,
+      -1.45
+    ],
+    "rubric_goal": [
+      2.5119,
+      -1.5382
+    ],
+    "dist_to_rubric": 0.5688,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_2",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go to the chair near the window, then stop at the soccer ball near the couch, avoiding the path between the TV and the tea table.",
+    "head_goal": [
+      -0.85,
+      2.75
+    ],
+    "rubric_goal": [
+      -1.4983,
+      1.5009
+    ],
+    "dist_to_rubric": 1.4073,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_2",
+    "q": 1,
+    "leg": 1,
+    "text": "First, go to the chair near the window, then stop at the soccer ball near the couch, avoiding the path between the TV and the tea table.",
+    "head_goal": [
+      1.35,
+      -2.15
+    ],
+    "rubric_goal": [
+      2.8663,
+      -6.1884
+    ],
+    "dist_to_rubric": 4.3137,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_3",
+    "q": 0,
+    "leg": 1,
+    "text": "Take the path near the TV and go to the pillow farthest from the lamp.",
+    "head_goal": [
+      2.45,
+      1.35
+    ],
+    "rubric_goal": [
+      0.6108,
+      -2.3605
+    ],
+    "dist_to_rubric": 4.1413,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_3",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go near the stool, then take the path near the cabinet, and stop at the bowl on the table.",
+    "head_goal": [
+      1.55,
+      1.35
+    ],
+    "rubric_goal": [
+      1.6464,
+      1.2746
+    ],
+    "dist_to_rubric": 0.1224,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_3",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go near the stool, then take the path near the cabinet, and stop at the bowl on the table.",
+    "head_goal": [
+      6.85,
+      -6.65
+    ],
+    "rubric_goal": [
+      5.3667,
+      -4.2474
+    ],
+    "dist_to_rubric": 2.8236,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_4",
+    "q": 0,
+    "leg": 0,
+    "text": "Go near the chair closest to the bookcase and stop at the table with the flowers on it.",
+    "head_goal": [
+      -3.05,
+      0.65
+    ],
+    "rubric_goal": [
+      -3.1786,
+      1.3705
+    ],
+    "dist_to_rubric": 0.7319,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_4",
+    "q": 0,
+    "leg": 1,
+    "text": "Go near the chair closest to the bookcase and stop at the table with the flowers on it.",
+    "head_goal": [
+      -0.75,
+      -0.95
+    ],
+    "rubric_goal": [
+      -1.172,
+      -0.6394
+    ],
+    "dist_to_rubric": 0.524,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_4",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go near the fireplace, then go to the window closest to the bookcase, and stop at the chair farthest from the mirror.",
+    "head_goal": [
+      -0.75,
+      -0.95
+    ],
+    "rubric_goal": [
+      -1.227,
+      -3.7255
+    ],
+    "dist_to_rubric": 2.8162,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_4",
+    "q": 1,
+    "leg": 1,
+    "text": "First, go near the fireplace, then go to the window closest to the bookcase, and stop at the chair farthest from the mirror.",
+    "head_goal": [
+      -3.65,
+      -1.25
+    ],
+    "rubric_goal": [
+      -4.8861,
+      -1.3349
+    ],
+    "dist_to_rubric": 1.239,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "livingroom_4",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go near the fireplace, then go to the window closest to the bookcase, and stop at the chair farthest from the mirror.",
+    "head_goal": [
+      -3.05,
+      0.65
+    ],
+    "rubric_goal": [
+      -3.1786,
+      0.7189
+    ],
+    "dist_to_rubric": 0.1459,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "loft",
+    "q": 0,
+    "leg": 0,
+    "text": "Go to the cup near the TV remote and avoid the path near the cabinet.",
+    "head_goal": [
+      -0.15,
+      -0.25
+    ],
+    "rubric_goal": [
+      6.3976,
+      2.9133
+    ],
+    "dist_to_rubric": 7.2717,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "loft",
+    "q": 1,
+    "leg": 0,
+    "text": "Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.",
+    "head_goal": [
+      -1.15,
+      0.65
+    ],
+    "rubric_goal": [
+      -1.279,
+      0.97
+    ],
+    "dist_to_rubric": 0.345,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "loft",
+    "q": 1,
+    "leg": 2,
+    "text": "Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.",
+    "head_goal": [
+      -0.15,
+      -1.35
+    ],
+    "rubric_goal": [
+      6.8771,
+      -2.356
+    ],
+    "dist_to_rubric": 7.0988,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "office_1",
+    "q": 0,
+    "leg": 0,
+    "text": "Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.",
+    "head_goal": [
+      1.05,
+      -0.25
+    ],
+    "rubric_goal": [
+      4.8111,
+      1.1368
+    ],
+    "dist_to_rubric": 4.0086,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "office_1",
+    "q": 0,
+    "leg": 1,
+    "text": "Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.",
+    "head_goal": [
+      -3.45,
+      -3.95
+    ],
+    "rubric_goal": [
+      -3.3617,
+      -4.28
+    ],
+    "dist_to_rubric": 0.3416,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "office_1",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go near the potted plant on the shelf, then take the path between the two tables, and stop at the bench closest to the map wall decal.",
+    "head_goal": [
+      -0.45,
+      -0.05
+    ],
+    "rubric_goal": [
+      0.1952,
+      1.2025
+    ],
+    "dist_to_rubric": 1.4089,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "office_1",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go near the potted plant on the shelf, then take the path between the two tables, and stop at the bench closest to the map wall decal.",
+    "head_goal": [
+      0.85,
+      -3.85
+    ],
+    "rubric_goal": [
+      1.593,
+      -3.8636
+    ],
+    "dist_to_rubric": 0.7431,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "office_2",
+    "q": 0,
+    "leg": 0,
+    "text": "Go near the potted plant on the cabinet and stop at the window closest to the clock.",
+    "head_goal": [
+      4.55,
+      -1.25
+    ],
+    "rubric_goal": [
+      4.518,
+      0.21
+    ],
+    "dist_to_rubric": 1.4603,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "office_2",
+    "q": 0,
+    "leg": 1,
+    "text": "Go near the potted plant on the cabinet and stop at the window closest to the clock.",
+    "head_goal": [
+      5.05,
+      2.65
+    ],
+    "rubric_goal": [
+      4.9055,
+      4.5747
+    ],
+    "dist_to_rubric": 1.9301,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "office_2",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go to the trash can near the cabinet, then go to the folder on the cabinet closest to the whiteboard, and finally, to the door near the exit sign.",
+    "head_goal": [
+      2.25,
+      -0.25
+    ],
+    "rubric_goal": [
+      2.2652,
+      -0.3414
+    ],
+    "dist_to_rubric": 0.0926,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "office_2",
+    "q": 1,
+    "leg": 1,
+    "text": "First, go to the trash can near the cabinet, then go to the folder on the cabinet closest to the whiteboard, and finally, to the door near the exit sign.",
+    "head_goal": [
+      5.05,
+      2.65
+    ],
+    "rubric_goal": [
+      5.1268,
+      3.1395
+    ],
+    "dist_to_rubric": 0.4955,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "office_2",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go to the trash can near the cabinet, then go to the folder on the cabinet closest to the whiteboard, and finally, to the door near the exit sign.",
+    "head_goal": [
+      5.55,
+      -1.75
+    ],
+    "rubric_goal": [
+      6.608,
+      -0.8907
+    ],
+    "dist_to_rubric": 1.363,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "studio",
+    "q": 0,
+    "leg": 0,
+    "text": "Go to the vases on the cabinet below the TV and stop at the guitar near the couch.",
+    "head_goal": [
+      3.75,
+      1.55
+    ],
+    "rubric_goal": [
+      3.7052,
+      2.9196
+    ],
+    "dist_to_rubric": 1.3704,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "studio",
+    "q": 0,
+    "leg": 1,
+    "text": "Go to the vases on the cabinet below the TV and stop at the guitar near the couch.",
+    "head_goal": [
+      3.35,
+      -0.25
+    ],
+    "rubric_goal": [
+      3.4351,
+      -2.0163
+    ],
+    "dist_to_rubric": 1.7684,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "studio",
+    "q": 1,
+    "leg": 0,
+    "text": "First, go to the vase closest to the easel, then, take the path between the couch and the table and stop at the window closest to the couch.",
+    "head_goal": [
+      1.55,
+      1.55
+    ],
+    "rubric_goal": [
+      1.8666,
+      1.5858
+    ],
+    "dist_to_rubric": 0.3186,
+    "anchor_cell_unreachable_plain_costmap": true
+  },
+  {
+    "scene": "studio",
+    "q": 1,
+    "leg": 2,
+    "text": "First, go to the vase closest to the easel, then, take the path between the couch and the table and stop at the window closest to the couch.",
+    "head_goal": [
+      1.45,
+      -1.15
+    ],
+    "rubric_goal": [
+      3.299,
+      -3.9285
+    ],
+    "dist_to_rubric": 3.3375,
+    "anchor_cell_unreachable_plain_costmap": true
+  }
+]
