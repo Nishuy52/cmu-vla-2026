@@ -1,0 +1,73 @@
+{
+  "current_ceiling": "35/72 = 0.4861",
+  "class_counts": {
+    "c_demonstrator_route": 7,
+    "b_offset_convention": 17,
+    "a_wrong_instance": 11,
+    "d_leg_decomposition": 2
+  },
+  "subclass_counts": {
+    "b1_push_offside": 10,
+    "a1_superlative_anchor": 5,
+    "a2_on_with_fallback": 5,
+    "b2_near_not_intol": 7,
+    "a3_bare_tiebreak": 1
+  },
+  "rule_changes_ranked": [
+    {
+      "id": "B1",
+      "name": "Fix _nearest_free_goal push direction/target (goal-projection convention)",
+      "n_legs": 10,
+      "location": "src/core/runner/gt_battery.py::_nearest_free_goal (also mirrored in core/heads/instruction.py's real-nav goto/via projection)",
+      "mechanism": "Anchor AABB is already within the 0.8 m arrival tolerance of the GT path, but the rubric's projected stop point (nearest-free-goal push off the anchor's own or a neighbouring obstacle's footprint edge, clearance 0.4 m, bounded 2.5 m push) lands the goal OUTSIDE tolerance. The push is blind to the GT path/approach direction -- it always moves to the nearest AABB edge, which is frequently the wrong side relative to where the demonstrator actually stood. Fix: bias the push toward the side of the anchor nearest the incoming leg's prior goal (or, cheaper, clamp push distance harder / prefer the raw centroid over a push that increases distance to any reachable point) so the projected stop point never moves further from the anchor's own reachable neighbourhood than the raw centroid did.",
+      "cumulative_legs_after_fix": 45,
+      "cumulative_ceiling_after_fix": 0.625
+    },
+    {
+      "id": "B2",
+      "name": "Widen/soften the arrival-tolerance convention for near-miss stop points",
+      "n_legs": 7,
+      "location": "src/core/groundtruth/scoring.py::LEG_ARRIVAL_TOL_M and/or gt_battery.py::_if_rubric_geometry goal projection",
+      "mechanism": "Anchor AABB itself sits 0.8-1.5 m from the GT path (not touching it), and the projected goal is not appreciably closer -- these are not push-direction bugs, they are a systematic 'the demonstrator stopped near but not AT the object, at a distance the current stop-point convention (project onto/off the AABB edge) does not reach.' Needs a convention change: project the goal toward the GT-path side of the room / a fixed standoff distance from the anchor along the approach direction, not just off the nearest colliding obstacle.",
+      "cumulative_legs_after_fix": 52,
+      "cumulative_ceiling_after_fix": 0.7222
+    },
+    {
+      "id": "A1",
+      "name": "Fix superlative-anchor (closest_to/farthest_from) resolution",
+      "n_legs": 5,
+      "location": "src/core/geometry/toolbox.py::resolve (superlative ranking) / closest_to / farthest_from",
+      "mechanism": "The clause's own reference anchor (e.g. 'the hookah', 'the easel', 'the chair') resolves ambiguously when the scene has multiple candidates for it, or the closest_to/farthest_from Euclidean ranking of survivors disagrees with which candidate the demonstrator actually treated as satisfying the superlative -- picking the wrong same-class instance outright. Needs per-case tracing of the reference-anchor resolution (is 'hookah' itself picking the wrong instance) before a single global fix can be specified; likely several distinct root causes bucketed under one symptom.",
+      "cumulative_legs_after_fix": 57,
+      "cumulative_ceiling_after_fix": 0.7917
+    },
+    {
+      "id": "A2",
+      "name": "Fix ON/WITH relation-clause fallback ranking",
+      "n_legs": 5,
+      "location": "src/core/geometry/toolbox.py::resolve / on() / _relaxed_relation_order",
+      "mechanism": "A residual instance of the same on()/with() hard-gate-vs-soft-score gap documented for issue #59 (7-leg bucket, since partly fixed): the relation clause still fails as a HARD filter for the correct candidate (footprint/height edge cases) and the category-only fallback's soft ranking (_relaxed_relation_order) still does not consistently prefer the geometrically-correct candidate. Needs auditing the specific on()/with() failures per leg (chinese_room tea table, home_building_1 coffee table, home_building_2 magazine-on-ottoman, japanese_room table-with-vase, studio vase-on-cabinet) to find the next edge case the #59 fix didn't cover.",
+      "cumulative_legs_after_fix": 62,
+      "cumulative_ceiling_after_fix": 0.8611
+    },
+    {
+      "id": "D1",
+      "name": "Redefine corridor_between leg arrival point (not the raw gate midpoint)",
+      "n_legs": 2,
+      "location": "src/core/geometry/toolbox.py::corridor_gate + gt_battery.py::_if_rubric_geometry (corridor_between goal)",
+      "mechanism": "Both of a corridor leg's anchors can sit right on the GT path (AABB dist 0.0 m and ~1.4-1.8 m) while the straight-line MIDPOINT between them is 1.7-1.9 m off the path -- the demonstrator threaded the gap at an angle, not through the segment midpoint. Fix: score corridor_between legs by whether the GT path crosses the gate SEGMENT (or a widened gate band) anywhere, not by distance to its midpoint; or move the rubric goal to the path's actual closest crossing point on the segment.",
+      "cumulative_legs_after_fix": 64,
+      "cumulative_ceiling_after_fix": 0.8889
+    },
+    {
+      "id": "A3",
+      "name": "Fix bare-noun category tie-break (no relation clause at all)",
+      "n_legs": 1,
+      "location": "src/core/geometry/toolbox.py::_tier_priority_order",
+      "mechanism": "livingroom_3's 'the cabinet' (no disambiguating clause in this leg) resolves via plain tier-priority/instance-id tie-break among multiple same-class cabinets; the correct one (a TV cabinet, per the scene's role in the sentence) is not the top-ranked survivor. A single-leg symptom; not enough evidence here to prescribe a general rule beyond 'when multiple bare-noun survivors exist, prefer the one closest to elsewhere already established in the route' as a candidate heuristic.",
+      "cumulative_legs_after_fix": 65,
+      "cumulative_ceiling_after_fix": 0.9028
+    }
+  ],
+  "achievable_ceiling": "65/72 = 0.9028"
+}
