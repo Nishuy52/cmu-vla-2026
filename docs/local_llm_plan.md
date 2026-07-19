@@ -85,9 +85,10 @@ Two regimes, two model sizes:
    real tiles/panos extracted from the recorded bags (perception tooling
    already crops tiles) with known GT from `object_list.txt`: hit/false
    rates per checkpoint per model size.
-3. Output: a per-checkpoint enable matrix for the local regime (e.g.
-   "CP1 on, CP4 on, CP2 on only with 7B, CP5 off") + measured latency
-   ledger entries.
+3. Output: a per-checkpoint enable matrix for the local regime — **MEASURED
+   19 Jul: ALL OFF for the local 3B** (CP1 floor wins; CP2 blind+over-cap;
+   CP3 vetoes real anchors; CP5 insufficient evidence) — authoritative
+   table + evidence in reports/local_llm_phase2/vision_checkpoints.md.
    Exit: documented matrix + battery deltas committed to reports/.
 
 ### Phase 3 — live integration, IN-IMAGE serving (~1-2 sessions; after

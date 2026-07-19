@@ -1,0 +1,6 @@
+{"scene": "japanese_room_q1", "n_calls": 8, "n_degenerate": 12, "n_reloads": 8}
+{"scene": "office_1_q1", "n_calls": 8, "n_degenerate": 9, "n_reloads": 6}
+{"scene": "livingroom_1_tour", "n_calls": 8, "n_degenerate": 12, "n_reloads": 8}
+{"scene": "japanese_room_q1", "n_calls": 12, "n_degenerate": 15, "n_reloads": 10}
+{"scene": "office_1_q1", "n_calls": 12, "n_degenerate": 0, "n_reloads": 0}
+{"scene": "livingroom_1_tour", "n_calls": 12, "n_degenerate": 15, "n_reloads": 10}
