@@ -12,6 +12,7 @@ function of `seed`.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -68,6 +69,11 @@ class GTObject:
     #: on a cabinet, a vase on a shelf) carries its real base, so the terrain mirror can
     #: tell floor obstacles from overhangs the vehicle drives beside/under (IF-F2/H13).
     cz: float = 0.0
+    #: Footprint yaw, radians about +Z, in the SAME convention as
+    #: ``core.groundtruth.loader.obb_to_aabb`` (world = R(heading) @ local + centre).
+    #: 0.0 (the default) is an axis-aligned box — every pre-existing caller (that never
+    #: passed a heading) is unaffected. See :meth:`footprint_contains`.
+    heading: float = 0.0
 
     @property
     def aabb_min(self) -> np.ndarray:
@@ -82,9 +88,26 @@ class GTObject:
         )
 
     def footprint_contains(self, x: float, y: float) -> bool:
-        return (
-            abs(x - self.cx) <= self.sx / 2 and abs(y - self.cy) <= self.sy / 2
-        )
+        """Point-in-footprint test — exact rotated-rectangle test when ``heading``
+        is non-zero (issue #77 Pre-Stage 1a: rasterize the true OBB footprint instead
+        of its AABB hull), axis-aligned when it is not.
+
+        At ``heading == 0.0`` this takes the ``dx, dy`` branch with no trig call at
+        all, so it is bit-for-bit the pre-existing axis-aligned test — the regression
+        guard for unrotated objects (byte-identical stamps).
+        """
+        dx = x - self.cx
+        dy = y - self.cy
+        if self.heading:
+            cos_h, sin_h = math.cos(self.heading), math.sin(self.heading)
+            # Inverse-rotate the world-frame offset into the box's local frame
+            # (world = R(heading) @ local, so local = R(heading)^-1 @ world =
+            # R(-heading) @ world).
+            lx = cos_h * dx + sin_h * dy
+            ly = -sin_h * dx + cos_h * dy
+        else:
+            lx, ly = dx, dy
+        return abs(lx) <= self.sx / 2 and abs(ly) <= self.sy / 2
 
 
 class SyntheticScene:
@@ -143,14 +166,18 @@ class SyntheticScene:
         sy: float = 0.5,
         sz: float = DEFAULT_OBJ_HEIGHT,
         cz: float = 0.0,
+        heading: float = 0.0,
     ) -> GTObject:
         """Place a labeled box centred at (x, y) with full extents (sx, sy, sz).
 
         ``cz`` is the base height (z of the underside above the floor); 0.0 keeps the
-        legacy floor-mounted behaviour. Returns the created :class:`GTObject`.
+        legacy floor-mounted behaviour. ``heading`` (radians about +Z) rotates the
+        footprint; 0.0 (the default) keeps the legacy axis-aligned behaviour. Returns
+        the created :class:`GTObject`.
         """
         obj = GTObject(label=label.strip().lower(), cx=float(x), cy=float(y),
-                       sx=float(sx), sy=float(sy), sz=float(sz), cz=float(cz))
+                       sx=float(sx), sy=float(sy), sz=float(sz), cz=float(cz),
+                       heading=float(heading))
         self.objects.append(obj)
         return obj
 
