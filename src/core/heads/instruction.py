@@ -106,6 +106,28 @@ _PROVISIONAL_STEPS = frozenset(
     {"drop_relation", "category_only", "drop_disambiguator", "relax_attributes"}
 )
 
+# Pre-grounding-movement plan, Stage 3 (docs/proposals/pre_grounding_movement_plan.md
+# §1(3), decision 3) — goal-credibility withhold gate. A GOTO/VIA_NEAR leg's resolved
+# goal (``_GroundedLeg.goal_clamp_m``) can sit far from its anchor's actual centroid
+# when the anchor lives in a pocket the reachable-mask BFS has to clamp away from (an
+# unreachable/pinched anchor cell snaps to the nearest reachable cell instead, see
+# ``_goto_point``) or, for VIA_NEAR, when no compliant "near" placement is reachable.
+# Driving to a goal that is farther than ARRIVAL_TOL_M from the anchor centroid can
+# never earn scoring credit for that leg (the rubric credits arrival only within
+# ARRIVAL_TOL_M of the centroid — the same rationale documented above for
+# VIA_NEAR_CLEARANCE_M). ARRIVAL_TOL_M itself is therefore the credibility bar:
+# parameter-free (no new tunable), derived from the existing constant, exactly as
+# decision 3 calls for. A clamp within tolerance is exactly as good as landing on the
+# anchor for scoring purposes; a clamp beyond it cannot score, so committing it isn't
+# worth stopping exploration for.
+GOAL_CLAMP_CREDIBILITY_BAR_M: float = ARRIVAL_TOL_M
+
+# Stage 3 — cap on re-ground "improvement" rebuilds per question (see
+# ``_maybe_reground_rebuild``), separate from MAX_REPLANS_PER_QUESTION so improvement
+# rebuilds triggered by better geometry can never starve a stall/no-LOS/capsule replan
+# of its own budget.
+MAX_REGROUND_REBUILDS: int = 2
+
 
 from typing import Any, Callable
 
@@ -141,6 +163,13 @@ class _GroundedLeg:
     #: forced-assembly time pressure. A very large default keeps an ungrounded leg
     #: (geom is None, min_n_obs never set) from spuriously gating a shorter prefix.
     min_n_obs: int = 1 << 30
+    #: Stage 3 (pre-grounding movement plan §1(3)) — straight-line distance from this
+    #: leg's resolved goal (``geom``) to its primary anchor's centroid, recorded by
+    #: ``_goto_point``/``_via_point`` via ``_ground_one``. ``None`` for CORRIDOR_BETWEEN
+    #: legs (no single goal point to clamp) and for any leg whose geometry never
+    #: resolved. Feeds Gate 3 in ``_committable_prefix_len`` (withhold an uncreditable
+    #: clamp) and the re-ground improvement trigger in ``_maybe_reground_rebuild``.
+    goal_clamp_m: float | None = None
 
 
 @dataclass
@@ -196,6 +225,14 @@ class InstructionHead:
     #: stamped capsule, so we re-plan on ENTRY (clear->violated) rather than every tick a
     #: legitimately-engulfed start stays inside (the recovery path already drives it out).
     _in_capsule: bool = False
+    #: Stage 3 — ``goal_clamp_m`` per committed leg index, snapshotted at the moment its
+    #: route was (re)built (``_snapshot_committed_clamp``). Compared against the current
+    #: ``self._legs`` clamp on every tick to detect material improvement
+    #: (``_maybe_reground_rebuild``).
+    _committed_clamp_m: dict[int, float] = field(default_factory=dict)
+    #: Stage 3 — count of re-ground improvement rebuilds this question, capped at
+    #: MAX_REGROUND_REBUILDS (separate from ``_replans``/MAX_REPLANS_PER_QUESTION).
+    _reground_rebuilds: int = 0
 
     def __post_init__(self) -> None:
         # Backward compat: the old ``(plan, leg_index, summary) -> bool`` seam is detected
@@ -223,6 +260,10 @@ class InstructionHead:
         self._pose = pose
         self._ingest_terrain(io, pose)
         self._ground_legs(scene)
+        # Stage 3 (pre-grounding movement plan §1(3)): re-grounding an already-committed
+        # leg from the current pose can reveal a materially better goal than the one
+        # driven on — rebuild (guarded) to adopt it before considering prefix growth.
+        self._maybe_reground_rebuild(scene)
 
         # (Re)build/extend the committed route to cover the longest grounded prefix.
         # A later leg grounding after the first build extends the drive (H3c); until any
@@ -298,9 +339,15 @@ class InstructionHead:
             )
         runner_up = self._resolve_anchor(leg.anchors[0], scene, prev_xy)[1]
         min_n_obs = min(r.n_obs for r in recs)
+        goal_clamp_m = None
+        if leg.kind is not LegKind.CORRIDOR_BETWEEN:
+            anchor_c = TB.P._as3(recs[0].centroid)
+            goal_clamp_m = math.hypot(
+                geom[0] - float(anchor_c[0]), geom[1] - float(anchor_c[1])
+            )
         return _GroundedLeg(
             leg.kind, grounded, geom, nouns, record=recs[0], runner_up=runner_up,
-            provisional=provisional, min_n_obs=min_n_obs,
+            provisional=provisional, min_n_obs=min_n_obs, goal_clamp_m=goal_clamp_m,
         )
 
     def _resolve_leg_anchors(
@@ -617,13 +664,19 @@ class InstructionHead:
     def _committable_prefix_len(self) -> int:
         """The grounded-prefix length we will actually commit to the route this tick.
 
-        Two independent withhold gates apply, in order:
+        Three independent withhold gates apply, in order:
 
         1. Issue #33 — single-observation floor: the prefix is first truncated at the
            earliest leg backed by fewer than MIN_COMMIT_OBS observations (n_obs == 1
            legs are PLANNED — geometry already computed by ``_ground_legs`` — but not
            COMMITTED), unless the T-90 forced-assembly gate has been reached.
-        2. H4c — provisional terminal: if the (obs-gated) prefix reaches the FINAL route
+        2. Stage 3 (pre-grounding movement plan §1(3)) — goal-credibility floor: the
+           obs-gated prefix is further truncated at the earliest GOTO/VIA_NEAR leg whose
+           resolved goal was clamped more than GOAL_CLAMP_CREDIBILITY_BAR_M away from its
+           anchor centroid (an uncreditable clamp), unless budget/forced-assembly
+           pressure has already forced the commit — the identical override pattern as
+           H4c/#33 (see ``_clamp_gated_prefix_len``).
+        3. H4c — provisional terminal: if the (gated) prefix reaches the FINAL route
            leg and that terminal was resolved via a relaxation rung, hold it back (drive
            only the legs before it) until budget pressure forces the commit, so
            exploration can still find the missing disambiguator/anchor. Non-terminal
@@ -631,11 +684,35 @@ class InstructionHead:
            banked regardless.
         """
         n = self._obs_gated_prefix_len(self._grounded_prefix_len())
+        n = self._clamp_gated_prefix_len(n)
         if n == 0 or n < len(self._legs):
             return n  # terminal not yet in the prefix; nothing to withhold
         terminal = self._legs[-1]
         if terminal.provisional and not self._commit_forced():
             return n - 1  # withhold the provisional terminal; drive the rest
+        return n
+
+    def _clamp_gated_prefix_len(self, n: int) -> int:
+        """Stage 3 Gate 3: truncate a geometry/obs-gated prefix of length ``n`` at the
+        first GOTO/VIA_NEAR leg whose ``goal_clamp_m`` exceeds
+        GOAL_CLAMP_CREDIBILITY_BAR_M — driving to that clamped goal can never earn
+        scoring credit, so it is PLANNED (geometry stays in ``self._legs``, feeding
+        explore affinity) but withheld from the COMMITTED prefix.
+
+        Uses the SAME override pair as H4c/#33 — ``_commit_forced()`` (budget pressure;
+        defaults True with no ``budget_frac`` hook) or ``_forced_assembly_reached()``
+        (T-90 time pressure; defaults False with no ``forced_assembly`` hook) — so with
+        both hooks unconfigured (``None``), ``_commit_forced()`` is True and this gate
+        never withholds: all current behaviour is byte-preserved by default.
+        CORRIDOR_BETWEEN legs have no single goal point (``goal_clamp_m`` stays
+        ``None``) and are never gated here.
+        """
+        if self._commit_forced() or self._forced_assembly_reached():
+            return n
+        for i in range(n):
+            clamp = self._legs[i].goal_clamp_m
+            if clamp is not None and clamp > GOAL_CLAMP_CREDIBILITY_BAR_M:
+                return i
         return n
 
     def _obs_gated_prefix_len(self, n: int) -> int:
@@ -686,6 +763,17 @@ class InstructionHead:
         legs ground. Rebuilds from ``start_xy`` whenever the committable prefix grows
         (H3c partial-route drive); a shrinking/steady prefix leaves the follower intact.
         """
+        if self._follower is None and self._costmap is None:
+            # Stage 3 Gate 3 (goal-credibility withhold) needs a reachable-mask costmap
+            # to know a leg's true ``goal_clamp_m`` — before any route has ever been
+            # built there is none yet, so the grounding pass ``advance`` already ran
+            # this tick used the pre-costmap ``_project_free`` fallback instead of the
+            # real BFS-reachable clamp. Probe one now so the very first commit decision
+            # sees the SAME geometry the driven route itself will use. Idempotent
+            # (mirrors ``_stamp_avoids``) — ``_build_route``/``_stamp_ground_plan``
+            # redoes this exact stamp+ground once more before actually adopting a
+            # route, so this changes no final geometry, only what Gate 3 sees.
+            self._refresh_costmap_and_geometry(scene)
         want = self._committable_prefix_len()
         if want == 0:
             return  # nothing grounded yet — caller (ExploreHead) explores this tick
@@ -704,24 +792,33 @@ class InstructionHead:
             return  # already driving a route covering (at least) this prefix
         self._build_route(start_xy, scene, want)
 
-    def _build_route(self, start_xy: tuple[float, float], scene, prefix_len: int) -> None:
-        """Stamp avoids ONCE, plan the leading ``prefix_len`` ordered legs, wrap in a
-        BreadcrumbFollower.
-
-        Plans only the grounded prefix (partial-route drive, H3c); the route is rebuilt
-        with a longer prefix as later legs ground. ``_stamp_avoids`` is idempotent over
-        specs, so a rebuild re-stamps any avoid anchors that have since grounded.
-        """
-        prefix = self._legs[:prefix_len]
-        if not prefix or any(l.geom is None for l in prefix):
-            return
+    def _refresh_costmap_and_geometry(self, scene) -> None:
+        """Rebuild the costmap from the current grid, re-stamp avoids, and re-ground
+        every leg against it. ``_stamp_avoids`` is idempotent over specs (re-stamps any
+        avoid anchor that has since grounded); re-grounding is likewise safe to run
+        speculatively. Shared by ``_stamp_ground_plan`` (the actual build/rebuild path)
+        and ``_maybe_build_or_extend_route``'s Gate 3 probe (see its docstring)."""
         self._costmap = Costmap(self.grid)
         self._stamp_avoids(scene)
-        # geometry may need re-projection now the costmap exists.
         self._ground_legs(scene)
+
+    def _stamp_ground_plan(
+        self, start_xy: tuple[float, float], scene, prefix_len: int
+    ) -> tuple[list[tuple[float, float]], list[int]] | None:
+        """Stamp avoids fresh, re-ground (geometry may need re-projection now the
+        costmap exists), and A*-plan the leading ``prefix_len`` ordered legs.
+
+        Returns ``(path, leg_bounds)``, or ``None`` if the prefix lacks geometry or
+        ``plan_through`` cannot reach it. This always mutates ``self._costmap``/
+        ``self._legs``, but never touches ``self._follower``/``self._driven_prefix``:
+        callers decide whether/how to adopt the routing result (``_build_route`` always
+        adopts, falling back to ``_recover_path`` on ``None``; the Stage 3 guarded
+        re-ground rebuild adopts ONLY on success).
+        """
+        self._refresh_costmap_and_geometry(scene)
         prefix = self._legs[:prefix_len]
         if any(l.geom is None for l in prefix):
-            return
+            return None
         legs = [self._leg_tuple(l) for l in prefix]
         path, leg_bounds = plan_through(
             self._costmap,
@@ -733,11 +830,31 @@ class InstructionHead:
             record_leg_bounds=True,
         )
         if path is None:
+            return None
+        return path, leg_bounds
+
+    def _build_route(self, start_xy: tuple[float, float], scene, prefix_len: int) -> None:
+        """Stamp avoids ONCE, plan the leading ``prefix_len`` ordered legs, wrap in a
+        BreadcrumbFollower.
+
+        Plans only the grounded prefix (partial-route drive, H3c); the route is rebuilt
+        with a longer prefix as later legs ground.
+        """
+        prefix = self._legs[:prefix_len]
+        if not prefix or any(l.geom is None for l in prefix):
+            return
+        result = self._stamp_ground_plan(start_xy, scene, prefix_len)
+        if result is not None:
+            path, leg_bounds = result
+        else:
             # Unreachable with the hard capsules in place: drive to the nearest legal
             # point to the terminal goal and answer from there (architecture row 4).
             # The recovery path MUST be planned through the costmap — never a raw
             # straight segment, which could cut through a hard capsule (the very
             # violation the capsule exists to prevent).
+            prefix = self._legs[:prefix_len]
+            if any(l.geom is None for l in prefix):
+                return
             path = self._recover_path(start_xy, prefix)
             # Issue #74: the recovery path collapses the ordered legs into a single
             # best-effort segment to the nearest legal point — it no longer threads
@@ -750,6 +867,93 @@ class InstructionHead:
             path=path, costmap=self._costmap, leg_goal_indices=leg_bounds
         )
         self._driven_prefix = prefix_len
+        self._snapshot_committed_clamp(prefix_len)
+
+    def _snapshot_committed_clamp(self, prefix_len: int) -> None:
+        """Stage 3 (§1(3)) — record ``goal_clamp_m`` for each committed leg at the
+        moment its route is (re)built, so a later re-ground can be compared against the
+        geometry that was actually driven on to detect material improvement (see
+        ``_maybe_reground_rebuild``)."""
+        self._committed_clamp_m = {
+            i: self._legs[i].goal_clamp_m
+            for i in range(prefix_len)
+            if self._legs[i].goal_clamp_m is not None
+        }
+
+    def _try_reground_rebuild(self, start_xy: tuple[float, float], scene, prefix_len: int) -> bool:
+        """Guarded rebuild for the Stage 3 re-ground improvement trigger: attempt
+        ``_stamp_ground_plan`` and adopt the new follower ONLY if ``plan_through``
+        succeeds. Never falls back to ``_recover_path`` — swapping an already-working,
+        already-threaded route for a least-bad beeline over an improvement signal would
+        cost more (earned threading, #77c) than the improvement is worth. Returns True
+        iff the rebuild was adopted."""
+        result = self._stamp_ground_plan(start_xy, scene, prefix_len)
+        if result is None:
+            return False
+        path, leg_bounds = result
+        self._terminal_xy = path[-1]
+        self._follower = BreadcrumbFollower(
+            path=path, costmap=self._costmap, leg_goal_indices=leg_bounds
+        )
+        self._driven_prefix = prefix_len
+        self._snapshot_committed_clamp(prefix_len)
+        return True
+
+    def _maybe_reground_rebuild(self, scene) -> None:
+        """Stage 3 (pre-grounding movement plan §1(3)) — while driving, re-grounding an
+        already-committed leg from the CURRENT (moved) pose can materially improve a
+        previously-clamped goal (more of the map is reachable/known now than when the
+        route was built). Detect that and rebuild the committed route to adopt it.
+
+        Eligible legs: GOTO/VIA_NEAR (``goal_clamp_m`` applies; corridor legs are
+        excluded — no single goal point and no clamp), index >= ``_leg_progress`` (never
+        touch a leg the drive has already passed), and not in ``_confirmed`` (never
+        rewrite an arrived leg, mirrors ``_mark_arrivals``). "Material" mirrors Gate 3:
+        improvement must exceed GOAL_CLAMP_CREDIBILITY_BAR_M (parameter-free, same bar).
+        Bounded by MAX_REGROUND_REBUILDS (separate from MAX_REPLANS_PER_QUESTION, so
+        stall/no-LOS/capsule replans are never starved by improvement rebuilds). Adoption
+        is guarded (``_try_reground_rebuild``): never swaps into ``_recover_path``.
+        Follower progress resets exactly like ``_replan`` (a fresh ``BreadcrumbFollower``
+        over the rebuilt path).
+        """
+        if self._follower is None or self._reground_rebuilds >= MAX_REGROUND_REBUILDS:
+            return
+        prefix_len = self._driven_prefix
+        if prefix_len == 0:
+            return
+        trigger_i = None
+        for i in range(self._leg_progress, prefix_len):
+            if i in self._confirmed:
+                continue
+            leg = self._legs[i]
+            if leg.kind not in (LegKind.GOTO, LegKind.VIA_NEAR):
+                continue
+            if leg.geom is None or leg.goal_clamp_m is None:
+                continue
+            old = self._committed_clamp_m.get(i)
+            if old is None:
+                continue
+            if old - leg.goal_clamp_m > GOAL_CLAMP_CREDIBILITY_BAR_M:
+                trigger_i = i
+                break
+        if trigger_i is None:
+            return
+        self._reground_rebuilds += 1
+        self._replan_events.append(
+            f"reground_rebuild #{self._reground_rebuilds} @pose={self._pose} leg={trigger_i}"
+        )
+        _LOG.info(
+            "IF reground rebuild #%d: leg %d goal_clamp_m improved; re-planning from "
+            "pose %s.",
+            self._reground_rebuilds,
+            trigger_i,
+            self._pose,
+        )
+        if self._try_reground_rebuild(self._pose, scene, prefix_len):
+            self._in_capsule = False  # recomputed against the new plan next tick
+        # else: the improvement isn't reachable through the hard capsules — keep driving
+        # the existing (already-working) follower unchanged; never strand on a failed
+        # guarded rebuild.
 
     def _recover_path(
         self, start_xy: tuple[float, float], prefix: list[_GroundedLeg] | None = None
