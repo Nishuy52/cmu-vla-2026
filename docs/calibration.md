@@ -35,6 +35,33 @@ Highest current fitting-risk items: GDINO question-pass threshold 0.25 (single-s
 fit, japanese_room probe - needs rule-1 validation), parser construction fixes
 #23/#25 (generator-template-derived, acceptable under rule 2).
 
+**G1 adjudication — GT-trajectory carve is mirror measurement fidelity, not
+tuning (20 Jul 2026):** the user granted Gate G1 of
+`docs/proposals/pre_grounding_movement_plan.md` for the Stage-1 GT-trajectory
+carve (`core.runner.gt_battery._carve_cells_along_trajectories` /
+`_GTCarvedScene`, issue #77). Evidence basis:
+`reports/mirror_truth_audit/audit.md` found, across **all 15 training
+scenes** (not a single-scene fit), 2,006 GT-trajectory-contradicted mirror
+cells — every scene's own GT reference trajectory drives through cells the
+mirror stamps solid, a direct self-contradiction of the mirror's own ground
+truth, independent of any question-generation or scoring choice. This is
+classified as **measurement fidelity** (the mirror's costmap must not
+disagree with the GT evidence it was built from), not a tuning decision,
+because: (a) the correction removes cells the scene's OWN GT trajectory
+physically drove through — GT evidence only, no external/invented threshold;
+(b) the carve radius is `core.nav.costmap.VEHICLE_RADIUS_M` (0.4 m), the
+existing physical vehicle-footprint constant already used everywhere else in
+the stack (costmap inflation, rubric goal clearance) — no new tunable
+introduced; (c) applied uniformly across all 15 scenes with the same rule,
+not swept or picked per-scene; (d) verified zero score regressions on a full
+75-question per-question diff (`reports/gt_battery_stage1_baseline` vs
+`reports/gt_battery_stage1_carve`) including individual scrutiny of the
+audit's 11 flagged regression-risk questions (all unchanged, still 1.0/full
+credit, zero violations). Constraint going forward: any future extension of
+this carve mechanism (a different radius, a different evidence source, a
+different scope) re-triggers this same GT-evidence-only / physical-radius /
+uniform-across-scenes bar and does NOT inherit this adjudication by default.
+
 **Wiring summary:** 64 fields total (geometry 18 · fusion 5 · tracker 2 · keyframe 3 ·
 nav 21 · budget 15). **Wireable today (constructor arg or function param): 53.**
 **Wiring TODO (module constant, needs a setter/param before a sweep can move it): 11.**

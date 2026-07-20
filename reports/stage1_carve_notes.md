@@ -83,4 +83,96 @@ with a fully clean (zero-diff) battery — commits standalone.
 
 ## Piece 2 — GT-trajectory carve
 
-TBD, see below for progress once started.
+**Mechanism.** New `_carve_cells_along_trajectories(if_traj, frame, *,
+radius_m=VEHICLE_RADIUS_M, cell_m=FLOOR_SPACING)`: for every point on every one
+of a scene's GT IF reference trajectories (mapped through the fitted frame),
+adds every lattice cell within `VEHICLE_RADIUS_M` (0.4 m, the existing
+`core.nav.costmap.VEHICLE_RADIUS_M` constant — no new tunable) to a carved
+set, using the same disc-offset construction `Costmap._inflate` uses and the
+same integer lattice `_derive_wall_cells`/`extra_wall_cells` already use.
+
+**Implementation choice — runner-side, with a minimal additive seam in
+`gt_battery.py` only (per user decision 2).** Two blocking sources needed
+carving:
+- **Derived-wall cells** (`extra_wall_cells`): a plain set difference,
+  `wall_cells = wall_cells - carved_cells`, done in `_synthetic_from_gt`
+  before constructing the scene. No new machinery — the carve just removes
+  entries from a set gt_battery.py already owns.
+- **Stamped-object cells**: `SyntheticScene.footprint_contains` is evaluated
+  analytically per grid point inside `terrain_patch()`, so there is no
+  pre-stamp set to subtract from without duplicating that lattice logic.
+  Runner-side-only would have meant re-implementing `_is_wall`/
+  `footprint_contains`'s per-point geometry test in `gt_battery.py` just to
+  know which points to null out before feeding them anywhere — an exact
+  duplication the user's decision explicitly allows a minimal seam to avoid.
+  Added `_GTCarvedScene(SyntheticScene)` (defined in `gt_battery.py`, core/
+  mocks/synthetic_scene.py itself untouched): overrides only `terrain_patch`
+  to re-check the BASE CLASS'S ALREADY-COMPUTED obstacle points against the
+  carve set and zero their intensity, post-generation — a pure subtractive
+  filter, not a new stamping path. `SyntheticScene.instances()` (feeds every
+  other head/rubric path, e.g. object grounding) is untouched, so a carved
+  cell never shrinks what a GT object IS, only what the MIRROR TERRAIN/
+  costmap says is drivable there.
+- Applied unconditionally (like `room_bounds`), independent of `--no-walls` —
+  GT-trajectory carving is a border/terrain-correctness fix, not the
+  interior-wall-realism feature that flag gates.
+
+**Unit tests** (`src/tests/runner/test_gt_battery.py`, `# issue #77 Stage 1
+(carve)` section, 7 tests): `_carve_cells_along_trajectories` empty without
+frame/trajectories and covers exactly the vehicle-radius disc; derived-wall
+cell removal via `_is_wall`; stamped-object terrain cleared at a carved cell
+while an un-carved cell in the SAME footprint stays solid; GT
+`InstanceRecord` AABB never shrinks; `carved_cells=None` byte-identical to
+the plain `SyntheticScene`; and an end-to-end `_drive_if_trajectory` test
+proving a carved corridor lets the driven path cross an otherwise-solid wall
+band that an un-carved run (the pre-existing routing test) must still detour
+around.
+
+**Battery diff (piece 1 + piece 2 combined).**
+- `reports/gt_battery_stage1_carve/` vs the pre-change baseline
+  (`reports/gt_battery_stage1_baseline/`): `if_rubric` 0.611 -> **0.744**,
+  `n_threading_violations` 3 -> 4, `n_avoid_violations` 0 -> 0 (unchanged).
+- Full per-question diff (all fields) over all 75 questions: **zero score
+  decreases anywhere** (checked `rubric_score`, `ordered_leg_credit`, `iou`,
+  `true_match` — every changed field only ever increased or stayed the
+  same). 9 questions gained (arabic_room, chinese_room, home_building_2 x2,
+  hotel_room_1, livingroom_4, loft, office_1, office_2, studio) — several
+  from partial credit to full 1.0.
+- One new threading violation: `home_building_2`'s "Take the path between the
+  sofa and the coffee table..." question's `corridor_between` leg 0 is now
+  REACHED (arrival tolerance met, previously the leg was never even
+  attempted because the route was blocked earlier) but the driven path
+  doesn't literally cross the sofa/coffee-table gate segment ("threading:
+  trajectory never crossed the gate segment") — a real, correctly-scored
+  rubric penalty (rubric_score for that question is 0.6667, not 1.0, an
+  IMPROVEMENT over the baseline's 0.3333, not a regression) that surfaces
+  only because the leg is reachable at all now. Flagged, not fixed here —
+  in scope for Stage 3 (route-quality behavior), out of scope for a
+  measurement-fidelity carve.
+- The audit's **11 flagged regression-risk questions**: individually
+  checked (scene + question text cross-referenced against
+  `reports/mirror_truth_audit/audit.json`'s per-scene `pocket.regression_risk`
+  lists) — every one is unchanged: still `rubric_score=1.0`, all legs
+  reached, zero threading/avoid violations, identical before and after.
+- **14-leg pool reachability** (`reports/issue77e_notes.md`'s
+  grounding-pose-BFS-disconnected pool): **10 of 14** legs now reach
+  `reached_in_order=true` (full arrival credit) — `studio` leg1, `arabic_room`
+  leg2, `office_2` leg1, `livingroom_4` leg0, `chinese_room` leg0,
+  `home_building_2` leg1 and leg2, `hotel_room_1` leg0, `office_1` leg0,
+  `loft` leg2. The remaining 4 (`chinese_room` leg1, `livingroom_2` leg1,
+  `arabic_room` leg0, `loft` leg0) are still short of arrival tolerance, but
+  3 of the 4 measurably closed distance (livingroom_2 4.31m -> 3.22m,
+  arabic_room 6.17m -> 5.69m, loft 6.84m -> **2.47m**) — `chinese_room` leg1
+  is unchanged (4.23m both), i.e. genuinely un-carvable from this mechanism
+  (its blocker isn't a GT-trajectory-contradicted cell).
+
+**Files touched:** `src/core/runner/gt_battery.py` (new
+`_carve_cells_along_trajectories`, `_GTCarvedScene`, `carved_cells` param
+threaded through `_synthetic_from_gt`/`_drive_if_path`/
+`_run_instruction_head`/`_drive_if_trajectory`/`score_scene`),
+`src/tests/runner/test_gt_battery.py` (7 new tests), `docs/calibration.md`
+(G1 adjudication entry, Generalization-protocol section).
+
+Net: piece 2 lands a substantial, GT-evidence-only, zero-regression IF gain
+(+0.133 aggregate rubric) on top of piece 1's clean border fix — commits
+standalone.

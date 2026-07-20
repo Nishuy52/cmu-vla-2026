@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from dataclasses import asdict, dataclass, field
@@ -41,7 +42,7 @@ import numpy as np
 
 from core.groundtruth import scoring as S
 from core.groundtruth.loader import GTScene, load_scene
-from core.interfaces import QType, WaypointCmd
+from core.interfaces import QType, TerrainPatch, WaypointCmd
 from core.mocks.mock_io import FakeClock, MockRobotIO
 from core.mocks.synthetic_scene import (
     FLOOR_SPACING,
@@ -49,6 +50,7 @@ from core.mocks.synthetic_scene import (
     Room,
     SyntheticScene,
 )
+from core.nav.costmap import VEHICLE_RADIUS_M
 from core.perception.scene_index import BasicSceneIndex
 from core.runner.provenance import collect_provenance
 
@@ -138,12 +140,107 @@ def _is_architectural_room_scale_aabb(
     )
 
 
+def _carve_cells_along_trajectories(
+    if_traj: "Sequence[np.ndarray | None] | None",
+    frame: "S.Frame2D | None",
+    *,
+    radius_m: float = VEHICLE_RADIUS_M,
+    cell_m: float = FLOOR_SPACING,
+) -> set[tuple[int, int]]:
+    """Lattice cells within ``radius_m`` of any point on any of the scene's GT IF
+    reference trajectories, mapped through the fitted sim->object ``frame`` (issue #77
+    Stage 1 GT-trajectory carve).
+
+    ``radius_m`` defaults to :data:`core.nav.costmap.VEHICLE_RADIUS_M` (the SAME
+    constant the real inflated costmap uses) — deliberately the existing physical
+    vehicle-radius constant, not a new tunable: a lattice cell within one vehicle
+    radius of a point the GT vehicle actually occupied cannot be solid, because the GT
+    vehicle's own body was there. Uses the same integer ``round(coord / cell_m)``
+    lattice as :func:`_derive_wall_cells`/``SyntheticScene._in_extra_wall_cells`` so
+    the returned set lines up with both the wall-cell lattice and the terrain grid.
+
+    Empty when there is no fitted frame or no trajectory to carve from — a scene with
+    neither GT evidence is carved not at all (the corridor is a per-scene, GT-derived
+    quantity, never a blanket assumption).
+    """
+    if frame is None or not if_traj:
+        return set()
+    r_cells = int(math.ceil(radius_m / cell_m))
+    offs = [
+        (dr, dc)
+        for dr in range(-r_cells, r_cells + 1)
+        for dc in range(-r_cells, r_cells + 1)
+        if dr * dr + dc * dc <= r_cells * r_cells
+    ]
+    carved: set[tuple[int, int]] = set()
+    for traj in if_traj:
+        if traj is None or traj.shape[0] == 0:
+            continue
+        mapped = frame.apply(np.asarray(traj, dtype=float)[:, :2])
+        ix = np.round(mapped[:, 0] / cell_m).astype(np.int64)
+        iy = np.round(mapped[:, 1] / cell_m).astype(np.int64)
+        for cx, cy in zip(ix.tolist(), iy.tolist()):
+            for dr, dc in offs:
+                carved.add((cx + dr, cy + dc))
+    return carved
+
+
+class _GTCarvedScene(SyntheticScene):
+    """:class:`SyntheticScene` with a GT-trajectory carve applied to its terrain
+    (issue #77 Stage 1) — runner-side-only exclusion seam per user decision 2 (the
+    plan's Open Decision 2): duplicating ``_is_wall``/``footprint_contains``'s lattice
+    logic here to carve object footprints would egregiously repeat it, so instead this
+    overrides :meth:`terrain_patch` to re-check the base class's ALREADY-COMPUTED
+    obstacle points against the carve set and clear their intensity, post-generation.
+    It stamps nothing new and duplicates no obstacle-membership logic — a pure
+    subtractive filter. Derived-wall cells are carved upstream instead (removed from
+    ``extra_wall_cells`` before construction, a plain set difference — see
+    :func:`_synthetic_from_gt`); this override's own job is exactly the residual the
+    task calls out: stamped-object cells, which have no pre-stamp set to subtract from
+    because ``footprint_contains`` is evaluated analytically per grid point, not from a
+    precomputed cell set.
+
+    Only :attr:`SyntheticScene.objects`' surface points feed instance perception
+    (:meth:`_object_surface_points`) — untouched here, so a carved cell still yields a
+    correct, un-shrunk GT ``InstanceRecord`` AABB; only the MIRROR TERRAIN/costmap the
+    planner's BFS/A* consult is carved, exactly matching the plan's scope (a mirror
+    measurement-fidelity fix, not a change to what the scene's objects ARE).
+    """
+
+    def __init__(self, *args, carved_cells: set[tuple[int, int]] | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.carved_cells = carved_cells or set()
+
+    def terrain_patch(self, *, extended: bool = False, t: float = 0.0) -> TerrainPatch:
+        patch = super().terrain_patch(extended=extended, t=t)
+        if not self.carved_cells or patch.points.size == 0:
+            return patch
+        pts = patch.points
+        obs_idx = np.nonzero(pts[:, 3] > 0.0)[0]
+        if obs_idx.size == 0:
+            return patch
+        # Only the (typically much smaller) obstacle subset needs a per-point lattice
+        # lookup — the free-floor majority of a terrain patch never touches the carve.
+        ix = np.round(pts[obs_idx, 0] / FLOOR_SPACING).astype(np.int64)
+        iy = np.round(pts[obs_idx, 1] / FLOOR_SPACING).astype(np.int64)
+        carve_local = np.fromiter(
+            ((int(x), int(y)) in self.carved_cells for x, y in zip(ix.tolist(), iy.tolist())),
+            dtype=bool, count=obs_idx.size,
+        )
+        if not carve_local.any():
+            return patch
+        pts = pts.copy()
+        pts[obs_idx[carve_local], 3] = 0.0
+        return TerrainPatch(t=patch.t, points=pts, extended=patch.extended)
+
+
 def _synthetic_from_gt(
     gt: GTScene,
     pad: float = 1.5,
     *,
     wall_cells: set[tuple[int, int]] | None = None,
     room_bounds: tuple[float, float, float, float] | None = None,
+    carved_cells: set[tuple[int, int]] | None = None,
 ) -> SyntheticScene:
     """Build a SyntheticScene that mirrors the GT AABBs (for the IF costmap).
 
@@ -170,11 +267,27 @@ def _synthetic_from_gt(
     :data:`ARCHITECTURAL_AABB_ROOM_FRACTION`) are NOT stamped as solid boxes: the raw
     box is a VLA-3D bounding-box-of-an-aggregate, not the real thin element, and
     stamping it solid seals interior area the room-scale box only happens to cover.
+
+    ``carved_cells`` (issue #77 Stage 1 GT-trajectory carve — see
+    :func:`_carve_cells_along_trajectories`) removes any derived-wall cell AND any
+    stamped-object cell in the given set from the mirror's terrain, regardless of what
+    would otherwise stamp them solid — GT reference trajectories physically drove
+    through that lattice cell, so whatever the mirror's derived geometry says about it
+    is contradicted by direct GT evidence. ``None``/empty reproduces the pre-carve
+    behaviour exactly (every pre-existing caller).
     """
     x0, y0, x1, y1 = _gt_footprint_bounds(gt, 0.0)
     room_w, room_h = x1 - x0, y1 - y0
 
-    sc = SyntheticScene(0, extra_wall_cells=wall_cells)
+    # Derived-wall cells: a plain set difference — carved cells simply aren't wall.
+    if carved_cells and wall_cells:
+        wall_cells = wall_cells - carved_cells
+
+    scene_cls = SyntheticScene if not carved_cells else _GTCarvedScene
+    sc_kwargs = dict(extra_wall_cells=wall_cells)
+    if carved_cells:
+        sc_kwargs["carved_cells"] = carved_cells
+    sc = scene_cls(0, **sc_kwargs)
     # Shift into non-negative coords is unnecessary — Room accepts arbitrary bounds.
     if room_bounds is not None:
         rx0, ry0, rx1, ry1 = room_bounds
@@ -423,6 +536,7 @@ def _drive_if_path(
     start_xy: tuple[float, float] | None = None,
     wall_cells: set[tuple[int, int]] | None = None,
     room_bounds: tuple[float, float, float, float] | None = None,
+    carved_cells: set[tuple[int, int]] | None = None,
 ) -> np.ndarray:
     """Plan an instruction-following path over the GT scene and return it as (N, 2).
 
@@ -446,7 +560,9 @@ def _drive_if_path(
     if plan.qtype is not QType.INSTRUCTION_FOLLOWING or not plan.route:
         return np.empty((0, 2), dtype=float)
 
-    sc = _synthetic_from_gt(gt, wall_cells=wall_cells, room_bounds=room_bounds)
+    sc = _synthetic_from_gt(
+        gt, wall_cells=wall_cells, room_bounds=room_bounds, carved_cells=carved_cells
+    )
     clk = FakeClock(0.0)
     if start_xy is not None:
         start_x, start_y = float(start_xy[0]), float(start_xy[1])
@@ -506,6 +622,7 @@ def _run_instruction_head(
     max_build_ticks: int,
     wall_cells: set[tuple[int, int]] | None = None,
     room_bounds: tuple[float, float, float, float] | None = None,
+    carved_cells: set[tuple[int, int]] | None = None,
 ):
     """Build a scene mirror + MockRobotIO and tick the InstructionHead until its route
     firms up. Returns ``(head, io, plan)`` (head is None when the question isn't IF)."""
@@ -516,7 +633,9 @@ def _run_instruction_head(
     if plan.qtype is not QType.INSTRUCTION_FOLLOWING or not plan.route:
         return None, None, plan
 
-    sc = _synthetic_from_gt(gt, wall_cells=wall_cells, room_bounds=room_bounds)
+    sc = _synthetic_from_gt(
+        gt, wall_cells=wall_cells, room_bounds=room_bounds, carved_cells=carved_cells
+    )
     clk = FakeClock(0.0)
     if start_xy is not None:
         start_x, start_y = float(start_xy[0]), float(start_xy[1])
@@ -543,6 +662,7 @@ def _drive_if_trajectory(
     start_xy: tuple[float, float] | None = None,
     wall_cells: set[tuple[int, int]] | None = None,
     room_bounds: tuple[float, float, float, float] | None = None,
+    carved_cells: set[tuple[int, int]] | None = None,
 ) -> np.ndarray:
     """Simulate the DRIVEN trajectory (IF-F2), returning the pose stream as (N, 2).
 
@@ -578,7 +698,7 @@ def _drive_if_trajectory(
     """
     head, io, plan = _run_instruction_head(
         text, gt, idx, start_xy=start_xy, max_build_ticks=max_build_ticks,
-        wall_cells=wall_cells, room_bounds=room_bounds,
+        wall_cells=wall_cells, room_bounds=room_bounds, carved_cells=carved_cells,
     )
     if head is None:
         return np.empty((0, 2), dtype=float)
@@ -1501,6 +1621,12 @@ def score_scene(
     # (a border-correctness fix, not an interior-wall-realism feature) so it always
     # applies once a frame is fit, regardless of `walls`.
     room_bounds = _scene_room_bounds(gt, frame_for_walls, if_traj)
+    # Issue #77 Stage 1 GT-trajectory carve: remove any derived-wall or stamped-object
+    # cell within one vehicle radius of a point any of the scene's own GT reference
+    # trajectories actually drove through — GT evidence only, same trusted-fit gate,
+    # uniform across all 15 scenes, no new tunable (VEHICLE_RADIUS_M is the existing
+    # physical constant). Independent of `walls` for the same reason room_bounds is.
+    carved_cells = _carve_cells_along_trajectories(if_traj, frame_for_walls)
 
     from core.parsing.regex_tier import parse_regex as _parse_regex_if
 
@@ -1531,7 +1657,7 @@ def score_scene(
         # Frechet/coverage are carried through the rubric as SECONDARY diagnostics only.
         driven = _drive_if_trajectory(
             text, gt, idx, start_xy=spawn_xy, wall_cells=wall_cells,
-            room_bounds=room_bounds,
+            room_bounds=room_bounds, carved_cells=carved_cells,
         )
         leg_goals, corridor_gates, avoid_caps, leg_instance_ids, leg_instance_aabbs = (
             _if_rubric_geometry(text, gt, idx, start_xy=spawn_xy)
