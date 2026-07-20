@@ -662,6 +662,102 @@ def test_scene_wall_cells_none_without_ply(tmp_path):
     )
 
 
+# --------------------------------------------------------- issue #77 Stage 1 (border pad)
+
+
+def test_scene_room_bounds_without_frame_matches_pad_only_footprint():
+    """No fitted frame -> the pre-fix instance-AABB-plus-pad rectangle, unchanged."""
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="syn")
+    assert GB._scene_room_bounds(gt, None, None) == GB._gt_footprint_bounds(gt, 1.5)
+
+
+def test_scene_room_bounds_without_trajectories_matches_pad_only_footprint():
+    """A fitted frame but no GT trajectories (``if_traj`` empty/None) -> unchanged
+    fallback — trajectories are the fix's evidence, not the frame alone."""
+    from core.groundtruth import scoring as S
+
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="syn")
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    assert GB._scene_room_bounds(gt, frame, None) == GB._gt_footprint_bounds(gt, 1.5)
+    assert GB._scene_room_bounds(gt, frame, []) == GB._gt_footprint_bounds(gt, 1.5)
+    assert (
+        GB._scene_room_bounds(gt, frame, [None, np.empty((0, 3))])
+        == GB._gt_footprint_bounds(gt, 1.5)
+    )
+
+
+def test_scene_room_bounds_expands_to_cover_gt_trajectory(tmp_path):
+    """A GT reference trajectory point far past the instance-AABB-plus-pad rectangle
+    must widen the room bounds to (at least) cover it — the exact defect the audit
+    found (arabic_room's GT trajectory ran to x=8.42 against a mirror border stamped
+    at x=5.63 by the old instance-AABB-only pad). Deliberately scoped to the
+    trajectory itself, not the scene's full traversable mesh (which can reach well
+    past anywhere any GT trajectory goes and was found to perturb unrelated route
+    geometry — see the function's docstring)."""
+    from core.groundtruth import scoring as S
+
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="room77")
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    # Instance footprint is [-0.2, 0.2] x [-0.2, 0.2]; old pad-only bound would be
+    # [-1.7, 1.7] x [-1.7, 1.7]. Put a trajectory point well past that.
+    if_traj = [np.array([[5.0, 0.0, 0.0], [0.0, 0.0, 0.0]])]
+
+    x0, y0, x1, y1 = GB._scene_room_bounds(gt, frame, if_traj)
+    old_x0, old_y0, old_x1, old_y1 = GB._gt_footprint_bounds(gt, 1.5)
+    assert x1 > old_x1, "room bounds must widen to cover the far trajectory point"
+    assert x1 >= 5.0 + 1.5 - 1e-9
+    # Never shrinks relative to the old (instance-only) rectangle on the other sides.
+    assert x0 <= old_x0 and y0 <= old_y0 and y1 >= old_y1
+
+
+def test_scene_room_bounds_never_shrinks_when_trajectory_inside_old_pad():
+    """A trajectory entirely inside the old instance-AABB-plus-pad rectangle must not
+    shrink the bounds — the fix only ever grows the rectangle, never tightens it."""
+    from core.groundtruth import scoring as S
+
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="room77b")
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    if_traj = [np.array([[0.1, 0.1, 0.0], [-0.1, -0.1, 0.0]])]
+
+    got = GB._scene_room_bounds(gt, frame, if_traj)
+    assert got == GB._gt_footprint_bounds(gt, 1.5)
+
+
+def test_synthetic_from_gt_room_bounds_override_moves_border_wall():
+    """``room_bounds`` overrides the default instance-AABB-plus-pad rectangle used for
+    the mirror's own border-wall stamp — the mechanism :func:`_scene_room_bounds`
+    feeds into :func:`_synthetic_from_gt` (issue #77 Stage 1)."""
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="syn")
+
+    sc_default = GB._synthetic_from_gt(gt)
+    assert sc_default.rooms[0] == GB.Room(-1.7, -1.7, 1.7, 1.7)
+
+    wide = (-6.0, -6.0, 6.0, 6.0)
+    sc_wide = GB._synthetic_from_gt(gt, room_bounds=wide)
+    assert sc_wide.rooms[0] == GB.Room(*wide)
+
+    # A point just past the OLD (tight) border, inside the room by the old rectangle's
+    # own logic, is FREE under the widened room but blocked (border wall) under the
+    # default — proving room_bounds actually reaches the stamped costmap, not just the
+    # Room dataclass.
+    px, py = 3.0, 0.0
+    assert sc_default._is_wall(px, py) or not sc_default._in_any_room(px, py)
+    assert sc_wide._in_any_room(px, py) and not sc_wide._is_wall(px, py)
+
+
+def test_synthetic_from_gt_zero_room_bounds_default_is_byte_identical():
+    """``room_bounds=None`` (every pre-existing caller) reproduces the exact old
+    instance-AABB-plus-pad rectangle — regression guard for byte-identical behaviour
+    when Stage-1 room-bounds evidence is unavailable."""
+    gt = _synthetic_gt_scene(
+        [("stool", -4.0, 0.0, 0.0, 0.4, 0.4, 0.4), ("table", 4.0, 0.0, 0.0, 0.4, 0.4, 0.4)],
+        scene_name="syn2",
+    )
+    sc = GB._synthetic_from_gt(gt)
+    x0, y0, x1, y1 = GB._gt_footprint_bounds(gt, 0.0)
+    assert sc.rooms[0] == GB.Room(x0 - 1.5, y0 - 1.5, x1 + 1.5, y1 + 1.5)
+
+
 def test_score_scene_walls_false_skips_wall_derivation(monkeypatch):
     """``walls=False`` (the --no-walls escape) never calls the wall-derivation path."""
     calls = []
