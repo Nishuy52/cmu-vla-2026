@@ -162,3 +162,18 @@ Stages 1 and 2 are independent; 3 benefits from 0; 4 requires 3.
 - `src/core/fsm/controller.py` (285-288, 329-348, 243-253)
 - `src/core/heads/explore_step.py` (141-160, 458-487 — read-only dependency)
 - `src/core/nav/costmap.py` (238-296 — read-only)
+
+## 5. USER DECISIONS (20 Jul 2026) — plan amended
+
+1. **Pre-Stage 1a (user amendment, dispatched immediately, no G1 gate
+   needed): rasterize ORIENTED boxes (rotated-rectangle scan-fill) instead
+   of AABB hulls in the mirror stamping** — exact fix for the dominant
+   blocking cause, no new thresholds. The GT-trajectory carve (original
+   Stage 1) is DEFERRED pending re-probe after 1a: it may be largely
+   unnecessary once OBBs stop over-covering.
+2. Carve/stamping changes stay runner-side (gt_battery.py); all live
+   behavior inside ai_module src per challenge requirements.
+3. Stage 3 credibility bar: ARRIVAL_TOL_M-derived (parameter-free).
+4. Stage 4: minimal parity hooks; #33/H4c offline enablement as a
+   separately-approvable follow-up.
+5. #80 ORIENT fix ships standalone immediately.
