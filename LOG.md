@@ -1434,3 +1434,29 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   2 correctness-over-score decisions, headline 0.461 -> 0.611 (from
   0.150 at yesterday's start), tv 7 -> 3, every close on integrated
   batteries, zero unverified claims.
+
+## 2026-07-20 (afternoon) - GO-LIVE BASELINE: the live gap, measured
+
+- User-approved pivot to live: image rebuilt from current main (all
+  overnight merges), 9 GT questions attempted across livingroom_1 /
+  arabic_room / office_1; 6 scored (reports/live_baseline_2026-07-20;
+  bags local-only, ~95MB each; new tools/score_live_run.py reuses the
+  battery's own scorers, frame-alignment verified).
+- **LIVE vs OFFLINE (headline per question): livingroom inst 0.00 vs
+  1.00, livingroom nume 0.00 vs 1.00 (answered 2, true 8), office inst
+  0.50 vs 1.00 (first live IF credit), arabic inst 0.00 vs 0.50; obje
+  n/a both sides (GT-ambiguous).**
+- Root causes from the #60 events ring + bag forensics, filed:
+  **#82** local LLM tier fails at parse -> regex floor; **#83**
+  exploration never leaves the 0.5m sweep (scene-CONDITIONAL: office
+  drove, livingroom dithered 1.6m/620s despite 342 waypoints); **#84**
+  live detection recall (nume 2 vs 8); **#85** arabic sim scan
+  intermittency (2 runs lost). Session mechanics fixed along the way:
+  stale-bag pre-clean, restart-based scene swap, scan-flow preconditions.
+- Stage 1 carve landed earlier today: offline 0.744/0.789/tv=4 (from
+  0.150 yesterday); Stage 3 machinery merged (live-active); #80 ORIENT
+  fix merged (live-active, residual live verify folded into next session).
+- **VERDICT: competition score is now gated by the live stack, not
+  offline nav quality. Priority order next session: #83 (dominant,
+  scene-conditional diagnosis with 3-scene evidence) -> #84 -> #82;
+  offline Stage-4 parity stays demoted.** Stack stopped at session end.
