@@ -1,0 +1,2099 @@
+{
+  "arabic_room": {
+    "scene": "arabic_room",
+    "residual": 0.5740178337842141,
+    "wall_cells_derived": true,
+    "n_blocked_total": 106,
+    "n_blocked_wall": 56,
+    "n_blocked_wall_interior_derived": 0,
+    "n_blocked_wall_border": 56,
+    "n_blocked_object": 50,
+    "n_obb_clearable": 22,
+    "per_object": [
+      {
+        "label": "sofa",
+        "n_cells": 28
+      },
+      {
+        "label": "carpet",
+        "n_cells": 14
+      },
+      {
+        "label": "wall",
+        "n_cells": 9
+      },
+      {
+        "label": "pillow",
+        "n_cells": 3
+      }
+    ],
+    "per_object_obb": {
+      "wall": [
+        9,
+        7
+      ],
+      "sofa": [
+        28,
+        12
+      ],
+      "carpet": [
+        14,
+        4
+      ],
+      "pillow": [
+        3,
+        0
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 792,
+        "n_blocked_cells": 62
+      },
+      {
+        "qi": 1,
+        "n_points": 829,
+        "n_blocked_cells": 46
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 5,
+      "pocket_legs": [
+        {
+          "question": "Go near the stool under the picture and stop at the small ta",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            -3.1393839424582937,
+            -1.9811260129585473
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go near the stool under the picture and stop at the small ta",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            2.820600839340573,
+            -0.6609610784594886
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the potted plant furthest from the hookah, then",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            -2.804363444150103,
+            2.0008681648556874
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the potted plant furthest from the hookah, then",
+          "leg": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -0.9929995706898187,
+            -0.025999836588987524
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the potted plant furthest from the hookah, then",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            2.820600839340573,
+            -0.6609610784594886
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": []
+    }
+  },
+  "chinese_room": {
+    "scene": "chinese_room",
+    "residual": 0.6613776174348716,
+    "wall_cells_derived": true,
+    "n_blocked_total": 60,
+    "n_blocked_wall": 0,
+    "n_blocked_wall_interior_derived": 0,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 60,
+    "n_obb_clearable": 42,
+    "per_object": [
+      {
+        "label": "chair",
+        "n_cells": 47
+      },
+      {
+        "label": "carpet",
+        "n_cells": 10
+      },
+      {
+        "label": "table",
+        "n_cells": 2
+      }
+    ],
+    "per_object_obb": {
+      "chair": [
+        66,
+        53
+      ],
+      "table": [
+        2,
+        2
+      ],
+      "carpet": [
+        10,
+        1
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 1509,
+        "n_blocked_cells": 55
+      },
+      {
+        "qi": 1,
+        "n_points": 630,
+        "n_blocked_cells": 25
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 4,
+      "n_pocket_excluded": 4,
+      "pocket_legs": [
+        {
+          "question": "Go near the potted plant on the table and stop at the painti",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            5.583966569994756,
+            -2.581938025110771
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go near the potted plant on the table and stop at the painti",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            -1.8968530418011,
+            -3.6278769843008005
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the tea table with the elephant figurine on i",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            0.30364801670685465,
+            -2.962416359652058
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the tea table with the elephant figurine on i",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            5.583966569994756,
+            -2.5931388830339324
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": []
+    }
+  },
+  "home_building_1": {
+    "scene": "home_building_1",
+    "residual": 0.8793296089167959,
+    "wall_cells_derived": false,
+    "n_blocked_total": 278,
+    "n_blocked_wall": 0,
+    "n_blocked_wall_interior_derived": 0,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 278,
+    "n_obb_clearable": 115,
+    "per_object": [
+      {
+        "label": "tree",
+        "n_cells": 174
+      },
+      {
+        "label": "umbrella",
+        "n_cells": 147
+      },
+      {
+        "label": "cupboard",
+        "n_cells": 23
+      },
+      {
+        "label": "chair",
+        "n_cells": 18
+      },
+      {
+        "label": "refridgerator",
+        "n_cells": 16
+      },
+      {
+        "label": "unknown",
+        "n_cells": 14
+      },
+      {
+        "label": "table",
+        "n_cells": 1
+      }
+    ],
+    "per_object_obb": {
+      "tree": [
+        299,
+        203
+      ],
+      "umbrella": [
+        148,
+        50
+      ],
+      "chair": [
+        18,
+        0
+      ],
+      "table": [
+        1,
+        0
+      ],
+      "refridgerator": [
+        16,
+        12
+      ],
+      "cupboard": [
+        23,
+        12
+      ],
+      "unknown": [
+        19,
+        5
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 733,
+        "n_blocked_cells": 148
+      },
+      {
+        "qi": 1,
+        "n_points": 2015,
+        "n_blocked_cells": 132
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 5,
+      "pocket_legs": [
+        {
+          "question": "Go to the coffee table with the kettle on it and stop at the",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            6.434499791115681,
+            0.5399999845559064
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go to the coffee table with the kettle on it and stop at the",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            1.3553058690300497,
+            -3.2676988154188256
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the nightstand with a clock on it, then take th",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            -2.0813449934117805,
+            -12.962221849050298
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the nightstand with a clock on it, then take th",
+          "leg": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -0.47786722893879807,
+            -5.725426579033099
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the nightstand with a clock on it, then take th",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            -6.123276328115132,
+            -1.7066384146413835
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": []
+    }
+  },
+  "home_building_2": {
+    "scene": "home_building_2",
+    "residual": 0.19563630405806282,
+    "wall_cells_derived": true,
+    "n_blocked_total": 272,
+    "n_blocked_wall": 6,
+    "n_blocked_wall_interior_derived": 6,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 266,
+    "n_obb_clearable": 64,
+    "per_object": [
+      {
+        "label": "carpet",
+        "n_cells": 126
+      },
+      {
+        "label": "sofa",
+        "n_cells": 40
+      },
+      {
+        "label": "door",
+        "n_cells": 36
+      },
+      {
+        "label": "tv stand",
+        "n_cells": 34
+      },
+      {
+        "label": "coffee table",
+        "n_cells": 31
+      },
+      {
+        "label": "dining chair",
+        "n_cells": 20
+      },
+      {
+        "label": "dressing table",
+        "n_cells": 15
+      },
+      {
+        "label": "wall",
+        "n_cells": 12
+      },
+      {
+        "label": "dressing chair",
+        "n_cells": 9
+      },
+      {
+        "label": "door frame",
+        "n_cells": 7
+      },
+      {
+        "label": "dining table",
+        "n_cells": 6
+      },
+      {
+        "label": "kitchen cabinet",
+        "n_cells": 4
+      },
+      {
+        "label": "potted plant",
+        "n_cells": 4
+      },
+      {
+        "label": "ottoman",
+        "n_cells": 3
+      }
+    ],
+    "per_object_obb": {
+      "carpet": [
+        126,
+        0
+      ],
+      "coffee table": [
+        31,
+        11
+      ],
+      "ottoman": [
+        3,
+        0
+      ],
+      "kitchen cabinet": [
+        4,
+        4
+      ],
+      "door frame": [
+        7,
+        7
+      ],
+      "door": [
+        36,
+        22
+      ],
+      "dressing table": [
+        15,
+        10
+      ],
+      "dressing chair": [
+        9,
+        5
+      ],
+      "sofa": [
+        40,
+        0
+      ],
+      "dining table": [
+        6,
+        6
+      ],
+      "dining chair": [
+        21,
+        10
+      ],
+      "wall": [
+        12,
+        12
+      ],
+      "tv stand": [
+        34,
+        2
+      ],
+      "potted plant": [
+        4,
+        1
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 916,
+        "n_blocked_cells": 112
+      },
+      {
+        "qi": 1,
+        "n_points": 1670,
+        "n_blocked_cells": 160
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 4,
+      "pocket_legs": [
+        {
+          "question": "Go near the magazine on the ottoman, then go to the potted p",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            1.2610146516641076,
+            5.543000358905573
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "Go near the magazine on the ottoman, then go to the potted p",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            -3.9033188029483123,
+            11.755905182022717
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Take the path between the sofa and the coffee table and go t",
+          "leg": 0,
+          "kind": "corridor_between",
+          "goal": [
+            2.233196157762428,
+            2.0964172541424215
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Take the path between the sofa and the coffee table and go t",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            2.0740000111907153,
+            11.119001150846623
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Take the path between the sofa and the coffee table and go t",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            -4.364242671419364,
+            0.21468674285470368
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": []
+    }
+  },
+  "hotel_room_1": {
+    "scene": "hotel_room_1",
+    "residual": 0.19528171867458047,
+    "wall_cells_derived": true,
+    "n_blocked_total": 139,
+    "n_blocked_wall": 60,
+    "n_blocked_wall_interior_derived": 57,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 82,
+    "n_obb_clearable": 47,
+    "per_object": [
+      {
+        "label": "chair",
+        "n_cells": 35
+      },
+      {
+        "label": "desk cabinet",
+        "n_cells": 16
+      },
+      {
+        "label": "blanket",
+        "n_cells": 13
+      },
+      {
+        "label": "bench",
+        "n_cells": 12
+      }
+    ],
+    "per_object_obb": {
+      "desk cabinet": [
+        17,
+        8
+      ],
+      "chair": [
+        39,
+        21
+      ],
+      "blanket": [
+        13,
+        9
+      ],
+      "bench": [
+        12,
+        12
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 719,
+        "n_blocked_cells": 67
+      },
+      {
+        "qi": 1,
+        "n_points": 644,
+        "n_blocked_cells": 77
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 5,
+      "pocket_legs": [
+        {
+          "question": "Go to the bedside table closest to the window and stop at th",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            2.6941765083571276,
+            -3.790021884549424
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go to the bedside table closest to the window and stop at th",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            -0.09374111666169366,
+            -2.034392493562975
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the bedside table closest to the bench, then ",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            2.6941528816619726,
+            0.34262400592221953
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the bedside table closest to the bench, then ",
+          "leg": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -0.34945082088684676,
+            -1.7271503752666515
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the bedside table closest to the bench, then ",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            -2.533453181391348,
+            -3.0735329564189446
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": [
+        {
+          "question": "First, go near the bedside table closest to the bench, then take the p",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 31,
+          "closest_m": 0.047
+        }
+      ]
+    }
+  },
+  "hotel_room_2": {
+    "scene": "hotel_room_2",
+    "residual": 0.9749705303378956,
+    "wall_cells_derived": false,
+    "n_blocked_total": 90,
+    "n_blocked_wall": 0,
+    "n_blocked_wall_interior_derived": 0,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 90,
+    "n_obb_clearable": 56,
+    "per_object": [
+      {
+        "label": "wall",
+        "n_cells": 62
+      },
+      {
+        "label": "wardrobe",
+        "n_cells": 30
+      },
+      {
+        "label": "door",
+        "n_cells": 15
+      },
+      {
+        "label": "tv cabinet",
+        "n_cells": 12
+      },
+      {
+        "label": "carpet",
+        "n_cells": 10
+      },
+      {
+        "label": "bed frame",
+        "n_cells": 7
+      },
+      {
+        "label": "bench",
+        "n_cells": 3
+      }
+    ],
+    "per_object_obb": {
+      "bed frame": [
+        7,
+        7
+      ],
+      "bench": [
+        3,
+        3
+      ],
+      "door": [
+        15,
+        11
+      ],
+      "wardrobe": [
+        30,
+        20
+      ],
+      "wall": [
+        62,
+        28
+      ],
+      "tv cabinet": [
+        12,
+        12
+      ],
+      "carpet": [
+        10,
+        10
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 155,
+        "n_blocked_cells": 7
+      },
+      {
+        "qi": 1,
+        "n_points": 845,
+        "n_blocked_cells": 83
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 3,
+      "pocket_legs": [
+        {
+          "question": "Go between the bench and the bed and stop at the lamp closes",
+          "leg": 0,
+          "kind": "corridor_between",
+          "goal": [
+            -0.43276481677540773,
+            1.4380945090988786
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go between the bench and the bed and stop at the lamp closes",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            1.1106090893337175,
+            1.014162142600973
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the picture closest to the door, then take the ",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            2.6144971939508657,
+            -0.8981762644816126
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "First, go to the picture closest to the door, then take the ",
+          "leg": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -1.6424149594107,
+            -0.08556561026140674
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "First, go to the picture closest to the door, then take the ",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            -3.9436099588450317,
+            -0.8613001156648123
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": [
+        {
+          "question": "Go between the bench and the bed and stop at the lamp closest to the f",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 20,
+          "closest_m": 0.1
+        },
+        {
+          "question": "First, go to the picture closest to the door, then take the path betwe",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 46,
+          "closest_m": 0.266
+        }
+      ]
+    }
+  },
+  "japanese_room": {
+    "scene": "japanese_room",
+    "residual": 0.4589545446946064,
+    "wall_cells_derived": true,
+    "n_blocked_total": 69,
+    "n_blocked_wall": 0,
+    "n_blocked_wall_interior_derived": 0,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 69,
+    "n_obb_clearable": 39,
+    "per_object": [
+      {
+        "label": "wall",
+        "n_cells": 54
+      },
+      {
+        "label": "flowers",
+        "n_cells": 10
+      },
+      {
+        "label": "display ledge",
+        "n_cells": 5
+      }
+    ],
+    "per_object_obb": {
+      "wall": [
+        59,
+        35
+      ],
+      "flowers": [
+        10,
+        10
+      ],
+      "display ledge": [
+        5,
+        0
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 339,
+        "n_blocked_cells": 31
+      },
+      {
+        "qi": 1,
+        "n_points": 717,
+        "n_blocked_cells": 43
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 5,
+      "pocket_legs": [
+        {
+          "question": "Go near the small table with a vase on it and then to the fl",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            1.3879999216794974,
+            0.6656214650072758
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go near the small table with a vase on it and then to the fl",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            1.8580404206390866,
+            2.3708127341495957
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go to the lantern closest to the fan decoration, then take t",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            1.3879999216794974,
+            0.36743696632913914
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go to the lantern closest to the fan decoration, then take t",
+          "leg": 1,
+          "kind": "via_near",
+          "goal": [
+            1.3905151196175063,
+            3.974481666381822
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go to the lantern closest to the fan decoration, then take t",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            -1.5181508557199113,
+            3.974481666381822
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": [
+        {
+          "question": "Go near the small table with a vase on it and then to the flowers near",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 41,
+          "closest_m": 0.048
+        },
+        {
+          "question": "Go to the lantern closest to the fan decoration, then take the path ne",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 34,
+          "closest_m": 0.048
+        }
+      ]
+    }
+  },
+  "livingroom_1": {
+    "scene": "livingroom_1",
+    "residual": 0.9257351167206092,
+    "wall_cells_derived": false,
+    "n_blocked_total": 149,
+    "n_blocked_wall": 0,
+    "n_blocked_wall_interior_derived": 0,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 149,
+    "n_obb_clearable": 82,
+    "per_object": [
+      {
+        "label": "sofa",
+        "n_cells": 61
+      },
+      {
+        "label": "wall",
+        "n_cells": 59
+      },
+      {
+        "label": "carpet",
+        "n_cells": 24
+      },
+      {
+        "label": "chair",
+        "n_cells": 8
+      },
+      {
+        "label": "round table",
+        "n_cells": 7
+      },
+      {
+        "label": "plant stand",
+        "n_cells": 7
+      },
+      {
+        "label": "lamp",
+        "n_cells": 7
+      },
+      {
+        "label": "cabinet",
+        "n_cells": 3
+      },
+      {
+        "label": "door",
+        "n_cells": 3
+      }
+    ],
+    "per_object_obb": {
+      "wall": [
+        59,
+        51
+      ],
+      "sofa": [
+        61,
+        15
+      ],
+      "carpet": [
+        24,
+        0
+      ],
+      "round table": [
+        9,
+        5
+      ],
+      "chair": [
+        8,
+        8
+      ],
+      "plant stand": [
+        7,
+        5
+      ],
+      "lamp": [
+        7,
+        6
+      ],
+      "cabinet": [
+        3,
+        3
+      ],
+      "door": [
+        3,
+        3
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 751,
+        "n_blocked_cells": 71
+      },
+      {
+        "qi": 1,
+        "n_points": 882,
+        "n_blocked_cells": 78
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 3,
+      "pocket_legs": [
+        {
+          "question": "Go to the potted plant closest to the pyramid candle holder ",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            1.735561133425712,
+            -3.9172307490843523
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go to the potted plant closest to the pyramid candle holder ",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            -0.9163751752990547,
+            3.0404418866028236
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "First, go near the lamp closest to the black chair, then tak",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            -1.7304055318779752,
+            3.0404418866028236
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "First, go near the lamp closest to the black chair, then tak",
+          "leg": 1,
+          "kind": "corridor_between",
+          "goal": [
+            -0.710472954142261,
+            -2.354761581348781
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the lamp closest to the black chair, then tak",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            -2.2338874342103003,
+            -5.543848719484491
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": [
+        {
+          "question": "Go to the potted plant closest to the pyramid candle holder and stop a",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 9,
+          "closest_m": 0.058
+        }
+      ]
+    }
+  },
+  "livingroom_2": {
+    "scene": "livingroom_2",
+    "residual": 0.38171102209879265,
+    "wall_cells_derived": true,
+    "n_blocked_total": 102,
+    "n_blocked_wall": 4,
+    "n_blocked_wall_interior_derived": 3,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 99,
+    "n_obb_clearable": 62,
+    "per_object": [
+      {
+        "label": "carpet",
+        "n_cells": 38
+      },
+      {
+        "label": "kitchen island",
+        "n_cells": 22
+      },
+      {
+        "label": "coffee table",
+        "n_cells": 13
+      },
+      {
+        "label": "door frame",
+        "n_cells": 11
+      },
+      {
+        "label": "wall",
+        "n_cells": 11
+      },
+      {
+        "label": "soccer ball",
+        "n_cells": 9
+      },
+      {
+        "label": "stool",
+        "n_cells": 8
+      },
+      {
+        "label": "kitchen counter",
+        "n_cells": 5
+      },
+      {
+        "label": "tv cabinet",
+        "n_cells": 1
+      }
+    ],
+    "per_object_obb": {
+      "kitchen island": [
+        22,
+        20
+      ],
+      "kitchen counter": [
+        5,
+        5
+      ],
+      "stool": [
+        8,
+        8
+      ],
+      "carpet": [
+        38,
+        11
+      ],
+      "tv cabinet": [
+        1,
+        1
+      ],
+      "coffee table": [
+        13,
+        0
+      ],
+      "door frame": [
+        11,
+        9
+      ],
+      "wall": [
+        11,
+        9
+      ],
+      "soccer ball": [
+        9,
+        9
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 791,
+        "n_blocked_cells": 50
+      },
+      {
+        "qi": 1,
+        "n_points": 928,
+        "n_blocked_cells": 52
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 4,
+      "n_pocket_excluded": 4,
+      "pocket_legs": [
+        {
+          "question": "Go to the microwave on the kitchen counter and then go to th",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            -0.17170481486338363,
+            4.3795481667901965
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go to the microwave on the kitchen counter and then go to th",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            2.5119251926362214,
+            -1.5382155468784227
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the chair near the window, then stop at the soc",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            -1.4983000295452422,
+            1.5009392887198199
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the chair near the window, then stop at the soc",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            2.8662860309186997,
+            -6.188412637713578
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": [
+        {
+          "question": "Go to the microwave on the kitchen counter and then go to the crystal ",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 29,
+          "closest_m": 0.1
+        }
+      ]
+    }
+  },
+  "livingroom_3": {
+    "scene": "livingroom_3",
+    "residual": 1.8102818094449074,
+    "wall_cells_derived": false,
+    "n_blocked_total": 93,
+    "n_blocked_wall": 0,
+    "n_blocked_wall_interior_derived": 0,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 93,
+    "n_obb_clearable": 34,
+    "per_object": [
+      {
+        "label": "carpet",
+        "n_cells": 28
+      },
+      {
+        "label": "wall",
+        "n_cells": 19
+      },
+      {
+        "label": "table",
+        "n_cells": 19
+      },
+      {
+        "label": "cabinet",
+        "n_cells": 18
+      },
+      {
+        "label": "couch",
+        "n_cells": 11
+      },
+      {
+        "label": "stool",
+        "n_cells": 10
+      },
+      {
+        "label": "door",
+        "n_cells": 8
+      },
+      {
+        "label": "wall decal",
+        "n_cells": 2
+      },
+      {
+        "label": "vase",
+        "n_cells": 1
+      }
+    ],
+    "per_object_obb": {
+      "wall": [
+        19,
+        14
+      ],
+      "wall decal": [
+        2,
+        2
+      ],
+      "stool": [
+        10,
+        9
+      ],
+      "table": [
+        19,
+        6
+      ],
+      "carpet": [
+        28,
+        1
+      ],
+      "couch": [
+        11,
+        1
+      ],
+      "vase": [
+        1,
+        1
+      ],
+      "cabinet": [
+        18,
+        6
+      ],
+      "door": [
+        8,
+        6
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 585,
+        "n_blocked_cells": 65
+      },
+      {
+        "qi": 1,
+        "n_points": 548,
+        "n_blocked_cells": 28
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 5,
+      "pocket_legs": [
+        {
+          "question": "Take the path near the TV and go to the pillow farthest from",
+          "leg": 0,
+          "kind": "via_near",
+          "goal": [
+            1.888755196362927,
+            -4.9576030383927145
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Take the path near the TV and go to the pillow farthest from",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            0.6108142703263976,
+            -2.3605176559386236
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the stool, then take the path near the cabine",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            1.6463862189766911,
+            1.2745532821165748
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the stool, then take the path near the cabine",
+          "leg": 1,
+          "kind": "via_near",
+          "goal": [
+            3.1219996991412136,
+            -4.9576030383927145
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the stool, then take the path near the cabine",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            5.3666806657474275,
+            -4.2474228274203965
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": []
+    }
+  },
+  "livingroom_4": {
+    "scene": "livingroom_4",
+    "residual": 0.6917299896262815,
+    "wall_cells_derived": true,
+    "n_blocked_total": 146,
+    "n_blocked_wall": 6,
+    "n_blocked_wall_interior_derived": 4,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 142,
+    "n_obb_clearable": 80,
+    "per_object": [
+      {
+        "label": "carpet",
+        "n_cells": 47
+      },
+      {
+        "label": "sofa",
+        "n_cells": 35
+      },
+      {
+        "label": "curtain",
+        "n_cells": 32
+      },
+      {
+        "label": "chair",
+        "n_cells": 13
+      },
+      {
+        "label": "potted plant",
+        "n_cells": 13
+      },
+      {
+        "label": "table",
+        "n_cells": 12
+      },
+      {
+        "label": "wall",
+        "n_cells": 5
+      }
+    ],
+    "per_object_obb": {
+      "sofa": [
+        37,
+        35
+      ],
+      "carpet": [
+        48,
+        8
+      ],
+      "chair": [
+        15,
+        15
+      ],
+      "table": [
+        13,
+        2
+      ],
+      "potted plant": [
+        13,
+        13
+      ],
+      "curtain": [
+        32,
+        15
+      ],
+      "wall": [
+        5,
+        5
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 521,
+        "n_blocked_cells": 45
+      },
+      {
+        "qi": 1,
+        "n_points": 889,
+        "n_blocked_cells": 105
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 4,
+      "pocket_legs": [
+        {
+          "question": "Go near the chair closest to the bookcase and stop at the ta",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            -3.1786361152243745,
+            1.370465389459943
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go near the chair closest to the bookcase and stop at the ta",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            -1.1720001679490375,
+            -0.6394080776159515
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "First, go near the fireplace, then go to the window closest ",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            -1.2270001062362663,
+            -3.725469354882526
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the fireplace, then go to the window closest ",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            -4.886113391308062,
+            -1.3349409741564022
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the fireplace, then go to the window closest ",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            -3.1786361152243745,
+            0.718874603998762
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": [
+        {
+          "question": "Go near the chair closest to the bookcase and stop at the table with t",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 37,
+          "closest_m": 0.023
+        }
+      ]
+    }
+  },
+  "loft": {
+    "scene": "loft",
+    "residual": 0.2952806736353187,
+    "wall_cells_derived": true,
+    "n_blocked_total": 210,
+    "n_blocked_wall": 1,
+    "n_blocked_wall_interior_derived": 1,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 209,
+    "n_obb_clearable": 73,
+    "per_object": [
+      {
+        "label": "stairs",
+        "n_cells": 92
+      },
+      {
+        "label": "sofa",
+        "n_cells": 43
+      },
+      {
+        "label": "tv cabinet",
+        "n_cells": 26
+      },
+      {
+        "label": "carpet",
+        "n_cells": 23
+      },
+      {
+        "label": "potted plant",
+        "n_cells": 19
+      },
+      {
+        "label": "table",
+        "n_cells": 9
+      },
+      {
+        "label": "vase",
+        "n_cells": 7
+      }
+    ],
+    "per_object_obb": {
+      "stairs": [
+        97,
+        45
+      ],
+      "sofa": [
+        43,
+        6
+      ],
+      "carpet": [
+        23,
+        6
+      ],
+      "table": [
+        10,
+        0
+      ],
+      "potted plant": [
+        19,
+        11
+      ],
+      "vase": [
+        7,
+        6
+      ],
+      "tv cabinet": [
+        26,
+        2
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 739,
+        "n_blocked_cells": 119
+      },
+      {
+        "qi": 1,
+        "n_points": 771,
+        "n_blocked_cells": 96
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 4,
+      "n_pocket_excluded": 3,
+      "pocket_legs": [
+        {
+          "question": "Go to the cup near the TV remote and avoid the path near the",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            6.397601579560302,
+            2.9133213075068545
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go near the fireplace, pass by the stairs, then stop at the ",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            -1.2789777261708641,
+            0.9700002957901653
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go near the fireplace, pass by the stairs, then stop at the ",
+          "leg": 1,
+          "kind": "via_near",
+          "goal": [
+            -0.12716312924759465,
+            -0.316929289683928
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "Go near the fireplace, pass by the stairs, then stop at the ",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            6.877113061233509,
+            -2.3560223831779017
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": []
+    }
+  },
+  "office_1": {
+    "scene": "office_1",
+    "residual": 0.4493869506345517,
+    "wall_cells_derived": true,
+    "n_blocked_total": 78,
+    "n_blocked_wall": 0,
+    "n_blocked_wall_interior_derived": 0,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 78,
+    "n_obb_clearable": 36,
+    "per_object": [
+      {
+        "label": "chair",
+        "n_cells": 62
+      },
+      {
+        "label": "bench",
+        "n_cells": 12
+      },
+      {
+        "label": "table",
+        "n_cells": 2
+      },
+      {
+        "label": "water cooler",
+        "n_cells": 2
+      }
+    ],
+    "per_object_obb": {
+      "chair": [
+        62,
+        25
+      ],
+      "table": [
+        2,
+        2
+      ],
+      "bench": [
+        12,
+        7
+      ],
+      "water cooler": [
+        2,
+        2
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 1339,
+        "n_blocked_cells": 67
+      },
+      {
+        "qi": 1,
+        "n_points": 458,
+        "n_blocked_cells": 11
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 3,
+      "pocket_legs": [
+        {
+          "question": "Go to the potted plant furthest from the projector screen th",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            4.811082454591655,
+            1.1368215711234821
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go to the potted plant furthest from the projector screen th",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            -3.3617334855512517,
+            -4.279957401503226
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "First, go near the potted plant on the shelf, then take the ",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            0.19519808135587502,
+            1.2024996840234783
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go near the potted plant on the shelf, then take the ",
+          "leg": 1,
+          "kind": "corridor_between",
+          "goal": [
+            0.05164762282551416,
+            -1.8544735488669049
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "First, go near the potted plant on the shelf, then take the ",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            1.5929961037235056,
+            -3.8636330089732867
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": [
+        {
+          "question": "First, go near the potted plant on the shelf, then take the path betwe",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 8,
+          "closest_m": 0.1
+        }
+      ]
+    }
+  },
+  "office_2": {
+    "scene": "office_2",
+    "residual": 0.3851085259206226,
+    "wall_cells_derived": true,
+    "n_blocked_total": 69,
+    "n_blocked_wall": 12,
+    "n_blocked_wall_interior_derived": 12,
+    "n_blocked_wall_border": 0,
+    "n_blocked_object": 57,
+    "n_obb_clearable": 52,
+    "per_object": [
+      {
+        "label": "trash can",
+        "n_cells": 20
+      },
+      {
+        "label": "glass wall",
+        "n_cells": 13
+      },
+      {
+        "label": "chair",
+        "n_cells": 9
+      },
+      {
+        "label": "cabinet",
+        "n_cells": 8
+      },
+      {
+        "label": "wall",
+        "n_cells": 6
+      },
+      {
+        "label": "door",
+        "n_cells": 4
+      },
+      {
+        "label": "door frame",
+        "n_cells": 4
+      },
+      {
+        "label": "table",
+        "n_cells": 2
+      }
+    ],
+    "per_object_obb": {
+      "chair": [
+        14,
+        14
+      ],
+      "wall": [
+        7,
+        7
+      ],
+      "trash can": [
+        20,
+        20
+      ],
+      "cabinet": [
+        8,
+        8
+      ],
+      "table": [
+        2,
+        2
+      ],
+      "glass wall": [
+        13,
+        11
+      ],
+      "door": [
+        4,
+        4
+      ],
+      "door frame": [
+        4,
+        4
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 694,
+        "n_blocked_cells": 9
+      },
+      {
+        "qi": 1,
+        "n_points": 1454,
+        "n_blocked_cells": 68
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 4,
+      "pocket_legs": [
+        {
+          "question": "Go near the potted plant on the cabinet and stop at the wind",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            4.518049887612028,
+            0.2099625974581868
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go near the potted plant on the cabinet and stop at the wind",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            4.905480373619802,
+            4.574700501050688
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the trash can near the cabinet, then go to the ",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            2.265183421047661,
+            -0.3413515446111707
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "First, go to the trash can near the cabinet, then go to the ",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            5.126843535795336,
+            3.139529553765287
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the trash can near the cabinet, then go to the ",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            6.607973839211711,
+            -0.890737615553873
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": [
+        {
+          "question": "First, go to the trash can near the cabinet, then go to the folder on ",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 45,
+          "closest_m": 0.1
+        }
+      ]
+    }
+  },
+  "studio": {
+    "scene": "studio",
+    "residual": 0.5585748449651039,
+    "wall_cells_derived": true,
+    "n_blocked_total": 145,
+    "n_blocked_wall": 19,
+    "n_blocked_wall_interior_derived": 3,
+    "n_blocked_wall_border": 13,
+    "n_blocked_object": 129,
+    "n_obb_clearable": 84,
+    "per_object": [
+      {
+        "label": "couch",
+        "n_cells": 77
+      },
+      {
+        "label": "guitar",
+        "n_cells": 22
+      },
+      {
+        "label": "lamp",
+        "n_cells": 19
+      },
+      {
+        "label": "shelf",
+        "n_cells": 5
+      }
+    ],
+    "per_object_obb": {
+      "couch": [
+        96,
+        54
+      ],
+      "guitar": [
+        25,
+        23
+      ],
+      "lamp": [
+        19,
+        12
+      ],
+      "shelf": [
+        5,
+        5
+      ]
+    },
+    "per_q": [
+      {
+        "qi": 0,
+        "n_points": 752,
+        "n_blocked_cells": 77
+      },
+      {
+        "qi": 1,
+        "n_points": 566,
+        "n_blocked_cells": 89
+      }
+    ],
+    "pocket": {
+      "n_legs_probed": 5,
+      "n_pocket_excluded": 4,
+      "pocket_legs": [
+        {
+          "question": "Go to the vases on the cabinet below the TV and stop at the ",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            3.705153064797375,
+            2.9196288022605494
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "Go to the vases on the cabinet below the TV and stop at the ",
+          "leg": 1,
+          "kind": "goto",
+          "goal": [
+            3.435125147081184,
+            -2.016314008785369
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the vase closest to the easel, then, take the p",
+          "leg": 0,
+          "kind": "goto",
+          "goal": [
+            1.866602298584871,
+            1.5857816559139137
+          ],
+          "pocket_excluded": false
+        },
+        {
+          "question": "First, go to the vase closest to the easel, then, take the p",
+          "leg": 1,
+          "kind": "corridor_between",
+          "goal": [
+            3.49502793844907,
+            -1.0710465554295425
+          ],
+          "pocket_excluded": true
+        },
+        {
+          "question": "First, go to the vase closest to the easel, then, take the p",
+          "leg": 2,
+          "kind": "goto",
+          "goal": [
+            3.2990000511605535,
+            -3.9285173722462647
+          ],
+          "pocket_excluded": true
+        }
+      ],
+      "regression_risk": [
+        {
+          "question": "First, go to the vase closest to the easel, then, take the path betwee",
+          "rubric": 1.0,
+          "n_near_clearable_cells": 6,
+          "closest_m": 0.283
+        }
+      ]
+    }
+  }
+}
