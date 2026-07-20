@@ -1,6 +1,6 @@
 {
-  "generated_utc": "2026-07-20T05:59:08.071988+00:00",
-  "n_runs": 3,
+  "generated_utc": "2026-07-20T06:40:01.764717+00:00",
+  "n_runs": 5,
   "rows": [
     {
       "scene": "livingroom_1",
@@ -275,6 +275,227 @@
         "gt_target_id": null,
         "our_target_id": 23,
         "target_source": "ambiguous",
+        "match_method": "none",
+        "rubric_score": null,
+        "ordered_leg_credit": null,
+        "n_legs": null,
+        "n_legs_reached_in_order": null,
+        "n_threading_violations": null,
+        "n_avoid_violations": null,
+        "driven_n_poses": null,
+        "leg_goals": null,
+        "leg_outcomes": null,
+        "leg_probe": null,
+        "frechet_m": null,
+        "coverage_1m": null,
+        "our_n_waypoints": null,
+        "gt_n_waypoints": null,
+        "frame_aligned": null,
+        "fit_residual_m": null,
+        "note": "no GT target matched; IoU undefined (flagged, not guessed)",
+        "parse_notes": ""
+      },
+      "headline_offline": null,
+      "delta": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    },
+    {
+      "scene": "office_1",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.",
+      "run_dir": "reports/live_baseline_2026-07-20/office_1/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 2,
+        "/numerical_response": 0,
+        "/selected_object_marker": 0,
+        "/state_estimation": 130240,
+        "/way_point_with_heading": 105
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.4494,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.5,
+        "ordered_leg_credit": 0.5,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 1,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 112,
+        "driven_n_poses_raw": 130240,
+        "frechet_m": 7.621296218068222,
+        "coverage_1m": 0.3196,
+        "if_question_index": 0,
+        "headline": 0.5,
+        "note": "legs=1/2"
+      },
+      "headline_live": 0.5,
+      "offline": {
+        "scene": "office_1",
+        "qtype": "instruction_following",
+        "question": "Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 2,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 71,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              4.811082454591655,
+              1.1368215711234821
+            ]
+          ],
+          [
+            "goto",
+            [
+              -3.3617334855512517,
+              -4.279957401503226
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              4.811082454591655,
+              1.1368215711234821
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.3597
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              -3.3617334855512517,
+              -4.279957401503226
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              4.811082454591655,
+              1.1368215711234821
+            ],
+            "our_instance_id": [
+              67
+            ],
+            "min_dist_driven_to_goal_m": 1.5993,
+            "dist_goal_to_gt_traj_m": 1.5751
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              -3.3617334855512517,
+              -4.279957401503226
+            ],
+            "our_instance_id": [
+              23
+            ],
+            "min_dist_driven_to_goal_m": 0.1194,
+            "dist_goal_to_gt_traj_m": 0.0632
+          }
+        ],
+        "frechet_m": 0.6246556982365182,
+        "coverage_1m": 1.0,
+        "our_n_waypoints": 71,
+        "gt_n_waypoints": 1339,
+        "frame_aligned": true,
+        "fit_residual_m": 0.4494,
+        "note": "",
+        "parse_notes": ""
+      },
+      "headline_offline": 1.0,
+      "delta": -0.5,
+      "note": "legs=1/2"
+    },
+    {
+      "scene": "office_1",
+      "qdir": "obje",
+      "qtype": "object_reference",
+      "question": "Find the potted plant on the file cabinet.",
+      "run_dir": "reports/live_baseline_2026-07-20/office_1/obje",
+      "capture_topic_counts": {
+        "/challenge_question": 1,
+        "/state_estimation": 125757,
+        "/selected_object_marker": 1,
+        "/numerical_response": 0,
+        "/way_point_with_heading": 71
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.4494,
+      "frame_available": true,
+      "live": {
+        "live_marker": {
+          "cx": 5.516770857170369,
+          "cy": -2.1885558883361296,
+          "cz": 0.7451036758720875,
+          "sx": 1.5344337672605786,
+          "sy": 1.9769446800311226,
+          "sz": 1.4952057227492332,
+          "label": ""
+        },
+        "gt_target_id": null,
+        "target_source": "none",
+        "match_method": "none",
+        "iou": null,
+        "headline": null,
+        "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+      },
+      "headline_live": null,
+      "offline": {
+        "scene": "office_1",
+        "qtype": "object_reference",
+        "question": "Find the potted plant on the file cabinet.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": 55,
+        "target_source": "none",
         "match_method": "none",
         "rubric_score": null,
         "ordered_leg_credit": null,
