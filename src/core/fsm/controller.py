@@ -283,7 +283,15 @@ class QuestionController:
         self._to(State.ORIENT, "parse attempted")
 
     def _tick_orient(self, io: RobotIO) -> None:
-        # In-place sweep window; seed the map. Leave orientation once the 60 s window closes.
+        # In-place sweep window; seed the map. Tick the same explore callable used by
+        # EXPLORE_EXECUTE so the opening diamond sweep actually runs during this window
+        # instead of after it (#80: 60 s of dead air otherwise, live-competition-critical —
+        # invisible offline since the battery bypasses the FSM). ExplorationPolicy anchors
+        # its own sweep clock on first step (`_elapsed`, core/nav/exploration.py:80-85), so
+        # ticking it here for the first time naturally starts the sweep at ORIENT entry
+        # rather than at t=60s; no anchor change needed there.
+        _safe_explore(self._explore, io, self.plan, self.world, self._note_swallowed)
+        # Leave orientation once the 60 s window closes.
         if self.budget is not None and not self.budget.in_orientation:
             self._to(State.EXPLORE_EXECUTE, "orientation window closed")
 

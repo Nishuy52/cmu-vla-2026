@@ -117,6 +117,79 @@ def test_happy_path_visits_states_in_order():
     assert positions == sorted(positions)
 
 
+# --------------------------------------------------------------------------- orient sweep (#80)
+
+
+def test_orient_ticks_explore_callable():
+    """#80: ORIENT must actually run the sweep, not sit parked for 60 s."""
+    clk = FakeClock(0.0)
+    ctrl, calls = build_controller(
+        qtype=QType.OBJECT_REFERENCE, world=WorldView(scene=FakeScene([make_instance(1, "chair")]))
+    )
+    io = FakeRobotIO(clk, q_of(QType.OBJECT_REFERENCE))
+    ctrl.tick(io)  # -> PARSING (then -> ORIENT same tick)
+    assert ctrl.state is State.ORIENT
+    before = calls["explore"]
+    for _ in range(3):
+        clk.advance(1.0)
+        ctrl.tick(io)
+    assert ctrl.state is State.ORIENT  # still well inside the 60 s window
+    assert calls["explore"] > before  # explore was ticked each ORIENT step
+
+
+def test_orient_to_explore_transition_still_at_60s():
+    """Explore ticking during ORIENT must not change the 60 s window boundary."""
+    clk = FakeClock(0.0)
+    ctrl, _ = build_controller(
+        qtype=QType.OBJECT_REFERENCE, world=WorldView(scene=FakeScene([make_instance(1, "chair")]))
+    )
+    io = FakeRobotIO(clk, q_of(QType.OBJECT_REFERENCE))
+    ctrl.tick(io)  # -> PARSING -> ORIENT
+    clk.set(59.0)
+    ctrl.tick(io)
+    assert ctrl.state is State.ORIENT
+    clk.set(61.0)
+    ctrl.tick(io)
+    assert ctrl.state is State.EXPLORE_EXECUTE
+
+
+def test_orient_explore_tick_does_not_disturb_watchdog_or_forced_assembly():
+    """Watchdog/forced-assembly overlays fire unchanged whether jammed in ORIENT or not,
+    now that ORIENT itself does explore work each tick."""
+    clk = FakeClock(0.0)
+    world = WorldView(
+        scene=FakeScene([make_instance(1, "chair")]),
+        partial=PartialResults(first_anchor_pt=(1.0, 1.0, 0.0)),
+    )
+    ctrl, _ = build_controller(qtype=QType.OBJECT_REFERENCE, world=world)
+    io = FakeRobotIO(clk, q_of(QType.OBJECT_REFERENCE))
+    floor_s = ctrl._watchdog_floor_s
+    ctrl.tick(io)  # -> PARSING -> ORIENT
+    ctrl.state = State.ORIENT  # jam it there
+    clk.set(floor_s - 1.0)
+    ctrl.tick(io)
+    assert io.publish_count == 0
+    clk.set(floor_s + 1.0)
+    ctrl.tick(io)
+    assert ctrl.state is State.DONE
+    assert io.publish_count == 1
+    assert len(io.published_markers) == 1
+
+
+def test_orient_explore_tick_does_not_disturb_forced_assembly():
+    clk = FakeClock(0.0)
+    ctrl, _ = build_controller(
+        qtype=QType.OBJECT_REFERENCE, world=WorldView(scene=FakeScene([make_instance(1, "chair")]))
+    )
+    io = FakeRobotIO(clk, q_of(QType.OBJECT_REFERENCE))
+    fa_s = ctrl._forced_assembly_s
+    ctrl.tick(io)  # -> PARSING -> ORIENT
+    ctrl.state = State.ORIENT  # pretend still orienting past forced-assembly
+    clk.set(fa_s + 1.0)
+    ctrl.tick(io)
+    assert ctrl.state in (State.VERIFY, State.ANSWER, State.DONE)
+
+
 # --------------------------------------------------------------------------- watchdog
 
 
