@@ -21,6 +21,12 @@ Each object row becomes an :class:`~core.interfaces.InstanceRecord`:
   rotated 45 deg yields an AABB up to ~sqrt(2) larger per axis. It is the honest
   cost of the core pipeline being axis-aligned-only (:class:`MarkerBox` is an AABB);
   documented here so IoU scores are read with that inflation in mind.
+* ``obb_center/obb_extents/obb_heading`` = the ORIGINAL oriented box, additive fields
+  carried alongside the AABB approximation (issue #77, Pre-Stage 1a). Every existing
+  scoring/toolbox geometry predicate keeps reading ``aabb_min/aabb_max`` unchanged
+  (frozen semantics); only the mirror-costmap stamping path
+  (``core.runner.gt_battery._synthetic_from_gt``) reads these three, to rasterize the
+  true rotated footprint instead of its AABB hull.
 * ``n_obs`` = 3 — ground truth is *fully observed*, so every instance clears the
   ``n_obs >= 3`` confidence gate the heads apply.
 * ``points`` = None — no per-object point cloud is loaded (the AABB is exact enough
@@ -294,6 +300,7 @@ def parse_object_csv(path: os.PathLike | str) -> list[InstanceRecord]:
             )
             heading = float(row.get("object_bbox_heading") or 0.0)
             amin, amax = obb_to_aabb(center, extents, heading)
+            obb_center = np.asarray(center, dtype=float)
             # One shared pass over the colour slots (issue #27): computing colors and
             # bins separately from independent row scans (the pre-fix shape) is what
             # let a corrupt slot survive in one structure while vanishing from the
@@ -319,6 +326,9 @@ def parse_object_csv(path: os.PathLike | str) -> list[InstanceRecord]:
                         ColorBin(name=name, rgb=rgb, fraction=frac)
                         for name, rgb, frac in slots
                     ),
+                    obb_center=obb_center,
+                    obb_extents=extents,
+                    obb_heading=heading,
                 )
             )
     return recs

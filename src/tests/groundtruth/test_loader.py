@@ -55,6 +55,49 @@ def test_obb_to_aabb_center_preserved():
     assert np.allclose(mid, c, atol=1e-9)
 
 
+# -------------------------------------------------------------- #77 additive OBB fields
+
+
+def test_parse_object_csv_carries_obb_fields(tmp_path):
+    """Issue #77 Pre-Stage 1a: parse_object_csv additionally carries the ORIGINAL
+    oriented box (center/extents/heading) on InstanceRecord, alongside the
+    unchanged AABB-of-OBB approximation."""
+    row = _base_row(
+        object_bbox_cx="2.5", object_bbox_cy="-1.5", object_bbox_cz="0.3",
+        object_bbox_xlength="2.0", object_bbox_ylength="0.6", object_bbox_zlength="0.7",
+        object_bbox_heading="0.7853981633974483",  # pi/4
+    )
+    path = _write_object_csv(tmp_path, [row])
+    rec = parse_object_csv(path)[0]
+    assert rec.obb_heading == pytest.approx(math.pi / 4)
+    assert np.allclose(rec.obb_center, [2.5, -1.5, 0.3])
+    assert np.allclose(rec.obb_extents, [2.0, 0.6, 0.7])
+    # aabb_min/aabb_max stay the (unchanged) over-approximation, computed by
+    # obb_to_aabb the same way it always was.
+    amin, amax = obb_to_aabb(rec.obb_center, rec.obb_extents, rec.obb_heading)
+    assert np.allclose(rec.aabb_min, amin)
+    assert np.allclose(rec.aabb_max, amax)
+
+
+def test_parse_object_csv_default_heading_is_zero(tmp_path):
+    row = _base_row()  # object_bbox_heading defaults to "0.0" in _base_row
+    path = _write_object_csv(tmp_path, [row])
+    rec = parse_object_csv(path)[0]
+    assert rec.obb_heading == 0.0
+
+
+def test_instance_record_obb_fields_default_none_zero():
+    """A producer that never sets the additive OBB fields (mocks/perception) keeps
+    the safe defaults — no OBB info, callers fall back to the AABB."""
+    rec = InstanceRecord(
+        instance_id=0, label="chair", score=1.0, n_obs=3,
+        centroid=np.zeros(3), aabb_min=np.zeros(3), aabb_max=np.ones(3),
+    )
+    assert rec.obb_center is None
+    assert rec.obb_extents is None
+    assert rec.obb_heading == 0.0
+
+
 # --------------------------------------------------------------------------- real loft
 
 
