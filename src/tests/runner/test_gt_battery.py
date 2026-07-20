@@ -890,6 +890,157 @@ def test_synthetic_from_gt_still_stamps_real_thin_wall():
     assert "wall" in labels, "a genuinely thin wall panel must still be stamped"
 
 
+# ----------------------------------------------------------------------- issue #77 OBB raster
+
+
+def _synthetic_gt_scene_with_obb(objs, scene_name="synthetic_obb"):
+    """Like ``_synthetic_gt_scene`` but each entry is
+    ``(label, cx, cy, cz, sx, sy, sz, heading)`` and the record's ADDITIVE
+    ``obb_center/obb_extents/obb_heading`` fields are populated (mirroring what
+    ``core.groundtruth.loader.parse_object_csv`` does), with ``aabb_min/aabb_max``
+    the honest ``obb_to_aabb`` over-approximation -- i.e. a real loader-shaped
+    GTScene, not a hand-rolled AABB-only one."""
+    from core.groundtruth.loader import GTScene, obb_to_aabb
+    from core.interfaces import InstanceRecord
+
+    recs = []
+    for i, (label, cx, cy, cz, sx, sy, sz, heading) in enumerate(objs):
+        center = (cx, cy, cz)
+        extents = np.array([sx, sy, sz], dtype=float)
+        amin, amax = obb_to_aabb(center, extents, heading)
+        recs.append(
+            InstanceRecord(
+                instance_id=i,
+                label=label,
+                score=1.0,
+                n_obs=3,
+                centroid=(amin + amax) / 2.0,
+                aabb_min=amin,
+                aabb_max=amax,
+                obb_center=np.asarray(center, dtype=float),
+                obb_extents=extents,
+                obb_heading=float(heading),
+            )
+        )
+    return GTScene(scene_name=scene_name, instances=recs, regions=[])
+
+
+def test_synthetic_from_gt_zero_heading_is_byte_identical_to_aabb_stamp():
+    """Regression guard: a GTScene whose instances all carry heading=0.0 (the
+    common case -- most VLA-3D objects are axis-aligned) stamps IDENTICAL
+    SyntheticScene objects (label/cx/cy/sx/sy/sz/cz/heading) whether or not the
+    additive OBB fields are populated."""
+    gt_with_obb = _synthetic_gt_scene_with_obb(
+        [
+            ("sofa", -2.0, 0.0, 0.0, 1.0, 1.2, 0.8, 0.0),
+            ("coffee table", 2.0, 0.5, 0.0, 0.9, 0.6, 0.5, 0.0),
+        ]
+    )
+    gt_plain = _synthetic_gt_scene(
+        [
+            ("sofa", -2.0, 0.0, 0.0, 1.0, 1.2, 0.8),
+            ("coffee table", 2.0, 0.5, 0.0, 0.9, 0.6, 0.5),
+        ]
+    )
+    sc_obb = GB._synthetic_from_gt(gt_with_obb)
+    sc_plain = GB._synthetic_from_gt(gt_plain)
+    assert len(sc_obb.objects) == len(sc_plain.objects) == 2
+    for a, b in zip(sc_obb.objects, sc_plain.objects):
+        assert a.label == b.label
+        assert a.heading == b.heading == 0.0
+        assert (a.cx, a.cy, a.sx, a.sy, a.sz, a.cz) == (b.cx, b.cy, b.sx, b.sy, b.sz, b.cz)
+    assert np.array_equal(sc_obb.terrain_patch().points, sc_plain.terrain_patch().points)
+
+
+def test_synthetic_from_gt_rotated_object_stamps_smaller_than_aabb_hull():
+    """Issue #77 Pre-Stage 1a core claim: a 45deg-rotated GT instance stamps its
+    TRUE oriented footprint (fewer blocked terrain cells) rather than its AABB
+    hull -- built through the real ``_synthetic_from_gt`` code path."""
+    import math
+
+    heading = math.pi / 4
+    gt = _synthetic_gt_scene_with_obb(
+        [
+            ("sofa", 0.0, 0.0, 0.0, 2.0, 0.6, 0.7, heading),
+            # A distant small anchor so the room bounds aren't dominated by the
+            # rotated object alone (which would otherwise read "room-scale" and
+            # get skipped by the #53 architectural-AABB guard).
+            ("lamp", 8.0, 8.0, 0.0, 0.2, 0.2, 0.3, 0.0),
+        ],
+        scene_name="syn77_rot",
+    )
+    sc = GB._synthetic_from_gt(gt)
+    sc.objects = [o for o in sc.objects if o.label == "sofa"]
+    assert len(sc.objects) == 1
+    obj = sc.objects[0]
+    assert obj.heading == pytest.approx(heading)
+    # sx/sy came from the OBB's own local extents, not the (larger-footprint) AABB hull.
+    assert obj.sx == pytest.approx(2.0)
+    assert obj.sy == pytest.approx(0.6)
+
+    n_true = int(np.sum(sc.terrain_patch().points[:, 3] > 0.0))
+
+    # Compare against the (pre-fix) AABB-hull stamp for the SAME instance.
+    gt_hull_only = _synthetic_gt_scene(
+        [
+            ("sofa", 0.0, 0.0, 0.0,
+             float(gt.instances[0].aabb_max[0] - gt.instances[0].aabb_min[0]),
+             float(gt.instances[0].aabb_max[1] - gt.instances[0].aabb_min[1]),
+             0.7),
+            ("lamp", 8.0, 8.0, 0.0, 0.2, 0.2, 0.3),
+        ],
+        scene_name="syn77_hull",
+    )
+    sc_hull = GB._synthetic_from_gt(gt_hull_only)
+    sc_hull.objects = [o for o in sc_hull.objects if o.label == "sofa"]
+    n_hull = int(np.sum(sc_hull.terrain_patch().points[:, 3] > 0.0))
+    assert n_true < n_hull
+
+
+def test_synthetic_from_gt_arabic_room_sofa_covers_fewer_cells_than_hull():
+    """The real arabic_room sofa (object_id 56) that motivated this fix: heading
+    -3.1328664 rad, ~0.5 deg off axis-aligned. Confirms the rasterized stamp is a
+    strict (if modest) improvement over the AABB hull for this exact fixture."""
+    import math
+
+    cx, cy, cz = 2.0790001107131033, 0.6679999141611369, 0.33887168842884763
+    sx, sy, sz = 2.1899273413427003, 0.7787988067917222, 0.6777391842100893
+    heading = -3.1328664111144175
+    gt = _synthetic_gt_scene_with_obb(
+        [
+            ("sofa", cx, cy, cz, sx, sy, sz, heading),
+            ("lamp", cx + 8.0, cy + 8.0, 0.0, 0.2, 0.2, 0.3, 0.0),
+        ],
+        scene_name="arabic_room_sofa",
+    )
+    sc = GB._synthetic_from_gt(gt)
+    sofa_obj = next(o for o in sc.objects if o.label == "sofa")
+    assert sofa_obj.heading == pytest.approx(heading)
+    assert sofa_obj.sx == pytest.approx(sx)  # true OBB extents, not the AABB hull's
+
+    hull_sx = float(gt.instances[0].aabb_max[0] - gt.instances[0].aabb_min[0])
+    hull_sy = float(gt.instances[0].aabb_max[1] - gt.instances[0].aabb_min[1])
+    assert hull_sx > sx or hull_sy > sy  # confirms this fixture IS rotated enough to inflate
+
+    # The residual delta from a ~0.5deg tilt is well under the 0.1m terrain grid's
+    # resolution, so exercise the exact same fine-grained containment check as
+    # tests/mocks/test_synthetic_scene.py's GTObject-level regression test (the
+    # true footprint stays a strict subset of its own AABB hull).
+    step = 0.02
+    xs = np.arange(cx - hull_sx / 2 - 0.1, cx + hull_sx / 2 + 0.1, step)
+    ys = np.arange(cy - hull_sy / 2 - 0.1, cy + hull_sy / 2 + 0.1, step)
+    n_true = sum(
+        1 for x in xs for y in ys if sofa_obj.footprint_contains(float(x), float(y))
+    )
+    n_hull = sum(
+        1
+        for x in xs
+        for y in ys
+        if abs(float(x) - cx) <= hull_sx / 2 and abs(float(y) - cy) <= hull_sy / 2
+    )
+    assert n_true < n_hull
+
+
 # ----------------------------------------------------------------------- issue #66
 
 

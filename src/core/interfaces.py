@@ -168,6 +168,17 @@ class InstanceRecord:
     #: (mocks / perception without colour quantisation). Enables luminance +
     #: dominance colour salience (issues #11/#12) that scheme names alone cannot.
     color_bins: tuple[ColorBin, ...] = ()
+    #: Original oriented-box centre/full-extents/yaw (radians, +Z), when the producer
+    #: has them (currently only ``core.groundtruth.loader``, straight off the VLA-3D
+    #: CSV). ``aabb_min``/``aabb_max`` stay the AABB-of-OBB over-approximation used by
+    #: every scoring/toolbox geometry predicate (frozen semantics) — these three are
+    #: PURELY ADDITIVE, read only by the mirror-costmap stamping path (issue #77,
+    #: pre_grounding_movement_plan.md Pre-Stage 1a) to rasterize the true rotated
+    #: footprint instead of its AABB hull. ``None``/``0.0`` (the default) means "no OBB
+    #: info" — callers fall back to the AABB, unchanged prior behaviour.
+    obb_center: np.ndarray | None = None  # (3,) float
+    obb_extents: np.ndarray | None = None  # (3,) float, full xyz lengths
+    obb_heading: float = 0.0  # radians, rotation about +Z
 
     @property
     def extents(self) -> np.ndarray:

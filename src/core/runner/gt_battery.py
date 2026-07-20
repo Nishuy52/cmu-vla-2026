@@ -177,7 +177,22 @@ def _synthetic_from_gt(
         # base ~0.83 m; the floor beside it is drivable). Without this every AABB was
         # stamped floor-to-top, sealing floor near most leg anchors (T11 sig-1/2).
         cz = float(rec.aabb_min[2])
-        sc.place_box(rec.label, cx, cy, sx, sy, sz, cz=cz)
+        # Issue #77 Pre-Stage 1a: stamp the TRUE oriented footprint, not its AABB
+        # hull, when the loader carried one (core.groundtruth.loader always does;
+        # rec.obb_heading defaults to 0.0 for any producer that doesn't, which is the
+        # legacy axis-aligned stamp). cx/cy/sx/sy/sz stay AABB-of-OBB derived above —
+        # that only sets the box's centre/size, which for the true OBB coincide with
+        # its own centre/extents (both are the same box, just described two ways: OBB
+        # centre == AABB-of-OBB centre only when heading is a multiple of 90 deg in
+        # general, so use the OBB's own centre/extents when available for an exact
+        # rotated stamp).
+        heading = float(rec.obb_heading or 0.0)
+        if heading and rec.obb_center is not None and rec.obb_extents is not None:
+            cx = float(rec.obb_center[0])
+            cy = float(rec.obb_center[1])
+            sx = float(max(rec.obb_extents[0], 0.05))
+            sy = float(max(rec.obb_extents[1], 0.05))
+        sc.place_box(rec.label, cx, cy, sx, sy, sz, cz=cz, heading=heading)
     return sc
 
 
