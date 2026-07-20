@@ -662,6 +662,259 @@ def test_scene_wall_cells_none_without_ply(tmp_path):
     )
 
 
+# --------------------------------------------------------- issue #77 Stage 1 (border pad)
+
+
+def test_scene_room_bounds_without_frame_matches_pad_only_footprint():
+    """No fitted frame -> the pre-fix instance-AABB-plus-pad rectangle, unchanged."""
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="syn")
+    assert GB._scene_room_bounds(gt, None, None) == GB._gt_footprint_bounds(gt, 1.5)
+
+
+def test_scene_room_bounds_without_trajectories_matches_pad_only_footprint():
+    """A fitted frame but no GT trajectories (``if_traj`` empty/None) -> unchanged
+    fallback — trajectories are the fix's evidence, not the frame alone."""
+    from core.groundtruth import scoring as S
+
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="syn")
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    assert GB._scene_room_bounds(gt, frame, None) == GB._gt_footprint_bounds(gt, 1.5)
+    assert GB._scene_room_bounds(gt, frame, []) == GB._gt_footprint_bounds(gt, 1.5)
+    assert (
+        GB._scene_room_bounds(gt, frame, [None, np.empty((0, 3))])
+        == GB._gt_footprint_bounds(gt, 1.5)
+    )
+
+
+def test_scene_room_bounds_expands_to_cover_gt_trajectory(tmp_path):
+    """A GT reference trajectory point far past the instance-AABB-plus-pad rectangle
+    must widen the room bounds to (at least) cover it — the exact defect the audit
+    found (arabic_room's GT trajectory ran to x=8.42 against a mirror border stamped
+    at x=5.63 by the old instance-AABB-only pad). Deliberately scoped to the
+    trajectory itself, not the scene's full traversable mesh (which can reach well
+    past anywhere any GT trajectory goes and was found to perturb unrelated route
+    geometry — see the function's docstring)."""
+    from core.groundtruth import scoring as S
+
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="room77")
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    # Instance footprint is [-0.2, 0.2] x [-0.2, 0.2]; old pad-only bound would be
+    # [-1.7, 1.7] x [-1.7, 1.7]. Put a trajectory point well past that.
+    if_traj = [np.array([[5.0, 0.0, 0.0], [0.0, 0.0, 0.0]])]
+
+    x0, y0, x1, y1 = GB._scene_room_bounds(gt, frame, if_traj)
+    old_x0, old_y0, old_x1, old_y1 = GB._gt_footprint_bounds(gt, 1.5)
+    assert x1 > old_x1, "room bounds must widen to cover the far trajectory point"
+    assert x1 >= 5.0 + 1.5 - 1e-9
+    # Never shrinks relative to the old (instance-only) rectangle on the other sides.
+    assert x0 <= old_x0 and y0 <= old_y0 and y1 >= old_y1
+
+
+def test_scene_room_bounds_never_shrinks_when_trajectory_inside_old_pad():
+    """A trajectory entirely inside the old instance-AABB-plus-pad rectangle must not
+    shrink the bounds — the fix only ever grows the rectangle, never tightens it."""
+    from core.groundtruth import scoring as S
+
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="room77b")
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    if_traj = [np.array([[0.1, 0.1, 0.0], [-0.1, -0.1, 0.0]])]
+
+    got = GB._scene_room_bounds(gt, frame, if_traj)
+    assert got == GB._gt_footprint_bounds(gt, 1.5)
+
+
+def test_synthetic_from_gt_room_bounds_override_moves_border_wall():
+    """``room_bounds`` overrides the default instance-AABB-plus-pad rectangle used for
+    the mirror's own border-wall stamp — the mechanism :func:`_scene_room_bounds`
+    feeds into :func:`_synthetic_from_gt` (issue #77 Stage 1)."""
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="syn")
+
+    sc_default = GB._synthetic_from_gt(gt)
+    assert sc_default.rooms[0] == GB.Room(-1.7, -1.7, 1.7, 1.7)
+
+    wide = (-6.0, -6.0, 6.0, 6.0)
+    sc_wide = GB._synthetic_from_gt(gt, room_bounds=wide)
+    assert sc_wide.rooms[0] == GB.Room(*wide)
+
+    # A point just past the OLD (tight) border, inside the room by the old rectangle's
+    # own logic, is FREE under the widened room but blocked (border wall) under the
+    # default — proving room_bounds actually reaches the stamped costmap, not just the
+    # Room dataclass.
+    px, py = 3.0, 0.0
+    assert sc_default._is_wall(px, py) or not sc_default._in_any_room(px, py)
+    assert sc_wide._in_any_room(px, py) and not sc_wide._is_wall(px, py)
+
+
+def test_synthetic_from_gt_zero_room_bounds_default_is_byte_identical():
+    """``room_bounds=None`` (every pre-existing caller) reproduces the exact old
+    instance-AABB-plus-pad rectangle — regression guard for byte-identical behaviour
+    when Stage-1 room-bounds evidence is unavailable."""
+    gt = _synthetic_gt_scene(
+        [("stool", -4.0, 0.0, 0.0, 0.4, 0.4, 0.4), ("table", 4.0, 0.0, 0.0, 0.4, 0.4, 0.4)],
+        scene_name="syn2",
+    )
+    sc = GB._synthetic_from_gt(gt)
+    x0, y0, x1, y1 = GB._gt_footprint_bounds(gt, 0.0)
+    assert sc.rooms[0] == GB.Room(x0 - 1.5, y0 - 1.5, x1 + 1.5, y1 + 1.5)
+
+
+# ------------------------------------------------------ issue #77 Stage 1 (carve)
+
+
+def test_carve_cells_along_trajectories_empty_without_frame_or_traj():
+    """No fitted frame, or no trajectories, -> nothing carved."""
+    from core.groundtruth import scoring as S
+
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    traj = [np.array([[1.0, 2.0, 0.0]])]
+    assert GB._carve_cells_along_trajectories(traj, None) == set()
+    assert GB._carve_cells_along_trajectories(None, frame) == set()
+    assert GB._carve_cells_along_trajectories([], frame) == set()
+    assert GB._carve_cells_along_trajectories([None, np.empty((0, 3))], frame) == set()
+
+
+def test_carve_cells_along_trajectories_covers_vehicle_radius_disc():
+    """The carved set around a single trajectory point is exactly the
+    VEHICLE_RADIUS_M disc on the FLOOR_SPACING lattice — cells inside are carved,
+    a cell just past the radius is not."""
+    from core.groundtruth import scoring as S
+    from core.mocks.synthetic_scene import FLOOR_SPACING
+    from core.nav.costmap import VEHICLE_RADIUS_M
+
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    traj = [np.array([[0.0, 0.0, 0.0]])]
+    carved = GB._carve_cells_along_trajectories(traj, frame)
+
+    assert (0, 0) in carved, "the trajectory's own cell must be carved"
+    r_cells = int(np.ceil(VEHICLE_RADIUS_M / FLOOR_SPACING))
+    assert (r_cells, 0) in carved, "a cell exactly at the radius (axis-aligned) is carved"
+    assert (r_cells + 5, 0) not in carved, "a cell well past the radius is not carved"
+
+
+def test_synthetic_from_gt_carved_cells_removes_derived_wall_cell():
+    """A cell present in BOTH ``wall_cells`` and ``carved_cells`` is not stamped wall —
+    the carve wins over derived-wall geometry (a plain set difference upstream)."""
+    from core.mocks.synthetic_scene import FLOOR_SPACING
+
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="syn77c")
+    cell = (round(3.0 / FLOOR_SPACING), round(0.0 / FLOOR_SPACING))
+    wall_cells = {cell}
+    carved_cells = {cell}
+
+    sc_uncarved = GB._synthetic_from_gt(gt, wall_cells=wall_cells)
+    sc_carved = GB._synthetic_from_gt(gt, wall_cells=wall_cells, carved_cells=carved_cells)
+
+    assert sc_uncarved._is_wall(3.0, 0.0), "sanity: the cell is wall without the carve"
+    assert not sc_carved._is_wall(3.0, 0.0), "the carve must clear the derived-wall cell"
+
+
+def test_synthetic_from_gt_carved_cells_clears_stamped_object_terrain():
+    """A carved cell inside a solid object's footprint reads FREE (intensity 0) in the
+    mirror terrain, while an un-carved cell in the SAME footprint stays solid — proving
+    the carve is a per-cell terrain filter, not a whole-object removal."""
+    from core.mocks.synthetic_scene import FLOOR_SPACING
+
+    gt = _synthetic_gt_scene(
+        [
+            ("table", 0.0, 0.0, 0.0, 2.0, 2.0, 0.8),
+            # Filler far away so "table" (2x2) isn't the scene's ENTIRE own footprint
+            # bounds -- otherwise issue #53's room-scale-AABB skip would drop it from
+            # stamping altogether (a fixture artifact, not what this test is about).
+            ("filler", 20.0, 20.0, 0.0, 0.2, 0.2, 0.2),
+        ],
+        scene_name="syn77d",
+    )
+    # A carved cell near the object's centre, and an un-carved one near its edge —
+    # both squarely inside its [-1, 1] x [-1, 1] footprint.
+    carved_cell = (round(0.0 / FLOOR_SPACING), round(0.0 / FLOOR_SPACING))
+    uncarved_probe = (0.8, 0.8)
+    carved_cells = {carved_cell}
+
+    sc = GB._synthetic_from_gt(gt, carved_cells=carved_cells)
+    patch = sc.terrain_patch()
+    pts = patch.points
+
+    at_carved = pts[(np.abs(pts[:, 0] - 0.0) < 1e-6) & (np.abs(pts[:, 1] - 0.0) < 1e-6)]
+    assert at_carved.shape[0] == 1
+    assert at_carved[0, 3] == 0.0, "carved cell inside the object footprint must read free"
+
+    at_uncarved = pts[
+        (np.abs(pts[:, 0] - uncarved_probe[0]) < 1e-6)
+        & (np.abs(pts[:, 1] - uncarved_probe[1]) < 1e-6)
+    ]
+    assert at_uncarved.shape[0] == 1
+    assert at_uncarved[0, 3] > 0.0, "un-carved cell in the same footprint must stay solid"
+
+
+def test_synthetic_from_gt_carved_cells_never_shrinks_instance_record_aabb():
+    """The carve only touches the MIRROR TERRAIN (the costmap the planner BFS/A*
+    consult) — the GT instance record itself (what the object IS, used by every other
+    head/rubric path) is untouched."""
+    from core.groundtruth import scoring as S
+
+    gt = _synthetic_gt_scene(
+        [
+            ("table", 0.0, 0.0, 0.0, 2.0, 2.0, 0.8),
+            ("filler", 20.0, 20.0, 0.0, 0.2, 0.2, 0.2),  # see the terrain-carve test above
+        ],
+        scene_name="syn77e",
+    )
+    frame = S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+    carved_cells = GB._carve_cells_along_trajectories([np.array([[0.0, 0.0, 0.0]])], frame)
+    sc = GB._synthetic_from_gt(gt, carved_cells=carved_cells)
+    recs = {r.label: r for r in sc.instances()}
+    assert set(recs) == {"table", "filler"}
+    assert np.allclose(recs["table"].aabb_min, [-1.0, -1.0, -0.4])
+    assert np.allclose(recs["table"].aabb_max, [1.0, 1.0, 0.4])
+
+
+def test_synthetic_from_gt_zero_carved_cells_default_is_byte_identical():
+    """``carved_cells=None`` (every pre-existing caller) reproduces the plain
+    ``SyntheticScene`` — regression guard for byte-identical behaviour."""
+    gt = _synthetic_gt_scene([("stool", 0.0, 0.0, 0.0, 0.4, 0.4, 0.4)], scene_name="syn77f")
+    sc = GB._synthetic_from_gt(gt)
+    assert type(sc) is GB.SyntheticScene, "no carve requested -> the plain base class"
+
+
+def test_drive_if_trajectory_carve_opens_a_path_through_a_blocked_band():
+    """Feeding a carved corridor through an otherwise-solid wall band lets the driven
+    path cross straight through it — end-to-end proof the carve reaches the costmap
+    the planner reasons over, mirroring test_drive_if_trajectory_routes_around_
+    interior_wall's un-carved case (which must still detour)."""
+    from core.perception.scene_index import BasicSceneIndex
+    from core.mocks.synthetic_scene import FLOOR_SPACING
+
+    gt = _synthetic_gt_scene(
+        [
+            ("stool", -4.0, 0.0, 0.3, 0.4, 0.4, 0.6),
+            ("table", 4.0, 0.0, 0.4, 1.0, 1.0, 0.8),
+        ]
+    )
+    idx = BasicSceneIndex(gt.instances)
+    text = "Go to the stool and then go to the table."
+
+    wall_cells = set()
+    for x in np.arange(-0.3, 0.31, FLOOR_SPACING):
+        for y in np.arange(-3.0, 3.01, FLOOR_SPACING):
+            wall_cells.add((round(x / FLOOR_SPACING), round(y / FLOOR_SPACING)))
+
+    # Carve a corridor straight across the band at y=0 (as if a GT trajectory drove
+    # through there) — wide enough (a few cells either side of x=0) that the vehicle
+    # can actually fit through, not just graze it.
+    carved_cells = set()
+    for x in np.arange(-0.3, 0.31, FLOOR_SPACING):
+        for y in np.arange(-0.5, 0.51, FLOOR_SPACING):
+            carved_cells.add((round(x / FLOOR_SPACING), round(y / FLOOR_SPACING)))
+
+    driven = GB._drive_if_trajectory(
+        gt=gt, idx=idx, text=text, start_xy=(-4.0, 0.0),
+        wall_cells=wall_cells, carved_cells=carved_cells,
+    )
+    assert driven.shape[0] > 2
+    crossed_band = (np.abs(driven[:, 0]) <= 0.25).any()
+    assert crossed_band, "the carved corridor must let the driven path cross the band"
+
+
 def test_score_scene_walls_false_skips_wall_derivation(monkeypatch):
     """``walls=False`` (the --no-walls escape) never calls the wall-derivation path."""
     calls = []
