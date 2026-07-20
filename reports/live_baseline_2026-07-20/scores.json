@@ -1,0 +1,303 @@
+{
+  "generated_utc": "2026-07-20T05:59:08.071988+00:00",
+  "n_runs": 3,
+  "rows": [
+    {
+      "scene": "livingroom_1",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.",
+      "run_dir": "reports/live_baseline_2026-07-20/livingroom_1/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 0,
+        "/numerical_response": 0,
+        "/selected_object_marker": 0,
+        "/state_estimation": 130311,
+        "/way_point_with_heading": 342
+      },
+      "capture_issues": [
+        "missing /challenge_question (0 messages) \u2014 question read from run.log"
+      ],
+      "frame_fit_residual_m": 0.9257,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.0,
+        "ordered_leg_credit": 0.0,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 0,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 117,
+        "driven_n_poses_raw": 130311,
+        "frechet_m": 6.308494103029172,
+        "coverage_1m": 0.0,
+        "if_question_index": 0,
+        "headline": 0.0,
+        "note": "legs=0/2"
+      },
+      "headline_live": 0.0,
+      "offline": {
+        "scene": "livingroom_1",
+        "qtype": "instruction_following",
+        "question": "Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 2,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 125,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              1.735561133425712,
+              -3.9172307490843523
+            ]
+          ],
+          [
+            "goto",
+            [
+              -0.9163751752990547,
+              3.0404418866028236
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              1.735561133425712,
+              -3.9172307490843523
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.4308
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              -0.9163751752990547,
+              3.0404418866028236
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              1.735561133425712,
+              -3.9172307490843523
+            ],
+            "our_instance_id": [
+              36
+            ],
+            "min_dist_driven_to_goal_m": 1.0519,
+            "dist_goal_to_gt_traj_m": 2.6732
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              -0.9163751752990547,
+              3.0404418866028236
+            ],
+            "our_instance_id": [
+              11
+            ],
+            "min_dist_driven_to_goal_m": 0.0304,
+            "dist_goal_to_gt_traj_m": 1.6545
+          }
+        ],
+        "frechet_m": 4.926611058596862,
+        "coverage_1m": 0.1185,
+        "our_n_waypoints": 125,
+        "gt_n_waypoints": 751,
+        "frame_aligned": true,
+        "fit_residual_m": 0.9257,
+        "note": "interior walls unavailable (frame fit residual 0.93 m > 0.8 m wall-derivation gate); boundary-only costmap",
+        "parse_notes": ""
+      },
+      "headline_offline": 1.0,
+      "delta": -1.0,
+      "note": "legs=0/2"
+    },
+    {
+      "scene": "livingroom_1",
+      "qdir": "nume",
+      "qtype": "numerical",
+      "question": "How many chairs are near the table with a vase on it?",
+      "run_dir": "reports/live_baseline_2026-07-20/livingroom_1/nume",
+      "capture_topic_counts": {
+        "/challenge_question": 1,
+        "/selected_object_marker": 0,
+        "/numerical_response": 1,
+        "/state_estimation": 130700,
+        "/way_point_with_heading": 0
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.9257,
+      "frame_available": true,
+      "live": {
+        "live_answer": 2,
+        "gt_answer_true": 8,
+        "true_source": "questions_pdf_text",
+        "true_match": false,
+        "gt_count_pipeline": 8,
+        "gt_count_independent": 9,
+        "independent_source": "referential",
+        "headline": 0.0,
+        "note": "live=2 true=8"
+      },
+      "headline_live": 0.0,
+      "offline": {
+        "scene": "livingroom_1",
+        "qtype": "numerical",
+        "question": "How many chairs are near the table with a vase on it?",
+        "our_count": 8,
+        "gt_count_pipeline": 8,
+        "exact_match": true,
+        "gt_count_independent": 9,
+        "independent_source": "referential",
+        "gt_count_scenegraph": 8,
+        "scenegraph_source": "scene_graph",
+        "annotated_targets_of_class": 9,
+        "csv_instances_of_class": 9,
+        "gt_answer_true": 8,
+        "true_match": true,
+        "true_source": "questions_pdf_text",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": null,
+        "ordered_leg_credit": null,
+        "n_legs": null,
+        "n_legs_reached_in_order": null,
+        "n_threading_violations": null,
+        "n_avoid_violations": null,
+        "driven_n_poses": null,
+        "leg_goals": null,
+        "leg_outcomes": null,
+        "leg_probe": null,
+        "frechet_m": null,
+        "coverage_1m": null,
+        "our_n_waypoints": null,
+        "gt_n_waypoints": null,
+        "frame_aligned": null,
+        "fit_residual_m": null,
+        "note": "pipeline=8; independent=9; scene_graph=8 (disagreement)",
+        "parse_notes": "indefinite article on 'vase' (any matching instance qualifies)"
+      },
+      "headline_offline": 1.0,
+      "delta": -1.0,
+      "note": "live=2 true=8"
+    },
+    {
+      "scene": "livingroom_1",
+      "qdir": "obje",
+      "qtype": "object_reference",
+      "question": "Find the vase on the cabinet below the picture.",
+      "run_dir": "reports/live_baseline_2026-07-20/livingroom_1/obje",
+      "capture_topic_counts": {
+        "/challenge_question": 0,
+        "/numerical_response": 0,
+        "/selected_object_marker": 1,
+        "/state_estimation": 130151,
+        "/way_point_with_heading": 83
+      },
+      "capture_issues": [
+        "missing /challenge_question (0 messages) \u2014 question read from run.log"
+      ],
+      "frame_fit_residual_m": 0.9257,
+      "frame_available": true,
+      "live": {
+        "live_marker": {
+          "cx": -4.9809334336815985,
+          "cy": 2.2181568625222274,
+          "cz": 0.2374124102294445,
+          "sx": 2.626690068369403,
+          "sy": 2.418316545361578,
+          "sz": 0.4759864702820778,
+          "label": ""
+        },
+        "gt_target_id": null,
+        "target_source": "ambiguous",
+        "match_method": "none",
+        "iou": null,
+        "headline": null,
+        "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+      },
+      "headline_live": null,
+      "offline": {
+        "scene": "livingroom_1",
+        "qtype": "object_reference",
+        "question": "Find the vase on the cabinet below the picture.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": 23,
+        "target_source": "ambiguous",
+        "match_method": "none",
+        "rubric_score": null,
+        "ordered_leg_credit": null,
+        "n_legs": null,
+        "n_legs_reached_in_order": null,
+        "n_threading_violations": null,
+        "n_avoid_violations": null,
+        "driven_n_poses": null,
+        "leg_goals": null,
+        "leg_outcomes": null,
+        "leg_probe": null,
+        "frechet_m": null,
+        "coverage_1m": null,
+        "our_n_waypoints": null,
+        "gt_n_waypoints": null,
+        "frame_aligned": null,
+        "fit_residual_m": null,
+        "note": "no GT target matched; IoU undefined (flagged, not guessed)",
+        "parse_notes": ""
+      },
+      "headline_offline": null,
+      "delta": null,
+      "note": "no GT target matched; IoU undefined (flagged, not guessed)"
+    }
+  ]
+}
