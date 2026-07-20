@@ -1,0 +1,30 @@
+[adapter_node-1] [INFO] [1784527435.749319193] [vla_ai_module]: published 82 waypoints since latch
+[adapter_node-1] [INFO] [1784527493.694669761] [vla_ai_module]: published 85 waypoints since latch
+[adapter_node-1] [INFO] [1784527551.889171017] [vla_ai_module]: published 88 waypoints since latch
+[adapter_node-1] [INFO] [1784527566.761023789] [vla_ai_module]: explore_execute->verify explore budget spent
+[adapter_node-1] [INFO] [1784527581.660942368] [vla_ai_module]: verify->answer verify complete
+[adapter_node-1] [INFO] [1784527607.005001330] [vla_ai_module]: published 91 waypoints since latch
+[adapter_node-1] [INFO] [1784527607.008145314] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[adapter_node-1] [INFO] [1784527655.149202801] [vla_ai_module]: published 94 waypoints since latch
+[adapter_node-1] [INFO] [1784527703.128794404] [vla_ai_module]: published 97 waypoints since latch
+[adapter_node-1] [INFO] [1784527752.062409283] [vla_ai_module]: published 100 waypoints since latch
+[adapter_node-1] [INFO] [1784527801.392978684] [vla_ai_module]: published 103 waypoints since latch
+[adapter_node-1] [INFO] [1784527851.846316189] [vla_ai_module]: drive_out->done watchdog_floor>=570s
+[adapter_node-1] [INFO] [1784527851.849327802] [vla_ai_module]: controller DONE; last 10 events: 0.2:idle:transition:idle->parsing question received | 5.0:parsing:parsed:tier=local | 5.0:parsing:transition:parsing->orient parse attempted | 60.4:orient:transition:orient->explore_execute orientation window closed | 273.5:explore_execute:transition:explore_execute->verify explore budget spent | 288.4:verify:transition:verify->answer verify complete | 313.8:answer:published:WaypointCmd via answer_state | 313.8:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 558.6:drive_out:publish_suppressed:already published; watchdog_floor>=570s | 558.6:drive_out:transition:drive_out->done watchdog_floor>=570s
+[adapter_node-1] [INFO] [1784528030.520788125] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[adapter_node-1] [INFO] [1784528030.527505213] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784528030.533335201] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[adapter_node-1] [INFO] [1784528058.810452120] [vla_ai_module]: question latched: 'How many computer monitors are on the table closest to the map wall decal?'
+[adapter_node-1] [INFO] [1784528060.077418438] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[adapter_node-1] [INFO] [1784528060.081173428] [vla_ai_module]: idle->parsing question received
+[adapter_node-1] [WARN] [1784528080.101854724] [vla_ai_module]: seam 'parse' swallowed exception (occurrence 1): TimeoutError('chat call exceeded 20s timeout')
+[adapter_node-1] [INFO] [1784528080.105391397] [vla_ai_module]: parsing->orient parse attempted
+[adapter_node-1] [INFO] [1784528118.935600490] [vla_ai_module]: orient->explore_execute orientation window closed
+[adapter_node-1] [INFO] [1784528269.630880541] [vla_ai_module]: explore_execute->verify explore budget spent
+[adapter_node-1] [INFO] [1784528271.018672813] [vla_ai_module]: verify->answer verify complete
+[adapter_node-1] [INFO] [1784528272.358761649] [vla_ai_module]: published int answer: 2
+[adapter_node-1] [INFO] [1784528272.361707596] [vla_ai_module]: answer->done answered
+[adapter_node-1] [INFO] [1784528272.364644257] [vla_ai_module]: controller DONE; last 9 events: 1.3:idle:question_latched:numerical: 'How many computer monitors are on the table closest to the map wall decal?' | 1.3:idle:transition:idle->parsing question received | 21.3:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 210.8:explore_execute:transition:explore_execute->verify explore budget spent | 212.2:verify:transition:verify->answer verify complete | 213.5:answer:answer_from_floor:verify yielded nothing | 213.6:answer:published:IntAnswer via answer_state | 213.6:answer:transition:answer->done answered
+[adapter_node-1] [INFO] [1784528721.443924958] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[adapter_node-1] [INFO] [1784528721.444664872] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784528721.445262479] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz

@@ -1,0 +1,68 @@
+Mon Jul 20 02:49:37 PM +08 2026
+scene=arabic_room
+question=Go near the stool under the picture and stop at the small table farthest from the columns.
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523575.142822590] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523632.150513668] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784524423.878505751] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784525139.981968385] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526033.820233638] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526138.786082132] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526243.832891503] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526431.613072621] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526524.718334745] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526631.432760218] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526869.335342765] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526974.116350326] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784527079.462122059] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784527280.843438797] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528030.520788125] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528721.443924958] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528743.732679175] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784529647.711096742] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784530194.898808372] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+average rate: 4.920
+publisher: beginning loop
+publishing #1: std_msgs.msg.String(data='Go near the stool under the picture and stop at the small table farthest from the columns.')
+
+4351 MiB, P8
+7534 MiB, P0
+7558 MiB, P0
+7562 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+3213 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+budget elapsed 636s
+QUESTION_RUN_COMPLETE arabic_room

@@ -1,0 +1,126 @@
+Mon Jul 20 02:25:26 PM +08 2026
+scene=office_1
+question=Find the potted plant on the file cabinet.
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523575.142822590] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523632.150513668] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784524423.878505751] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784525139.981968385] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526033.820233638] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526138.786082132] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526243.832891503] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526431.613072621] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526524.718334745] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526631.432760218] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526869.335342765] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526974.116350326] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784527079.462122059] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784527280.843438797] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528030.520788125] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528721.443924958] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528743.732679175] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+average rate: 9.819
+publisher: beginning loop
+publishing #1: std_msgs.msg.String(data='Find the potted plant on the file cabinet.')
+
+4351 MiB, P8
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523575.142822590] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523632.150513668] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784524423.878505751] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784525139.981968385] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526033.820233638] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526138.786082132] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526243.832891503] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526431.613072621] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526524.718334745] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526631.432760218] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526869.335342765] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526974.116350326] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784527079.462122059] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784527280.843438797] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528030.520788125] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528721.443924958] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528743.732679175] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+average rate: 9.680
+publisher: beginning loop
+publishing #1: std_msgs.msg.String(data='Find the potted plant on the file cabinet.')
+
+7558 MiB, P0
+7558 MiB, P0
+7558 MiB, P0
+7558 MiB, P0
+7558 MiB, P0
+7510 MiB, P0
+7554 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7548 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7514 MiB, P8
+7562 MiB, P8
+7522 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7562 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7562 MiB, P8
+3213 MiB, P8
+3213 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+budget elapsed 635s
+QUESTION_RUN_COMPLETE office_1
+budget elapsed 637s
+Error response from daemon: Could not find the file /tmp/live_bag in container iros2026_ai_module
+QUESTION_RUN_COMPLETE office_1

@@ -1,0 +1,30 @@
+[adapter_node-1] [INFO] [1784523839.369261766] [vla_ai_module]: published 31 waypoints since latch
+[adapter_node-1] [INFO] [1784523896.192198096] [vla_ai_module]: published 34 waypoints since latch
+[adapter_node-1] [INFO] [1784523953.207479100] [vla_ai_module]: published 38 waypoints since latch
+[adapter_node-1] [INFO] [1784523981.048179351] [vla_ai_module]: explore_execute->verify explore budget spent
+[adapter_node-1] [INFO] [1784523981.576000708] [vla_ai_module]: verify->answer verify complete
+[adapter_node-1] [INFO] [1784523981.590609269] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[adapter_node-1] [INFO] [1784523983.353945140] [vla_ai_module]: published 70 waypoints since latch
+[adapter_node-1] [INFO] [1784524013.781936076] [vla_ai_module]: published 101 waypoints since latch
+[adapter_node-1] [INFO] [1784524047.212737447] [vla_ai_module]: published 122 waypoints since latch
+[adapter_node-1] [INFO] [1784524077.589617309] [vla_ai_module]: published 156 waypoints since latch
+[adapter_node-1] [INFO] [1784524108.166086003] [vla_ai_module]: published 190 waypoints since latch
+[adapter_node-1] [INFO] [1784524152.823446588] [vla_ai_module]: published 229 waypoints since latch
+[adapter_node-1] [INFO] [1784524183.345628674] [vla_ai_module]: published 264 waypoints since latch
+[adapter_node-1] [INFO] [1784524215.670607814] [vla_ai_module]: published 301 waypoints since latch
+[adapter_node-1] [INFO] [1784524262.803899190] [vla_ai_module]: drive_out->done watchdog_floor>=570s
+[adapter_node-1] [INFO] [1784524262.806742183] [vla_ai_module]: controller DONE; last 10 events: 0.2:idle:transition:idle->parsing question received | 11.1:parsing:parsed:tier=regex | 11.1:parsing:transition:parsing->orient parse attempted | 71.1:orient:transition:orient->explore_execute orientation window closed | 270.5:explore_execute:transition:explore_execute->verify explore budget spent | 271.1:verify:transition:verify->answer verify complete | 271.1:answer:published:WaypointCmd via answer_state | 271.1:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 552.3:drive_out:publish_suppressed:already published; watchdog_floor>=570s | 552.3:drive_out:transition:drive_out->done watchdog_floor>=570s
+[adapter_node-1] [INFO] [1784524423.878505751] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[adapter_node-1] [INFO] [1784524423.885862471] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784524423.892243855] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[adapter_node-1] [INFO] [1784524474.150371291] [vla_ai_module]: question latched: 'How many chairs are near the table with a vase on it?'
+[adapter_node-1] [INFO] [1784524475.477157189] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[adapter_node-1] [INFO] [1784524475.480090496] [vla_ai_module]: idle->parsing question received
+[adapter_node-1] [WARN] [1784524495.501660005] [vla_ai_module]: seam 'parse' swallowed exception (occurrence 1): TimeoutError('chat call exceeded 20s timeout')
+[adapter_node-1] [INFO] [1784524495.506680066] [vla_ai_module]: parsing->orient parse attempted
+[adapter_node-1] [INFO] [1784524535.387044681] [vla_ai_module]: orient->explore_execute orientation window closed
+[adapter_node-1] [INFO] [1784524685.416453210] [vla_ai_module]: explore_execute->verify explore budget spent
+[adapter_node-1] [INFO] [1784524686.773123823] [vla_ai_module]: verify->answer verify complete
+[adapter_node-1] [INFO] [1784524688.067670576] [vla_ai_module]: published int answer: 2
+[adapter_node-1] [INFO] [1784524688.071297947] [vla_ai_module]: answer->done answered
+[adapter_node-1] [INFO] [1784524688.074379261] [vla_ai_module]: controller DONE; last 9 events: 1.3:idle:question_latched:numerical: 'How many chairs are near the table with a vase on it?' | 1.3:idle:transition:idle->parsing question received | 21.4:parsing:transition:parsing->orient parse attempted | 61.2:orient:transition:orient->explore_execute orientation window closed | 211.3:explore_execute:transition:explore_execute->verify explore budget spent | 212.6:verify:transition:verify->answer verify complete | 213.9:answer:answer_from_floor:verify yielded nothing | 213.9:answer:published:IntAnswer via answer_state | 213.9:answer:transition:answer->done answered

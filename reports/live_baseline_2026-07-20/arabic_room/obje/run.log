@@ -1,0 +1,46 @@
+Mon Jul 20 03:03:50 PM +08 2026
+scene=arabic_room
+question=Find the pillow closest to the book on the stool.
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523575.142822590] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523632.150513668] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784524423.878505751] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784525139.981968385] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526033.820233638] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526138.786082132] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526243.832891503] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526431.613072621] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526524.718334745] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526631.432760218] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526869.335342765] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784526974.116350326] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784527079.462122059] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784527280.843438797] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528030.520788125] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528721.443924958] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784528743.732679175] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784529647.711096742] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784530194.898808372] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784530986.105648557] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784531090.662171964] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+NO_SCAN - aborting

@@ -1,0 +1,30 @@
+[adapter_node-1] [INFO] [1784526974.124925081] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784526974.130607421] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[adapter_node-1] [INFO] [1784527079.462122059] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[adapter_node-1] [INFO] [1784527079.468839584] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784527079.477107912] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[adapter_node-1] [INFO] [1784527280.843438797] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[adapter_node-1] [INFO] [1784527280.850113577] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784527280.856231393] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[adapter_node-1] [INFO] [1784527293.210937767] [vla_ai_module]: question latched: 'Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.'
+[adapter_node-1] [INFO] [1784527293.400207403] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[adapter_node-1] [INFO] [1784527293.400496744] [vla_ai_module]: idle->parsing question received
+[adapter_node-1] [INFO] [1784527298.259124317] [vla_ai_module]: parsing->orient parse attempted
+[adapter_node-1] [INFO] [1784527311.608691274] [vla_ai_module]: published 9 waypoints since latch
+[adapter_node-1] [INFO] [1784527342.526589795] [vla_ai_module]: published 33 waypoints since latch
+[adapter_node-1] [INFO] [1784527353.625602712] [vla_ai_module]: orient->explore_execute orientation window closed
+[adapter_node-1] [INFO] [1784527372.815186802] [vla_ai_module]: published 52 waypoints since latch
+[adapter_node-1] [INFO] [1784527402.830629360] [vla_ai_module]: published 74 waypoints since latch
+[adapter_node-1] [INFO] [1784527435.749319193] [vla_ai_module]: published 82 waypoints since latch
+[adapter_node-1] [INFO] [1784527493.694669761] [vla_ai_module]: published 85 waypoints since latch
+[adapter_node-1] [INFO] [1784527551.889171017] [vla_ai_module]: published 88 waypoints since latch
+[adapter_node-1] [INFO] [1784527566.761023789] [vla_ai_module]: explore_execute->verify explore budget spent
+[adapter_node-1] [INFO] [1784527581.660942368] [vla_ai_module]: verify->answer verify complete
+[adapter_node-1] [INFO] [1784527607.005001330] [vla_ai_module]: published 91 waypoints since latch
+[adapter_node-1] [INFO] [1784527607.008145314] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[adapter_node-1] [INFO] [1784527655.149202801] [vla_ai_module]: published 94 waypoints since latch
+[adapter_node-1] [INFO] [1784527703.128794404] [vla_ai_module]: published 97 waypoints since latch
+[adapter_node-1] [INFO] [1784527752.062409283] [vla_ai_module]: published 100 waypoints since latch
+[adapter_node-1] [INFO] [1784527801.392978684] [vla_ai_module]: published 103 waypoints since latch
+[adapter_node-1] [INFO] [1784527851.846316189] [vla_ai_module]: drive_out->done watchdog_floor>=570s
+[adapter_node-1] [INFO] [1784527851.849327802] [vla_ai_module]: controller DONE; last 10 events: 0.2:idle:transition:idle->parsing question received | 5.0:parsing:parsed:tier=local | 5.0:parsing:transition:parsing->orient parse attempted | 60.4:orient:transition:orient->explore_execute orientation window closed | 273.5:explore_execute:transition:explore_execute->verify explore budget spent | 288.4:verify:transition:verify->answer verify complete | 313.8:answer:published:WaypointCmd via answer_state | 313.8:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 558.6:drive_out:publish_suppressed:already published; watchdog_floor>=570s | 558.6:drive_out:transition:drive_out->done watchdog_floor>=570s

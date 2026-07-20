@@ -1,0 +1,30 @@
+[adapter_node-1] [INFO] [1784528080.105391397] [vla_ai_module]: parsing->orient parse attempted
+[adapter_node-1] [INFO] [1784528118.935600490] [vla_ai_module]: orient->explore_execute orientation window closed
+[adapter_node-1] [INFO] [1784528269.630880541] [vla_ai_module]: explore_execute->verify explore budget spent
+[adapter_node-1] [INFO] [1784528271.018672813] [vla_ai_module]: verify->answer verify complete
+[adapter_node-1] [INFO] [1784528272.358761649] [vla_ai_module]: published int answer: 2
+[adapter_node-1] [INFO] [1784528272.361707596] [vla_ai_module]: answer->done answered
+[adapter_node-1] [INFO] [1784528272.364644257] [vla_ai_module]: controller DONE; last 9 events: 1.3:idle:question_latched:numerical: 'How many computer monitors are on the table closest to the map wall decal?' | 1.3:idle:transition:idle->parsing question received | 21.3:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 210.8:explore_execute:transition:explore_execute->verify explore budget spent | 212.2:verify:transition:verify->answer verify complete | 213.5:answer:answer_from_floor:verify yielded nothing | 213.6:answer:published:IntAnswer via answer_state | 213.6:answer:transition:answer->done answered
+[adapter_node-1] [INFO] [1784528721.443924958] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[adapter_node-1] [INFO] [1784528721.444664872] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784528721.445262479] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[adapter_node-1] [INFO] [1784528743.732679175] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[adapter_node-1] [INFO] [1784528743.733463234] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784528743.734116266] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[adapter_node-1] [INFO] [1784528799.909096675] [vla_ai_module]: question latched: 'Find the potted plant on the file cabinet.'
+[adapter_node-1] [INFO] [1784528800.090407630] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[adapter_node-1] [INFO] [1784528800.090731088] [vla_ai_module]: idle->parsing question received
+[adapter_node-1] [INFO] [1784528803.328687345] [vla_ai_module]: parsing->orient parse attempted
+[adapter_node-1] [INFO] [1784528803.331902886] [vla_ai_module]: published 1 waypoints since latch
+[adapter_node-1] [INFO] [1784528833.457153352] [vla_ai_module]: published 21 waypoints since latch
+[adapter_node-1] [INFO] [1784528860.168734540] [vla_ai_module]: orient->explore_execute orientation window closed
+[adapter_node-1] [INFO] [1784528864.220259900] [vla_ai_module]: published 44 waypoints since latch
+[adapter_node-1] [INFO] [1784528896.178121980] [vla_ai_module]: published 67 waypoints since latch
+[adapter_node-1] [INFO] [1784528935.898384104] [vla_ai_module]: published 70 waypoints since latch
+[adapter_node-1] [INFO] [1784528992.485684823] [vla_ai_module]: published 73 waypoints since latch
+[adapter_node-1] [INFO] [1784529048.568985449] [vla_ai_module]: published 76 waypoints since latch
+[adapter_node-1] [INFO] [1784529048.572660599] [vla_ai_module]: explore_execute->verify explore budget spent
+[adapter_node-1] [INFO] [1784529066.977025372] [vla_ai_module]: verify->answer verify complete
+[adapter_node-1] [INFO] [1784529080.671533845] [vla_ai_module]: published marker answer: label='potted plant' centroid=(5.42, -0.73, 0.75)
+[adapter_node-1] [INFO] [1784529080.676055383] [vla_ai_module]: answer->done answered
+[adapter_node-1] [INFO] [1784529080.680336306] [vla_ai_module]: controller DONE; last 9 events: 0.2:idle:question_latched:object_reference: 'Find the potted plant on the file cabinet.' | 0.2:idle:transition:idle->parsing question received | 3.4:parsing:parsed:tier=local | 3.4:parsing:transition:parsing->orient parse attempted | 60.3:orient:transition:orient->explore_execute orientation window closed | 248.7:explore_execute:transition:explore_execute->verify explore budget spent | 267.1:verify:transition:verify->answer verify complete | 280.8:answer:published:MarkerBox via answer_state | 280.8:answer:transition:answer->done answered

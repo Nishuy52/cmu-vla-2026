@@ -1,0 +1,34 @@
+Mon Jul 20 01:00:14 PM +08 2026
+scene=livingroom_1
+question=Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523575.142822590] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[launch_with_llm] prewarm OK: model qwen2.5vl:3b loaded
+[adapter_node-1] [INFO] [1784523632.150513668] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+average rate: 5.183
+publisher: beginning loop
+publishing #1: std_msgs.msg.String(data='Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.')
+
+4351 MiB, P8
+7558 MiB, P0
+7562 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7558 MiB, P8
+7562 MiB, P8
+7558 MiB, P8
+7558 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+3613 MiB, P8
+budget elapsed 636s
+QUESTION_RUN_COMPLETE livingroom_1

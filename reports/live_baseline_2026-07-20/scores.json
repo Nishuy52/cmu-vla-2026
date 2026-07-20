@@ -1,7 +1,150 @@
 {
-  "generated_utc": "2026-07-20T06:40:01.764717+00:00",
-  "n_runs": 5,
+  "generated_utc": "2026-07-20T07:07:30.763846+00:00",
+  "n_runs": 6,
   "rows": [
+    {
+      "scene": "arabic_room",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "Go near the stool under the picture and stop at the small table farthest from the columns.",
+      "run_dir": "reports/live_baseline_2026-07-20/arabic_room/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 1,
+        "/numerical_response": 0,
+        "/selected_object_marker": 0,
+        "/state_estimation": 130433,
+        "/way_point_with_heading": 675
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.574,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.0,
+        "ordered_leg_credit": 0.0,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 0,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 122,
+        "driven_n_poses_raw": 130433,
+        "frechet_m": 8.018944946575017,
+        "coverage_1m": 0.0,
+        "if_question_index": 0,
+        "headline": 0.0,
+        "note": "legs=0/2"
+      },
+      "headline_live": 0.0,
+      "offline": {
+        "scene": "arabic_room",
+        "qtype": "instruction_following",
+        "question": "Go near the stool under the picture and stop at the small table farthest from the columns.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 0.5,
+        "ordered_leg_credit": 0.5,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 1,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 17,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              -3.1393839424582937,
+              -1.9811260129585473
+            ]
+          ],
+          [
+            "goto",
+            [
+              2.820600839340573,
+              -0.6609610784594886
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              -3.1393839424582937,
+              -1.9811260129585473
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.1609
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              2.820600839340573,
+              -0.6609610784594886
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              -3.1393839424582937,
+              -1.9811260129585473
+            ],
+            "our_instance_id": [
+              34
+            ],
+            "min_dist_driven_to_goal_m": 5.692,
+            "dist_goal_to_gt_traj_m": 5.6733
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              2.820600839340573,
+              -0.6609610784594886
+            ],
+            "our_instance_id": [
+              64
+            ],
+            "min_dist_driven_to_goal_m": 0.6899,
+            "dist_goal_to_gt_traj_m": 0.8063
+          }
+        ],
+        "frechet_m": 3.295542960561886,
+        "coverage_1m": 0.4836,
+        "our_n_waypoints": 17,
+        "gt_n_waypoints": 792,
+        "frame_aligned": true,
+        "fit_residual_m": 0.574,
+        "note": "",
+        "parse_notes": ""
+      },
+      "headline_offline": 0.5,
+      "delta": -0.5,
+      "note": "legs=0/2"
+    },
     {
       "scene": "livingroom_1",
       "qdir": "inst",

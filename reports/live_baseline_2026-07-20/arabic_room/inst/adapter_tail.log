@@ -1,0 +1,30 @@
+[adapter_node-1] [INFO] [1784529647.711096742] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[adapter_node-1] [INFO] [1784529647.718069256] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784529647.723758380] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[adapter_node-1] [INFO] [1784530194.898808372] [vla_ai_module]: LLM ladder configured: 1 provider tier(s): local (regex floor always last).
+[adapter_node-1] [INFO] [1784530194.899606595] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[adapter_node-1] [INFO] [1784530194.900267675] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[adapter_node-1] [INFO] [1784530273.661591258] [vla_ai_module]: question latched: 'Go near the stool under the picture and stop at the small table farthest from the columns.'
+[adapter_node-1] [INFO] [1784530273.864630787] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[adapter_node-1] [INFO] [1784530273.864963747] [vla_ai_module]: idle->parsing question received
+[adapter_node-1] [INFO] [1784530278.686589396] [vla_ai_module]: parsing->orient parse attempted
+[adapter_node-1] [INFO] [1784530278.691693750] [vla_ai_module]: published 1 waypoints since latch
+[adapter_node-1] [INFO] [1784530309.234958410] [vla_ai_module]: published 21 waypoints since latch
+[adapter_node-1] [INFO] [1784530335.426901720] [vla_ai_module]: orient->explore_execute orientation window closed
+[adapter_node-1] [INFO] [1784530339.627237098] [vla_ai_module]: published 43 waypoints since latch
+[adapter_node-1] [INFO] [1784530370.437348286] [vla_ai_module]: published 55 waypoints since latch
+[adapter_node-1] [INFO] [1784530426.772840942] [vla_ai_module]: published 58 waypoints since latch
+[adapter_node-1] [INFO] [1784530481.830418921] [vla_ai_module]: published 61 waypoints since latch
+[adapter_node-1] [INFO] [1784530536.969837143] [vla_ai_module]: published 64 waypoints since latch
+[adapter_node-1] [INFO] [1784530551.062699127] [vla_ai_module]: explore_execute->verify explore budget spent
+[adapter_node-1] [INFO] [1784530551.333885921] [vla_ai_module]: verify->answer verify complete
+[adapter_node-1] [INFO] [1784530551.357425421] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[adapter_node-1] [INFO] [1784530578.364849130] [vla_ai_module]: published 117 waypoints since latch
+[adapter_node-1] [INFO] [1784530625.272192086] [vla_ai_module]: published 208 waypoints since latch
+[adapter_node-1] [INFO] [1784530655.332565348] [vla_ai_module]: published 280 waypoints since latch
+[adapter_node-1] [INFO] [1784530685.568058300] [vla_ai_module]: published 352 waypoints since latch
+[adapter_node-1] [INFO] [1784530728.927356729] [vla_ai_module]: published 432 waypoints since latch
+[adapter_node-1] [INFO] [1784530759.043190775] [vla_ai_module]: published 508 waypoints since latch
+[adapter_node-1] [INFO] [1784530790.822342280] [vla_ai_module]: published 590 waypoints since latch
+[adapter_node-1] [INFO] [1784530813.667135266] [vla_ai_module]: drive_out->done watchdog_floor>=570s
+[adapter_node-1] [INFO] [1784530813.669903656] [vla_ai_module]: controller DONE; last 10 events: 0.2:idle:transition:idle->parsing question received | 5.0:parsing:parsed:tier=local | 5.0:parsing:transition:parsing->orient parse attempted | 61.8:orient:transition:orient->explore_execute orientation window closed | 277.4:explore_execute:transition:explore_execute->verify explore budget spent | 277.7:verify:transition:verify->answer verify complete | 277.7:answer:published:WaypointCmd via answer_state | 277.7:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 540.0:drive_out:publish_suppressed:already published; watchdog_floor>=570s | 540.0:drive_out:transition:drive_out->done watchdog_floor>=570s
