@@ -763,6 +763,17 @@ class InstructionHead:
         legs ground. Rebuilds from ``start_xy`` whenever the committable prefix grows
         (H3c partial-route drive); a shrinking/steady prefix leaves the follower intact.
         """
+        if self._follower is None and self._costmap is None:
+            # Stage 3 Gate 3 (goal-credibility withhold) needs a reachable-mask costmap
+            # to know a leg's true ``goal_clamp_m`` — before any route has ever been
+            # built there is none yet, so the grounding pass ``advance`` already ran
+            # this tick used the pre-costmap ``_project_free`` fallback instead of the
+            # real BFS-reachable clamp. Probe one now so the very first commit decision
+            # sees the SAME geometry the driven route itself will use. Idempotent
+            # (mirrors ``_stamp_avoids``) — ``_build_route``/``_stamp_ground_plan``
+            # redoes this exact stamp+ground once more before actually adopting a
+            # route, so this changes no final geometry, only what Gate 3 sees.
+            self._refresh_costmap_and_geometry(scene)
         want = self._committable_prefix_len()
         if want == 0:
             return  # nothing grounded yet — caller (ExploreHead) explores this tick
@@ -781,6 +792,16 @@ class InstructionHead:
             return  # already driving a route covering (at least) this prefix
         self._build_route(start_xy, scene, want)
 
+    def _refresh_costmap_and_geometry(self, scene) -> None:
+        """Rebuild the costmap from the current grid, re-stamp avoids, and re-ground
+        every leg against it. ``_stamp_avoids`` is idempotent over specs (re-stamps any
+        avoid anchor that has since grounded); re-grounding is likewise safe to run
+        speculatively. Shared by ``_stamp_ground_plan`` (the actual build/rebuild path)
+        and ``_maybe_build_or_extend_route``'s Gate 3 probe (see its docstring)."""
+        self._costmap = Costmap(self.grid)
+        self._stamp_avoids(scene)
+        self._ground_legs(scene)
+
     def _stamp_ground_plan(
         self, start_xy: tuple[float, float], scene, prefix_len: int
     ) -> tuple[list[tuple[float, float]], list[int]] | None:
@@ -788,17 +809,13 @@ class InstructionHead:
         costmap exists), and A*-plan the leading ``prefix_len`` ordered legs.
 
         Returns ``(path, leg_bounds)``, or ``None`` if the prefix lacks geometry or
-        ``plan_through`` cannot reach it. ``_stamp_avoids`` is idempotent over specs
-        (a rebuild re-stamps any avoid anchor that has since grounded), and re-grounding
-        is likewise safe to run speculatively — this always mutates
-        ``self._costmap``/``self._legs``, but never touches ``self._follower`` /
-        ``self._driven_prefix``: callers decide whether/how to adopt the routing result
-        (``_build_route`` always adopts, falling back to ``_recover_path`` on ``None``;
-        the Stage 3 guarded re-ground rebuild adopts ONLY on success).
+        ``plan_through`` cannot reach it. This always mutates ``self._costmap``/
+        ``self._legs``, but never touches ``self._follower``/``self._driven_prefix``:
+        callers decide whether/how to adopt the routing result (``_build_route`` always
+        adopts, falling back to ``_recover_path`` on ``None``; the Stage 3 guarded
+        re-ground rebuild adopts ONLY on success).
         """
-        self._costmap = Costmap(self.grid)
-        self._stamp_avoids(scene)
-        self._ground_legs(scene)
+        self._refresh_costmap_and_geometry(scene)
         prefix = self._legs[:prefix_len]
         if any(l.geom is None for l in prefix):
             return None

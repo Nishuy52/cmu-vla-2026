@@ -207,6 +207,48 @@ def test_provisional_terminal_commits_when_no_budget_signal():
     assert inst._driven_prefix == 2
 
 
+# --------------------------------------------------------------------------- Stage 3: clamp withhold
+
+
+def _sealed_pocket_scene() -> tuple[SyntheticScene, BasicSceneIndex]:
+    """A room with a corner pocket sealed except for a hairline sliver gap, and an
+    anchor deep in the far corner of the pocket — the sliver's nearest-reachable snap
+    lands well beyond ARRIVAL_TOL_M from the anchor centroid (an uncreditable clamp,
+    see docs/proposals/pre_grounding_movement_plan.md Stage 3)."""
+    sc = SyntheticScene(0)
+    sc.rooms = [Room(0.0, 0.0, 16.0, 16.0)]
+    sc.place_box("wall", 12.85, 9.7, 6.3, 0.3, 1.0)
+    sc.place_box("wall", 9.7, 12.85, 0.3, 6.3, 1.0)
+    sc.place_box("cabinet", 14.5, 14.5, 0.4, 0.4, 0.8)
+    return sc, BasicSceneIndex(sc.instances())
+
+
+def test_explore_falls_through_while_clamped_leg_withheld():
+    """Stage 3 test (b): while the ONLY route leg's goal is clamped beyond the
+    credibility bar and budget pressure hasn't forced the commit, IF withholds the whole
+    route (nothing grounded to drive) — ExploreHead must still fall through and publish
+    waypoints (H3 style), not deadlock waiting for the withheld leg."""
+    from core.heads.instruction import GOAL_CLAMP_CREDIBILITY_BAR_M
+
+    sc, idx = _sealed_pocket_scene()
+    route = [_goto("cabinet")]
+    inst = InstructionHead(
+        plan=instruction_plan(route),
+        budget_frac=lambda: 0.10,  # early: pressure has not forced the commit
+    )
+    head = ExploreHead(plan=instruction_plan(route), instruction=inst)
+    io = _ExploreDriveIO(sc, start=(1.0, 1.0))
+
+    for _ in range(5):
+        head.advance(io, idx)
+        io.tick_motion()
+
+    assert inst._legs[0].goal_clamp_m is not None
+    assert inst._legs[0].goal_clamp_m > GOAL_CLAMP_CREDIBILITY_BAR_M
+    assert inst._follower is None, "the clamped leg must stay withheld from the route"
+    assert io.waypoints, "explore fall-through must still publish while withheld"
+
+
 # --------------------------------------------------------------------------- IF-F6: pairs
 
 
