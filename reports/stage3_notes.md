@@ -65,5 +65,13 @@ Implement Stage 3 of `docs/proposals/pre_grounding_movement_plan.md` in
 ## Verification log
 - Fast suite (`pytest` from `src/`) green throughout, including after the
   first-tick-ordering fix.
-- Full gate (`pytest -m ""`) and battery byte-check: see final report / commit
-  messages for results.
+- Full gate `pytest -m ""` from `src/`: PASSED, exit 0 (all non-skipped tests green,
+  including the `@pytest.mark.slow` driven-trajectory tests).
+- Battery byte-check: `python -m core.runner.gt_battery --groundtruth
+  ../data/vla3d/Unity --out ../reports/gt_battery_stage3_bytecheck` (from `src/`,
+  commit d9c99f0) vs `reports/gt_battery_main_post77c` — `scores` and `aggregate`
+  byte-identical (`a['scores']==b['scores']` and `a['aggregate']==b['aggregate']`
+  both `True`; `tools/battery_diff.py` independently reports "no changes" on every
+  topline metric). See `reports/gt_battery_stage3_bytecheck/diff_vs_post77c.md`.
+- Commits: 8402939 (core Gate 3 + reground rebuild), d9c99f0 (first-tick ordering
+  fix + tests a/b/c/d), 731abdb (battery byte-check report).
