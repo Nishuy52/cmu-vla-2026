@@ -1,0 +1,764 @@
+"""Score LIVE-sim baseline runs (recorded ROS 2 bags) against ground truth.
+
+Companion to ``core.runner.gt_battery`` (the OFFLINE battery, which drives a
+*simulated* kinematic follower over the mirror costmap): this tool scores the
+*actually driven* trajectory + published answers captured from a real
+``ros2 bag record`` of the live sim/adapter stack, using the SAME scorers and
+SAME per-scene geometry the offline battery uses (``core.groundtruth.scoring``,
+plus the private leg/frame helpers in ``core.runner.gt_battery`` — imported,
+never reimplemented) so a live row and its offline counterpart are directly
+comparable question-for-question.
+
+Bag reading reuses ``core.replay.bag_reader.BagSource`` (the same machinery
+``tools/llm_vision_checkpoint_replay.py`` and the perception replay tooling
+use to turn an mcap into core dataclasses), extended with two converters for
+the two live-only topics the replay machinery doesn't already know about
+(``/numerical_response`` std_msgs/Int32, ``/selected_object_marker``
+visualization_msgs/Marker).
+
+Frame note: the live sim publishes ``/state_estimation`` in the SAME
+sim/trajectory frame the GT reference trajectories (``trajectory_q{4,5}.ply``)
+were recorded in — verified per-scene by comparing the live trajectory's first
+pose to the GT trajectory's first vertex (both ~= the scene's fixed sim-origin
+spawn, (0, 0, 0.75) for every scene in this dataset). The battery's per-scene
+fitted ``Frame2D`` (``core.runner.gt_battery._fit_scene_if_frame`` /
+``core.groundtruth.scoring.align_scene_trajectories``) maps that sim frame into
+the VLA-3D object frame; we fit it ONCE per scene (from the questions.json
+instruction_following texts + GT trajectory PLYs — no live data involved) and
+reuse it for every question type in that scene, since it is a property of the
+scene's sim<->object registration, not of any one question.
+
+Usage (from the repo root, host venv)::
+
+    python -m tools.score_live_run                                   # whole default baseline dir
+    python -m tools.score_live_run reports/live_baseline_2026-07-20   # explicit baseline dir
+    python -m tools.score_live_run reports/live_baseline_2026-07-20/livingroom_1/inst  # one run
+
+Writes ``<out>/scores.md`` + ``<out>/scores.json`` (default out = the scored
+baseline dir). Safe to re-run as more bags land — each invocation rescans the
+baseline dir fresh; nothing is mutated in place.
+
+Pure offline dev tool (tools/ — never part of the scored pipeline). CPU only.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+import tools  # noqa: F401 -- inserts <repo>/src onto sys.path
+
+from core.groundtruth import scoring as S
+from core.groundtruth.loader import load_scene
+from core.interfaces import MarkerBox
+from core.perception.scene_index import BasicSceneIndex
+from core.replay.bag_reader import (
+    DEFAULT_TOPIC_MAP,
+    BagSource,
+    TOPIC_ODOM,
+    TOPIC_QUESTION,
+)
+from core.runner import gt_battery as GB
+
+_REPO = Path(__file__).resolve().parents[1]
+DEFAULT_BASELINE_DIR = _REPO / "reports" / "live_baseline_2026-07-20"
+DEFAULT_GROUNDTRUTH = _REPO / "data" / "vla3d" / "Unity"
+DEFAULT_OFFLINE_RESULTS = (
+    _REPO / "reports" / "gt_battery_main_post_carve" / "gt_battery_results.json"
+)
+
+#: run-dir basename -> QType value (docs/challenge_brief.md naming; the baseline
+#: capture layout uses the shortened dir names per scene).
+QDIR_TO_QTYPE = {
+    "nume": "numerical",
+    "obje": "object_reference",
+    "inst": "instruction_following",
+}
+
+TOPIC_NUM_RESPONSE = "/numerical_response"
+TOPIC_MARKER = "/selected_object_marker"
+
+#: Minimum XY movement (m) between kept trajectory samples. Live odom is
+#: published at ~100-200 Hz; the rubric scorer's Frechet/threading/capsule
+#: checks are O(n*m) Python loops sized for the offline battery's sparse
+#: (one-pose-per-planned-waypoint) driven paths, so a raw multi-hundred-
+#: thousand-row live trajectory must be shape-preservingly decimated first —
+#: well below every tolerance the scorer applies (ARRIVAL_RESAMPLE_STEP_M
+#: 0.25 m, leg-arrival tolerances ~1-2 m), so decimation cannot change a
+#: verdict, only the cost of computing it.
+DECIMATE_MIN_MOVE_M = 0.05
+
+
+def _int32_to_value(msg: Any, bag_ns: int) -> int:
+    return int(msg.data)
+
+
+def _marker_to_dict(msg: Any, bag_ns: int) -> dict[str, float]:
+    p = msg.pose.position
+    s = msg.scale
+    return {
+        "cx": float(p.x), "cy": float(p.y), "cz": float(p.z),
+        "sx": float(s.x), "sy": float(s.y), "sz": float(s.z),
+        "t": float(bag_ns) * 1e-9,
+    }
+
+
+LIVE_TOPIC_MAP = {
+    TOPIC_ODOM: DEFAULT_TOPIC_MAP[TOPIC_ODOM],
+    TOPIC_QUESTION: DEFAULT_TOPIC_MAP[TOPIC_QUESTION],
+    TOPIC_NUM_RESPONSE: _int32_to_value,
+    TOPIC_MARKER: _marker_to_dict,
+}
+
+
+# --------------------------------------------------------------------------- bag reading
+
+
+@dataclass
+class BagCapture:
+    """Raw content extracted from one run's bag, plus per-topic message counts."""
+
+    question_text: str | None
+    odom_xy_raw_n: int  # message count before decimation (capture diagnostic)
+    odom_xy: np.ndarray  # (N, 2) decimated, order-preserving
+    numerical_response: int | None
+    marker: dict[str, float] | None
+    topic_counts: dict[str, int] = field(default_factory=dict)
+
+
+def _decimate_xy(points: list[tuple[float, float]], min_move: float) -> np.ndarray:
+    """Distance-decimate an ordered XY polyline, keeping the first/last points.
+
+    Shape-preserving (never reorders, never drops a >=min_move deviation) —
+    see :data:`DECIMATE_MIN_MOVE_M` for why this is safe for the scorers.
+    """
+    if not points:
+        return np.empty((0, 2), dtype=float)
+    out = [points[0]]
+    last = points[0]
+    for p in points[1:]:
+        if math.hypot(p[0] - last[0], p[1] - last[1]) >= min_move:
+            out.append(p)
+            last = p
+    if out[-1] != points[-1]:
+        out.append(points[-1])
+    return np.asarray(out, dtype=float)
+
+
+def read_bag_capture(bag_dir: Path) -> BagCapture:
+    """Read one run's bag into a :class:`BagCapture`.
+
+    ``question_text`` is the LAST ``/challenge_question`` message (there
+    should be exactly one on a well-formed capture); ``numerical_response``/
+    ``marker`` are likewise the last message on their topic (the final
+    published answer, tolerant of a re-publish). ``topic_counts`` reads
+    straight off the bag's connection metadata (rosbags ``msgcount``) —
+    the capture-completeness signal this tool reports even when a topic's
+    payload isn't needed for THIS run's qtype.
+    """
+    from rosbags.highlevel import AnyReader
+
+    topic_counts: dict[str, int] = {}
+    with AnyReader([bag_dir]) as reader:
+        for c in reader.connections:
+            topic_counts[c.topic] = topic_counts.get(c.topic, 0) + int(c.msgcount)
+
+    question_text: str | None = None
+    numerical_response: int | None = None
+    marker: dict[str, float] | None = None
+    odom_pts: list[tuple[float, float]] = []
+    odom_n = 0
+    for rec in BagSource(bag_dir, topic_map=LIVE_TOPIC_MAP):
+        if rec.topic == TOPIC_ODOM:
+            odom_n += 1
+            odom_pts.append((rec.msg.x, rec.msg.y))
+        elif rec.topic == TOPIC_QUESTION:
+            question_text = rec.msg.text
+        elif rec.topic == TOPIC_NUM_RESPONSE:
+            numerical_response = rec.msg
+        elif rec.topic == TOPIC_MARKER:
+            marker = rec.msg
+
+    return BagCapture(
+        question_text=question_text,
+        odom_xy_raw_n=odom_n,
+        odom_xy=_decimate_xy(odom_pts, DECIMATE_MIN_MOVE_M),
+        numerical_response=numerical_response,
+        marker=marker,
+        topic_counts=topic_counts,
+    )
+
+
+def _run_log_question(run_dir: Path) -> str | None:
+    """Fallback question text from ``run.log``'s ``question=<text>`` line.
+
+    Used when the bag itself carries no ``/challenge_question`` message
+    (a capture gap — see the tool's capture-completeness check) but the
+    launch log still records what was asked.
+    """
+    log = run_dir / "run.log"
+    if not log.is_file():
+        return None
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("question="):
+            return line[len("question="):].strip()
+    return None
+
+
+# --------------------------------------------------------------------------- discovery
+
+
+def discover_runs(root: Path) -> list[tuple[str, str, Path]]:
+    """Find ``<scene>/<qdir>/bag`` runs under a baseline dir. Returns (scene, qdir, run_dir)."""
+    runs: list[tuple[str, str, Path]] = []
+    if not root.is_dir():
+        return runs
+    for scene_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        for qdir in QDIR_TO_QTYPE:
+            run_dir = scene_dir / qdir
+            if (run_dir / "bag").is_dir():
+                runs.append((scene_dir.name, qdir, run_dir))
+    return runs
+
+
+def resolve_targets(target: str | None) -> list[tuple[str, str, Path]]:
+    """Resolve a CLI target (baseline root, or one run dir) to a run list."""
+    if target is None:
+        return discover_runs(DEFAULT_BASELINE_DIR)
+    p = Path(target)
+    if (p / "bag").is_dir():
+        # A single run dir: <scene_dir>/<qdir>.
+        return [(p.parent.name, p.name, p)]
+    return discover_runs(p)
+
+
+# --------------------------------------------------------------------------- questions.json
+
+
+def _load_questions_index(questions_path: Path) -> dict[str, dict[str, list[str]]]:
+    with open(questions_path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    return {e["scene"]: e["questions"] for e in data}
+
+
+def _squash(s: str) -> str:
+    return "".join(s.split()).casefold()
+
+
+def _match_question(text: str, candidates: list[str]) -> int | None:
+    """Index of ``text`` in ``candidates`` under whitespace/case-insensitive equality."""
+    target = _squash(text)
+    for i, c in enumerate(candidates):
+        if _squash(c) == target:
+            return i
+    return None
+
+
+# --------------------------------------------------------------------------- per-scene frame
+
+
+@dataclass
+class SceneContext:
+    scene: str
+    gt: Any
+    idx: BasicSceneIndex
+    referential: dict | None
+    scene_graph: dict | None
+    if_texts: list[str]
+    frame: S.Frame2D | None
+    fit_residual_m: float | None
+    spawn_xy: tuple[float, float] | None
+
+
+_SCENE_CACHE: dict[str, SceneContext] = {}
+
+
+def _load_scene_context(
+    scene: str,
+    *,
+    groundtruth_root: Path,
+    questions_dir: Path,
+    questions_index: dict[str, dict[str, list[str]]],
+) -> SceneContext | None:
+    if scene in _SCENE_CACHE:
+        return _SCENE_CACHE[scene]
+    folder = GB._find_scene_folder(groundtruth_root, scene)
+    if folder is None:
+        return None
+    gt = load_scene(folder, scene_name=scene)
+    idx = BasicSceneIndex(gt.instances)
+    referential = GB._load_referential(folder, scene)
+    scene_graph = GB._load_scene_graph(folder, scene)
+    entry_questions = questions_index.get(scene, {})
+    if_texts = entry_questions.get("instruction_following", [])
+
+    _if_traj, _if_cands, frame, residual, pairs = GB._fit_scene_if_frame(
+        gt, idx, if_texts, questions_dir
+    )
+    spawn_xy: tuple[float, float] | None = None
+    if frame is not None and pairs:
+        start_pt = pairs[0][0][0, :2]
+        mapped = frame.apply(np.asarray([start_pt], dtype=float))[0]
+        spawn_xy = (float(mapped[0]), float(mapped[1]))
+
+    ctx = SceneContext(
+        scene=scene, gt=gt, idx=idx, referential=referential, scene_graph=scene_graph,
+        if_texts=if_texts, frame=frame, fit_residual_m=residual, spawn_xy=spawn_xy,
+    )
+    _SCENE_CACHE[scene] = ctx
+    return ctx
+
+
+# --------------------------------------------------------------------------- marker -> AABB
+
+
+def _marker_aabb_in_object_frame(
+    marker: dict[str, float], frame: S.Frame2D | None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Map a live /selected_object_marker (sim frame) to a GT-comparable AABB.
+
+    z is untouched (the fitted frame is a 2D sim<->object registration only —
+    same convention ``score_instruction_rubric``/``align_scene_trajectories``
+    use for trajectories). When ``frame`` rotates (theta != 0) the box's four
+    XY corners are individually mapped and re-hulled into an axis-aligned
+    box — the same "OBB->AABB, an over-approximation" convention the GT
+    loader itself uses for oriented ground-truth boxes (see the offline
+    report's OBB->AABB note), applied here to keep the two IoUs comparable.
+    """
+    cx, cy, cz = marker["cx"], marker["cy"], marker["cz"]
+    sx, sy, sz = marker["sx"], marker["sy"], marker["sz"]
+    if frame is None:
+        a_min = np.array([cx - sx / 2, cy - sy / 2, cz - sz / 2])
+        a_max = np.array([cx + sx / 2, cy + sy / 2, cz + sz / 2])
+        return a_min, a_max
+    corners_xy = np.array(
+        [
+            [cx - sx / 2, cy - sy / 2],
+            [cx - sx / 2, cy + sy / 2],
+            [cx + sx / 2, cy - sy / 2],
+            [cx + sx / 2, cy + sy / 2],
+        ]
+    )
+    mapped = frame.apply(corners_xy)
+    xy_min = mapped.min(axis=0)
+    xy_max = mapped.max(axis=0)
+    a_min = np.array([xy_min[0], xy_min[1], cz - sz / 2])
+    a_max = np.array([xy_max[0], xy_max[1], cz + sz / 2])
+    return a_min, a_max
+
+
+# --------------------------------------------------------------------------- per-qtype scoring
+
+
+def score_numerical_run(
+    ctx: SceneContext, text: str, capture: BagCapture, *, answers: dict | None
+) -> dict:
+    live_value = capture.numerical_response
+    ns = S.score_numerical(text, ctx.idx, referential=ctx.referential, scene_graph=ctx.scene_graph)
+    gt_true, _pipeline_true_match, true_source, key_note = GB._true_numerical(
+        answers, ctx.scene, text, live_value
+    )
+    true_match = None if (live_value is None or gt_true is None) else (live_value == gt_true)
+    headline = None if true_match is None else (1.0 if true_match else 0.0)
+    note_parts = [key_note]
+    if gt_true is not None:
+        note_parts.append(f"live={live_value} true={gt_true}")
+    return {
+        "live_answer": live_value,
+        "gt_answer_true": gt_true,
+        "true_source": true_source,
+        "true_match": true_match,
+        "gt_count_pipeline": ns.gt_count_pipeline,
+        "gt_count_independent": ns.gt_count_independent,
+        "independent_source": ns.independent_source,
+        "headline": headline,
+        "note": "; ".join(filter(None, note_parts)),
+    }
+
+
+def score_object_reference_run(ctx: SceneContext, text: str, capture: BagCapture) -> dict:
+    ors = S.score_object_reference(text, ctx.idx, ctx.gt.instances, referential=ctx.referential)
+    note_parts: list[str] = []
+    if capture.marker is None:
+        return {
+            "live_marker": None,
+            "gt_target_id": ors.gt_target_id,
+            "target_source": ors.target_source,
+            "match_method": ors.match_method,
+            "iou": None,
+            "headline": None,
+            "note": "no /selected_object_marker in bag",
+        }
+    a_min, a_max = _marker_aabb_in_object_frame(capture.marker, ctx.frame)
+    if ctx.frame is None:
+        note_parts.append("no scene sim->object frame fit; marker scored in raw sim coords")
+    by_id = {r.instance_id: r for r in ctx.gt.instances}
+    iou: float | None = None
+    if ors.gt_target_id is not None and ors.gt_target_id in by_id:
+        gt_rec = by_id[ors.gt_target_id]
+        iou = S.iou_from_corners(a_min, a_max, gt_rec.aabb_min, gt_rec.aabb_max)
+    else:
+        note_parts.append("no GT target matched; IoU undefined (flagged, not guessed)")
+    live_marker = MarkerBox(
+        cx=float((a_min[0] + a_max[0]) / 2), cy=float((a_min[1] + a_max[1]) / 2),
+        cz=float((a_min[2] + a_max[2]) / 2),
+        sx=float(a_max[0] - a_min[0]), sy=float(a_max[1] - a_min[1]), sz=float(a_max[2] - a_min[2]),
+    )
+    return {
+        "live_marker": asdict(live_marker),
+        "gt_target_id": ors.gt_target_id,
+        "target_source": ors.target_source,
+        "match_method": ors.match_method,
+        "iou": None if iou is None else round(float(iou), 4),
+        "headline": None if iou is None else round(float(iou), 4),
+        "note": "; ".join(note_parts),
+    }
+
+
+def score_instruction_following_run(
+    ctx: SceneContext, text: str, capture: BagCapture, *, questions_dir: Path
+) -> dict:
+    """Score a live driven trajectory with the SAME per-leg rubric geometry
+    (``GB._if_rubric_geometry``) and scene frame (``ctx.frame``, fitted once
+    per scene by ``GB._fit_scene_if_frame``) the offline battery uses for this
+    question — only the driven trajectory itself (from the bag, mapped into
+    the object frame) differs from the offline simulated-follower path.
+    """
+    if not ctx.if_texts:
+        return {"headline": None, "note": "scene has no instruction_following questions"}
+    i = _match_question(text, ctx.if_texts)
+    if i is None:
+        return {"headline": None, "note": "question text did not match questions.json"}
+    if ctx.frame is None:
+        return {
+            "headline": None,
+            "note": "no scene sim->object frame fit; cannot map driven trajectory",
+        }
+    traj_q = GB._IF_TRAJ_INDEX.get(i)
+    traj_path = None
+    if traj_q is not None:
+        cand = questions_dir / ctx.scene / f"trajectory_q{traj_q}.ply"
+        if cand.exists():
+            traj_path = cand
+
+    leg_goals, corridor_gates, avoid_caps, _leg_ids, leg_instance_aabbs = (
+        GB._if_rubric_geometry(text, ctx.gt, ctx.idx, start_xy=ctx.spawn_xy)
+    )
+    empty_note = ""
+    if capture.odom_xy.shape[0] == 0:
+        empty_note = "no /state_estimation messages in bag; driven trajectory empty"
+        driven_object = np.empty((0, 2))
+    else:
+        driven_object = ctx.frame.apply(capture.odom_xy)
+
+    rub = S.score_instruction_rubric(
+        driven_object,
+        leg_goals,
+        corridor_gates=corridor_gates,
+        avoid_capsules=avoid_caps,
+        trajectory_ply=traj_path,
+        frame=None,  # driven_object is already in the object frame
+        leg_instance_aabbs=leg_instance_aabbs,
+    )
+    return {
+        "rubric_score": round(rub.rubric_score, 4),
+        "ordered_leg_credit": round(rub.ordered_leg_credit, 4),
+        "n_legs": rub.n_legs,
+        "n_legs_reached_in_order": rub.n_legs_reached_in_order,
+        "n_threading_violations": rub.n_threading_violations,
+        "n_avoid_violations": rub.n_avoid_violations,
+        "driven_n_poses_decimated": rub.driven_n_poses,
+        "driven_n_poses_raw": capture.odom_xy_raw_n,
+        "frechet_m": rub.frechet_m,
+        "coverage_1m": round(rub.coverage_1m, 4) if rub.coverage_1m is not None else None,
+        "if_question_index": i,
+        "headline": round(rub.rubric_score, 4),
+        "note": "; ".join(
+            filter(
+                None,
+                [f"legs={rub.n_legs_reached_in_order}/{rub.n_legs}", empty_note]
+                + rub.threading_details + rub.avoid_details,
+            )
+        ),
+    }
+
+
+# --------------------------------------------------------------------------- capture completeness
+
+
+def _capture_issues(qdir: str, capture: BagCapture) -> list[str]:
+    issues: list[str] = []
+    if capture.topic_counts.get("/challenge_question", 0) == 0:
+        issues.append("missing /challenge_question (0 messages) — question read from run.log")
+    if qdir == "nume" and capture.topic_counts.get(TOPIC_NUM_RESPONSE, 0) == 0:
+        issues.append("missing /numerical_response (0 messages) — cannot score")
+    if qdir == "obje" and capture.topic_counts.get(TOPIC_MARKER, 0) == 0:
+        issues.append("missing /selected_object_marker (0 messages) — cannot score")
+    if qdir == "inst" and capture.topic_counts.get(TOPIC_ODOM, 0) == 0:
+        issues.append("missing /state_estimation (0 messages) — cannot score")
+    return issues
+
+
+# --------------------------------------------------------------------------- offline pairing
+
+
+def _load_offline_index(path: Path) -> dict[tuple[str, str, str], dict]:
+    if not path.is_file():
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    out: dict[tuple[str, str, str], dict] = {}
+    for row in data.get("scores", []):
+        out[(row["scene"], row["qtype"], row["question"])] = row
+    return out
+
+
+def _offline_headline(qtype: str, row: dict | None) -> float | None:
+    if row is None:
+        return None
+    if qtype == "numerical":
+        tm = row.get("true_match")
+        return None if tm is None else (1.0 if tm else 0.0)
+    if qtype == "object_reference":
+        return row.get("iou")
+    if qtype == "instruction_following":
+        return row.get("rubric_score")
+    return None
+
+
+# --------------------------------------------------------------------------- one run
+
+
+def score_run(
+    scene: str,
+    qdir: str,
+    run_dir: Path,
+    *,
+    groundtruth_root: Path,
+    questions_dir: Path,
+    questions_index: dict[str, dict[str, list[str]]],
+    answers: dict | None,
+    offline_index: dict[tuple[str, str, str], dict],
+) -> dict:
+    qtype = QDIR_TO_QTYPE[qdir]
+    bag_dir = run_dir / "bag"
+    capture = read_bag_capture(bag_dir)
+    text = capture.question_text or _run_log_question(run_dir)
+    capture_issues = _capture_issues(qdir, capture)
+
+    row: dict[str, Any] = {
+        "scene": scene,
+        "qdir": qdir,
+        "qtype": qtype,
+        "question": text,
+        "run_dir": str(run_dir.relative_to(_REPO)) if run_dir.is_relative_to(_REPO) else str(run_dir),
+        "capture_topic_counts": capture.topic_counts,
+        "capture_issues": capture_issues,
+    }
+
+    if text is None:
+        row["headline_live"] = None
+        row["note"] = "no question text found (bag empty and no run.log)"
+        row["offline"] = None
+        row["headline_offline"] = None
+        row["delta"] = None
+        return row
+
+    ctx = _load_scene_context(
+        scene, groundtruth_root=groundtruth_root, questions_dir=questions_dir,
+        questions_index=questions_index,
+    )
+    if ctx is None:
+        row["headline_live"] = None
+        row["note"] = f"GT scene folder not found under {groundtruth_root}"
+        row["offline"] = None
+        row["headline_offline"] = None
+        row["delta"] = None
+        return row
+
+    row["frame_fit_residual_m"] = (
+        round(ctx.fit_residual_m, 4) if ctx.fit_residual_m is not None else None
+    )
+    row["frame_available"] = ctx.frame is not None
+
+    entry_questions = questions_index.get(scene, {})
+    candidates = entry_questions.get(qtype, [])
+    if _match_question(text, candidates) is None:
+        row["capture_issues"] = capture_issues + [
+            "question text did not match any questions.json entry for this scene/qtype"
+        ]
+
+    if qtype == "numerical":
+        live = score_numerical_run(ctx, text, capture, answers=answers)
+    elif qtype == "object_reference":
+        live = score_object_reference_run(ctx, text, capture)
+    else:
+        live = score_instruction_following_run(ctx, text, capture, questions_dir=questions_dir)
+
+    row["live"] = live
+    row["headline_live"] = live.get("headline")
+
+    offline_row = offline_index.get((scene, qtype, text))
+    row["offline"] = offline_row
+    headline_offline = _offline_headline(qtype, offline_row)
+    row["headline_offline"] = headline_offline
+    if row["headline_live"] is not None and headline_offline is not None:
+        row["delta"] = round(row["headline_live"] - headline_offline, 4)
+    else:
+        row["delta"] = None
+    row["note"] = live.get("note") or ""
+    return row
+
+
+# --------------------------------------------------------------------------- report
+
+
+def _fmt(v: Any) -> str:
+    if v is None:
+        return "n/a"
+    if isinstance(v, float):
+        return f"{v:.4f}"
+    return str(v)
+
+
+def write_report(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md_path = out_dir / "scores.md"
+    json_path = out_dir / "scores.json"
+
+    lines = [
+        f"# Live baseline scores ({date.today().isoformat()})",
+        "",
+        f"{len(rows)} run(s) scored. Headline metric per type: numerical = TRUE-answer "
+        "match (1.0/0.0), object_reference = 3D IoU of the live marker vs the GT target "
+        "box, instruction_following = rubric-proxy score (same scorers as the offline "
+        "`gt_battery`; see module docstring). `delta` = live - offline on the same "
+        "headline metric for the same question.",
+        "",
+        "| Scene | Type | Live | Offline | Delta | Capture issues | Note | Question |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        issues = "; ".join(r.get("capture_issues") or []) or ""
+        note = r.get("note") or ""
+        q = (r.get("question") or "")[:70]
+        lines.append(
+            f"| {r['scene']} | {r['qdir']} | {_fmt(r.get('headline_live'))} | "
+            f"{_fmt(r.get('headline_offline'))} | {_fmt(r.get('delta'))} | {issues} | "
+            f"{note} | {q} |"
+        )
+    lines.append("")
+
+    n_capture_issues = sum(1 for r in rows if r.get("capture_issues"))
+    lines.append(
+        f"Runs with a capture-completeness issue: {n_capture_issues}/{len(rows)}."
+    )
+    lines.append("")
+
+    md_path.write_text("\n".join(lines), encoding="utf-8")
+
+    payload = {
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "n_runs": len(rows),
+        "rows": rows,
+    }
+    json_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    return md_path, json_path
+
+
+def _merge_with_existing(out_dir: Path, new_rows: list[dict]) -> list[dict]:
+    """Merge freshly-scored rows into any pre-existing ``scores.json`` at ``out_dir``.
+
+    Keyed by ``(scene, qdir)`` — a re-run of one run dir (more bags landing, a
+    fix applied) replaces just that run's row and leaves every other
+    already-scored run's row untouched, so a partial re-invocation never
+    blanks previously-scored runs (the tool is "ready for re-run as more
+    bags land" per the task brief).
+    """
+    existing_path = out_dir / "scores.json"
+    merged: dict[tuple[str, str], dict] = {}
+    if existing_path.is_file():
+        try:
+            data = json.loads(existing_path.read_text(encoding="utf-8"))
+            for r in data.get("rows", []):
+                merged[(r["scene"], r["qdir"])] = r
+        except (OSError, json.JSONDecodeError, KeyError):
+            pass  # a corrupt/old-shape file is not fatal — we just start fresh
+    for r in new_rows:
+        merged[(r["scene"], r["qdir"])] = r
+    return [merged[k] for k in sorted(merged)]
+
+
+# --------------------------------------------------------------------------- CLI
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        prog="tools.score_live_run",
+        description="Score LIVE-sim baseline bag captures against ground truth "
+        "(same scorers as core.runner.gt_battery), side by side with the offline battery.",
+    )
+    ap.add_argument(
+        "target", nargs="?", default=None,
+        help="a run dir (<scene>/<qdir>) or a baseline root dir "
+        f"(default: {DEFAULT_BASELINE_DIR.relative_to(_REPO)})",
+    )
+    ap.add_argument("--groundtruth", default=str(DEFAULT_GROUNDTRUTH))
+    ap.add_argument("--questions", default=str(GB.DEFAULT_QUESTIONS))
+    ap.add_argument("--questions-dir", default=str(GB.DEFAULT_QUESTIONS_ROOT))
+    ap.add_argument("--answers", default=str(GB.DEFAULT_ANSWERS))
+    ap.add_argument("--offline-results", default=str(DEFAULT_OFFLINE_RESULTS))
+    ap.add_argument(
+        "--out", default=None,
+        help=f"output dir (default: {DEFAULT_BASELINE_DIR.relative_to(_REPO)}, merged with "
+        "any existing scores.json there — see _merge_with_existing)",
+    )
+    args = ap.parse_args(argv)
+
+    runs = resolve_targets(args.target)
+    if not runs:
+        print(f"score_live_run: no bag captures found under {args.target or DEFAULT_BASELINE_DIR}")
+        return 1
+
+    groundtruth_root = Path(args.groundtruth)
+    questions_dir = Path(args.questions_dir)
+    questions_index = _load_questions_index(Path(args.questions))
+    answers = GB._load_answers(args.answers)
+    offline_index = _load_offline_index(Path(args.offline_results))
+
+    # Default output is always the whole baseline dir (the deliverable location per the
+    # task brief), regardless of whether `target` narrowed the scan to one run — a
+    # single-run invocation still reads/merges any pre-existing scores.json for the
+    # other already-scored runs so re-running one run doesn't blank the rest.
+    out_dir = Path(args.out) if args.out else DEFAULT_BASELINE_DIR
+
+    rows: list[dict] = []
+    for scene, qdir, run_dir in runs:
+        row = score_run(
+            scene, qdir, run_dir,
+            groundtruth_root=groundtruth_root, questions_dir=questions_dir,
+            questions_index=questions_index, answers=answers, offline_index=offline_index,
+        )
+        rows.append(row)
+        print(
+            f"score_live_run: {scene}/{qdir} live={_fmt(row.get('headline_live'))} "
+            f"offline={_fmt(row.get('headline_offline'))} delta={_fmt(row.get('delta'))} "
+            f"issues={row.get('capture_issues') or []}"
+        )
+
+    rows = _merge_with_existing(out_dir, rows)
+    md_path, json_path = write_report(rows, out_dir)
+    print(f"wrote {md_path}")
+    print(f"wrote {json_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
