@@ -40,15 +40,20 @@ if [[ -e /etc/u-d-c-nvidia-runtimepm-override ]]; then
     echo "removed /etc/u-d-c-nvidia-runtimepm-override (gpu-manager runtimepm trigger)"
 fi
 
-# (b) Backstop unit: re-pin after anything that runs at boot (gpu-manager
-# included) has had its say.
+# (b) Backstop unit: re-pin after anything that runs at boot has had its
+# say. A single oneshot loses the last-writer race (observed 22 Jul:
+# gpu-manager enables runtimepm even WITHOUT the override flag by
+# detecting the GPU as capable, and something later in boot re-writes
+# "auto" after an early oneshot) — so pin repeatedly through the first
+# two minutes of boot instead of once.
 cat > /etc/systemd/system/nvidia-pm-pin.service <<'EOF'
 [Unit]
 Description=Pin NVIDIA GPU out of runtime suspend (RTD3 wedge workaround)
 After=gpu-manager.service systemd-udev-trigger.service
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'echo on > /sys/bus/pci/devices/0000:01:00.0/power/control'
+ExecStart=/bin/sh -c 'for i in $(seq 1 12); do echo on > /sys/bus/pci/devices/0000:01:00.0/power/control 2>/dev/null; sleep 10; done; echo on > /sys/bus/pci/devices/0000:01:00.0/power/control'
+TimeoutStartSec=180
 [Install]
 WantedBy=multi-user.target
 EOF
