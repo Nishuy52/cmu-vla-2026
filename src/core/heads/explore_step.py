@@ -26,6 +26,7 @@ from typing import Any, Callable, Sequence
 
 from core.interfaces import QType, RobotIO, WaypointCmd
 from core.fsm.floors import _anchor_nouns
+from core.heads import explore_debug
 from core.nav.exploration import ExplorationPolicy, ExplorationStatus
 from core.nav.frontiers import detect_frontiers
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
@@ -195,28 +196,41 @@ class ExploreHead:
             self._policy = ExplorationPolicy(start_xy=pose, affinity=self._affinity())
         decision = self._stepped_decision(pose, t)
         self.last_status = decision.status
-        # A live CP2 provisional biases navigation: prefer driving toward it over the
-        # geometric frontier while it stands. (Not distance-clamped: unlike a raw far
-        # frontier centroid, the provisional is a fixed placed target the vehicle converges
-        # on tick over tick — SYS-F9's stranding concern is the far *frontier* goal.)
-        if self.provisional_xy is not None:
-            io.publish_waypoint(WaypointCmd(self.provisional_xy[0], self.provisional_xy[1]))
-            return
-        # CP5: on a frontier decision in a multi-room scene, let the seam pick among the
-        # top-5 frontiers (fallback = the geometric top the policy already chose).
-        cp5_wp = self._maybe_cp5_frontier(pose, decision)
-        if cp5_wp is not None:
-            io.publish_waypoint(self._clamp_goal(pose, (cp5_wp.x, cp5_wp.y)))
-        elif decision.waypoint is not None:
-            # SYS-F9: drop an UNREACHABLE frontier goal (pd sentinel) — commanding it just
-            # strands the vehicle; skipping lets the next tick surface a reachable one.
-            # Only frontier decisions carry a Frontier to test; sweep waypoints always go.
-            if (
-                decision.status is ExplorationStatus.FRONTIER
-                and _frontier_unreachable(decision.frontier)
-            ):
+        # issue #83: diagnostic-only, no-op unless VLA_EXPLORE_DEBUG_DIR is set (see
+        # core.heads.explore_debug docstring) — reports what was actually decided below.
+        published: tuple[float, float] | None = None
+        try:
+            # A live CP2 provisional biases navigation: prefer driving toward it over the
+            # geometric frontier while it stands. (Not distance-clamped: unlike a raw far
+            # frontier centroid, the provisional is a fixed placed target the vehicle
+            # converges on tick over tick — SYS-F9's stranding concern is the far
+            # *frontier* goal.)
+            if self.provisional_xy is not None:
+                io.publish_waypoint(WaypointCmd(self.provisional_xy[0], self.provisional_xy[1]))
+                published = self.provisional_xy
                 return
-            io.publish_waypoint(self._clamp_goal(pose, (decision.waypoint.x, decision.waypoint.y)))
+            # CP5: on a frontier decision in a multi-room scene, let the seam pick among the
+            # top-5 frontiers (fallback = the geometric top the policy already chose).
+            cp5_wp = self._maybe_cp5_frontier(pose, decision)
+            if cp5_wp is not None:
+                clamped = self._clamp_goal(pose, (cp5_wp.x, cp5_wp.y))
+                io.publish_waypoint(clamped)
+                published = (clamped.x, clamped.y)
+            elif decision.waypoint is not None:
+                # SYS-F9: drop an UNREACHABLE frontier goal (pd sentinel) — commanding it
+                # just strands the vehicle; skipping lets the next tick surface a reachable
+                # one. Only frontier decisions carry a Frontier to test; sweep waypoints
+                # always go.
+                if (
+                    decision.status is ExplorationStatus.FRONTIER
+                    and _frontier_unreachable(decision.frontier)
+                ):
+                    return
+                clamped = self._clamp_goal(pose, (decision.waypoint.x, decision.waypoint.y))
+                io.publish_waypoint(clamped)
+                published = (clamped.x, clamped.y)
+        finally:
+            explore_debug.maybe_dump(self, self.grid, pose, t, decision.status.value, published)
 
     # ------------------------------------------------------------------ H14 throttle
     def _stepped_decision(self, pose: tuple[float, float], t: float):
