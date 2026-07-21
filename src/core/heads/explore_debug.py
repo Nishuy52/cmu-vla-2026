@@ -19,7 +19,20 @@ question-clock time we append one JSON line to
   rejected, or never exist at all";
 * the waypoint actually chosen this tick (or null if nothing was published).
 
-This is diagnostic-only: it reads the grid/policy state that ``ExploreHead``
+Issue #84 additions (same no-op-when-unset guarantee): each record also carries
+
+* ``live_instances`` — a summary of the LIVE instance index (``head._scene``, the
+  same ``BasicSceneIndex`` the GDINO adapter fuses detections into): per-class
+  counts plus, for each instance, its id/label/position/observation count. Listed
+  instances are capped at ``MAX_INSTANCES_LISTED`` with a ``truncated`` marker so
+  a long-running dump can't grow unbounded;
+* ``keyframes_processed`` — the perception pipeline's keyframe counter, when the
+  adapter has made it cheaply available (``scene._debug_perception``, stashed only
+  while this module's env var is set — see ``ros_adapter.adapter_node``); ``None``
+  when no such handle exists (offline runners, perception off, or the scene has no
+  backing pipeline at all).
+
+This is diagnostic-only: it reads the grid/policy/index state that ``ExploreHead``
 already computed and never influences a decision.
 """
 from __future__ import annotations
@@ -47,6 +60,10 @@ DEBUG_INTERVAL_S: float = 10.0
 #: as a plain constant here so this module has no import-time dependency on
 #: core.heads.explore_step (avoids a circular import — explore_step imports us).
 _UNREACHABLE_PD: float = 1e6
+#: issue #84: cap on individually-listed instances per record (bounds record size
+#: on long runs / dense scenes); ``by_class`` counts are never truncated, only the
+#: per-instance listing is.
+MAX_INSTANCES_LISTED: int = 100
 
 
 def _debug_dir() -> str | None:
@@ -147,6 +164,56 @@ def _frontier_candidates(
     return out
 
 
+def _instance_summary(scene: Any) -> dict[str, Any]:
+    """Live instance-index summary (issue #84): per-class counts + per-instance detail.
+
+    ``scene`` is ``head._scene`` — whatever ``ExploreHead.advance`` was last called
+    with (a ``BasicSceneIndex`` when perception is on; ``None`` before the first
+    tick or in scene-less callers). Missing/empty index -> zeroed-out summary, not
+    an omitted key, so a consumer can tell "ran with nothing detected yet" apart
+    from "this dump predates the field" (the latter simply lacks the key).
+    """
+    all_instances = scene.all_instances() if scene is not None else []
+    by_class: dict[str, int] = {}
+    for rec in all_instances:
+        by_class[rec.label] = by_class.get(rec.label, 0) + 1
+    # Deterministic order (id ascending) so repeated dumps of a stable index truncate
+    # the same way.
+    ordered = sorted(all_instances, key=lambda r: r.instance_id)
+    listed = ordered[:MAX_INSTANCES_LISTED]
+    instances = [
+        {
+            "id": int(rec.instance_id),
+            "label": rec.label,
+            "position": [round(float(c), 3) for c in rec.centroid],
+            "n_obs": int(rec.n_obs),
+        }
+        for rec in listed
+    ]
+    return {
+        "total_instances": len(all_instances),
+        "by_class": by_class,
+        "instances": instances,
+        "truncated": len(all_instances) > len(listed),
+    }
+
+
+def _keyframe_count(scene: Any) -> int | None:
+    """Keyframes processed so far, if cheaply reachable off the scene index.
+
+    ``ExploreHead`` only ever holds the live ``SceneIndex`` (``head._scene``), not
+    the ``PerceptionPipeline`` that owns the keyframe counter — the adapter stashes
+    a debug-only backref (``scene._debug_perception``, set only while
+    ``VLA_EXPLORE_DEBUG_DIR`` is set — see ``ros_adapter.adapter_node``) precisely so
+    this read is a cheap attribute chase rather than new plumbing through the head.
+    Returns ``None`` when no such handle exists (offline runners, perception off).
+    """
+    pipeline = getattr(scene, "_debug_perception", None)
+    if pipeline is None:
+        return None
+    return int(getattr(pipeline, "_keyframe_idx", 0))
+
+
 def maybe_dump(
     head: Any,
     grid: OccupancyGrid,
@@ -170,6 +237,7 @@ def maybe_dump(
         min_frontier_score = (
             head._policy.min_frontier_score if head._policy is not None else 0.0
         )
+        scene = getattr(head, "_scene", None)
         record = {
             "wall_time": time.time(),
             "question_clock_t": t,
@@ -184,6 +252,9 @@ def maybe_dump(
                 if chosen_waypoint is not None
                 else None
             ),
+            # issue #84
+            "live_instances": _instance_summary(scene),
+            "keyframes_processed": _keyframe_count(scene),
         }
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, f"explore_debug_{os.getpid()}.jsonl")

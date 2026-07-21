@@ -426,6 +426,12 @@ class AdapterNode(Node):
             self._perception = PerceptionPipeline(detector, index=BasicSceneIndex([]))
             # The controller sees the pipeline's LIVE index (mutated in place as frames fuse).
             self._scene_index = self._perception.index
+            # issue #84: stash a debug-only backref so core.heads.explore_debug can read
+            # the pipeline's keyframe counter off the index it already holds, without new
+            # plumbing through ExploreHead. Only set while the debug dump is enabled —
+            # gated the same way explore_debug itself is, so the unset case is untouched.
+            if os.environ.get("VLA_EXPLORE_DEBUG_DIR"):
+                self._scene_index._debug_perception = self._perception
         else:
             self._scene_index = BasicSceneIndex([])
         self._controller: QuestionController | None = None
