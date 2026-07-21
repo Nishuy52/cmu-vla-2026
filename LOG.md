@@ -1491,3 +1491,24 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   disconnection vs map-growth); #82 likely free after #86 + reboot verify; #84
   re-measure only after #83 moves. Next session: hardened-reboot load check,
   then the #83 instrumented live run.
+
+## 2026-07-22 (cont.) - #86 wedge: RTD3 refuted, EC 15W grant is the mechanism
+
+- udev-pin root cause: gpu-manager rewrites power/control=auto every boot
+  (u-d-c override flag). install.sh hardened (a155e0d): flag removal +
+  nvidia-pm-pin.service after gpu-manager + immediate apply. ubuntu_setup §1
+  updated.
+- Load verify (passive 5s sampling vs the concurrent live sim session;
+  record reports/gpu_wedge_2026-07-22_samples.csv): healthy P0/1.9-2.5GHz,
+  then WEDGE ONSET 02:09:13 on a sim load transition - P8/210MHz at 100%
+  util, EC grant 15W vs 55W default, with DPM=0 active and
+  runtime_suspended_time=0. **RTD3 theory refuted; wedge = stuck EC TGP
+  grant.** Recovered ~02:14 WITHOUT reboot on a charger re-plug (PD
+  renegotiation) - new first-line un-wedge procedure.
+- Machine pinned: Yoga Pro 9 14IRP8, BIOS MBCN34WW, USB-C-only OEM 140W;
+  battery conservation mode (80%, EC-level, persists from Windows) is not
+  the cause (disables battery-assist only). nvidia-powerd binary present
+  but unit-less (never ran) - installer now enables it (0b8be8a). BIOS
+  update check recommended.
+- PENDING USER: sudo tools/gpu_hardening/install.sh (pin + powerd). Note:
+  live-sim results in the 02:09-02:14 window ran on a wedged GPU - invalid.
