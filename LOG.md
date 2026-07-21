@@ -1526,3 +1526,19 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   reboot. Ladder: EC reset (user, in progress) -> BIOS MBCN37WW ->
   Windows cross-test -> Lenovo support with evidence pack.
 - Session interrupted for EC reset (full power-off).
+
+## 2026-07-22 (cont. 3) - #86: EC power-drain reset clears the wedge - 8/8 clean
+
+- User EC reset (shutdown + unplug + 30s power-button hold; note: Yoga's
+  bottom pinhole is the Novo button, NOT a reset hole). Post-reset 8-cycle
+  provocation: 72 load samples, ZERO wedge signatures, 45-48 matmuls/s at
+  the full 80W grant every cycle (pre-reset: onset at cycle 3 both runs).
+  Evidence reports/gpu_wedge_2026-07-22_post_ecreset_test.log.
+- Working theory: corrupted EC residual state, cleared by power drain
+  (warm reboot insufficient). Cautiously fixed; long-horizon confirmation
+  = a full live sim session. Recovery ladder finalized on #86.
+- Pin service race fix committed (loops through early boot; gpu-manager
+  runtimepm's capability autodetect defeats flag removal alone) - applies
+  on next sudo install.sh run.
+- Next session: back to the score path - #83 instrumented live run (with
+  the wedge check in the preflight), #84, #82 retest on healthy GPU.
