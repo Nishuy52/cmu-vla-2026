@@ -60,6 +60,47 @@ echo "installed + enabled nvidia-pm-pin.service"
 # still needs a reboot if it wasn't already active).
 echo on > /sys/bus/pci/devices/0000:01:00.0/power/control
 
+# (d) nvidia-powerd (issue #86, 22 Jul finding): the wedge recurred with
+# RTD3 fully disabled (runtime_suspended_time=0), so runtime PM is NOT the
+# root cause. Signature: EC grants the dGPU 15 W against its 55 W default
+# ("SW Power Cap: Active", P8 @ 210 MHz under 100% util); a charger
+# re-plug (PD renegotiation) restored the grant without reboot. The driver
+# ships /usr/bin/nvidia-powerd — the daemon that periodically renegotiates
+# the TGP grant via NVPCF — but no systemd unit, so it has never run.
+# Install + enable it; if the SBIOS turns out not to support it the
+# service just exits and the rest of the hardening stands.
+if [[ -x /usr/bin/nvidia-powerd ]]; then
+    cat > /etc/systemd/system/nvidia-powerd.service <<'EOF'
+[Unit]
+Description=nvidia-powerd service (Dynamic Boost TGP renegotiation)
+[Service]
+Type=dbus
+BusName=nvidia.powerd.server
+ExecStart=/usr/bin/nvidia-powerd
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat > /etc/dbus-1/system.d/nvidia-dbus.conf <<'EOF'
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <policy user="root">
+    <allow own="nvidia.powerd.server"/>
+    <allow send_destination="nvidia.powerd.server"/>
+    <allow receive_sender="nvidia.powerd.server"/>
+  </policy>
+  <policy context="default">
+    <allow send_destination="nvidia.powerd.server"/>
+    <allow receive_sender="nvidia.powerd.server"/>
+  </policy>
+</busconfig>
+EOF
+    systemctl daemon-reload
+    systemctl enable --now nvidia-powerd.service || \
+        echo "WARNING: nvidia-powerd failed to start (SBIOS may not support it) — check: journalctl -u nvidia-powerd"
+    echo "installed + enabled nvidia-powerd.service"
+fi
+
 update-initramfs -u
 echo
 echo "Done. Verify with:"
