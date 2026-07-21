@@ -1512,3 +1512,17 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   update check recommended.
 - PENDING USER: sudo tools/gpu_hardening/install.sh (pin + powerd). Note:
   live-sim results in the 02:09-02:14 window ran on a wedged GPU - invalid.
+
+## 2026-07-22 (cont. 2) - #86 wedge experiments: conservation + powerd-restart refuted
+
+- Conservation mode off (user ran; battery Charging): 8-cycle provocation
+  still wedges (cycles 3-7 at 15W; record 80W grant on healthy cycles 1-2).
+  Hypothesis refuted; evidence reports/gpu_wedge_2026-07-22_conservation_off_test.log.
+- nvidia-powerd restart while wedged: grant stays 15W under load - the
+  NVIDIA #966 workaround refuted here; EC itself refuses re-grant.
+- Same-symptom-on-Windows precedent found (Lenovo forums, Legion 5 Slim
+  4060) - platform defect family, warranty-relevant.
+- Working recoveries remain: charger re-plug / quiet-period self-clear /
+  reboot. Ladder: EC reset (user, in progress) -> BIOS MBCN37WW ->
+  Windows cross-test -> Lenovo support with evidence pack.
+- Session interrupted for EC reset (full power-off).
