@@ -1460,3 +1460,34 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   offline nav quality. Priority order next session: #83 (dominant,
   scene-conditional diagnosis with 3-scene evidence) -> #84 -> #82;
   offline Stage-4 parity stays demoted.** Stack stopped at session end.
+
+## 2026-07-22 - live-gap root-cause research (no code changes)
+
+- Architecture + evidence pass over the 2026-07-20 live baseline (3 read-only
+  scouts: exploration path, perception/grounding path, LLM ladder; main-session
+  verification of the load-bearing claims in exploration.py/explore_step.py/
+  frontiers.py and the run artifacts).
+- **#83 mechanism traced** (comment posted): sweep branch is skipped after 60s
+  regardless of vertex progress, so frontier pursuit RAN for ~140s and silently
+  returned nothing above the score bar; COMPLETE publishes no waypoint, robot
+  parks at the last diamond vertex. Prime suspect: BFS-unreachable sentinel
+  (pd=1e6 -> score<<0) from a disconnected vehicle cell — the live analog of
+  77e's offline spawn-pose BFS disconnection; matches office-drove/livingroom-
+  dithered scene-conditionality. Instrumentation spec added to the issue.
+- **#82 narrowed** (comment posted): tier=local WORKED in office/arabic (5.0s
+  parses); only livingroom (first runs) fell to regex, nume's window ≈ the 20s
+  per-call timeout. GPU samples show P8 @ 7.5/8GB during inference (wedge
+  signature) + model eviction mid-run — contention/wedge, not a ladder bug.
+- **#84 decomposed** (comment posted): mostly downstream of #83 (motion-gated
+  keyframes + 1.62m total motion = detector starved); independent residuals:
+  answer-eligibility n_obs>=2 vs mocks born at n_obs=3, empty prompt until plan
+  latch, vocab gap for compound nouns, live-active/offline-dead withhold gates
+  (#81 framing corrected: budget hook IS wired live).
+- **#86 filed**: post-reboot verify shows RTD3 hardening only half-applied —
+  DynamicPowerManagement=0 active, driver 595.71.05, but power/control still
+  'auto' (udev pin ineffective). Wedge risk stands until verified under load.
+- Verdict unchanged in direction, sharpened in order: #83 first but open the
+  instrumented run with the vehicle-cell BFS-component dump (one number decides
+  disconnection vs map-growth); #82 likely free after #86 + reboot verify; #84
+  re-measure only after #83 moves. Next session: hardened-reboot load check,
+  then the #83 instrumented live run.
