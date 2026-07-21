@@ -14,6 +14,6 @@ SETTLE=75; [ "$SCENE" = "arabic_room" ] && SETTLE=180
 sleep $SETTLE
 C=$(docker exec iros2026_system bash -c 'pgrep -cf "[M]odel.x86_64"')
 [ "$C" = "1" ] || { echo "SCENE_LAUNCH_BAD count=$C"; exit 3; }
-F=$(docker exec iros2026_system bash -c 'export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; source /opt/ros/*/setup.bash 2>/dev/null; timeout 30 ros2 topic hz /registered_scan 2>&1 | grep -c "average rate"' || true)
+F=$(bash -c 'export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; source /opt/ros/jazzy/setup.bash; timeout 30 ros2 topic hz /registered_scan 2>&1 | grep -c "average rate"' || true)
 [ "$F" = "1" ] || { echo "SCAN_NOT_FLOWING $SCENE"; exit 4; }
 echo "SCENE_READY $SCENE"
