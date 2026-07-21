@@ -19,6 +19,28 @@ sudo reboot
 nvidia-smi                           # must show your GPU before proceeding
 ```
 
+**RTD3 wedge hardening (required on this box — RTX 4060 Laptop):** the GPU
+recurrently wedges into P8 @ 210 MHz under runtime power management and
+never recovers without a reboot (see issue #86 and the 2026-07-20 live
+baseline). After any driver install/upgrade run:
+
+```bash
+sudo tools/gpu_hardening/install.sh
+```
+
+Idempotent; applies the sysfs pin immediately and persists it. It installs
+the `zz-nvidia-disable-rtd3.conf` modprobe option (needs one reboot if the
+driver was already loaded), the udev pin, removes gpu-manager's
+`/etc/u-d-c-nvidia-runtimepm-override` trigger, and enables a
+`nvidia-pm-pin.service` oneshot ordered after gpu-manager (which otherwise
+rewrites `power/control` to `auto` at every boot). Re-run after driver
+package upgrades — they recreate the override flag. Verify:
+
+```bash
+cat /sys/bus/pci/devices/0000:01:00.0/power/control     # expect: on
+grep DynamicPowerManagement /proc/driver/nvidia/params  # expect: 0
+```
+
 ## 2. Docker + NVIDIA Container Toolkit
 
 ```bash
