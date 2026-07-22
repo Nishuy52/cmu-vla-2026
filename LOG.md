@@ -1542,3 +1542,20 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   on next sudo install.sh run.
 - Next session: back to the score path - #83 instrumented live run (with
   the wedge check in the preflight), #84, #82 retest on healthy GPU.
+
+## 2026-07-22 (overnight) - live campaign: harness hardened, hardware-blocked
+
+- #83/#84 instrumentation merged (explore_debug + instance dump + recall
+  analyzer, byte-preserving); live harness repo-persisted after scratchpad
+  loss (tools/live_harness) and hardened through SIX failure modes: xhost
+  ordering, stale bags, double-launch (kills /registered_scan - guarded),
+  container-state degradation (recreate-not-restart), settle times, cwd.
+- office_1 clean capture banked (healthy signature: sweep->frontier 75s,
+  5-8 accepted candidates/cycle). livingroom capture attempted 5x - every
+  attempt killed by the #86 wedge firing AT GDINO LOAD (trigger now
+  conclusive; posted on #86). nvidia-powerd confirmed passive on this
+  SBIOS. Final wedge did not self-clear; recovery probe >4 min.
+- BLOCKED on physical intervention (charger re-plug / reboot). Post-
+  recovery queue: (1) GDINO load-isolation experiment -> preload dodge
+  decision; (2) paired capture (both money tables in one window);
+  (3) #83 mechanism -> fix -> live re-verify; (4) re-baseline.
