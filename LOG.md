@@ -1567,3 +1567,44 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   over SSH tunnels (#86 dodge). Live-verified end-to-end from this machine
   (detect 207 ms warm), servers torn down after; start on demand with
   tools/cluster/servers.sh. Details in the task record.
+
+## 2026-07-26 (session 22) - FULL-STACK LIVE RUNS ON THE SOC CLUSTER; grounded answers off-laptop
+
+Two tracks ran in parallel after the #86 wedge killed the overnight livingroom
+captures (split-stack offload delivered separately on this branch - T19).
+
+- **Cluster feasibility settled by probe ladder:** containers are dead on the
+  cluster (AppArmor blocks unprivileged userns uid_map; ptrace_scope=2 kills
+  proot; udocker F1 runs but fakechroot hangs rclpy) - the working shape is
+  **bare host processes out of the udocker-extracted sim image** + env
+  relocation (AMENT prefixes per install pkg, egg-link resolution for the
+  develop-mode ros_tcp_endpoint, container /usr/lib on LD_LIBRARY_PATH for
+  libOpenNI/libarmadillo). Unity renders HEADLESS ON GPU via Xvfb +
+  VirtualGL-EGL (`vglrun -d egl0`, ~/xstack dpkg-extracted, screenshot-proven);
+  CycloneDDS must be loopback-pinned (fabric drops multicast).
+- **v4 smoke:** 42 topics, scan 3.25 Hz, odom 250 Hz, Unity connected on
+  :10000 - full stack closed-loop in one nv GPU allocation (1.5 GPU-min).
+- **v5/v6 live runs:** full FSM lifecycle on cluster (question latch -> regex
+  parse -> orient -> explore [robot drove, 1051 waypoints] -> verify -> answer
+  published 211 s). Answer was the floor: raw /camera/image (3.7 MB frames)
+  cannot survive unprivileged CycloneDDS (kernel socket buffers) - compressed
+  (100 KB) flows fine.
+- **VLA_CAMERA_COMPRESSED adapter path** (fcbdea0, dev-only, env-gated):
+  subscribe /camera/image/compressed, in-process cv2 decode, re-enter the
+  exact _on_image path. Fast tier 1430 green.
+- **v7-v9 grounded runs:** GDINO SwinB live on the Titan RTX (first grounded
+  head answers off-laptop). fp32 + unlimited torch threads starved Unity's
+  encoder (camera 2 -> 0.1 Hz); fixed with GDINO_PRECISION=fp16 +
+  OMP_NUM_THREADS=4 + 16 cores: **v9 = steady 1.5 Hz camera, 342 keyframes,
+  grounded answer end-to-end**. Kit + runbook committed at
+  tools/cluster/live_run/ (README carries the hard-won constraints).
+- Quality gaps filed: **#88** (in-executor GDINO starves tick loop ~0.8 Hz)
+  and **#89** (numerical instance explosion 78-141 vs single-digit truth -
+  inverts the laptop's undercount mode; diagnose with #83/#84 instrumentation
+  on cluster runs). Total session cluster burn ~35 GPU-minutes on nv (4.0/hr
+  billing); no standing allocations left.
+
+**Next:** (1) #88 detector-thread fix (unblocks honest cadence), then #89
+diagnosis via a cluster instance-dump run; (2) scene-swap runner (office_1
+staged at ~/scenes) + GT questions -> first cluster battery; (3) merge this
+branch (split-stack T19 + live-run kit) to main.
