@@ -136,6 +136,14 @@ DETECTOR_GDINO = "grounding_dino"
 # path: the scored image never talks to a network detector.
 DETECTOR_REMOTE = "remote"
 
+# Dev-only (SoC cluster full-stack runs): subscribe /camera/image/compressed and decode
+# in-process instead of the raw /camera/image feed. Unprivileged CycloneDDS on the cluster
+# drops ~3.7 MB raw frames (UDP fragments overflow the default kernel socket buffers, which
+# can't be raised without root), while the ~100 KB jpeg stream survives. The decoded frame
+# re-enters the exact _on_image path, so everything downstream is identical. Never the
+# submission path: the scored image subscribes the contract's raw topic.
+ENV_CAMERA_COMPRESSED = "VLA_CAMERA_COMPRESSED"
+
 
 def make_detector(logger=None):
     """Build the perception detector from ``VLA_DETECTOR`` (default: stub / None).
@@ -311,9 +319,27 @@ class AdapterNode(Node):
         self._robotio_clock = _NodeClock(self)
 
         # ---- Subscriptions (six allowed system-output topics) -----------------
-        self.create_subscription(
-            Image, TOPIC_CAMERA, self._on_image, qos_profile_sensor_data
-        )
+        if os.environ.get(ENV_CAMERA_COMPRESSED, "").strip().lower() in ("1", "true", "yes"):
+            # Dev-only cluster path (see ENV_CAMERA_COMPRESSED above): jpeg in, same
+            # _on_image pipeline out. CompressedImage import is local so the contract
+            # path never touches it.
+            from sensor_msgs.msg import CompressedImage
+
+            self.create_subscription(
+                CompressedImage,
+                TOPIC_CAMERA + "/compressed",
+                self._on_image_compressed,
+                qos_profile_sensor_data,
+            )
+            self.get_logger().warning(
+                "VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed "
+                "(%s/compressed -> in-process decode). Not the submission path."
+                % TOPIC_CAMERA
+            )
+        else:
+            self.create_subscription(
+                Image, TOPIC_CAMERA, self._on_image, qos_profile_sensor_data
+            )
         self.create_subscription(
             PointCloud2, TOPIC_SCAN, self._on_scan, qos_profile_sensor_data
         )
@@ -529,6 +555,30 @@ class AdapterNode(Node):
         pano = image_to_pano(msg, self._now_ns(), odom=odom)
         with self._lock:
             self._pano = pano
+
+    def _on_image_compressed(self, msg) -> None:
+        # Dev-only (ENV_CAMERA_COMPRESSED): decode the jpeg and re-enter _on_image with a
+        # synthesized raw Image, so the entire downstream pipeline is byte-identical to the
+        # contract path. cv2/numpy imports are lazy — this callback only exists when the
+        # env flag opted in. A frame that fails to decode is dropped (never raises).
+        try:
+            import cv2
+            import numpy as np
+
+            arr = np.frombuffer(bytes(msg.data), dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None:
+                return
+            out = Image()
+            out.header = msg.header
+            out.height, out.width = int(img.shape[0]), int(img.shape[1])
+            out.encoding = "bgr8"
+            out.is_bigendian = 0
+            out.step = int(img.shape[1]) * 3
+            out.data = img.tobytes()
+            self._on_image(out)
+        except Exception as exc:  # a decode glitch must never disturb the drive loop
+            self.get_logger().error("compressed camera decode error: %s" % exc)
 
     def _on_scan(self, msg: PointCloud2) -> None:
         scan = pointcloud_to_lidar(msg, self._now_ns())
