@@ -130,6 +130,11 @@ TOPIC_DBG_COLORED_CLOUD = "/debug/colored_cloud"
 ENV_DETECTOR = "VLA_DETECTOR"
 DETECTOR_NONE = "none"
 DETECTOR_GDINO = "grounding_dino"
+# Issue #86: dev-only offload — keeps the ROS stack local but runs GDINO inference on a
+# remote cluster GPU over HTTP (reached via an SSH tunnel), so the laptop GPU's EC
+# power-wedge (fires at GroundingDINO model load) never gets tripped. Never the submission
+# path: the scored image never talks to a network detector.
+DETECTOR_REMOTE = "remote"
 
 
 def make_detector(logger=None):
@@ -141,7 +146,11 @@ def make_detector(logger=None):
     :class:`~core.perception.detector.GroundingDinoDetector` for ``grounding_dino`` — the
     real Phase-2 seam; its torch/groundingdino import is lazy (first ``__call__``), so this
     constructs cleanly on Windows and only fails loudly at inference time if the model deps
-    are absent. An unrecognised value falls back to the stub with a warning.
+    are absent. Returns a :class:`~core.perception.remote_detector.RemoteDetector` for
+    ``remote`` — the dev-only offload seam (issue #86); if ``VLA_REMOTE_DETECTOR_URL`` is
+    unset, construction raises ``RuntimeError``, which is caught here and logged, falling
+    back to the offline stub rather than crashing boot. An unrecognised value falls back to
+    the stub with a warning.
     """
     choice = os.environ.get(ENV_DETECTOR, DETECTOR_NONE).strip().lower()
     if choice in ("", DETECTOR_NONE):
@@ -153,10 +162,29 @@ def make_detector(logger=None):
                 "real inference lands in Phase 2)." % (ENV_DETECTOR, DETECTOR_GDINO)
             )
         return GroundingDinoDetector()
+    if choice == DETECTOR_REMOTE:
+        from core.perception.remote_detector import RemoteDetector
+
+        try:
+            detector = RemoteDetector()
+        except RuntimeError as exc:
+            if logger is not None:
+                logger.warn(
+                    "%s=%s: %s Falling back to the offline stub (no detector)."
+                    % (ENV_DETECTOR, DETECTOR_REMOTE, exc)
+                )
+            return None
+        if logger is not None:
+            logger.info(
+                "%s=%s: offloading GroundingDINO inference to %s (dev-only mode, never "
+                "the submission path)." % (ENV_DETECTOR, DETECTOR_REMOTE, detector.url)
+            )
+        return detector
     if logger is not None:
         logger.warn(
-            "%s=%r is not recognised (expected %s|%s); falling back to the offline stub "
-            "(no detector)." % (ENV_DETECTOR, choice, DETECTOR_NONE, DETECTOR_GDINO)
+            "%s=%r is not recognised (expected %s|%s|%s); falling back to the offline stub "
+            "(no detector)."
+            % (ENV_DETECTOR, choice, DETECTOR_NONE, DETECTOR_GDINO, DETECTOR_REMOTE)
         )
     return None
 

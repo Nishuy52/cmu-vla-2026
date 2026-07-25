@@ -52,6 +52,13 @@ def test_detector_factory_defaults_to_stub(src: str):
     assert "instances_tracked > 0 on a live scene" in src
 
 
+def test_detector_factory_remote_offload_wired(src: str):
+    # Issue #86: dev-only remote GDINO offload seam.
+    assert 'DETECTOR_REMOTE = "remote"' in src
+    assert "from core.perception.remote_detector import RemoteDetector" in src
+    assert "RemoteDetector()" in src
+
+
 def test_detector_prompt_refresh_wired_to_build_callables(src: str):
     # Issue #34: GroundingDinoDetector is constructed at boot with an empty prompt (no
     # question latched yet); without rewiring it stays "" (silently inert) forever. The
@@ -223,3 +230,58 @@ def test_symbols_exist_when_rclpy_present():
     finally:
         if old is not None:
             os.environ[node.ENV_DETECTOR] = old
+
+
+def test_make_detector_remote_with_url_returns_remote_detector():
+    pytest.importorskip("rclpy", reason="rclpy only present on Ubuntu/ROS")
+    import sys
+
+    src_root = str(_ADAPTER.parents[1])
+    if src_root not in sys.path:
+        sys.path.insert(0, src_root)
+    import os
+
+    import ros_adapter.adapter_node as node
+    from core.perception.remote_detector import RemoteDetector
+
+    old_choice = os.environ.get(node.ENV_DETECTOR)
+    old_url = os.environ.get("VLA_REMOTE_DETECTOR_URL")
+    os.environ[node.ENV_DETECTOR] = node.DETECTOR_REMOTE
+    os.environ["VLA_REMOTE_DETECTOR_URL"] = "http://127.0.0.1:8765"
+    try:
+        detector = node.make_detector()
+        assert isinstance(detector, RemoteDetector)
+        assert detector.url == "http://127.0.0.1:8765"
+    finally:
+        _restore_env(node.ENV_DETECTOR, old_choice)
+        _restore_env("VLA_REMOTE_DETECTOR_URL", old_url)
+
+
+def test_make_detector_remote_without_url_returns_none_and_warns():
+    pytest.importorskip("rclpy", reason="rclpy only present on Ubuntu/ROS")
+    import sys
+
+    src_root = str(_ADAPTER.parents[1])
+    if src_root not in sys.path:
+        sys.path.insert(0, src_root)
+    import os
+
+    import ros_adapter.adapter_node as node
+
+    old_choice = os.environ.get(node.ENV_DETECTOR)
+    old_url = os.environ.pop("VLA_REMOTE_DETECTOR_URL", None)
+    os.environ[node.ENV_DETECTOR] = node.DETECTOR_REMOTE
+    try:
+        assert node.make_detector() is None
+    finally:
+        _restore_env(node.ENV_DETECTOR, old_choice)
+        _restore_env("VLA_REMOTE_DETECTOR_URL", old_url)
+
+
+def _restore_env(key: str, old_value):
+    import os
+
+    if old_value is not None:
+        os.environ[key] = old_value
+    else:
+        os.environ.pop(key, None)
