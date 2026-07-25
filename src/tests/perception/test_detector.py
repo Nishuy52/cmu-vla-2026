@@ -843,3 +843,111 @@ def test_answer_min_obs_malformed_env_falls_back_to_default(monkeypatch):
 def test_answer_min_score_malformed_env_falls_back_to_default(monkeypatch):
     monkeypatch.setenv(ENV_GDINO_ANSWER_MIN_SCORE, "not-a-number")
     assert answer_min_score() == pytest.approx(DEFAULT_GDINO_ANSWER_MIN_SCORE)
+
+
+# ------------------------------------------------------------------ run_caption_pass (issue #86)
+# The remote-offload seam (core.perception.remote_detector.RemoteDetector, served on the
+# other end by tools/cluster/gdino_server.py) calls this directly, one caption pass per
+# request. These tests stub _lazy_import/_ensure_model the same way the #39 backoff tests do
+# above, so no torch/groundingdino install is needed.
+
+
+def test_run_caption_pass_empty_tiles_short_circuits_without_import(monkeypatch):
+    det = GroundingDinoDetector()
+    called = {"n": 0}
+
+    def fake_lazy_import():
+        called["n"] += 1
+        raise AssertionError("must not be called for empty tiles")
+
+    det._lazy_import = fake_lazy_import
+    assert det.run_caption_pass([], "sofa .", 0.35) == []
+    assert called["n"] == 0
+
+
+def test_run_caption_pass_empty_caption_short_circuits_without_import():
+    det = GroundingDinoDetector()
+    det._lazy_import = lambda: (_ for _ in ()).throw(AssertionError("must not import"))
+    tiles = _tiles(3)
+    assert det.run_caption_pass(tiles, "", 0.35) == [[], [], []]
+    assert det.run_caption_pass(tiles, "   ", 0.35) == [[], [], []]
+
+
+def test_run_caption_pass_delegates_to_dispatch_pass(tmp_path):
+    det = _dual_pass_detector(tmp_path, question_nouns=[], vocab_nouns=[])
+    det._resolved_device = "cpu"
+    captured: dict = {}
+
+    def fake_dispatch(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        captured["prompt"] = prompt
+        captured["box_threshold"] = box_threshold
+        captured["device"] = device
+        return [[Detection(0, (0, 0, 1, 1), "teapot", 0.9)]]
+
+    det._dispatch_pass = fake_dispatch
+    out = det.run_caption_pass(_tiles(1), "teapot .", 0.22)
+    assert captured["prompt"] == "teapot ."
+    assert captured["box_threshold"] == pytest.approx(0.22)
+    assert captured["device"] == "cpu"
+    assert [d.label for d in out[0]] == ["teapot"]
+
+
+def test_run_caption_pass_swaps_and_restores_text_threshold(tmp_path):
+    det = _dual_pass_detector(tmp_path, question_nouns=[], vocab_nouns=[])
+    det._resolved_device = "cpu"
+    det.text_threshold = 0.25
+    seen: list[float] = []
+
+    def fake_dispatch(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        seen.append(det.text_threshold)
+        return [[]]
+
+    det._dispatch_pass = fake_dispatch
+    det.run_caption_pass(_tiles(1), "teapot .", 0.22, text_threshold=0.4)
+    assert seen == [0.4]
+    assert det.text_threshold == 0.25  # restored after the pass
+
+
+def test_run_caption_pass_restores_text_threshold_on_exception(tmp_path):
+    det = _dual_pass_detector(tmp_path, question_nouns=[], vocab_nouns=[])
+    det._resolved_device = "cpu"
+    det.text_threshold = 0.25
+
+    def raising_dispatch(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    det._dispatch_pass = raising_dispatch
+    with pytest.raises(RuntimeError):
+        det.run_caption_pass(_tiles(1), "teapot .", 0.22, text_threshold=0.4)
+    assert det.text_threshold == 0.25  # restored even though the pass raised
+
+
+def test_run_caption_pass_no_text_threshold_leaves_it_unchanged(tmp_path):
+    det = _dual_pass_detector(tmp_path, question_nouns=[], vocab_nouns=[])
+    det._resolved_device = "cpu"
+    det.text_threshold = 0.25
+    seen: list[float] = []
+
+    def fake_dispatch(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        seen.append(det.text_threshold)
+        return [[]]
+
+    det._dispatch_pass = fake_dispatch
+    det.run_caption_pass(_tiles(1), "teapot .", 0.22)
+    assert seen == [0.25]
+    assert det.text_threshold == 0.25
+
+
+def test_run_caption_pass_load_failure_raises_and_does_not_touch_backoff(tmp_path):
+    det = _dual_pass_detector(tmp_path, question_nouns=[], vocab_nouns=[])
+    det._lazy_import = lambda: (
+        _FakeTorch(cuda_available=False),
+        _FailingLoad(),
+        None,
+    )
+    assert det._consecutive_load_failures == 0
+    with pytest.raises(RuntimeError):
+        det.run_caption_pass(_tiles(1), "teapot .", 0.22)
+    # Loud failure for the server, not the tick backoff (issue #39 counters untouched).
+    assert det._consecutive_load_failures == 0
+    assert det._next_retry_at == 0.0

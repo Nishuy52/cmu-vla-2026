@@ -678,6 +678,49 @@ class GroundingDinoDetector:
                 merged[i].extend(dets)
         return merged
 
+    def run_caption_pass(
+        self,
+        tiles: Sequence[np.ndarray],
+        caption: str,
+        box_threshold: float,
+        text_threshold: float | None = None,
+    ) -> list[list[Detection]]:
+        """Run exactly one caption pass over ``tiles`` and return the per-tile detections.
+
+        This is the entry point ``tools/cluster/gdino_server.py`` (the remote GDINO offload
+        server, issue #86) calls: it owns the loaded model on the cluster GPU and serves one
+        caption pass per request, decoupled from this detector's own tick-driven dual-pass
+        scheduling in :meth:`__call__` (question pass + cadenced vocab pass, backoff, tick
+        counter) — none of that applies here.
+
+        Empty ``tiles`` or an empty/whitespace-only ``caption`` short-circuits to
+        ``[[] for _ in tiles]`` with no import/load, mirroring :meth:`__call__`'s own
+        empty-prompt short circuit. Otherwise this lazily imports torch/groundingdino,
+        ensures the model is loaded, and delegates to :meth:`_dispatch_pass` for the actual
+        forward pass. Unlike :meth:`__call__`, a load failure here RAISES rather than
+        recording a backoff failure: the server wants a loud, immediate error on a bad
+        request, not the tick-driven cooldown behaviour of issue #39 (and the backoff
+        counters are left untouched by this method either way).
+
+        ``text_threshold``, if given, temporarily overrides ``self.text_threshold`` for the
+        duration of this one pass (restored in a ``finally``, including on exception) — the
+        server's request may specify its own text threshold per call.
+        """
+        if not tiles or not caption or not caption.strip():
+            return [[] for _ in tiles]
+        torch, load_model_fn, predict_fn = self._lazy_import()
+        model = self._ensure_model(torch, load_model_fn)
+        saved_text_threshold = self.text_threshold
+        if text_threshold is not None:
+            self.text_threshold = float(text_threshold)
+        try:
+            return self._dispatch_pass(
+                torch, model, predict_fn, tiles, self._resolved_device, torch.float32,
+                caption, float(box_threshold),
+            )
+        finally:
+            self.text_threshold = saved_text_threshold
+
     def _dispatch_pass(
         self, torch, model, predict_fn, tiles: Sequence[np.ndarray], device, dtype,
         prompt: str, box_threshold: float,
