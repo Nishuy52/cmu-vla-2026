@@ -118,3 +118,9 @@
   (hotel_room_1) and 10/26 unresolved legs (`_pinch_costmap`
   territory / #62 leg-goal-semantics territory) left for follow-up.
 - **T18** architecture-refresh - as-built architecture/ folder (README + ch 01-10, 3,006 lines, verifier-confirmed anchors) vs 19 Jul main; 11 Jul snapshot archived as `archive/2026-07-11-architecture-snapshot`. DONE
+- **T19** cluster-offload (#86, #82) — opt-in dev-only detector/LLM offload
+  to the NUS SoC Slurm cluster over SSH tunnels (RemoteDetector +
+  combined-GPU sbatch job + servers.sh/tunnel.sh), keeping Unity/ROS local;
+  submission builds unaffected; live-verified end-to-end 26 Jul (detect RTT
+  ~207 ms warm through the tunnel), servers start-on-demand via
+  tools/cluster/servers.sh. DONE
