@@ -393,6 +393,75 @@ Rules that keep this safe:
 - Never run the host node and the containerised ai_module simultaneously
   (both would latch the question).
 
+## 8c. Cluster detector/LLM offload (dev only)
+
+The RTX 4060 Laptop has a hard power-management wedge (§1, issue #86): the GPU can
+lock at P8/210 MHz the moment GroundingDINO loads its weights, and only a reboot
+recovers it — which kills whatever live sim run was in progress. Issue #82 separately
+found the local Ollama tier contending for the same VRAM. As an opt-in workaround,
+the detector and the local-LLM tier can instead be served from the NUS SoC Slurm
+cluster (`docs/soc_cluster_guide.md`) over SSH tunnels, while Unity + the ROS stack
+keep running on this machine unchanged.
+
+**This is a dev iteration tool only. Submission builds NEVER use this path** — the
+scored image always runs the local, baked-in `GroundingDinoDetector` (§7) and the
+in-image Ollama bake (§8a); nothing about the remote offload is part of the fork.
+
+Workflow:
+
+```bash
+tools/cluster/servers.sh start          # rsyncs src/+tools/ to the cluster, sbatches the combined GPU job
+tools/cluster/servers.sh status         # poll until both addr files exist on the cluster
+tools/cluster/tunnel.sh                 # opens the SSH tunnels, prints the exports below
+```
+
+Paste the printed exports into the shell running the host node (`tools/run_host_node.sh`,
+§8b) or the container env:
+
+| Var | Value |
+|---|---|
+| `VLA_DETECTOR` | `remote` |
+| `VLA_REMOTE_DETECTOR_URL` | `http://127.0.0.1:8765` |
+| `VLA_REMOTE_DETECTOR_TIMEOUT_S` | `10.0` (default; override if the cluster is loaded) |
+| `VLA_LLM_LOCAL_KIND` | `openai` |
+| `VLA_LLM_LOCAL_BASE_URL` | `http://127.0.0.1:11434/v1` |
+| `VLA_LLM_LOCAL_MODEL` | `qwen2.5vl:3b` (parity with the baked image default; `qwen2.5vl:7b` is also pulled on the cluster for A/B) |
+
+No API key needed for the local slot — an empty key is fine against Ollama's openai
+adapter.
+
+**Addr-file handshake:** the sbatch job picks its own ports at start (shared GPU
+nodes can already have something bound on 8765/11434 — the job probes upward for the
+first free port) and writes the live `host:port` to `~/gdino_server.addr` and
+`~/ollama_server.addr` on the cluster only after each server answers its own health
+endpoint; both files are removed on job exit. `tunnel.sh` reads them over SSH before
+opening the local port-forwards, so always run `servers.sh status` until both files
+show up before `tunnel.sh` — an early tunnel attempt just fails cleanly, it doesn't
+wedge anything.
+
+Any network failure (cluster down, tunnel dropped, timeout) degrades `RemoteDetector`
+to empty detections for that tick — it never crashes the adapter loop — but a dead
+remote detector still starves the run of real boxes, so treat `servers.sh status` as
+load-bearing before trusting a session's results.
+
+**Stop the moment you're done** — `tools/cluster/servers.sh stop` (cancels only
+`vla-servers` jobs; safe to run even if nothing is up). Fairshare bills the whole
+allocation while it sits idle, not just active compute.
+
+Override example for a longer session (defaults are `-p gpu -t 3:00:00`):
+
+```bash
+tools/cluster/servers.sh start -p gpu-long -t 8:00:00
+```
+
+**Measured latencies (26 Jul 2026, laptop -> xgpe5 Titan RTX via tunnel):**
+`/health` RTT 101.5 ms warm (288.3 ms cold); one-tile `/detect` ("chair .",
+812x451 render JPEG) 206.9 ms warm (398.3 ms cold); ollama `/v1/models`
+69.8 ms. A full RemoteDetector dual-pass tick (question + vocab = two
+POSTs) measured 641 ms, a question-only tick 203 ms — comfortably inside
+the 10 s default timeout, but plan for ~2-5 detection ticks/s, not the
+local GPU's rate.
+
 ## Troubleshooting quick refs
 
 | Symptom | Fix |
