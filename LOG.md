@@ -1559,3 +1559,11 @@ deferred shape-(b) midpoint-nudge, then vision-checkpoint/#33/#43 items.
   recovery queue: (1) GDINO load-isolation experiment -> preload dodge
   decision; (2) paired capture (both money tables in one window);
   (3) #83 mechanism -> fix -> live re-verify; (4) re-baseline.
+
+## 2026-07-26 - T19 cluster offload: detector+LLM split-stack, live-verified
+
+- Started and finished T19 (docs/tasks/T19-cluster-offload/): opt-in
+  VLA_DETECTOR=remote offload of GDINO + local-LLM tier to the SoC cluster
+  over SSH tunnels (#86 dodge). Live-verified end-to-end from this machine
+  (detect 207 ms warm), servers torn down after; start on demand with
+  tools/cluster/servers.sh. Details in the task record.
