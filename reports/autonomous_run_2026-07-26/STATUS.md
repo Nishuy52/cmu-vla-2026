@@ -20,13 +20,17 @@ Cold-pickup state for the 12h autonomous plan (user-approved). Update at every m
 4. [ ] office_1 nume
 5. [ ] livingroom_1 obje (IoU)
 6. [ ] office_1 obje
-7. [ ] arabic_room upload + inst (#85)
+7. [ ] arabic_room inst (#85) — scene UPLOADED to cluster, ready
 
 ## Host lanes (parallel executor worktrees)
 - A [dispatched] SoCLaaS default primary + usage logging (core/llm, adapter, docs) -> reports/soclaas_usage.jsonl
-- B [dispatched] #90 float32 lattice collision (core/nav/occupancy.py)
+- B [DONE -> main f6f913e, commented, worktree retired] #90 float32 lattice collision
 - C [dispatched] #81 offline battery budget hooks so head gates fire (core/runner/gt_battery.py)
-- D [dispatched] #84 raw-detection dump + #89 subphrase folding (core/perception)
+- D [DONE -> main 119aff9, #84/#89 commented, worktree retired] #84 dump + #89 folding
+
+## Verified ready
+- Host scoring path OK: rosbags import, GT scenes, questions/answers, score_live_run all present in .venv.
+- arabic_room uploaded to cluster; ollama qwen2.5vl:3b present; SoCLaaS gateway 200 + qwen3.6:35b valid.
 
 ## Harvest/integrate checklist
 - Each worktree agent: collect final message, integrate to main, commit/push, delete worktree.
