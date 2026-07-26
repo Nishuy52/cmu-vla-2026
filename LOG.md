@@ -1694,3 +1694,19 @@ you do). NOT yet exercised on a live job — the first new verify run is
 the proof. This gives real IF-rubric/IoU/numerical scores instead of the
 diagnostic-only verdict block; 697648/697653 predate it (no bag, can't be
 scored retroactively).
+
+---
+
+## 2026-07-26 (session 24) — autonomous run kicked off (user-approved 12h plan)
+
+- SoCLaaS approved as PERMANENT primary LLM tier + usage monitoring (accumulating
+  log). Phase-2 host fixes + max cluster live scoring while the tunnel holds.
+- Cluster: job 697761 (livingroom_1 inst) submitted via the new bag-capture sbatch
+  — validates capture->harvest->score and retests #82/#84/#83; PENDING in queue.
+  Cluster runs are SERIAL (scene overlay writes the shared ~/.udocker unity dir).
+- Host lanes dispatched (isolated worktrees, disjoint ownership): SoCLaaS-primary+
+  usage log (llm/adapter/docs), #90 float32 lattice (nav), #81 offline battery
+  budget hooks (runner), #84 raw-detection dump + #89 subphrase folding (perception).
+- Guardrails: conservative issue-closing (measured numbers only), commit/push per
+  milestone, host lane continues if the SSH ControlMaster expires (human-only re-auth).
+- Cold-pickup state: reports/autonomous_run_2026-07-26/STATUS.md.
