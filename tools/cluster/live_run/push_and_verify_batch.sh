@@ -83,7 +83,19 @@ scp -q "$KIT"/cluster_verify_batch.sbatch "$KIT"/question_pub.py "$KIT"/live_mon
 scp -q "$MATRIX" xlogin:verify_batch_matrix.txt
 
 echo "== submit"
-JOB=$(ssh xlogin "cd ~ && sbatch --export=ALL ~/cluster_verify_batch.sbatch" | grep -oE '[0-9]+')
+# Optional: chain behind an already-queued job, e.g. AFTER=698999 (or a full
+# spec like afterany:698999). Verify runs must never overlap — they drive the
+# SAME udocker container/scene overlay on NFS home — so when another run is
+# already queued, chain rather than submit a competing job. The dependency
+# queues immediately (accruing age/priority in a congested queue) and only
+# starts once the predecessor terminates, for any exit status.
+DEP_ARG=""
+if [ -n "${AFTER:-}" ]; then
+  case "$AFTER" in *:*) DEP_SPEC="$AFTER" ;; *) DEP_SPEC="afterany:$AFTER" ;; esac
+  DEP_ARG="--dependency=$DEP_SPEC"
+  echo "   chaining: $DEP_ARG"
+fi
+JOB=$(ssh xlogin "cd ~ && sbatch $DEP_ARG --export=ALL ~/cluster_verify_batch.sbatch" | grep -oE '[0-9]+')
 echo "SUBMITTED batch job $JOB (scenes=$SCENES_CSV, $(wc -l < "$MATRIX") question(s))"
 echo "   watch:   ssh xlogin tail -f '~/verify_batch_${JOB}.out'"
 echo "   harvest: tools/cluster/live_run/harvest_verify.sh $JOB"
