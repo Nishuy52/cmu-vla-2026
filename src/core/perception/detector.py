@@ -227,6 +227,40 @@ def answer_min_score() -> float:
         return DEFAULT_GDINO_ANSWER_MIN_SCORE
 
 
+#: :func:`answer_eligibility_reason`'s possible return values, for consumers that want
+#: to branch on the reason rather than pattern-match the string (issue #84 gate
+#: observability: this gate's rejections used to be a silent boolean with no visibility
+#: anywhere — offline the GT mocks are born n_obs=3 (``core.runner.gt_battery``), well
+#: clear of both floors, so the gate is never actually exercised by the battery; the only
+#: place it can silently reject something is live, where it was previously invisible).
+ELIGIBLE = "eligible"
+INELIGIBLE_N_OBS = "n_obs_below_floor"
+INELIGIBLE_SCORE = "score_below_floor"
+INELIGIBLE_BOTH = "n_obs_and_score_below_floor"
+INELIGIBLE_MALFORMED = "malformed"
+
+
+def answer_eligibility_reason(record: object) -> str:
+    """Diagnostic breakdown of :func:`is_answer_eligible`'s verdict for ``record``.
+
+    Returns one of :data:`ELIGIBLE`, :data:`INELIGIBLE_N_OBS`, :data:`INELIGIBLE_SCORE`,
+    :data:`INELIGIBLE_BOTH`, or :data:`INELIGIBLE_MALFORMED` (missing ``.n_obs``/``.score``).
+    Pure/side-effect-free — callers (logging here, the instance-index dump in
+    :mod:`core.perception.scene_index`, tests) decide what to do with the reason.
+    """
+    n_obs = getattr(record, "n_obs", None)
+    score = getattr(record, "score", None)
+    if n_obs is None or score is None:
+        return INELIGIBLE_MALFORMED
+    obs_ok = n_obs >= answer_min_obs()
+    score_ok = score >= answer_min_score()
+    if obs_ok and score_ok:
+        return ELIGIBLE
+    if not obs_ok and not score_ok:
+        return INELIGIBLE_BOTH
+    return INELIGIBLE_N_OBS if not obs_ok else INELIGIBLE_SCORE
+
+
 def is_answer_eligible(record: object) -> bool:
     """True iff ``record`` (an :class:`~core.interfaces.InstanceRecord`) clears both the
     answer-eligibility observation and peak-score floors (issue #43a).
@@ -234,12 +268,22 @@ def is_answer_eligible(record: object) -> bool:
     Duck-typed on ``.n_obs`` / ``.score`` (avoids importing ``core.interfaces`` from this
     module purely for a type hint); a record missing either attribute is treated as
     ineligible rather than raising, so a malformed/partial record never wins an answer.
+
+    Issue #84 gate observability: a rejection is logged at DEBUG (not silently dropped)
+    with the :func:`answer_eligibility_reason` breakdown and the record's id/label when
+    available, so a live run's debug log (or anything capturing this logger) shows WHY an
+    instance lost an answer — the offline battery's GT mocks (n_obs=3) never clear this
+    path since they always pass, so this was previously unexercisable outside a live run.
     """
-    n_obs = getattr(record, "n_obs", None)
-    score = getattr(record, "score", None)
-    if n_obs is None or score is None:
-        return False
-    return n_obs >= answer_min_obs() and score >= answer_min_score()
+    reason = answer_eligibility_reason(record)
+    if reason == ELIGIBLE:
+        return True
+    _LOGGER.debug(
+        "answer-eligibility gate rejected instance id=%r label=%r n_obs=%r score=%r: %s",
+        getattr(record, "instance_id", None), getattr(record, "label", None),
+        getattr(record, "n_obs", None), getattr(record, "score", None), reason,
+    )
+    return False
 
 
 def build_gdino_prompt(question_nouns: Sequence[str], vocab_nouns: Sequence[str]) -> str:
