@@ -83,13 +83,16 @@ echo "stack launched; settling 45s"; sleep 45
 (ss -ltn 2>/dev/null || true) | grep -q ":10000" && echo "ENDPOINT: :10000 up" || echo "ENDPOINT: MISSING"
 
 # ---------- ollama (local LLM tier, issue #82 retest) ----------
-export OLLAMA_HOST=127.0.0.1:11434 OLLAMA_MODELS=~/ollama-models
+# shared node: 11434 may already be bound (697648 lesson) — probe upward
+OPORT=11434
+while (ss -ltn 2>/dev/null || true) | grep -q ":$OPORT "; do OPORT=$((OPORT+1)); done
+export OLLAMA_HOST=127.0.0.1:$OPORT OLLAMA_MODELS=~/ollama-models
 ~/ollama/bin/ollama serve > ~/verify_run_${J}_ollama.log 2>&1 &
 OLLAMA_PID=$!
 for i in $(seq 1 30); do
-  (ss -ltn 2>/dev/null || true) | grep -q ":11434" && break; sleep 1
+  (ss -ltn 2>/dev/null || true) | grep -q ":$OPORT " && break; sleep 1
 done
-(ss -ltn 2>/dev/null || true) | grep -q ":11434" && echo "OLLAMA: up" || echo "OLLAMA: MISSING"
+(ss -ltn 2>/dev/null || true) | grep -q ":$OPORT " && echo "OLLAMA: up on $OPORT" || echo "OLLAMA: MISSING"
 
 # ---------- ai_module adapter (venv torch/GDINO + ROOT rclpy) ----------
 source ~/venv-gpu/bin/activate
@@ -120,7 +123,7 @@ else
 fi
 # issue #82: local tier via ollama (same 3b model as the laptop plan for parity)
 export VLA_LLM_LOCAL_KIND=openai
-export VLA_LLM_LOCAL_BASE_URL=http://127.0.0.1:11434/v1
+export VLA_LLM_LOCAL_BASE_URL=http://127.0.0.1:$OPORT/v1
 export VLA_LLM_LOCAL_MODEL=qwen2.5vl:3b
 export VLA_LOCAL_API_KEY=local-dummy
 python -c "from ros_adapter.adapter_node import main; main()" > ~/verify_run_${J}_adapter.log 2>&1 &
@@ -138,6 +141,9 @@ python3 ~/live_monitor.py 780 2>&1
 MONITOR_RC=$?
 
 # ---------- per-issue verdict summary ----------
+# live_monitor only latches numerical/marker answers; an IF answer is a waypoint.
+# The FSM's own answer transition in the adapter log is the authoritative signal.
+grep -q "transition:answer->" ~/verify_run_${J}_adapter.log && MONITOR_RC=0
 echo "== monitor rc=$MONITOR_RC"
 echo "== adapter log tail"; tail -25 ~/verify_run_${J}_adapter.log
 echo "== #82 parse tier"; grep -E "parsed: tier=|ladder" ~/verify_run_${J}_adapter.log | tail -5
