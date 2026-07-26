@@ -1669,3 +1669,28 @@ primary-tier A/B; merge verdicts -> close #83/#88/#89 if live numbers hold.
 - Open after this round: #89 subphrase folding, #84 raw-detection banking +
   flat-surface classes, #82 clean cluster retest, #85 arabic, #90 lattice,
   #77 mirror-artifact live check (goal-clamp legs), #86 laptop long-horizon.
+
+---
+
+## 2026-07-26 (session 23 addendum 3) — CROSS-SESSION NOTE: cluster verify runs now capture a ros bag
+
+Coordination flag for any concurrent/next session (a parallel session,
+`bfc60d81`, harvested 697648/697653 and closed #83 this round; this note
+is from the other session): two commits landed on origin/main AFTER
+`e877553` —
+
+- `dcb765e` tools: capture ros bag per verify run for real scoring
+- `2e5515c` tools: make verify-run stdout job-specific (no concurrent clobber)
+
+They wire `ros2 bag record` into `tools/cluster/live_run/cluster_verify_run.sbatch`
+(records /state_estimation + /challenge_question + /numerical_response +
+/selected_object_marker into `<scene>/<qdir>/bag/`, the layout
+`tools/score_live_run.py` scores), make `harvest_verify.sh` pull + score
+the bag, and switch SLURM stdout to `verify_run_%j.out`. Files touched:
+`tools/cluster/live_run/{cluster_verify_run.sbatch,harvest_verify.sh,push_and_verify.sh}`.
+
+PULL these before pushing (git will reject a non-fast-forward push until
+you do). NOT yet exercised on a live job — the first new verify run is
+the proof. This gives real IF-rubric/IoU/numerical scores instead of the
+diagnostic-only verdict block; 697648/697653 predate it (no bag, can't be
+scored retroactively).
