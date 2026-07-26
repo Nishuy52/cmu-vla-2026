@@ -8,6 +8,7 @@ from core.heads import explore_debug
 from core.heads.explore_debug import ENV_DEBUG_DIR, maybe_dump
 from core.nav.occupancy import OccupancyGrid
 from tests.heads._helpers import inst, scene
+from tests.nav.helpers import patch_from_ascii
 
 
 class _FakePolicy:
@@ -104,3 +105,41 @@ def test_instance_listing_truncated_at_cap(tmp_path, monkeypatch):
     assert li["by_class"] == {"box": n}
     assert len(li["instances"]) == explore_debug.MAX_INSTANCES_LISTED
     assert li["truncated"] is True
+
+
+def test_dump_surfaces_bfs_reroot(tmp_path, monkeypatch):
+    """issue #83: a degenerate vehicle pocket re-root must be visible in the dump,
+    including on a status that would otherwise look like a silent dead end."""
+    monkeypatch.setenv(ENV_DEBUG_DIR, str(tmp_path))
+    rows = [
+        "      ......",
+        "      ......",
+        "      ......",
+        ".     ......",
+        "      ......",
+        "      ......",
+    ]
+    grid = OccupancyGrid(cell_m=0.1)
+    grid.integrate_patch(patch_from_ascii(rows, cell_m=0.1))
+    head = _FakeHead(None)
+    # "complete" is exactly the status ExplorationPolicy.step reports when every
+    # frontier scores below the bar -- the silent-parking symptom of issue #83.
+    maybe_dump(head, grid, (0.05, 0.25), 0.0, "complete", None)
+
+    files = list(tmp_path.glob("explore_debug_*.jsonl"))
+    record = json.loads(files[0].read_text().splitlines()[0])
+    assert record["bfs_reroot"] is True
+    assert record["bfs_reroot_pocket_cells"] == 1
+    assert record["bfs_reroot_largest_component_cells"] == 36
+
+
+def test_dump_no_reroot_when_pocket_healthy(tmp_path, monkeypatch):
+    monkeypatch.setenv(ENV_DEBUG_DIR, str(tmp_path))
+    grid = OccupancyGrid(cell_m=0.1)
+    grid.integrate_patch(patch_from_ascii(["." * 8 for _ in range(8)], cell_m=0.1))
+    head = _FakeHead(None)
+    maybe_dump(head, grid, (0.35, 0.35), 0.0, "frontier", None)
+
+    files = list(tmp_path.glob("explore_debug_*.jsonl"))
+    record = json.loads(files[0].read_text().splitlines()[0])
+    assert record["bfs_reroot"] is False
