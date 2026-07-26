@@ -1,0 +1,76 @@
+adapter node starting (VLA_DETECTOR=grounding_dino, RMW=rmw_cyclonedds_cpp); ctrl-C to stop
+[INFO] [1784694110.581111158] [vla_ai_module]: no LLM provider configured: parse is regex-only and all checkpoint seams are off (deterministic offline path).
+[INFO] [1784694110.581849668] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1784694110.582489728] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1784694161.351521734] [vla_ai_module]: question latched: 'Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door.'
+[INFO] [1784694161.386390203] [vla_ai_module]: QuestionController constructed; driving (llm=False, perception=True)
+[INFO] [1784694161.389042223] [vla_ai_module]: idle->parsing question received
+[INFO] [1784694161.398059797] [vla_ai_module]: parsing->orient parse attempted
+[INFO] [1784694161.624357538] [vla_ai_module]: published 1 waypoints since latch
+/home/jason/vla_host/venv/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/jason/vla_host/venv/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/jason/vla_host/venv/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/jason/vla_host/venv/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/jason/vla_host/venv/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/jason/vla_host/venv/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1784694301.555748838] [vla_ai_module]: published 144 waypoints since latch
+[INFO] [1784694301.558155769] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1784694331.951605113] [vla_ai_module]: published 145 waypoints since latch
+[INFO] [1784694459.147783735] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1784694490.228935132] [vla_ai_module]: verify->answer verify complete
+[INFO] [1784694625.027266510] [vla_ai_module]: published 146 waypoints since latch
+[INFO] [1784694625.029360794] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1784694688.916850776] [vla_ai_module]: published 147 waypoints since latch
+[INFO] [1784694753.576592870] [vla_ai_module]: drive_out->done watchdog_floor>=570s
+[INFO] [1784694753.578837082] [vla_ai_module]: controller DONE; last 10 events: 0.0:parsing:parsed:tier=regex | 0.0:parsing:transition:parsing->orient parse attempted | 140.2:orient:transition:orient->explore_execute orientation window closed | 297.8:explore_execute:transition:explore_execute->verify explore budget spent | 328.9:verify:transition:verify->answer verify complete | 463.7:answer:answer_from_floor:verify yielded nothing | 463.7:answer:published:WaypointCmd via answer_state | 463.7:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 592.2:drive_out:publish_suppressed:already published; watchdog_floor>=570s | 592.2:drive_out:transition:drive_out->done watchdog_floor>=570s
+Traceback (most recent call last):
+  File "/home/jason/cmu_ws/cmu-vla-2026/src/ros_adapter/adapter_node.py", line 1037, in main
+    rclpy.spin(node)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 907, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 877, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/Traceback (most recent call last):
+  File "/home/jason/cmu_ws/cmu-vla-2026/src/ros_adapter/adapter_node.py", line 1031, in main
+    
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 907, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 877, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 785, in _wait_for_ready_callbacks
+    raise ExternalShutdownEfinal text_encoder_type: bert-base-uncased
+Exception
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/jason/cmu_ws/cmu-vla-2026/src/ros_adapter/adapter_node.py", line 1036, in main
+    try:
+        ^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 134, in shutdown
+    _shutdown(context=context)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/utilities.py", line 82, in shutdown
+    context.shutdown()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/context.py", line 129, in shutdown
+    self.__context.shutdown()
+rclpy._rclpy_pybind11.RCLError: failed to shutdown: rcl_shutdown already called on the given context, at ./src/rcl/init.c:333
+final text_encoder_type: bert-base-uncased
