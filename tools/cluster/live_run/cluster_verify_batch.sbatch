@@ -1,0 +1,252 @@
+#!/bin/bash
+#SBATCH --job-name=verify-batch
+#SBATCH -p gpu
+#SBATCH --gpus=nv:1
+#SBATCH -x xgpe0,xgpe2,xgpe6
+#SBATCH -t 175
+#SBATCH -c 16
+#SBATCH --mem=48G
+#SBATCH -o /home/c/cyuhsin/verify_batch_%j.out
+
+# Batch verification run: ONE Slurm allocation answers MULTIPLE (scene, qdir,
+# question) tuples sequentially, so the ~12h nv-queue wait is amortized across
+# a whole matrix instead of paid once per question (tools/cluster/live_run/
+# cluster_verify_run.sbatch is the single-question flow this refactors; keep
+# that file untouched — it stays the reference for a lone-question rerun).
+#
+# Matrix input: ~/verify_batch_matrix.txt, one line per question:
+#   scene|qdir|scene_dir|question
+# scene_dir may be empty (baked scene). qdir is nume|obje|inst, matching
+# tools/score_live_run.py's QDIR_TO_QTYPE. Built locally by
+# push_and_verify_batch.sh and scp'd alongside this script.
+#
+# Each matrix line gets a FULL relaunch (Xvfb/Unity/stack/ollama/adapter) —
+# no attempt to keep Unity warm across questions (unproven optimization, not
+# worth the risk of cross-question state leakage). Between questions every
+# process from the previous question is killed and DISPLAY :99 / port :10000
+# / the ollama port are confirmed free (bounded wait-loop) before the next
+# relaunch, so each question starts from the same clean-slate state the
+# single-question sbatch always started from.
+#
+# A single bad question (dead Unity, adapter crash, monitor timeout) must
+# never abort the whole batch: run_one's body is invoked inside a guarded
+# call in the main loop, and a RETURN trap inside run_one guarantees its
+# teardown fires no matter how the function exits (normal end, `return` on
+# an early error, ...). The loop always advances to the next matrix line.
+#
+# Per-question output layout (all keyed by a unique slot id so concurrent-run
+# artifacts never clobber across questions in the SAME job):
+#   SLOT=<i>_<scene>_<qdir>                       (i = 0-based matrix line index)
+#   ~/verify_batch_${J}_captures/$SLOT/$SCN/$QD/bag   <- ros2 bag (scorer input;
+#     NOTE the extra $SLOT level vs the single script's
+#     captures/$SCENE/$QDIR/bag — that's what lets the SAME (scene, qdir) repeat
+#     across matrix lines without collision, while still handing the scorer an
+#     exact captures/<scene>/<qdir>/bag leaf for GT lookup + QDIR_TO_QTYPE.)
+#   ~/verify_batch_${J}_debug_${SLOT}/             <- explore-debug + instance dumps
+#   ~/verify_batch_${J}_usage_${SLOT}.jsonl         <- per-call LLM usage log
+#   ~/verify_batch_${J}_{unity,launch,ollama,adapter,bag}_${SLOT}.log
+set -u
+ROOT=~/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT
+WS=$ROOT/home/docker/autonomy_stack_mecanum_wheel_platform
+XR=~/xstack/root
+J=$SLURM_JOB_ID
+MATRIX=${MATRIX:-~/verify_batch_matrix.txt}
+UNITY_DIR=$WS/src/base_autonomy/vehicle_simulator/mesh/unity
+MODEL=$UNITY_DIR/environment/Model.x86_64
+CAP_ROOT=~/verify_batch_${J}_captures
+
+echo "== verify-batch $J on $(hostname) $(date +%T)  matrix: $MATRIX"
+if [ ! -f "$MATRIX" ]; then
+  echo "FATAL: matrix file $MATRIX not found"; exit 1
+fi
+
+# ---------- proven v4 base env (done ONCE for the whole allocation) ----------
+export PATH=$ROOT/opt/ros/jazzy/bin:$PATH
+export PYTHONPATH=$ROOT/opt/ros/jazzy/lib/python3.12/site-packages:$ROOT/usr/lib/python3/dist-packages:$ROOT/usr/lib/python3.12/dist-packages
+export LD_LIBRARY_PATH=$ROOT/opt/ros/jazzy/lib:$ROOT/opt/ros/jazzy/lib/x86_64-linux-gnu:$ROOT/usr/lib/x86_64-linux-gnu:$ROOT/lib/x86_64-linux-gnu:$ROOT/usr/lib
+export AMENT_PREFIX_PATH=$ROOT/opt/ros/jazzy
+for d in "$WS"/install/*/; do
+  pkg=$(basename "$d"); [ "$pkg" = "COLCON_IGNORE" ] && continue; [ -d "$d" ] || continue
+  export AMENT_PREFIX_PATH="$d:${AMENT_PREFIX_PATH}"
+  [ -d "$d/lib" ] && export LD_LIBRARY_PATH="$d/lib:$LD_LIBRARY_PATH"
+  [ -d "$d/lib/python3.12/site-packages" ] && export PYTHONPATH="$d/lib/python3.12/site-packages:$PYTHONPATH"
+done
+for link in "$WS"/install/*/lib/python3.12/site-packages/*.egg-link; do
+  [ -f "$link" ] || continue
+  tgt=$(head -1 "$link"); [ -d "$ROOT$tgt" ] && export PYTHONPATH="$ROOT$tgt:$PYTHONPATH"
+done
+export ROS_DISTRO=jazzy RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export ROS_LOG_DIR=/tmp/roslog-$J ROS_HOME=/tmp/roshome-$J
+mkdir -p "$ROS_LOG_DIR" "$ROS_HOME"
+export CYCLONEDDS_URI='<CycloneDDS><Domain><General><Interfaces><NetworkInterface address="127.0.0.1" multicast="true"/></Interfaces></General></Domain></CycloneDDS>'
+
+# ai_module adapter deps + SoCLaaS key: independent of any single question,
+# loaded once here so run_one only sets the per-question knobs.
+source ~/venv-gpu/bin/activate
+export PYTHONPATH=~/vla/src:$PYTHONPATH
+export VLA_DETECTOR=grounding_dino GDINO_DEVICE=cuda GDINO_PRECISION=fp16
+export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4
+export GDINO_CONFIG_PATH=~/models/gdino/GroundingDINO_SwinB_cfg.py
+export GDINO_CHECKPOINT_PATH=~/models/gdino/groundingdino_swinb_cogcoor.pth
+export VLA_CAMERA_COMPRESSED=1
+eval "$(grep -h 'export SOCLAAS_API_KEY' ~/.bashrc | head -1)" || true
+if [ -n "${SOCLAAS_API_KEY:-}" ]; then
+  echo "SOCLAAS: primary tier enabled by default (qwen3.6:35b)"
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 \
+    https://soclaas-api.comp.nus.edu.sg/v1/models -H "Authorization: Bearer $SOCLAAS_API_KEY" 2>/dev/null)
+  echo "SOCLAAS: compute-node gateway probe HTTP $code (200 = reachable from this node)"
+else
+  echo "SOCLAAS: no key in ~/.bashrc — primary tier off, ladder falls to local/regex"
+fi
+export VLA_LLM_LOCAL_KIND=openai
+export VLA_LLM_LOCAL_MODEL=qwen2.5vl:3b
+export VLA_LOCAL_API_KEY=local-dummy
+
+mkdir -p "$CAP_ROOT"
+
+# ---------- per-question teardown: kill everything, wait for ports to free ----------
+teardown_one() {
+  kill "${QPUB_PID:-}" "${ADAPTER_PID:-}" "${OLLAMA_PID:-}" "${LAUNCH_PID:-}" \
+       "${UNITY_PID:-}" "${XVFB_PID:-}" 2>/dev/null
+  kill -KILL -"${BAG_PID:-}" 2>/dev/null; kill -KILL "${BAG_PID:-}" 2>/dev/null
+  for i in $(seq 1 30); do
+    busy=0
+    (ss -ltn 2>/dev/null || true) | grep -q ":10000 " && busy=1
+    [ -n "${OPORT:-}" ] && (ss -ltn 2>/dev/null || true) | grep -q ":$OPORT " && busy=1
+    [ -f /tmp/.X11-unix/X99 ] && busy=1
+    [ "$busy" -eq 0 ] && break
+    sleep 1
+  done
+  # Belt-and-braces: anything still alive by name, one more sweep.
+  pkill -9 -f "Model.x86_64" 2>/dev/null || true
+  pkill -9 -f "Xvfb :99" 2>/dev/null || true
+  pkill -9 -f "ollama serve" 2>/dev/null || true
+  pkill -9 -f "ros_adapter.adapter_node" 2>/dev/null || true
+  rm -f /tmp/.X11-unix/X99 2>/dev/null || true
+  echo "TEARDOWN: done (ports/display released)"
+}
+
+# ---------- run one (scene, qdir, question) tuple end to end ----------
+run_one() {
+  local SCN=$1 QD=$2 SDIR=$3 QUESTION=$4 SLOT=$5
+  trap teardown_one RETURN
+  echo "== slot $SLOT: scene=$SCN qdir=$QD scene_dir=${SDIR:-<baked>} question: $QUESTION"
+
+  # ---- optional scene overlay (restart-based: swap BEFORE Unity starts) ----
+  if [ -n "$SDIR" ]; then
+    local SWAP_MODEL SCENE_ROOT
+    SWAP_MODEL=$(find "$SDIR" -maxdepth 3 -name 'Model.x86_64' | head -1)
+    if [ -n "$SWAP_MODEL" ]; then
+      SCENE_ROOT=$(dirname "$(dirname "$SWAP_MODEL")")
+      rsync -a "$SCENE_ROOT/" "$UNITY_DIR/"
+      echo "SCENE: overlaid $SCENE_ROOT -> $UNITY_DIR"
+    else
+      echo "SCENE: no Model.x86_64 under $SDIR — using currently-baked scene"
+    fi
+  else
+    echo "SCENE: baked"
+  fi
+
+  # ---- X + Unity ----
+  mkdir -p /tmp/.X11-unix 2>/dev/null
+  $XR/usr/bin/Xvfb :99 -screen 0 1280x720x24 -xkbdir $XR/usr/share/X11/xkb -noreset 2>/dev/null &
+  XVFB_PID=$!; sleep 3
+  export DISPLAY=:99
+  chmod +x "$MODEL" 2>/dev/null
+  $XR/opt/VirtualGL/bin/vglrun -ld $XR/usr/lib -d egl0 "$MODEL" -force-glcore -screen-width 1280 -screen-height 720 \
+    > ~/verify_batch_${J}_unity_${SLOT}.log 2>&1 &
+  UNITY_PID=$!; sleep 8
+  kill -0 $UNITY_PID 2>/dev/null && echo "UNITY: alive" || { echo "UNITY: DEAD"; return 1; }
+
+  # ---- autonomy stack ----
+  timeout 900 ros2 launch vehicle_simulator system_simulation.launch > ~/verify_batch_${J}_launch_${SLOT}.log 2>&1 &
+  LAUNCH_PID=$!
+  echo "stack launched; settling 45s"; sleep 45
+  (ss -ltn 2>/dev/null || true) | grep -q ":10000" && echo "ENDPOINT: :10000 up" || echo "ENDPOINT: MISSING"
+
+  # ---- ollama (local LLM tier) ----
+  OPORT=11434
+  while (ss -ltn 2>/dev/null || true) | grep -q ":$OPORT "; do OPORT=$((OPORT+1)); done
+  export OLLAMA_HOST=127.0.0.1:$OPORT OLLAMA_MODELS=~/ollama-models
+  ~/ollama/bin/ollama serve > ~/verify_batch_${J}_ollama_${SLOT}.log 2>&1 &
+  OLLAMA_PID=$!
+  for i in $(seq 1 30); do
+    (ss -ltn 2>/dev/null || true) | grep -q ":$OPORT " && break; sleep 1
+  done
+  (ss -ltn 2>/dev/null || true) | grep -q ":$OPORT " && echo "OLLAMA: up on $OPORT" || echo "OLLAMA: MISSING"
+  export VLA_LLM_LOCAL_BASE_URL=http://127.0.0.1:$OPORT/v1
+
+  # ---- ai_module adapter (per-question dump paths) ----
+  export VLA_EXPLORE_DEBUG_DIR=~/verify_batch_${J}_debug_${SLOT}
+  mkdir -p "$VLA_EXPLORE_DEBUG_DIR"
+  export VLA_INSTANCE_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/instance_index.jsonl
+  export VLA_RAW_DETECTION_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/raw_detections.jsonl
+  export VLA_LLM_USAGE_LOG=~/verify_batch_${J}_usage_${SLOT}.jsonl
+  python -c "from ros_adapter.adapter_node import main; main()" > ~/verify_batch_${J}_adapter_${SLOT}.log 2>&1 &
+  ADAPTER_PID=$!
+  sleep 25
+  kill -0 $ADAPTER_PID 2>/dev/null && echo "ADAPTER: alive" || { echo "ADAPTER: DEAD — log tail:"; tail -15 ~/verify_batch_${J}_adapter_${SLOT}.log; return 1; }
+  grep -m1 -iE "perception|detector|boot" ~/verify_batch_${J}_adapter_${SLOT}.log || true
+  grep -m1 -iE "ladder configured" ~/verify_batch_${J}_adapter_${SLOT}.log || true
+
+  # ---- ros bag capture (extra $SLOT level vs single-run so the scorer's
+  # required captures/<scene>/<qdir>/bag leaf stays exact while multiple
+  # slots reuse the same (scene, qdir) across the batch without clobbering) ----
+  local BAGDIR=$CAP_ROOT/$SLOT/$SCN/$QD
+  mkdir -p "$BAGDIR"; rm -rf "$BAGDIR/bag"
+  setsid ros2 bag record -o "$BAGDIR/bag" \
+    /state_estimation /challenge_question /numerical_response /selected_object_marker \
+    > ~/verify_batch_${J}_bag_${SLOT}.log 2>&1 &
+  BAG_PID=$!
+  sleep 3
+  kill -0 $BAG_PID 2>/dev/null && echo "BAG: recording -> $BAGDIR/bag" || { echo "BAG: recorder DEAD — log tail:"; tail -10 ~/verify_batch_${J}_bag_${SLOT}.log; }
+
+  # ---- question + monitor ----
+  python3 ~/question_pub.py "$QUESTION" > /dev/null 2>&1 &
+  QPUB_PID=$!
+  echo "question publishing; monitor up (deadline 780s)"
+  python3 ~/live_monitor.py 780 2>&1
+  local MONITOR_RC=$?
+
+  # ---- robust bounded bag stop (setsid process-group SIGINT, escalating,
+  # NEVER a blocking `wait` — a bare `wait $BAG_PID` can hang the whole
+  # allocation to the SLURM wall if rosbag2's child doesn't finalize) ----
+  kill -INT -"$BAG_PID" 2>/dev/null || kill -INT "$BAG_PID" 2>/dev/null
+  for i in $(seq 1 45); do kill -0 "$BAG_PID" 2>/dev/null || break; sleep 1; done
+  kill -KILL -"$BAG_PID" 2>/dev/null; kill -KILL "$BAG_PID" 2>/dev/null
+  echo "== bag capture"
+  timeout 30 ros2 bag info "$BAGDIR/bag" 2>&1 | grep -E "Messages:|Topic:|Duration:" \
+    || echo "BAG: no clean info (harvest reindex+convert will recover)"
+
+  # ---- per-question verdict summary ----
+  grep -q "transition:answer->" ~/verify_batch_${J}_adapter_${SLOT}.log && MONITOR_RC=0
+  echo "== slot $SLOT monitor rc=$MONITOR_RC"
+  echo "== slot $SLOT adapter log tail"; tail -25 ~/verify_batch_${J}_adapter_${SLOT}.log
+  echo "== slot $SLOT parse tier"; grep -E "parsed: tier=|ladder" ~/verify_batch_${J}_adapter_${SLOT}.log | tail -5
+  echo "== slot $SLOT LLM usage"; tail -12 "$VLA_LLM_USAGE_LOG" 2>/dev/null || echo "no usage log"
+  [ $MONITOR_RC -eq 0 ] && echo "SLOT $SLOT: SUCCESS" || echo "SLOT $SLOT: rc=$MONITOR_RC"
+  return 0
+}
+
+# ---------- main matrix loop ----------
+# Each line failing must not abort the batch: run_one's own body already
+# returns non-zero on a hard failure (dead Unity/adapter) instead of exiting
+# the script, and the guard below logs+continues regardless. `set -u` (not
+# `set -e`) is in effect for the whole file, matching the single-question
+# sbatch, so a nonzero return here never aborts the loop on its own — the
+# explicit guard is belt-and-braces documentation of that invariant.
+i=0
+while IFS='|' read -r SCENE QDIR SCENE_DIR QUESTION || [ -n "${SCENE:-}" ]; do
+  [ -z "${SCENE:-}" ] && continue
+  case "$SCENE" in \#*) continue ;; esac
+  SLOT="${i}_${SCENE}_${QDIR}"
+  if run_one "$SCENE" "$QDIR" "$SCENE_DIR" "$QUESTION" "$SLOT"; then
+    echo "== slot $SLOT: run_one returned OK"
+  else
+    echo "== slot $SLOT: run_one FAILED (rc=$?) — continuing to next question"
+  fi
+  i=$((i+1))
+done < "$MATRIX"
+
+echo "== gpu"; nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader
+echo "VERIFY-BATCH-DONE: $i question(s) attempted"

@@ -56,6 +56,34 @@ the end of `~/verify_run.out` (parse tier, last pocket/reroot records, instance
 class counts, waypoint cadence). Harvest the `~/verify_run_<job>_debug/` JSONLs
 alongside the logs; `tools/live_harness/compare_explore_debug.py` reads them.
 
+## Batch variant (multiple questions per allocation)
+
+`cluster_verify_batch.sbatch` = `cluster_verify_run.sbatch` refactored so ONE
+Slurm allocation answers a whole matrix of (scene, qdir, question) tuples
+sequentially, amortizing the ~12h nv-queue wait across every question instead
+of paying it per question. Driven end-to-end by
+`push_and_verify_batch.sh [scene1,scene2,...]` (default
+`livingroom_1,office_1`): it builds `~/verify_batch_matrix.txt` locally from
+`upstream/CMU-VLN-Challenge-2026/questions/questions.json` (one line per
+question, `scene|qdir|scene_dir|question`), uploads any scene not already on
+the cluster, and submits.
+
+Each matrix line gets a full relaunch (matching the single-question flow —
+Unity is never kept warm across questions) and a bounded teardown (kill
+Unity/stack/adapter/ollama/Xvfb, wait for `:10000`/the ollama port/`:99` to
+free) before the next line starts, so every question begins from the same
+clean-slate state. A single bad question (dead Unity, adapter crash, monitor
+timeout) is logged and the loop continues — it never aborts the whole batch.
+
+Outputs are keyed by a `<line-index>_<scene>_<qdir>` slot id so they never
+clobber across questions in the same job: bag captures land under
+`~/verify_batch_<job>_captures/<slot>/<scene>/<qdir>/bag` (the extra `<slot>`
+level vs the single-run layout lets the same (scene, qdir) repeat across a
+batch), debug dumps under `~/verify_batch_<job>_debug_<slot>/`, and per-slot
+adapter/ollama/launch/bag logs + LLM usage log alongside.
+`harvest_verify.sh <job>` detects single vs batch naming automatically and
+scores every captured bag with `tools/score_live_run.py`.
+
 ## Known quality gaps (filed)
 
 - #88 in-executor GDINO starves the tick loop (~0.8 Hz effective vs 5 Hz)
