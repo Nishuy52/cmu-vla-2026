@@ -440,6 +440,9 @@ cadence stall; never set it for a live/eval run.
 | Var | Value |
 |---|---|
 | `VLA_PERCEPTION_SYNC` | unset/`0` (default: threaded); `1` forces synchronous debug mode |
+| `VLA_EXPLORE_DEBUG_DIR` | unset (default: no-op); dir for per-run explore/frontier JSONL dumps (#83) |
+| `VLA_INSTANCE_DUMP_PATH` | unset (default: no-op); JSONL path for periodic + answer-time instance-index dumps (#84/#89) |
+| `VLA_INSTANCE_DUMP_INTERVAL_S` | periodic dump throttle, default 10 |
 
 **Addr-file handshake:** the sbatch job picks its own ports at start (shared GPU
 nodes can already have something bound on 8765/11434 — the job probes upward for the
