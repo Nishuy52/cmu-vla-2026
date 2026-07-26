@@ -1652,3 +1652,20 @@ Parallel worktree lanes, all merged to main same session:
 **Next:** harvest 697648/697653 (verdict blocks per issue); #82 tier verdict
 from ollama log; #84 recall quantification from instance dump; SoCLaaS key +
 primary-tier A/B; merge verdicts -> close #83/#88/#89 if live numbers hold.
+
+## 2026-07-26 (session 23 addendum) - verification round harvested; #83/#88/#80 CLOSED
+
+- office_1 697648: #88 CLOSED (5 Hz with GDINO, was 0.8), #80 CLOSED
+  (waypoints from t=0), #89 counts sane (36 vs 78-141), #84 recall 0.20
+  overall / 2-of-4 office anchors undetected (projector screen, window ->
+  next: bank raw pre-gate detections), #82 retest void (11434 squatter;
+  sbatch port-probe fixed+deployed; monitor IF-answer rc fixed).
+- livingroom_1 697653 (#83-fixed src): **#83 CLOSED** - pocket 1 -> 3367,
+  frontiers active, all-but-TV anchors indexed, route grounded and DRIVEN
+  TO COMPLETION (512 s, no floor answer) on the exact baseline
+  scene+question that scored 0.00. Evidence reports/cluster_verify/69764{8,53}.
+- SoCLaaS free LLM gateway wired as primary tier (qwen3.6:35b, key
+  cluster-side only); brief allows online APIs at eval.
+- Open after this round: #89 subphrase folding, #84 raw-detection banking +
+  flat-surface classes, #82 clean cluster retest, #85 arabic, #90 lattice,
+  #77 mirror-artifact live check (goal-clamp legs), #86 laptop long-horizon.
