@@ -96,9 +96,10 @@ export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4
 export GDINO_CONFIG_PATH=~/models/gdino/GroundingDINO_SwinB_cfg.py
 export GDINO_CHECKPOINT_PATH=~/models/gdino/groundingdino_swinb_cogcoor.pth
 export VLA_CAMERA_COMPRESSED=1
-# issues #83/#84: per-run explore-debug + instance-index dumps
+# issues #83/#84/#89: per-run explore-debug + instance-index dumps
 export VLA_EXPLORE_DEBUG_DIR=~/verify_run_${J}_debug
 mkdir -p "$VLA_EXPLORE_DEBUG_DIR"
+export VLA_INSTANCE_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/instance_index.jsonl
 # issue #82: local tier via ollama (same 3b model as the laptop plan for parity)
 export VLA_LLM_LOCAL_KIND=openai
 export VLA_LLM_LOCAL_BASE_URL=http://127.0.0.1:11434/v1
