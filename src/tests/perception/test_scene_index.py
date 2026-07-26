@@ -2,12 +2,17 @@
 and the IoU-gated merge/fuse API."""
 from __future__ import annotations
 
+import json
+import os
+
 import numpy as np
 
 from core.interfaces import InstanceRecord, SceneIndex
 from core.perception.scene_index import (
+    ENV_INSTANCE_DUMP_PATH,
     BasicSceneIndex,
     MatchTier,
+    dump_instance_index,
     normalize_label,
     singularize,
 )
@@ -327,6 +332,71 @@ def test_scene_index_protocol_structurally_requires_by_label_tiered():
     # by_label_tiered is now a required Protocol member (not an optional extra that
     # geometry.toolbox._match_anchor_noun quietly shrugs off via getattr).
     assert not isinstance(_NonConformingFakeIndex(), SceneIndex)
+
+
+# --------------------------------------------------------------------------- #84/#89:
+# dump_instance_index instrumentation
+
+
+def test_dump_instance_index_is_noop_without_env_var(monkeypatch, tmp_path):
+    monkeypatch.delenv(ENV_INSTANCE_DUMP_PATH, raising=False)
+    idx = BasicSceneIndex([_rec(1, "chair", [0, 0, 0], [1, 1, 1])])
+    dump_instance_index(idx, tag="periodic")
+    assert list(tmp_path.iterdir()) == []  # nothing written anywhere
+
+
+def test_dump_instance_index_writes_jsonl_record(monkeypatch, tmp_path):
+    out = tmp_path / "instances.jsonl"
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, str(out))
+    idx = BasicSceneIndex(
+        [_rec(1, "chair", [0, 0, 0], [1, 1, 1], n_obs=3, score=0.42)]
+    )
+    dump_instance_index(idx, tag="answer_time", keyframes_processed=7)
+    lines = out.read_text().strip().splitlines()
+    assert len(lines) == 1
+    rec = json.loads(lines[0])
+    assert rec["tag"] == "answer_time"
+    assert rec["keyframes_processed"] == 7
+    assert rec["total_instances"] == 1
+    assert rec["by_class"] == {"chair": 1}
+    assert rec["instances"][0]["id"] == 1
+    assert rec["instances"][0]["label"] == "chair"
+    assert rec["instances"][0]["n_obs"] == 3
+    assert rec["instances"][0]["score"] == 0.42
+    assert len(rec["instances"][0]["position"]) == 3
+    # n_obs=3 & score=0.42 clear both default answer-eligibility floors (issue #84)
+    assert rec["instances"][0]["answer_eligible"] is True
+    assert rec["instances"][0]["eligibility_reason"] == "eligible"
+
+
+def test_dump_instance_index_surfaces_gate_rejection_reason(monkeypatch, tmp_path):
+    """Issue #84 gate observability: an instance that fails the answer-eligibility gate
+    (n_obs=1, below the default min-obs floor of 2) shows up in the dump as ineligible
+    with the reason -- this is the visibility the offline battery's n_obs=3 GT mocks
+    never exercise."""
+    out = tmp_path / "instances.jsonl"
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, str(out))
+    idx = BasicSceneIndex([_rec(1, "teapot", [0, 0, 0], [1, 1, 1], n_obs=1, score=0.9)])
+    dump_instance_index(idx, tag="periodic")
+    rec = json.loads(out.read_text().strip())
+    assert rec["instances"][0]["answer_eligible"] is False
+    assert rec["instances"][0]["eligibility_reason"] == "n_obs_below_floor"
+
+
+def test_dump_instance_index_appends_across_calls(monkeypatch, tmp_path):
+    out = tmp_path / "instances.jsonl"
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, str(out))
+    idx = BasicSceneIndex([_rec(1, "chair", [0, 0, 0], [1, 1, 1])])
+    dump_instance_index(idx, tag="periodic")
+    dump_instance_index(idx, tag="periodic")
+    assert len(out.read_text().strip().splitlines()) == 2
+
+
+def test_dump_instance_index_never_raises_on_bad_path(monkeypatch):
+    # A path under a file (not a directory) cannot be created -> swallowed, not raised.
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, "/dev/null/nonexistent/instances.jsonl")
+    idx = BasicSceneIndex([_rec(1, "chair", [0, 0, 0], [1, 1, 1])])
+    dump_instance_index(idx, tag="periodic")  # must not raise
 
 
 def test_non_conforming_index_lacks_the_attribute_toolbox_depends_on():

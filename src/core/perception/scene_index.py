@@ -20,6 +20,10 @@ first, and :meth:`by_label_tiered` surfaces which tier each hit came from):
 """
 from __future__ import annotations
 
+import json
+import os
+import time
+
 import numpy as np
 
 from core.interfaces import InstanceRecord, MarkerBox, MatchTier
@@ -27,7 +31,104 @@ from core.interfaces import InstanceRecord, MarkerBox, MatchTier
 # Re-exported for backward compatibility: this module used to define MatchTier
 # itself; it now lives on core.interfaces (see SceneIndex.by_label_tiered, #24) so
 # the Protocol can name it without a core -> perception import cycle.
-__all__ = ["BasicSceneIndex", "MatchTier", "normalize_label", "singularize"]
+__all__ = [
+    "BasicSceneIndex",
+    "MatchTier",
+    "normalize_label",
+    "singularize",
+    "dump_instance_index",
+]
+
+# --------------------------------------------------------------------------- instrumentation
+#
+# Issues #84/#89: quantifying live detection recall (#84) and instance-count blowups (#89)
+# both need a per-run dump of the LIVE instance index (classes, counts, positions, scores,
+# n_obs) — the offline battery has no equivalent need (its GT mocks are the ground truth,
+# not something to audit). Opt-in only, following the existing explore-debug dump's
+# contract (core/heads/explore_debug.py, issue #83/#84): unset env var == this module is
+# byte-identical to before instrumentation existed, no behaviour or perf change.
+
+#: Path to append JSONL instance-index records to. Unset (default) -> dump_instance_index
+#: is a no-op (single os.environ.get, no I/O).
+ENV_INSTANCE_DUMP_PATH: str = "VLA_INSTANCE_DUMP_PATH"
+
+#: Minimum seconds between periodic dumps from the SAME caller (callers pass their own
+#: clock reading; see :class:`~core.perception.tracker.PerceptionPipeline`). An
+#: "answer_time" tag is never throttled — always dump exactly once (see
+#: :func:`dump_instance_index`'s ``force`` argument).
+ENV_INSTANCE_DUMP_INTERVAL_S: str = "VLA_INSTANCE_DUMP_INTERVAL_S"
+DEFAULT_INSTANCE_DUMP_INTERVAL_S: float = 10.0
+
+
+def dump_instance_index(
+    index: "BasicSceneIndex",
+    tag: str,
+    *,
+    keyframes_processed: int | None = None,
+    extra: dict | None = None,
+) -> None:
+    """Append one JSONL record describing ``index``'s current instances, if
+    :data:`ENV_INSTANCE_DUMP_PATH` is set. No-op (no I/O at all) when unset.
+
+    Record shape: ``wall_time``, ``tag`` (caller-chosen, e.g. ``"periodic"`` for a
+    throttled perception-tick dump or ``"answer_time"`` for the one fired when a head
+    is about to publish), ``keyframes_processed`` (caller-supplied, or ``None``),
+    ``total_instances``, ``by_class`` (label -> count), and ``instances`` — one entry
+    per instance with ``id``/``label``/``position`` (rounded centroid)/``score``/
+    ``n_obs``, exactly the fields #84/#89 need to compare live recall and instance
+    counts against ground truth. ``extra`` is merged into the top-level record as-is
+    (e.g. a caller-specific qtype/answer value) when given.
+
+    Any failure (bad path, unwritable dir, etc.) is swallowed — diagnostics must never
+    break the run they are observing, matching ``core.heads.explore_debug.maybe_dump``.
+    """
+    path = os.environ.get(ENV_INSTANCE_DUMP_PATH)
+    if not path:
+        return
+    # Deferred import: detector.py has no reverse dependency on this module today, but
+    # importing it lazily here (matching this module's existing lazy-import style for
+    # perception.vocab/dimension_priors) keeps this module's own import-time surface
+    # unchanged for every caller that never sets ENV_INSTANCE_DUMP_PATH.
+    from core.perception.detector import answer_eligibility_reason, is_answer_eligible
+
+    try:
+        instances = index.all_instances()
+        by_class: dict[str, int] = {}
+        for rec in instances:
+            by_class[rec.label] = by_class.get(rec.label, 0) + 1
+        ordered = sorted(instances, key=lambda r: r.instance_id)
+        record: dict = {
+            "wall_time": time.time(),
+            "tag": tag,
+            "keyframes_processed": keyframes_processed,
+            "total_instances": len(instances),
+            "by_class": by_class,
+            "instances": [
+                {
+                    "id": int(rec.instance_id),
+                    "label": rec.label,
+                    "position": [round(float(c), 3) for c in rec.centroid],
+                    "score": round(float(rec.score), 4),
+                    "n_obs": int(rec.n_obs),
+                    # Issue #84 gate observability: whether THIS instance would win the
+                    # answer-eligibility gate right now, and why not when it doesn't --
+                    # makes the gate's rejections visible in the same stream that already
+                    # shows the recall/count numbers, no separate log-scraping needed.
+                    "answer_eligible": is_answer_eligible(rec),
+                    "eligibility_reason": answer_eligibility_reason(rec),
+                }
+                for rec in ordered
+            ],
+        }
+        if extra:
+            record.update(extra)
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "a") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except Exception:  # noqa: BLE001 - diagnostics must never break the run
+        pass
 
 MERGE_IOU: float = 0.3  # 3D IoU threshold for fusing same-label instances
 TYPO_MAX_DIST: int = 2  # max Levenshtein distance for the longest length band

@@ -22,6 +22,7 @@ pattern.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -35,7 +36,14 @@ from core.perception.fusion import (
     FusionConfig,
     fuse_detection,
 )
-from core.perception.scene_index import BasicSceneIndex, normalize_label
+from core.perception.scene_index import (
+    BasicSceneIndex,
+    DEFAULT_INSTANCE_DUMP_INTERVAL_S,
+    ENV_INSTANCE_DUMP_INTERVAL_S,
+    ENV_INSTANCE_DUMP_PATH,
+    dump_instance_index,
+    normalize_label,
+)
 from core.perception.tiling import (
     DEFAULT_N_TILES,
     DEFAULT_TILE_HFOV,
@@ -250,6 +258,12 @@ class PerceptionPipeline:
         self._keyframe_idx = 0                    # keyframes processed
         self._det_kf_idx = 0                      # DETECTION-BEARING keyframes (H15a decay clock)
         self._first_seen: dict[int, int] = {}     # instance_id -> det-keyframe it was minted
+        # Issues #84/#89 instrumentation: question-clock time (the PanoFrame's own `t`,
+        # not wall-clock) of the last periodic instance-index dump (None -> unconditionally
+        # dumps once VLA_INSTANCE_DUMP_PATH is set). Keeping this off frame time rather
+        # than wall-clock stays deterministic/testable and matches
+        # core.heads.explore_debug's throttle style.
+        self._last_dump_t: float | None = None
 
     def _is_keyframe(self, odom: OdomState) -> bool:
         kf = self.keyframe_cfg
@@ -307,7 +321,25 @@ class PerceptionPipeline:
             self.index, self._first_seen, self._det_kf_idx, self.tracker_cfg.decay_k
         )
         self._keyframe_idx += 1
+        self._maybe_dump_instances(pano.t)
         return touched
+
+    def _maybe_dump_instances(self, t: float) -> None:
+        """Issues #84/#89: throttled periodic instance-index dump (opt-in via
+        ``VLA_INSTANCE_DUMP_PATH``; no-op — not even the env lookup's cost matters,
+        this is one dict-get per keyframe — when unset)."""
+        if not os.environ.get(ENV_INSTANCE_DUMP_PATH):
+            return
+        try:
+            interval = float(
+                os.environ.get(ENV_INSTANCE_DUMP_INTERVAL_S, DEFAULT_INSTANCE_DUMP_INTERVAL_S)
+            )
+        except (TypeError, ValueError):
+            interval = DEFAULT_INSTANCE_DUMP_INTERVAL_S
+        if self._last_dump_t is not None and (t - self._last_dump_t) < interval:
+            return
+        self._last_dump_t = t
+        dump_instance_index(self.index, tag="periodic", keyframes_processed=self._keyframe_idx)
 
     # convenience for tests / callers
     @property

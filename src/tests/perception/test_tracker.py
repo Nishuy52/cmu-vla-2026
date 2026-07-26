@@ -297,6 +297,55 @@ def test_pipeline_smoke_on_mock_robot_io():
     ))
 
 
+# ------------------------------------------------------------------ #84/#89 instance dump
+
+
+def test_pipeline_dumps_instances_periodically_when_env_set(monkeypatch, tmp_path):
+    from core.perception.scene_index import ENV_INSTANCE_DUMP_PATH
+
+    out = tmp_path / "instances.jsonl"
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, str(out))
+    det = _front_det()
+    pipe = PerceptionPipeline(FakeDetector([det]), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    scan = LidarScan(t=0.0, points=_box_cloud(3.0, 0.0, 0.5))
+    pipe.process(PanoFrame(0.0, img, _odom(0, 0)), scan)
+    assert out.exists()
+    assert len(out.read_text().strip().splitlines()) == 1
+
+
+def test_pipeline_does_not_dump_without_env_var(monkeypatch, tmp_path):
+    from core.perception.scene_index import ENV_INSTANCE_DUMP_PATH
+
+    monkeypatch.delenv(ENV_INSTANCE_DUMP_PATH, raising=False)
+    det = _front_det()
+    pipe = PerceptionPipeline(FakeDetector([det]), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    scan = LidarScan(t=0.0, points=_box_cloud(3.0, 0.0, 0.5))
+    pipe.process(PanoFrame(0.0, img, _odom(0, 0)), scan)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_pipeline_dump_is_throttled_by_interval(monkeypatch, tmp_path):
+    from core.perception.scene_index import (
+        ENV_INSTANCE_DUMP_INTERVAL_S,
+        ENV_INSTANCE_DUMP_PATH,
+    )
+
+    out = tmp_path / "instances.jsonl"
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, str(out))
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_INTERVAL_S, "10.0")
+    det = _front_det()
+    pipe = PerceptionPipeline(FakeDetector([det]), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    scan = LidarScan(t=0.0, points=_box_cloud(3.0, 0.0, 0.5))
+    pipe.process(PanoFrame(0.0, img, _odom(0, 0)), scan)
+    pipe.process(PanoFrame(1.0, img, _odom(0.6, 0)), scan)  # t=1.0, well under 10s interval
+    assert len(out.read_text().strip().splitlines()) == 1  # second tick throttled
+    pipe.process(PanoFrame(11.0, img, _odom(1.2, 0)), scan)  # t=11.0, interval elapsed
+    assert len(out.read_text().strip().splitlines()) == 2
+
+
 def test_pipeline_empty_detections_noop():
     pipe = PerceptionPipeline(FakeDetector([]), keyframe_cfg=KeyframeConfig(every_k=1))
     img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
