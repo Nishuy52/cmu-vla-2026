@@ -45,6 +45,17 @@ Outputs: `~/live_run.out` (monitor + verdict), `~/live_run_<job>_{adapter,launch
 - **Exclude broken GPU nodes** `-x xgpe0,xgpe2,xgpe6`; `nv` GRES only (fairshare:
   4.0/hr vs 10–30 for A100/H100; idle allocations bill identically — tear down).
 
+## Verification variant
+
+`cluster_verify_run.sbatch` = the live run plus per-issue instrumentation:
+`VLA_EXPLORE_DEBUG_DIR` dumps (issue #83 pocket/frontier + #84 instance index),
+an in-job `~/ollama serve` with captured log + the local LLM tier enabled
+(issue #82 retest; qwen2.5vl:3b for laptop parity), optional `SCENE_DIR` swap
+(restart-based, resolved before Unity starts), and a verdict-summary block at
+the end of `~/verify_run.out` (parse tier, last pocket/reroot records, instance
+class counts, waypoint cadence). Harvest the `~/verify_run_<job>_debug/` JSONLs
+alongside the logs; `tools/live_harness/compare_explore_debug.py` reads them.
+
 ## Known quality gaps (filed)
 
 - #88 in-executor GDINO starves the tick loop (~0.8 Hz effective vs 5 Hz)
