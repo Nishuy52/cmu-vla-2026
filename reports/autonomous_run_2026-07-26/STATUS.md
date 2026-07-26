@@ -14,7 +14,7 @@ Cold-pickup state for the 12h autonomous plan (user-approved). Update at every m
 - SSH ControlMaster re-auth is HUMAN-ONLY — if it expires, cluster lane pauses, host lane continues.
 
 ## Cluster queue (serial)
-1. [PENDING in SLURM queue] job 697761 — livingroom_1 inst — bag-path validation + #82/#84/#83 + first real IF-rubric score (poller b7rgt25w5)
+1. [PENDING ~45min+ (queue congested, 27 deep) job 697761 — livingroom_1 inst — poller bn0v2o5uy]
 2. [ ] office_1 inst
 3. [ ] livingroom_1 nume (#89 counts + numerical-match)
 4. [ ] office_1 nume
@@ -23,9 +23,9 @@ Cold-pickup state for the 12h autonomous plan (user-approved). Update at every m
 7. [ ] arabic_room inst (#85) — scene UPLOADED to cluster, ready
 
 ## Host lanes (parallel executor worktrees)
-- A [dispatched] SoCLaaS default primary + usage logging (core/llm, adapter, docs) -> reports/soclaas_usage.jsonl
+- A [DONE -> main c1efcc0] SoCLaaS default primary + usage logging (reports/soclaas_usage.jsonl)
 - B [DONE -> main f6f913e, commented, worktree retired] #90 float32 lattice collision
-- C [dispatched] #81 offline battery budget hooks so head gates fire (core/runner/gt_battery.py)
+- C [DONE -> main 97131d8; delta measuring in bg bcwvfg2wd] #81 budget hooks opt-in (default off = byte-preserving)
 - D [DONE -> main 119aff9, #84/#89 commented, worktree retired] #84 dump + #89 folding
 
 ## Verified ready
