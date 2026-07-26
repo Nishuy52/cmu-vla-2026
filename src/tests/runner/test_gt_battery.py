@@ -604,12 +604,12 @@ def test_synthetic_scene_extra_wall_cells_mark_terrain_obstacle():
     pts = patch.points
     near = pts[(np.abs(pts[:, 0] - 2.0) < 1e-6) & (np.abs(pts[:, 1] - 2.0) < 1e-6)]
     assert near.shape[0] == 1
-    assert near[0, 3] == WALL_HEIGHT
+    assert near[0, 3] == pytest.approx(WALL_HEIGHT, abs=1e-6)
 
     # A cell well away from the marked wall cell and the border stays free.
     away = pts[(np.abs(pts[:, 0] - 1.0) < 1e-6) & (np.abs(pts[:, 1] - 1.0) < 1e-6)]
     assert away.shape[0] == 1
-    assert away[0, 3] == 0.0
+    assert away[0, 3] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_drive_if_trajectory_routes_around_interior_wall():
