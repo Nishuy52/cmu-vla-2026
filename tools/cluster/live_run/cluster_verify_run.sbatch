@@ -17,6 +17,15 @@
 #   SCENE_DIR   optional path to a downloaded scene dir whose unity environment
 #               build should replace the baked one (restart-based swap; the
 #               baked scene is used when unset)
+#   SCENE       scene NAME for the capture layout (default: basename of
+#               SCENE_DIR, else "baked"). Only labels the bag output path.
+#   QDIR        question-type dir for the capture layout — nume|obje|inst
+#               (default: inst). Matches tools/score_live_run.py QDIR_TO_QTYPE.
+#
+# Records a ros bag of the driven trajectory + published answers into
+# ~/verify_run_${J}_captures/$SCENE/$QDIR/bag so tools/score_live_run.py can
+# produce a real IF-rubric / IoU / numerical-match score, not just the
+# diagnostic verdict greps below (harvest_verify.sh pulls it back).
 set -u
 ROOT=~/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT
 WS=$ROOT/home/docker/autonomy_stack_mecanum_wheel_platform
@@ -24,6 +33,8 @@ XR=~/xstack/root
 J=$SLURM_JOB_ID
 QUESTION=${QUESTION:-"Go to the potted plant closest to the pyramid candle holder and stop at the vase between the TV and the door."}
 SCENE_DIR=${SCENE_DIR:-}
+SCENE=${SCENE:-$(basename "${SCENE_DIR:-baked}")}
+QDIR=${QDIR:-inst}
 
 # ---------- proven v4 base env ----------
 export PATH=$ROOT/opt/ros/jazzy/bin:$PATH
@@ -133,12 +144,32 @@ kill -0 $ADAPTER_PID 2>/dev/null && echo "ADAPTER: alive" || { echo "ADAPTER: DE
 grep -m1 -iE "perception|detector|boot" ~/verify_run_${J}_adapter.log || true
 grep -m1 -iE "ladder configured" ~/verify_run_${J}_adapter.log || true
 
+# ---------- ros bag capture (tools/score_live_run.py input) ----------
+# Record the driven trajectory (/state_estimation) + the question + both
+# published-answer topics into <scene>/<qdir>/bag/ so the run can be scored
+# offline with the SAME scorers as the gt_battery. Started BEFORE the question
+# is published (settle so the recorder is subscribed first) and stopped after
+# the monitor returns; irrelevant answer topics for this qtype simply record 0
+# messages, which is exactly what score_live_run's completeness check expects.
+BAGDIR=~/verify_run_${J}_captures/$SCENE/$QDIR
+mkdir -p "$BAGDIR"; rm -rf "$BAGDIR/bag"  # ros2 bag record refuses an existing dir
+ros2 bag record -o "$BAGDIR/bag" \
+  /state_estimation /challenge_question /numerical_response /selected_object_marker \
+  > ~/verify_run_${J}_bag.log 2>&1 &
+BAG_PID=$!
+sleep 3
+kill -0 $BAG_PID 2>/dev/null && echo "BAG: recording -> $BAGDIR/bag" || { echo "BAG: recorder DEAD — log tail:"; tail -10 ~/verify_run_${J}_bag.log; }
+
 # ---------- question + monitor ----------
 python3 ~/question_pub.py "$QUESTION" > /dev/null 2>&1 &
 QPUB_PID=$!
 echo "question publishing; monitor up (deadline 780s)"
 python3 ~/live_monitor.py 780 2>&1
 MONITOR_RC=$?
+
+# stop the recorder cleanly (SIGINT lets rosbag2 finalize the mcap) before teardown
+kill -INT $BAG_PID 2>/dev/null; wait $BAG_PID 2>/dev/null
+echo "== bag capture"; ros2 bag info "$BAGDIR/bag" 2>&1 | grep -E "Messages:|Topic:|Duration:" || echo "BAG: no info (recorder may have failed)"
 
 # ---------- per-issue verdict summary ----------
 # live_monitor only latches numerical/marker answers; an IF answer is a waypoint.
@@ -176,6 +207,6 @@ echo "== #88 waypoint cadence + #80 pre-60s waypoints (analyze WAYPOINT lines ab
 grep -cE "^WAYPOINT" ~/verify_run.out 2>/dev/null || true
 echo "== grounded or floor?"; grep -E "answer_from_floor|answer_from_head|published int answer|instances" ~/verify_run_${J}_adapter.log | tail -5
 echo "== gpu"; nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader
-kill $QPUB_PID $ADAPTER_PID $OLLAMA_PID $LAUNCH_PID $UNITY_PID $XVFB_PID 2>/dev/null
+kill $QPUB_PID $ADAPTER_PID $OLLAMA_PID $LAUNCH_PID $UNITY_PID $XVFB_PID ${BAG_PID:-} 2>/dev/null
 sleep 2
 [ $MONITOR_RC -eq 0 ] && echo "VERIFY-RUN-DONE: SUCCESS" || echo "VERIFY-RUN-DONE: rc=$MONITOR_RC"
