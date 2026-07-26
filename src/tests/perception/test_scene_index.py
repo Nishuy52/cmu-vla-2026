@@ -243,6 +243,40 @@ def test_merge_recomputes_trimmed_aabb_from_percentiles():
     assert survivor.aabb_max[0] < 10.0
 
 
+def test_merge_into_fuses_by_id_even_when_disjoint():
+    """Issue #89: merge_into trusts the caller's association decision unconditionally
+    -- unlike add()'s IoU re-derivation, disjoint boxes still fuse when the caller
+    (the tracker) already matched them by id."""
+    idx = BasicSceneIndex([_rec(1, "chair", [0, 0, 0], [1, 1, 1], n_obs=1)])
+    incoming = _rec(1, "chair", [10, 10, 0], [11, 11, 1], n_obs=1, score=0.7)
+    survivor = idx.merge_into(1, incoming)
+    assert len(idx.all_instances()) == 1  # fused, no duplicate spawned
+    assert survivor.instance_id == 1
+    assert survivor.n_obs == 2
+    assert survivor.score == 0.7
+
+
+def test_merge_into_fuses_by_id_even_across_label_variants():
+    """Issue #84 item 3: merge_into ignores label text entirely -- a detector label
+    variant the tracker's association already alias-bridged (e.g. 'refridgerator' vs
+    the tracked 'refrigerator') still fuses into the SAME instance, since merge_into
+    never re-derives label compatibility the way add()/_find_merge_target does."""
+    idx = BasicSceneIndex([_rec(1, "refrigerator", [0, 0, 0], [1, 1, 1], n_obs=1)])
+    incoming = _rec(1, "refridgerator", [0.1, 0.1, 0.1], [1.1, 1.1, 1.1], n_obs=1)
+    survivor = idx.merge_into(1, incoming)
+    assert len(idx.all_instances()) == 1
+    assert survivor.instance_id == 1
+    assert survivor.n_obs == 2
+
+
+def test_merge_into_falls_back_to_add_when_id_absent():
+    idx = BasicSceneIndex()
+    incoming = _rec(1, "chair", [0, 0, 0], [1, 1, 1])
+    survivor = idx.merge_into(1, incoming)
+    assert len(idx.all_instances()) == 1
+    assert survivor.instance_id == 1
+
+
 def test_add_disjoint_reassigns_colliding_id():
     idx = BasicSceneIndex([_rec(1, "chair", [0, 0, 0], [1, 1, 1])])
     # incoming reuses id 1 but is disjoint -> must be appended with a fresh id

@@ -279,6 +279,41 @@ class BasicSceneIndex:
         self._fuse(target, rec)
         return target
 
+    def merge_into(self, instance_id: int, rec: InstanceRecord) -> InstanceRecord:
+        """Fuse ``rec`` (one fresh single-frame observation) directly into the existing
+        instance identified by ``instance_id`` — trusting that decision unconditionally,
+        with NO re-derivation of label/IoU compatibility.
+
+        Issue #89 (live instance explosion) / #84 item 3 (label-variant ghosts): the
+        tracker's own association (:func:`core.perception.tracker.associate`) already
+        decided ``rec`` belongs to ``instance_id`` — centroid distance under the tracker
+        gate, label compatibility through the FULL alias bridge
+        (:func:`core.perception.tracker.canonical_for_match`, which folds in
+        ``core.parsing.vocab.NOUN_ALIASES`` on top of this module's own narrower
+        :data:`_SYNONYM_MAP`). :meth:`add`'s :meth:`_find_merge_target` used to be the
+        ONLY way a matched detection reached the index, and it independently re-derives
+        the merge decision from this module's own :func:`normalize_label` (missing any
+        alias only known to ``NOUN_ALIASES``, e.g. 'refridgerator' vs 'refrigerator') AND
+        an AABB IoU > :data:`MERGE_IOU` (0.3) test — a MUCH stricter, different
+        criterion than the tracker's centroid gate (0.75 m). Under live pose jitter, or
+        for a label that only the broader alias bridge recognises, these two independent
+        decisions routinely disagree; when they do, ``add`` falls through to its
+        "new instance" branch, finds ``rec.instance_id`` already taken by the very
+        instance association just matched it to, and mints a completely FRESH id —
+        silently defeating the association and spawning a duplicate instance for
+        something already being tracked. That is the dominant contributor to #89's
+        78-141 instance overcounts on chair-dense live scenes.
+
+        Falls back to a normal :meth:`add` (which still runs its own IoU-based dedup)
+        only if ``instance_id`` is not actually present — defensive; the tracker never
+        calls this with an id it did not itself just read off ``all_instances()``.
+        """
+        for existing in self._instances:
+            if existing.instance_id == instance_id:
+                self._fuse(existing, rec)
+                return existing
+        return self.add(rec)
+
     def _find_merge_target(self, rec: InstanceRecord) -> InstanceRecord | None:
         q = normalize_label(rec.label)
         best: InstanceRecord | None = None

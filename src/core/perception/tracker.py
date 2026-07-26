@@ -163,8 +163,13 @@ def associate(
         if di in matched_det:
             target = matched_det[di]
             rec = _fused_to_record(det, fused, instance_id=target.instance_id)
-            # add() finds the same-label IoU-overlapping target and fuses in place.
-            survivor = index.add(rec)
+            # Issue #89/#84: trust THIS association's own match decision (alias-bridged
+            # label compatibility + centroid gate, both already checked above) and fuse
+            # directly into `target` — do NOT hand off to index.add(), whose independent
+            # label/IoU re-derivation can (and under live pose jitter routinely does)
+            # disagree with this decision and silently mint a duplicate instance instead
+            # of fusing (see BasicSceneIndex.merge_into's docstring for the full story).
+            survivor = index.merge_into(target.instance_id, rec)
             touched.append(survivor.instance_id)
         else:
             new_id = index.next_id()
