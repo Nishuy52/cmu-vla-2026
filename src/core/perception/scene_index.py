@@ -37,6 +37,7 @@ __all__ = [
     "MatchTier",
     "normalize_label",
     "singularize",
+    "labels_foldable",
     "dump_instance_index",
 ]
 
@@ -197,6 +198,61 @@ def normalize_label(noun: str) -> str:
     """Canonicalise a noun: lowercase, singular, mapped through the synonym table."""
     base = singularize(noun)
     return _SYNONYM_MAP.get(base, base)
+
+
+# --------------------------------------------------------------------------- label folding
+#
+# Issue #89: open-vocab GDINO phrase decoding routinely emits FRAGMENTS of one class
+# label instead of the label itself -- a duplicated leading token ("door" -> "door
+# door", "projector screen" -> "screen projector screen") or a bare head/modifier split
+# off a multi-word class ("potted plant" -> "potted" / "plant"). Each fragment fails
+# the exact-label-equality tracker association/scene-index merge checks against the
+# label the SAME physical object was already tracked under, so it mints its own
+# instance instead of fusing -- observed office_1 instance_index.jsonl fragmentation
+# ("potted plant"/"potted"/"plant", "door door"/"door door frame"/"door",
+# "projector screen"/"screen projector screen") inflating live instance counts 2-3x on
+# a single object.
+
+def _fold_tokens(label: str) -> frozenset[str]:
+    """Whitespace-tokenised, singularised, duplicate/order-insensitive token set.
+
+    Converting to a ``set`` is what makes both fold shapes fall out of ONE test in
+    :func:`labels_foldable`: a duplicated token ("door door" -> tokens ``[door,
+    door]``) collapses to the same singleton set as the plain word ("door" ->
+    ``{door}``), and a bare head/modifier fragment ("potted") is trivially a *subset*
+    of the multi-word label's token set ("potted plant" -> ``{potted, plant}``).
+    """
+    return frozenset(singularize(t) for t in normalize_label(label).split() if t)
+
+
+def labels_foldable(a: str, b: str) -> bool:
+    """True iff labels ``a`` and ``b`` are fragments of ONE class via a subphrase or
+    duplicated-token relation (issue #89) -- i.e. one's (deduped) token set is wholly
+    contained in the other's. Deliberately conservative: this is a TOKEN-SET test, not
+    a substring/edit-distance test, so two genuinely distinct single-word classes never
+    fold merely for looking similar -- ``"door"`` (``{door}``) is not a subset of
+    ``"floor"`` (``{floor}``, no shared tokens at all), nor is ``"chair"`` a subset of
+    ``"table"``. Folding only fires when a token set is an actual subset of the other:
+    ``"potted"`` (``{potted}``) subset of ``"potted plant"`` (``{potted, plant}``);
+    ``"door door"`` (``{door}``) equal to ``"door"`` (``{door}``); ``"door door
+    frame"`` (``{door, frame}``) superset of ``"door"`` (``{door}``); ``"screen
+    projector screen"`` (``{screen, projector}``) equal to ``"projector screen"``.
+
+    Two identical empty-token labels (blank strings) never fold (guards against a
+    vacuous ``frozenset() <= frozenset()``).
+
+    NOT transitive across differing fragments of the same object that never
+    individually appeared together: e.g. if ``"potted"`` and ``"plant"`` (but never the
+    compound ``"potted plant"``) are both observed for the same object, they do NOT
+    fold against each other directly (``{potted}`` is not a subset of ``{plant}`` or
+    vice versa) -- callers rely on the compound form (or SOME shared-superset label)
+    appearing at least once to anchor the fold, which matches the observed live data
+    (the detector's own caption prompt is usually the full compound noun).
+    """
+    ta, tb = _fold_tokens(a), _fold_tokens(b)
+    if not ta or not tb:
+        return False
+    return ta <= tb or tb <= ta
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -441,7 +497,15 @@ class BasicSceneIndex:
         best: InstanceRecord | None = None
         best_iou = MERGE_IOU
         for existing in self._instances:
-            if normalize_label(existing.label) != q:
+            # Issue #89: exact-canonical equality OR a subphrase/duplicated-token fold
+            # relation (labels_foldable) -- a "potted"/"door door" fragment still needs
+            # to find its established "potted plant"/"door" instance here, not just via
+            # the tracker's own association (BasicSceneIndex.add/_find_merge_target is
+            # also reached directly by callers that bypass the tracker, e.g. scripted
+            # replay/tests).
+            if normalize_label(existing.label) != q and not labels_foldable(
+                existing.label, rec.label
+            ):
                 continue
             iou = _aabb_iou_3d(
                 existing.aabb_min, existing.aabb_max, rec.aabb_min, rec.aabb_max

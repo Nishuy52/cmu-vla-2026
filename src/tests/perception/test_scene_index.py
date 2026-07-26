@@ -13,6 +13,7 @@ from core.perception.scene_index import (
     BasicSceneIndex,
     MatchTier,
     dump_instance_index,
+    labels_foldable,
     normalize_label,
     singularize,
 )
@@ -280,6 +281,70 @@ def test_merge_into_falls_back_to_add_when_id_absent():
     survivor = idx.merge_into(1, incoming)
     assert len(idx.all_instances()) == 1
     assert survivor.instance_id == 1
+
+
+def test_add_merges_across_subphrase_fragment_label():
+    """Issue #89: a bare 'potted' fragment overlapping a 'potted plant' instance's box
+    must fuse via add()'s own IoU-gated merge path, not just via the tracker's
+    merge_into (add()/_find_merge_target is also reached directly, e.g. scripted
+    replay/tests bypassing the tracker)."""
+    a_min, a_max = [0, 0, 0], [1, 1, 1]
+    b_min, b_max = [0.2, 0.2, 0.2], [1.2, 1.2, 1.2]  # heavy overlap -> IoU > 0.3
+    idx = BasicSceneIndex(
+        [_rec(1, "potted plant", a_min, a_max, points=_box_points(a_min, a_max), n_obs=1)]
+    )
+    incoming = _rec(2, "potted", b_min, b_max, points=_box_points(b_min, b_max), n_obs=1)
+    survivor = idx.add(incoming)
+    assert len(idx.all_instances()) == 1
+    assert survivor.instance_id == 1
+    assert survivor.label == "potted plant"  # established label kept
+    assert survivor.n_obs == 2
+
+
+def test_add_merges_across_duplicated_token_label():
+    a_min, a_max = [0, 0, 0], [1, 1, 1]
+    b_min, b_max = [0.2, 0.2, 0.2], [1.2, 1.2, 1.2]
+    idx = BasicSceneIndex(
+        [_rec(1, "door", a_min, a_max, points=_box_points(a_min, a_max), n_obs=1)]
+    )
+    incoming = _rec(2, "door door", b_min, b_max, points=_box_points(b_min, b_max), n_obs=1)
+    survivor = idx.add(incoming)
+    assert len(idx.all_instances()) == 1
+    assert survivor.n_obs == 2
+
+
+def test_add_does_not_merge_door_and_floor_even_when_overlapping():
+    idx = BasicSceneIndex([_rec(1, "door", [0, 0, 0], [1, 1, 1])])
+    idx.add(_rec(2, "floor", [0, 0, 0], [1, 1, 1]))  # same box, unrelated label
+    assert len(idx.all_instances()) == 2
+
+
+# --------------------------------------------------------------------- labels_foldable
+
+
+def test_labels_foldable_subphrase_fragments():
+    assert labels_foldable("potted", "potted plant")
+    assert labels_foldable("plant", "potted plant")
+    assert labels_foldable("potted plant", "potted")  # symmetric
+
+
+def test_labels_foldable_duplicated_token_forms():
+    assert labels_foldable("door door", "door")
+    assert labels_foldable("door door frame", "door")
+    assert labels_foldable("screen projector screen", "projector screen")
+
+
+def test_labels_foldable_guards_against_over_merge():
+    assert not labels_foldable("door", "floor")
+    assert not labels_foldable("chair", "table")
+    assert not labels_foldable("", "door")
+    assert not labels_foldable("", "")
+
+
+def test_labels_foldable_unrelated_fragments_of_same_object_not_transitive():
+    """Documented limitation: 'potted' and 'plant' alone (neither the compound) do not
+    fold against each other directly."""
+    assert not labels_foldable("potted", "plant")
 
 
 def test_add_disjoint_reassigns_colliding_id():

@@ -353,3 +353,133 @@ def test_pipeline_empty_detections_noop():
     ids = pipe.process(PanoFrame(0.0, img, _odom()), scan)
     assert ids == []
     assert pipe.index.all_instances() == []
+
+
+# ------------------------------------------------------------------ #84 raw detection dump
+
+
+def test_pipeline_dumps_raw_detections_when_env_set(monkeypatch, tmp_path):
+    import json
+
+    from core.perception.detector import ENV_RAW_DETECTION_DUMP_PATH, GATE_ACCEPTED
+
+    out = tmp_path / "raw.jsonl"
+    monkeypatch.setenv(ENV_RAW_DETECTION_DUMP_PATH, str(out))
+    det = _front_det("sofa")
+    pipe = PerceptionPipeline(FakeDetector([det]), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    scan = LidarScan(t=0.0, points=_box_cloud(3.0, 0.0, 0.5))
+    pipe.process(PanoFrame(0.0, img, _odom()), scan)
+    assert out.exists()
+    lines = out.read_text().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["total_detections"] == 1
+    d = record["detections"][0]
+    assert d["label"] == "sofa"
+    assert d["gate"] == GATE_ACCEPTED
+    assert d["instance_id"] == pipe.index.all_instances()[0].instance_id
+
+
+def test_pipeline_raw_dump_records_gated_detection(monkeypatch, tmp_path):
+    """A detection whose bbox has no lidar cluster nearby is gated (fusion rejects it,
+    min_points floor) and never reaches the scene index, but still shows up in the raw
+    dump with GATE_NO_LIDAR_CLUSTER and instance_id None."""
+    import json
+
+    from core.perception.detector import ENV_RAW_DETECTION_DUMP_PATH, GATE_NO_LIDAR_CLUSTER
+
+    out = tmp_path / "raw.jsonl"
+    monkeypatch.setenv(ENV_RAW_DETECTION_DUMP_PATH, str(out))
+    det = _front_det("window")  # scripted detection with NO lidar cloud anywhere nearby
+    pipe = PerceptionPipeline(FakeDetector([det]), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    # cloud far away from the detection's frustum -> fuse_detection returns None
+    scan = LidarScan(t=0.0, points=_box_cloud(-30.0, -30.0, -5.0))
+    pipe.process(PanoFrame(0.0, img, _odom()), scan)
+    assert pipe.index.all_instances() == []  # never entered the scene index
+    record = json.loads(out.read_text().strip())
+    assert record["total_detections"] == 1
+    d = record["detections"][0]
+    assert d["label"] == "window"
+    assert d["gate"] == GATE_NO_LIDAR_CLUSTER
+    assert d["instance_id"] is None
+    assert record["by_class"]["window"] == {"total": 1, "accepted": 0, "gated": 1}
+
+
+def test_pipeline_does_not_dump_raw_detections_without_env_var(monkeypatch, tmp_path):
+    from core.perception.detector import ENV_RAW_DETECTION_DUMP_PATH
+
+    monkeypatch.delenv(ENV_RAW_DETECTION_DUMP_PATH, raising=False)
+    det = _front_det("sofa")
+    pipe = PerceptionPipeline(FakeDetector([det]), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    scan = LidarScan(t=0.0, points=_box_cloud(3.0, 0.0, 0.5))
+    pipe.process(PanoFrame(0.0, img, _odom()), scan)
+    assert list(tmp_path.iterdir()) == []
+
+
+# ------------------------------------------------------------------ #89 label folding
+
+
+def test_labels_compatible_folds_subphrase_fragments():
+    assert labels_compatible("potted", "potted plant")
+    assert labels_compatible("plant", "potted plant")
+    assert labels_compatible("door door", "door")
+    assert labels_compatible("door door frame", "door")
+    assert labels_compatible("screen projector screen", "projector screen")
+
+
+def test_labels_compatible_guards_against_over_merge():
+    assert not labels_compatible("door", "floor")
+    assert not labels_compatible("chair", "table")
+    assert not labels_compatible("potted", "plant")  # neither is a subset of the other
+
+
+def test_associate_folds_subphrase_fragment_into_established_instance():
+    """Issue #89 repro: 'potted plant' seen first, then a bare 'potted' fragment of the
+    SAME object nearby must fuse into it rather than spawning a 2nd instance."""
+    idx = BasicSceneIndex()
+    plant = _front_det("potted plant")
+    associate([(plant, _fuse(plant, _box_cloud(3.0, 0.0, 0.5, seed=1), _odom()))], idx)
+    fragment = _front_det("potted")
+    fused = _fuse(fragment, _box_cloud(3.05, 0.0, 0.5, seed=2), _odom())
+    associate([(fragment, fused)], idx)
+    assert len(idx.all_instances()) == 1
+    assert idx.all_instances()[0].n_obs == 2
+    assert idx.all_instances()[0].label == "potted plant"  # established label kept
+
+
+def test_associate_folds_duplicated_token_fragment_into_established_instance():
+    """'door door' (duplicate-token GDINO phrase-decode artifact) must fuse into an
+    established 'door' instance rather than spawning a ghost."""
+    idx = BasicSceneIndex()
+    door = _front_det("door")
+    associate([(door, _fuse(door, _box_cloud(3.0, 0.0, 0.5, seed=1), _odom()))], idx)
+    dup = _front_det("door door")
+    fused = _fuse(dup, _box_cloud(3.05, 0.0, 0.5, seed=2), _odom())
+    associate([(dup, fused)], idx)
+    assert len(idx.all_instances()) == 1
+    assert idx.all_instances()[0].n_obs == 2
+
+
+def test_associate_does_not_fold_door_and_floor():
+    """Guard: 'door' and 'floor' share no tokens and must never fold/merge even when
+    co-located."""
+    idx = BasicSceneIndex()
+    door = _front_det("door")
+    associate([(door, _fuse(door, _box_cloud(3.0, 0.0, 0.5, seed=1), _odom()))], idx)
+    floor = _front_det("floor")
+    fused = _fuse(floor, _box_cloud(3.02, 0.0, 0.5, seed=2), _odom())
+    associate([(floor, fused)], idx)
+    assert len(idx.all_instances()) == 2
+
+
+def test_associate_does_not_fold_chair_and_table():
+    idx = BasicSceneIndex()
+    chair = _front_det("chair")
+    associate([(chair, _fuse(chair, _box_cloud(3.0, 0.0, 0.5, seed=1), _odom()))], idx)
+    table = _front_det("table")
+    fused = _fuse(table, _box_cloud(3.02, 0.0, 0.5, seed=2), _odom())
+    associate([(table, fused)], idx)
+    assert len(idx.all_instances()) == 2

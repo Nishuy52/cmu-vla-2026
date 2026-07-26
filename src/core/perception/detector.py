@@ -14,6 +14,7 @@ detections deterministically.
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
 import time
@@ -284,6 +285,104 @@ def is_answer_eligible(record: object) -> bool:
         getattr(record, "n_obs", None), getattr(record, "score", None), reason,
     )
     return False
+
+
+# --------------------------------------------------------------------------- raw detection dump
+#
+# Issue #84: dump_instance_index (core.perception.scene_index) shows what SURVIVED into
+# the scene index; it cannot tell "an anchor class the question needs was NEVER proposed
+# by the detector at all this run" apart from "it was proposed and then dropped by a
+# downstream gate" (office_1: 2/4 question-anchor classes -- projector screen, window --
+# were never indexed, and there was no way to tell which of those two this was without
+# re-running with extra logging). This is the missing pre-gate view: every raw
+# :class:`Detection` the :data:`DetectorFn` returned this keyframe, tagged with whether
+# fusion (the only point in the pipeline that can drop a detection outright -- see
+# :mod:`core.perception.fusion`'s ``min_points`` cluster-size floor) accepted it and,
+# if so, which instance id it landed in via the tracker's association.
+#
+# SCOPE NOTE: this module's own DetectorFn implementations (:class:`GroundingDinoDetector`
+# in particular) already apply the model's box_threshold internally when decoding raw
+# logits into Detection objects (see ``_decode_batch_item``) -- a candidate box scoring
+# below that threshold never becomes a Detection at all, so this dump cannot recover a
+# sub-box-threshold raw score. What it CAN split apart is "the detector emitted this
+# label at least once, above its own box threshold, this run" (proposed) vs "downstream
+# fusion/tracking gated every instance of it out" (proposed-but-gated) -- which is
+# exactly the split #84 needs, given the DetectorFn seam's contract.
+#
+# Opt-in only, same contract as VLA_INSTANCE_DUMP_PATH: unset -> a single os.environ.get
+# per keyframe and nothing else runs; any dump failure is swallowed so diagnostics never
+# break the run they are observing.
+
+#: Path to append JSONL raw-detection records to. Unset (default) -> dump_raw_detections
+#: is a no-op (single os.environ.get, no I/O). Debug-only; never affects the scored path.
+ENV_RAW_DETECTION_DUMP_PATH: str = "VLA_RAW_DETECTION_DUMP_PATH"
+
+#: :func:`dump_raw_detections`'s per-detection ``gate`` values.
+GATE_ACCEPTED = "accepted"                    # fused with a lidar cluster and indexed
+GATE_NO_LIDAR_CLUSTER = "no_lidar_cluster"    # fusion rejected: < FusionConfig.min_points
+
+
+def dump_raw_detections(
+    records: Sequence[tuple[Detection, str, int | None]],
+    *,
+    keyframe_idx: int,
+    tag: str = "raw_detections",
+) -> None:
+    """Append one JSONL record of this keyframe's RAW (pre-eligibility-gate) detector
+    output, if :data:`ENV_RAW_DETECTION_DUMP_PATH` is set. No-op (no I/O at all) when
+    unset.
+
+    ``records`` is one ``(detection, gate, instance_id)`` triple per raw
+    :class:`Detection` the detector returned this keyframe, where ``gate`` is
+    :data:`GATE_ACCEPTED` (fusion produced a lidar cluster and the tracker filed it
+    into ``instance_id``) or :data:`GATE_NO_LIDAR_CLUSTER` (fusion's ``min_points``
+    floor rejected it before it ever reached the tracker/scene index -- ``instance_id``
+    is ``None`` in that case).
+
+    Record shape: ``wall_time``, ``tag``, ``keyframe_idx``, ``total_detections``,
+    ``by_class`` (label -> ``{"total", "accepted", "gated"}`` counts), and
+    ``detections`` -- one entry per raw detection with ``tile_id``/``label``/``score``/
+    ``bbox_xyxy``/``gate``/``instance_id``.
+
+    Any failure (bad path, unwritable dir, etc.) is swallowed -- diagnostics must never
+    break the run they are observing, matching
+    :func:`core.perception.scene_index.dump_instance_index`.
+    """
+    path = os.environ.get(ENV_RAW_DETECTION_DUMP_PATH)
+    if not path:
+        return
+    try:
+        by_class: dict[str, dict[str, int]] = {}
+        detections_out: list[dict] = []
+        for det, gate, instance_id in records:
+            stats = by_class.setdefault(det.label, {"total": 0, "accepted": 0, "gated": 0})
+            stats["total"] += 1
+            stats["accepted" if gate == GATE_ACCEPTED else "gated"] += 1
+            detections_out.append(
+                {
+                    "tile_id": int(det.tile_id),
+                    "label": det.label,
+                    "score": round(float(det.score), 4),
+                    "bbox_xyxy": [round(float(c), 2) for c in det.bbox_xyxy],
+                    "gate": gate,
+                    "instance_id": int(instance_id) if instance_id is not None else None,
+                }
+            )
+        record = {
+            "wall_time": time.time(),
+            "tag": tag,
+            "keyframe_idx": keyframe_idx,
+            "total_detections": len(detections_out),
+            "by_class": by_class,
+            "detections": detections_out,
+        }
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "a") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except Exception:  # noqa: BLE001 - diagnostics must never break the run
+        pass
 
 
 def build_gdino_prompt(question_nouns: Sequence[str], vocab_nouns: Sequence[str]) -> str:

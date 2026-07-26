@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import builtins
+import json
 
 import numpy as np
 import pytest
@@ -21,7 +22,10 @@ from core.perception.detector import (
     ENV_GDINO_PRECISION,
     ENV_GDINO_QUESTION_BOX_THRESHOLD,
     ENV_GDINO_VOCAB_PASS_CADENCE,
+    ENV_RAW_DETECTION_DUMP_PATH,
     FakeDetector,
+    GATE_ACCEPTED,
+    GATE_NO_LIDAR_CLUSTER,
     GDINO_BACKOFF_BASE_S,
     GDINO_BACKOFF_CAP_S,
     GDINO_BACKOFF_DEGRADE_N,
@@ -35,6 +39,7 @@ from core.perception.detector import (
     answer_eligibility_reason,
     answer_min_obs,
     answer_min_score,
+    dump_raw_detections,
     is_answer_eligible,
     GroundingDinoDetector,
     _norm_cxcywh_to_tile_xyxy,
@@ -998,3 +1003,61 @@ def test_run_caption_pass_load_failure_raises_and_does_not_touch_backoff(tmp_pat
     # Loud failure for the server, not the tick backoff (issue #39 counters untouched).
     assert det._consecutive_load_failures == 0
     assert det._next_retry_at == 0.0
+
+
+# ------------------------------------------------------------------ #84 raw detection dump
+
+
+def test_dump_raw_detections_is_noop_without_env_var(monkeypatch, tmp_path):
+    monkeypatch.delenv(ENV_RAW_DETECTION_DUMP_PATH, raising=False)
+    det = Detection(tile_id=0, bbox_xyxy=(0, 0, 10, 10), label="window", score=0.4)
+    dump_raw_detections([(det, GATE_ACCEPTED, 1)], keyframe_idx=0)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_dump_raw_detections_writes_jsonl_record(monkeypatch, tmp_path):
+    out = tmp_path / "raw.jsonl"
+    monkeypatch.setenv(ENV_RAW_DETECTION_DUMP_PATH, str(out))
+    accepted = Detection(tile_id=0, bbox_xyxy=(0, 0, 10, 20), label="sofa", score=0.42)
+    gated = Detection(tile_id=1, bbox_xyxy=(5, 5, 15, 25), label="window", score=0.28)
+    dump_raw_detections(
+        [(accepted, GATE_ACCEPTED, 3), (gated, GATE_NO_LIDAR_CLUSTER, None)],
+        keyframe_idx=7,
+    )
+    assert out.exists()
+    lines = out.read_text().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["keyframe_idx"] == 7
+    assert record["total_detections"] == 2
+    assert record["by_class"]["sofa"] == {"total": 1, "accepted": 1, "gated": 0}
+    assert record["by_class"]["window"] == {"total": 1, "accepted": 0, "gated": 1}
+    dets = {d["label"]: d for d in record["detections"]}
+    assert dets["sofa"]["gate"] == GATE_ACCEPTED
+    assert dets["sofa"]["instance_id"] == 3
+    assert dets["window"]["gate"] == GATE_NO_LIDAR_CLUSTER
+    assert dets["window"]["instance_id"] is None
+
+
+def test_dump_raw_detections_appends_across_calls(monkeypatch, tmp_path):
+    out = tmp_path / "raw.jsonl"
+    monkeypatch.setenv(ENV_RAW_DETECTION_DUMP_PATH, str(out))
+    det = Detection(tile_id=0, bbox_xyxy=(0, 0, 10, 10), label="chair", score=0.5)
+    dump_raw_detections([(det, GATE_ACCEPTED, 1)], keyframe_idx=0)
+    dump_raw_detections([(det, GATE_ACCEPTED, 1)], keyframe_idx=1)
+    assert len(out.read_text().strip().splitlines()) == 2
+
+
+def test_dump_raw_detections_never_raises_on_bad_path(monkeypatch):
+    monkeypatch.setenv(ENV_RAW_DETECTION_DUMP_PATH, "/dev/null/nonexistent/raw.jsonl")
+    det = Detection(tile_id=0, bbox_xyxy=(0, 0, 10, 10), label="chair", score=0.5)
+    dump_raw_detections([(det, GATE_ACCEPTED, 1)], keyframe_idx=0)  # must not raise
+
+
+def test_dump_raw_detections_empty_records_still_writes_record(monkeypatch, tmp_path):
+    out = tmp_path / "raw.jsonl"
+    monkeypatch.setenv(ENV_RAW_DETECTION_DUMP_PATH, str(out))
+    dump_raw_detections([], keyframe_idx=2)
+    record = json.loads(out.read_text().strip())
+    assert record["total_detections"] == 0
+    assert record["by_class"] == {}

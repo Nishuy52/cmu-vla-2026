@@ -29,7 +29,14 @@ import numpy as np
 
 from core.interfaces import InstanceRecord, LidarScan, OdomState, PanoFrame
 from core.parsing.vocab import NOUN_ALIASES
-from core.perception.detector import Detection, DetectorFn
+from core.perception.detector import (
+    Detection,
+    DetectorFn,
+    ENV_RAW_DETECTION_DUMP_PATH,
+    GATE_ACCEPTED,
+    GATE_NO_LIDAR_CLUSTER,
+    dump_raw_detections,
+)
 from core.perception.fusion import (
     DEFAULT_FUSION_CONFIG,
     Fused3D,
@@ -42,6 +49,7 @@ from core.perception.scene_index import (
     ENV_INSTANCE_DUMP_INTERVAL_S,
     ENV_INSTANCE_DUMP_PATH,
     dump_instance_index,
+    labels_foldable,
     normalize_label,
 )
 from core.perception.tiling import (
@@ -70,8 +78,14 @@ def canonical_for_match(label: str) -> str:
 
 
 def labels_compatible(a: str, b: str) -> bool:
-    """True when two labels denote the same canonical noun (alias/synonym-aware)."""
-    return canonical_for_match(a) == canonical_for_match(b)
+    """True when two labels denote the same canonical noun (alias/synonym-aware), OR
+    are a subphrase/duplicated-token fold of one another (issue #89: GDINO phrase
+    decode fragments -- "potted"/"plant" vs "potted plant", "door door" vs "door" --
+    see :func:`~core.perception.scene_index.labels_foldable`). Association is already
+    centroid-gated (the caller only considers pairs within ``cfg.gate``), so folding
+    here only ever widens which CO-LOCATED detection can join an existing track; it
+    never on its own decides two spatially-unrelated detections are the same object."""
+    return canonical_for_match(a) == canonical_for_match(b) or labels_foldable(a, b)
 
 
 # --------------------------------------------------------------------------- config
@@ -294,6 +308,13 @@ class PerceptionPipeline:
         tiles = project_tiles(pano.image, self.n_tiles, self.hfov, self.vfov)
         per_tile = self.detector(tiles)
 
+        # Issue #84: opt-in raw pre-gate dump. The env lookup is the only cost paid
+        # when unset (matches _maybe_dump_instances' cost contract); raw_records stays
+        # empty and dump_raw_detections() below no-ops on its own env check anyway, but
+        # skipping the list-building here too avoids paying for it at all when off.
+        dump_raw = bool(os.environ.get(ENV_RAW_DETECTION_DUMP_PATH))
+        raw_records: list[list] = []  # [Detection, gate, instance_id] triples (mutable placeholder)
+
         fused_dets: list[tuple[Detection, Fused3D]] = []
         for tile_dets in per_tile:
             for det in tile_dets:
@@ -303,8 +324,26 @@ class PerceptionPipeline:
                 )
                 if fused is not None:
                     fused_dets.append((det, fused))
+                    if dump_raw:
+                        raw_records.append([det, GATE_ACCEPTED, None])
+                elif dump_raw:
+                    raw_records.append([det, GATE_NO_LIDAR_CLUSTER, None])
 
         touched = associate(fused_dets, self.index, self.tracker_cfg)
+
+        if dump_raw:
+            # Back-fill the instance id each accepted detection landed in: associate()
+            # returns `touched` in fused_dets order, and raw_records' GATE_ACCEPTED
+            # entries were appended in that exact same order above.
+            fused_i = 0
+            for rec in raw_records:
+                if rec[1] == GATE_ACCEPTED:
+                    rec[2] = touched[fused_i]
+                    fused_i += 1
+            dump_raw_detections(
+                [(d, g, iid) for d, g, iid in raw_records],
+                keyframe_idx=self._keyframe_idx,
+            )
 
         # H15a: record first sighting for any newly minted instance, then decay
         # one-frame ghosts that never got a second look. The decay clock counts
