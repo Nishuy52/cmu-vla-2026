@@ -1,9 +1,11 @@
 """Occupancy grid: classification, max-intensity retention, growth, observed mask."""
 from __future__ import annotations
 
+from collections import deque
+
 import numpy as np
 
-from core.nav.occupancy import FREE, OBSTACLE, UNKNOWN, OccupancyGrid
+from core.nav.occupancy import FREE, OBSTACLE, UNKNOWN, VEHICLE_FOOTPRINT_RADIUS_M, OccupancyGrid
 from tests.nav.helpers import make_points, patch_from_ascii
 
 
@@ -111,3 +113,62 @@ def test_ascii_patch_layout_orientation():
     # Top-left char -> (x low, y high): cell (row=1, col=0).
     assert grid.state[1, 0] == OBSTACLE
     assert grid.state[0, 0] == FREE
+
+
+# --------------------------------------------------------------------------- #83
+def _free_components_8conn(state: np.ndarray) -> list[list[tuple[int, int]]]:
+    """Small local 8-connected component finder over a FREE boolean mask (test-only;
+    mirrors core.nav.frontiers._cluster without importing across the nav/heads
+    boundary from a pure-occupancy test)."""
+    free = state == FREE
+    h, w = free.shape
+    seen = np.zeros_like(free)
+    comps: list[list[tuple[int, int]]] = []
+    for r0 in range(h):
+        for c0 in range(w):
+            if not free[r0, c0] or seen[r0, c0]:
+                continue
+            comp = []
+            dq = deque([(r0, c0)])
+            seen[r0, c0] = True
+            while dq:
+                r, c = dq.popleft()
+                comp.append((r, c))
+                for dr in (-1, 0, 1):
+                    for dc in (-1, 0, 1):
+                        nr, nc = r + dr, c + dc
+                        if dr == 0 and dc == 0:
+                            continue
+                        if 0 <= nr < h and 0 <= nc < w and free[nr, nc] and not seen[nr, nc]:
+                            seen[nr, nc] = True
+                            dq.append((nr, nc))
+            comps.append(comp)
+    return comps
+
+
+def test_mark_pose_footprint_carve_connects_trail_at_0_2m_ticks():
+    """Issue #83 repro: a straight-line trail at 0.2 m/tick spacing (2x the grid
+    resolution) used to leave disconnected single-cell singletons -- pre-fix the
+    single-centre carve puts FREE cells 2 cells apart (0.2 m / 0.1 m per cell),
+    which are NOT 8-adjacent, so each tick was its own connected component.
+    Post-fix, overlapping VEHICLE_FOOTPRINT_RADIUS_M=0.25 m discs (> half the 0.2 m
+    tick spacing) connect every tick into one component."""
+    grid = OccupancyGrid(cell_m=0.1)
+    for i in range(15):
+        grid.mark_pose(i * 0.2, 0.0)
+    comps = _free_components_8conn(grid.state)
+    assert len(comps) == 1
+    assert len(comps[0]) >= 15
+
+
+def test_mark_pose_footprint_does_not_carve_beyond_radius():
+    grid = OccupancyGrid(cell_m=0.1)
+    # Seed an obstacle well outside the footprint radius but inside the observe disc.
+    far_x = VEHICLE_FOOTPRINT_RADIUS_M + 0.5
+    grid.integrate_patch(make_points([(far_x, 0.0, 0.9)]))
+    assert grid.is_obstacle(*grid.world_to_cell(far_x, 0.0))
+    grid.mark_pose(0.0, 0.0)
+    # Untouched: still an obstacle, the footprint carve never reached it.
+    assert grid.is_obstacle(*grid.world_to_cell(far_x, 0.0))
+    # But the vehicle's own cell (and near neighbours) are carved FREE.
+    assert grid.is_free(*grid.world_to_cell(0.0, 0.0))

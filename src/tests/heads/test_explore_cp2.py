@@ -11,7 +11,7 @@ from typing import Any
 
 from core.heads.explore_step import ExploreHead, _ProvisionalInstance
 from core.heads.numerical import NumericalHead
-from core.interfaces import OdomState, WaypointCmd
+from core.interfaces import OdomState, TerrainPatch, WaypointCmd
 from core.mocks.synthetic_scene import SyntheticScene
 from core.perception.scene_index import BasicSceneIndex
 from tests.heads._helpers import inst, numerical_plan, object_plan, scene
@@ -34,7 +34,27 @@ class _ExploreIO:
         self.waypoints = []
 
     def latest_terrain(self, extended=False):
-        return self._sc.terrain_patch(extended=extended, t=self._t)
+        # issue #83 test-fixture notes:
+        # (a) SyntheticScene.terrain_patch samples an EXACT 0.1 m lattice; float32
+        #     (TerrainPatch's real point dtype) rounds some of those exact multiples
+        #     down by one ULP, colliding two adjacent lattice rows/cols into the same
+        #     occupancy cell and leaving the other perpetually UNKNOWN -- a
+        #     mock-sampling artifact (real lidar returns never land exactly on a
+        #     clean grid). A small sub-cell jitter keeps every sample off the lattice.
+        # (b) the raw scene is a single walled room with no doorway to the outside,
+        #     so integrating its FULL terrain leaves zero frontiers (nothing left
+        #     unexplored) -- unlike a real limited-range sensor. Clipping to a
+        #     modest radius around the vehicle simulates realistic partial coverage,
+        #     leaving genuine unexplored space (and frontiers) beyond it for CP2's
+        #     provisional placement to point at.
+        patch = self._sc.terrain_patch(extended=extended, t=self._t)
+        pts = patch.points.copy()
+        if pts.size:
+            pts[:, 0] += 0.03
+            pts[:, 1] += 0.03
+            within = (pts[:, 0] - self._x) ** 2 + (pts[:, 1] - self._y) ** 2 <= 2.0**2
+            pts = pts[within]
+        return TerrainPatch(t=patch.t, points=pts, extended=patch.extended)
 
     def latest_odom(self):
         return OdomState(t=self._t, x=self._x, y=self._y, z=0.0, yaw=0.0)

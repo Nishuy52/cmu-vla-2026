@@ -4,12 +4,29 @@ from __future__ import annotations
 import numpy as np
 
 from core.nav.frontiers import (
+    DEGENERATE_POCKET_CELLS,
+    DEGENERATE_POCKET_RATIO,
     MIN_CLUSTER_SIZE,
+    _bfs_distances,
     detect_frontiers,
     frontier_mask,
+    last_call_info,
 )
 from core.nav.occupancy import FREE, UNKNOWN, OBSTACLE, OccupancyGrid
 from tests.nav.helpers import patch_from_ascii
+
+
+def _direct_grid(shape: tuple[int, int], cell_m: float = 0.1) -> OccupancyGrid:
+    """An OccupancyGrid with `state` set directly to exact FREE/UNKNOWN cell counts,
+    bypassing integrate_patch -- lets #83 tests pin exact pocket/component sizes."""
+    grid = OccupancyGrid(cell_m=cell_m)
+    h, w = shape
+    grid.state = np.full((h, w), UNKNOWN, dtype=np.int8)
+    grid.intensity = np.full((h, w), -np.inf, dtype=np.float32)
+    grid.observed = np.zeros((h, w), dtype=bool)
+    grid.overhead = np.zeros((h, w), dtype=bool)
+    grid.ground_z = np.full((h, w), np.nan, dtype=np.float32)
+    return grid
 
 
 def _free_unknown_grid():
@@ -110,3 +127,80 @@ def test_no_frontiers_when_fully_enclosed():
     grid.integrate_patch(patch_from_ascii(rows, cell_m=0.1))
     fr = detect_frontiers(grid, vehicle_xy=(0.25, 0.25))
     assert fr == []
+
+
+# --------------------------------------------------------------------------- #83
+def test_disconnection_repro_reroot_reaches_frontiers():
+    """Live #83 repro shape: the vehicle sits on a single FREE cell isolated by an
+    UNKNOWN annulus from a large FREE region that carries the actual frontiers
+    (the terrain blind-spot-around-spawn mechanism). Pre-fix semantics: the raw
+    vehicle-rooted BFS alone reaches only the singleton, so every frontier in the
+    big block is stamped with the UNREACHABLE_PD (1e6) sentinel. Post-fix:
+    detect_frontiers re-roots off the much larger component and every frontier
+    comes back with a finite path_distance."""
+    rows = [
+        "      ......",
+        "      ......",
+        "      ......",
+        ".     ......",
+        "      ......",
+        "      ......",
+    ]
+    grid = OccupancyGrid(cell_m=0.1)
+    grid.integrate_patch(patch_from_ascii(rows, cell_m=0.1))
+    vehicle_xy = (0.05, 0.25)
+    vehicle_cell = grid.world_to_cell(*vehicle_xy)
+    assert grid.is_free(*vehicle_cell)
+
+    # Pre-fix semantics: the plain vehicle-rooted BFS reaches only the singleton.
+    raw_dist = _bfs_distances(grid, vehicle_cell)
+    assert int(np.isfinite(raw_dist).sum()) == 1
+
+    # Post-fix: detect_frontiers re-roots off the 36-cell block and returns
+    # finite-distance, reachable frontiers for it (the singleton's OWN frontier
+    # cluster is itself disconnected from the new root and legitimately stays
+    # unreachable -- the fix reconnects the big block, not the singleton).
+    frontiers = detect_frontiers(grid, vehicle_xy, min_cluster_size=1)
+    assert frontiers
+    assert any(f.path_distance < 1e6 for f in frontiers)
+    info = last_call_info()
+    assert info["bfs_reroot"] is True
+    assert info["pocket_cells"] == 1
+    assert info["largest_component_cells"] == 36
+
+
+def test_degenerate_threshold_boundary_pocket_at_threshold_no_reroot():
+    """Pocket size == DEGENERATE_POCKET_CELLS (not <) must NOT re-root, even next
+    to a much larger separate FREE component -- the far component's frontiers stay
+    stamped unreachable, and the vehicle-rooted distances are untouched."""
+    grid = _direct_grid(shape=(40, 40))
+    grid.state[0:5, 0:10] = FREE  # exactly DEGENERATE_POCKET_CELLS (50) cells
+    grid.state[10:25, 0:20] = FREE  # a separate 300-cell component (gap rows 5-9)
+    vehicle_xy = grid.cell_to_world(2, 5)  # inside the 50-cell pocket
+
+    frontiers = detect_frontiers(grid, vehicle_xy, min_cluster_size=1)
+    info = last_call_info()
+    assert info["pocket_cells"] == DEGENERATE_POCKET_CELLS
+    assert info["bfs_reroot"] is False
+    # Threshold is a strict '<': at-threshold skips the (expensive) full-grid
+    # component scan entirely.
+    assert info["largest_component_cells"] is None
+    # The far, disconnected component's frontier(s) are still stamped unreachable.
+    assert any(f.path_distance >= 1e6 for f in frontiers)
+
+
+def test_degenerate_ratio_boundary_insufficient_ratio_no_reroot():
+    """Pocket small enough to qualify, but the largest other component is under
+    DEGENERATE_POCKET_RATIO x its size -- must NOT re-root."""
+    grid = _direct_grid(shape=(40, 40))
+    grid.state[0:2, 0:5] = FREE  # 10-cell vehicle pocket
+    grid.state[10:17, 0:5] = FREE  # a separate 35-cell component (< 4x10 = 40)
+    vehicle_xy = grid.cell_to_world(0, 2)
+
+    frontiers = detect_frontiers(grid, vehicle_xy, min_cluster_size=1)
+    info = last_call_info()
+    assert info["pocket_cells"] == 10
+    assert info["largest_component_cells"] == 35
+    assert 35 < DEGENERATE_POCKET_RATIO * 10
+    assert info["bfs_reroot"] is False
+    assert any(f.path_distance >= 1e6 for f in frontiers)

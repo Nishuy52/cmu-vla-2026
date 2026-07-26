@@ -22,7 +22,7 @@ from core.heads.explore_step import (
     _frontier_unreachable,
 )
 from core.nav.exploration import ExplorationDecision, ExplorationStatus
-from core.interfaces import OdomState, WaypointCmd
+from core.interfaces import OdomState, TerrainPatch, WaypointCmd
 from core.mocks.synthetic_scene import SyntheticScene
 from core.nav.frontiers import Frontier
 from core.perception.scene_index import BasicSceneIndex
@@ -47,7 +47,21 @@ class _ExploreIO:
         self.waypoints: list[WaypointCmd] = []
 
     def latest_terrain(self, extended=False):
-        return self._sc.terrain_patch(extended=extended, t=self._t)
+        # issue #83 test-fixture notes (see tests/heads/test_explore_cp2.py's
+        # _ExploreIO for the full rationale): (a) a small sub-cell jitter keeps
+        # samples off SyntheticScene's exact 0.1 m lattice, where float32 rounding
+        # can collide two adjacent rows/cols into one occupancy cell; (b) clipping
+        # to a radius around the vehicle simulates realistic limited sensor range
+        # (the raw scene is a single walled room with no doorway out, so
+        # integrating its FULL terrain leaves zero frontiers for CP2 to target).
+        patch = self._sc.terrain_patch(extended=extended, t=self._t)
+        pts = patch.points.copy()
+        if pts.size:
+            pts[:, 0] += 0.03
+            pts[:, 1] += 0.03
+            within = (pts[:, 0] - self._x) ** 2 + (pts[:, 1] - self._y) ** 2 <= 2.0**2
+            pts = pts[within]
+        return TerrainPatch(t=patch.t, points=pts, extended=patch.extended)
 
     def latest_odom(self):
         if not self._odom_present:

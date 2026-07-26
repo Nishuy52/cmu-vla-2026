@@ -30,6 +30,19 @@ FREE_MAX: float = 0.15  # intensity < this -> FREE (matches TerrainPatch.FREE_MA
 OBSERVE_RADIUS_M: float = 8.0  # lidar footprint radius for the observed mask
 GROW_PAD_CELLS: int = 8  # extra ring of cells added when the grid must grow
 
+#: issue #83 -- half-footprint of the mecanum platform: mark_pose carves every cell
+#: within this radius of the vehicle FREE (a disc, not a single cell), so consecutive
+#: tick poses at >= 0.1 m/tick spacing overlap into one connected trail instead of
+#: disconnected singletons (the diagnosed root cause of the reachable-pocket collapse
+#: -- see docs/upstream_notes.md and reports/issue83_live_captures/). Deliberately a
+#: SEPARATE constant from core.nav.costmap.VEHICLE_RADIUS_M (0.4 m): that one is an
+#: obstacle-INFLATION radius ("half footprint + margin" per its own docstring), tuned
+#: for planning safety margin, not the vehicle's true physical half-footprint used
+#: here for occupancy carving; keeping them distinct also avoids occupancy.py
+#: importing costmap.py (costmap.py already imports occupancy.py -- a reverse import
+#: would be circular).
+VEHICLE_FOOTPRINT_RADIUS_M: float = 0.25
+
 #: issue #36 -- min terrain patches (each contributing a vehicle_z sample) before
 #: the runtime ground-offset estimator is trusted; kept small so warm-up is fast.
 GROUND_OFFSET_WARMUP_PATCHES: int = 5
@@ -343,8 +356,19 @@ class OccupancyGrid:
         self.overhead[u_rows, u_cols] = True
 
     def mark_pose(self, x: float, y: float) -> None:
-        """Carve the vehicle cell FREE and flag all cells within lidar radius observed."""
-        # Ensure the observe disc fits in the grid.
+        """Carve a vehicle-footprint disc FREE and flag all cells within lidar radius observed.
+
+        Issue #83: the vehicle physically occupies a disc of radius
+        ``VEHICLE_FOOTPRINT_RADIUS_M`` around (x, y), not a single point, so every
+        cell whose centre lies within that disc is traversable by construction and
+        is carved FREE (intensity clamped <= 0, same as the previous single-cell
+        carve). At >= 0.1 m/tick pose spacing a single-cell-per-tick carve leaves a
+        trail of disconnected singletons (BFS-reachable pocket stuck at 1 cell,
+        the live-capture root cause); overlapping footprint discs from consecutive
+        ticks connect into one contiguous trail instead.
+        """
+        # Ensure the observe disc (>= footprint disc: OBSERVE_RADIUS_M >
+        # VEHICLE_FOOTPRINT_RADIUS_M) fits in the grid.
         r_cells = int(np.ceil(self.observe_radius_m / self.cell_m))
         cr, cc = self.world_to_cell(x, y)
         corner_rows = np.array([cr - r_cells, cr + r_cells], dtype=np.int64)
@@ -360,14 +384,20 @@ class OccupancyGrid:
         gr, gc = np.meshgrid(rr, ccg, indexing="ij")
         wx = self.origin_x + (gc + 0.5) * self.cell_m
         wy = self.origin_y + (gr + 0.5) * self.cell_m
-        within = (wx - x) ** 2 + (wy - y) ** 2 <= self.observe_radius_m**2
+        d2 = (wx - x) ** 2 + (wy - y) ** 2
+        within = d2 <= self.observe_radius_m**2
         self.observed[gr[within], gc[within]] = True
 
-        # Vehicle position is always traversable: carve its cell FREE unconditionally.
-        if self.in_bounds(cr, cc):
-            self.state[cr, cc] = FREE
+        # Vehicle footprint is always traversable: carve every cell within the
+        # footprint disc FREE (not just the centre cell -- see docstring above).
+        carve = d2 <= VEHICLE_FOOTPRINT_RADIUS_M**2
+        carve_rows, carve_cols = gr[carve], gc[carve]
+        if carve_rows.size:
+            self.state[carve_rows, carve_cols] = FREE
             # Keep intensity coherent (below free cutoff) so re-classification stays FREE.
-            self.intensity[cr, cc] = min(float(self.intensity[cr, cc]), 0.0)
+            self.intensity[carve_rows, carve_cols] = np.minimum(
+                self.intensity[carve_rows, carve_cols], 0.0
+            )
 
     # ------------------------------------------------------------- queries
     def is_free(self, row: int, col: int) -> bool:

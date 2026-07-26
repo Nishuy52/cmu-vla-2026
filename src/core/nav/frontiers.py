@@ -12,12 +12,24 @@ yields a centroid (snapped to the nearest FREE cell in the cluster) scored:
 `affinity` is an injected callable (x, y) -> float; default returns 0 so scoring
 is purely geometric (VLFM-style semantic bias is layered in by the caller). We
 return frontier centroids ranked best-first.
+
+Issue #83 -- degenerate-pocket re-rooting: the BFS distances above are normally
+rooted at the vehicle cell. If that vehicle-rooted pocket is small
+(DEGENERATE_POCKET_CELLS) AND a much larger FREE component exists elsewhere on the
+grid (DEGENERATE_POCKET_RATIO), the small pocket is treated as a costmap artifact
+(e.g. a terrain blind-spot annulus around a furniture-dense spawn that never
+paints FREE) rather than a genuinely tiny room, and the BFS is re-run rooted at
+the nearest cell of that larger component instead. The base autonomy stack does
+its own local obstacle avoidance and drives the robot regardless of what this
+frontier scorer thinks is "reachable" -- so a degenerate vehicle-rooted pocket
+must not stamp every frontier with the unreachable sentinel and park the robot
+forever. See ``last_call_info()`` for whether/why a given call re-rooted.
 """
 from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 import numpy as np
 
@@ -29,8 +41,42 @@ W_SIZE: float = 1.0  # reward larger frontiers (more unknown to reveal)
 W_DIST: float = 0.5  # penalise distance (cells) so we exploit nearby frontiers first
 W_AFFINITY: float = 4.0  # weight on the injected semantic affinity term
 
+#: issue #83 -- a vehicle-rooted BFS pocket smaller than this (cells) is a candidate
+#: "degenerate pocket": a costmap artifact (blind-spot annulus around a furniture-
+#: dense spawn / a footprint-carve trail not yet stitched to the terrain-derived FREE
+#: mass) rather than a genuinely tiny room. 50 cells = 0.5 m^2 at CELL_M=0.10 --
+#: roughly 2 vehicle footprints (see occupancy.VEHICLE_FOOTPRINT_RADIUS_M), well
+#: below any real room.
+DEGENERATE_POCKET_CELLS: int = 50
+#: A pocket only counts as degenerate (and triggers re-rooting) if a FREE region at
+#: least this many times larger exists elsewhere on the grid -- otherwise the vehicle
+#: really is in the biggest connected space there is, and no re-root should fire.
+DEGENERATE_POCKET_RATIO: float = 4.0
+
 _NEIGH4 = ((-1, 0), (1, 0), (0, -1), (0, 1))
 _NEIGH8 = _NEIGH4 + ((-1, -1), (-1, 1), (1, -1), (1, 1))
+
+#: issue #83 -- module-level "last call" diagnostics for detect_frontiers, read by
+#: core.heads.explore_debug so a re-root event is observable without threading a new
+#: return value through every caller (ExplorationPolicy.step, the CP5 seam, etc).
+#: Overwritten at the start of every detect_frontiers call; never influences scoring.
+_LAST_CALL_INFO: dict[str, Any] = {
+    "bfs_reroot": False,
+    "pocket_cells": 0,
+    "largest_component_cells": None,
+}
+
+
+def last_call_info() -> dict[str, Any]:
+    """A copy of the diagnostics recorded by the most recent detect_frontiers call.
+
+    ``bfs_reroot``: whether that call re-rooted the BFS off a degenerate vehicle
+    pocket (see DEGENERATE_POCKET_CELLS). ``pocket_cells``: the vehicle-rooted
+    BFS-reachable FREE cell count. ``largest_component_cells``: the largest FREE
+    connected component's size, or None if the pocket wasn't small enough to make
+    that expensive full-grid computation worth doing (see detect_frontiers).
+    """
+    return dict(_LAST_CALL_INFO)
 
 
 @dataclass(frozen=True)
@@ -182,10 +228,42 @@ def detect_frontiers(
 
     mask = frontier_mask(grid)
     clusters = [c for c in _cluster(mask) if len(c) >= min_cluster_size]
+
+    vehicle_cell = grid.world_to_cell(*vehicle_xy)
+    dist = _bfs_distances(grid, vehicle_cell)
+    pocket_cells = int(np.isfinite(dist).sum())
+
+    # issue #83: a small vehicle-rooted pocket next to a much larger FREE component
+    # elsewhere is a costmap artifact, not a real dead end -- re-root the BFS off the
+    # bigger component so frontiers there aren't stamped unreachable forever. The
+    # full-grid FREE clustering is only done when the pocket is already small (the
+    # common/healthy case has a large pocket and skips this entirely).
+    reroot = False
+    largest_component_cells: int | None = None
+    if pocket_cells < DEGENERATE_POCKET_CELLS:
+        free_components = _cluster(grid.state == FREE)
+        largest_component_cells = max((len(c) for c in free_components), default=0)
+        if (
+            free_components
+            and largest_component_cells >= DEGENERATE_POCKET_RATIO * pocket_cells
+        ):
+            largest_comp = max(free_components, key=len)
+            comp_arr = np.asarray(largest_comp)
+            vr, vc = vehicle_cell
+            d2 = (comp_arr[:, 0] - vr) ** 2 + (comp_arr[:, 1] - vc) ** 2
+            reroot_cell = tuple(int(v) for v in comp_arr[int(np.argmin(d2))])
+            dist = _bfs_distances(grid, reroot_cell)
+            reroot = True
+
+    _LAST_CALL_INFO.clear()
+    _LAST_CALL_INFO.update(
+        bfs_reroot=reroot,
+        pocket_cells=pocket_cells,
+        largest_component_cells=largest_component_cells,
+    )
+
     if not clusters:
         return []
-
-    dist = _bfs_distances(grid, grid.world_to_cell(*vehicle_xy))
 
     out: list[Frontier] = []
     for comp in clusters:

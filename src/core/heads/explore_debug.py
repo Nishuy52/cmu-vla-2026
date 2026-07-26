@@ -32,6 +32,21 @@ Issue #84 additions (same no-op-when-unset guarantee): each record also carries
   when no such handle exists (offline runners, perception off, or the scene has no
   backing pipeline at all).
 
+Issue #83 additions (same no-op-when-unset guarantee): each record also carries
+
+* ``bfs_reroot`` -- whether THIS tick's ``detect_frontiers`` call (the one that
+  built ``frontier_candidates`` above) re-rooted its BFS off a degenerate
+  vehicle-rooted pocket (see ``core.nav.frontiers.DEGENERATE_POCKET_CELLS``);
+* ``bfs_reroot_pocket_cells`` / ``bfs_reroot_largest_component_cells`` -- the two
+  pocket sizes ``detect_frontiers`` compared to decide whether to re-root (the
+  latter is ``None`` when the vehicle pocket wasn't even small enough to make
+  that check worth running -- see ``core.nav.frontiers.last_call_info``).
+
+Read together with ``status`` (e.g. ``"complete"``) these make an otherwise
+silent EXPLORATION_COMPLETE observable: a COMPLETE tick with ``bfs_reroot: true``
+or a small ``bfs_reroot_pocket_cells`` says the robot parked because of a
+degenerate-pocket artifact, not because the map is genuinely exhausted.
+
 This is diagnostic-only: it reads the grid/policy/index state that ``ExploreHead``
 already computed and never influences a decision.
 """
@@ -49,6 +64,7 @@ from core.nav.frontiers import (
     _cluster,
     detect_frontiers,
     frontier_mask,
+    last_call_info,
 )
 from core.nav.occupancy import FREE, OBSTACLE, UNKNOWN, OccupancyGrid
 
@@ -238,15 +254,21 @@ def maybe_dump(
             head._policy.min_frontier_score if head._policy is not None else 0.0
         )
         scene = getattr(head, "_scene", None)
+        frontier_candidates = _frontier_candidates(grid, pose, affinity, min_frontier_score)
+        # issue #83: reads the module-level diagnostics detect_frontiers just recorded
+        # for the call above -- makes a degenerate-pocket re-root (or its absence, on a
+        # COMPLETE tick) observable instead of a silent EXPLORATION_COMPLETE.
+        reroot_info = last_call_info()
         record = {
             "wall_time": time.time(),
             "question_clock_t": t,
             "pose": [round(pose[0], 3), round(pose[1], 3)],
             "status": status,
             "costmap": _costmap_summary(grid, pose),
-            "frontier_candidates": _frontier_candidates(
-                grid, pose, affinity, min_frontier_score
-            ),
+            "frontier_candidates": frontier_candidates,
+            "bfs_reroot": reroot_info.get("bfs_reroot", False),
+            "bfs_reroot_pocket_cells": reroot_info.get("pocket_cells"),
+            "bfs_reroot_largest_component_cells": reroot_info.get("largest_component_cells"),
             "chosen_waypoint": (
                 [round(chosen_waypoint[0], 3), round(chosen_waypoint[1], 3)]
                 if chosen_waypoint is not None
