@@ -6,7 +6,7 @@
 #SBATCH -t 25
 #SBATCH -c 16
 #SBATCH --mem=48G
-#SBATCH -o /home/c/cyuhsin/verify_run.out
+#SBATCH -o /home/c/cyuhsin/verify_run_%j.out
 
 # Instrumented verification run (issues #83/#84/#88/#82/#80): the live-run kit
 # plus (a) explore-debug + instance-index dumps, (b) the local LLM tier served
@@ -204,7 +204,7 @@ print(json.dumps(d.get('live_instances',{}).get('by_class',{})))
 "
 done
 echo "== #88 waypoint cadence + #80 pre-60s waypoints (analyze WAYPOINT lines above)"
-grep -cE "^WAYPOINT" ~/verify_run.out 2>/dev/null || true
+grep -cE "^WAYPOINT" ~/verify_run_${J}.out 2>/dev/null || true
 echo "== grounded or floor?"; grep -E "answer_from_floor|answer_from_head|published int answer|instances" ~/verify_run_${J}_adapter.log | tail -5
 echo "== gpu"; nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader
 kill $QPUB_PID $ADAPTER_PID $OLLAMA_PID $LAUNCH_PID $UNITY_PID $XVFB_PID ${BAG_PID:-} 2>/dev/null

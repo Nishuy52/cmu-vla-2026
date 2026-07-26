@@ -29,5 +29,5 @@ fi
 echo "== submit"
 JOB=$(ssh xlogin "cd ~ && QUESTION=\"$QUESTION\" SCENE=\"$SCENE\" QDIR=\"$QDIR\" SCENE_DIR=~/scenes/$SCENE sbatch --export=ALL ~/cluster_verify_run.sbatch" | grep -oE '[0-9]+')
 echo "SUBMITTED job $JOB (scene=$SCENE qdir=$QDIR)"
-echo "   watch:   ssh xlogin tail -f '~/verify_run.out'"
+echo "   watch:   ssh xlogin tail -f '~/verify_run_${JOB}.out'"
 echo "   harvest: tools/cluster/live_run/harvest_verify.sh $JOB"
