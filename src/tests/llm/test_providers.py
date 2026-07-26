@@ -16,6 +16,7 @@ from core.llm.providers import (
     OpenAIChatAdapter,
     ProviderUnavailable,
 )
+from core.llm.usage_log import usage_log_path
 from tests.llm.fakes import (
     FakeAnthropicClient,
     FakeOpenAIClient,
@@ -30,6 +31,16 @@ MESSAGES = [
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 JPEG_BYTES = b"\xff\xd8\xff" + b"\x00" * 16
+
+
+@pytest.fixture(autouse=True)
+def _isolate_usage_log(tmp_path, monkeypatch):
+    """Every OpenAIChatAdapter call logs usage (core.llm.usage_log) — redirect the
+    default path to a scratch file for every test in this module so the test suite
+    never writes into the real committed ``reports/soclaas_usage.jsonl``. Tests that
+    want to inspect the log override ``VLA_LLM_USAGE_LOG`` themselves afterward.
+    """
+    monkeypatch.setenv("VLA_LLM_USAGE_LOG", str(tmp_path / "_default_usage.jsonl"))
 
 
 @pytest.fixture
@@ -180,3 +191,88 @@ def test_vision_without_user_message_raises(fake_openai):
     adapter = OpenAIChatAdapter("http://host/v1", "gpt-x", "sk-key")
     with pytest.raises(ProviderUnavailable):
         adapter.vision_chat([{"role": "system", "content": "x"}], [PNG_BYTES])
+
+
+# ------------------------------------------------------------------- usage monitoring
+
+
+def _read_jsonl(path) -> list[dict]:
+    text = path.read_text(encoding="utf-8")
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def test_usage_log_path_defaults_to_reports_soclaas_usage_jsonl(monkeypatch):
+    monkeypatch.delenv("VLA_LLM_USAGE_LOG", raising=False)
+    path = usage_log_path()
+    assert path.name == "soclaas_usage.jsonl"
+    assert path.parent.name == "reports"
+
+
+def test_usage_log_path_overridable(monkeypatch, tmp_path):
+    override = tmp_path / "custom_usage.jsonl"
+    monkeypatch.setenv("VLA_LLM_USAGE_LOG", str(override))
+    assert usage_log_path() == override
+
+
+def test_openai_call_appends_usage_record(monkeypatch, tmp_path):
+    log_path = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("VLA_LLM_USAGE_LOG", str(log_path))
+    mod = make_openai_module(reply="hi", usage=(12, 34, 46))
+    monkeypatch.setitem(__import__("sys").modules, "openai", mod)
+
+    adapter = OpenAIChatAdapter("http://host/v1", "gpt-x", "sk-key", tier="api")
+    adapter(MESSAGES)
+
+    records = _read_jsonl(log_path)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["tier"] == "api"
+    assert rec["model"] == "gpt-x"
+    assert rec["ok"] is True
+    assert rec["prompt_tokens"] == 12
+    assert rec["completion_tokens"] == 34
+    assert rec["total_tokens"] == 46
+    assert isinstance(rec["latency_ms"], (int, float))
+    assert "ts" in rec  # ISO timestamp present
+
+
+def test_openai_call_without_usage_object_logs_none_tokens(monkeypatch, tmp_path):
+    log_path = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("VLA_LLM_USAGE_LOG", str(log_path))
+    mod = make_openai_module(reply="hi")  # no usage kwarg -> usage=None on the response
+    monkeypatch.setitem(__import__("sys").modules, "openai", mod)
+
+    adapter = OpenAIChatAdapter("http://host/v1", "gpt-x", "sk-key", tier="local")
+    adapter(MESSAGES)
+
+    rec = _read_jsonl(log_path)[0]
+    assert rec["tier"] == "local"
+    assert rec["ok"] is True
+    assert rec["total_tokens"] is None
+
+
+def test_openai_call_failure_still_logs_usage_record_and_reraises(monkeypatch, tmp_path):
+    log_path = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("VLA_LLM_USAGE_LOG", str(log_path))
+    monkeypatch.setitem(__import__("sys").modules, "openai", None)  # forces ProviderUnavailable
+
+    adapter = OpenAIChatAdapter("http://host/v1", "gpt-x", "sk-key", tier="api")
+    with pytest.raises(ProviderUnavailable):
+        adapter(MESSAGES)
+
+    rec = _read_jsonl(log_path)[0]
+    assert rec["tier"] == "api"
+    assert rec["ok"] is False
+    assert "error" in rec
+
+
+def test_usage_logging_failure_never_breaks_the_chat_call(monkeypatch, tmp_path):
+    # point the usage log at a path that cannot be created (parent is a file, not a dir)
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("VLA_LLM_USAGE_LOG", str(blocker / "usage.jsonl"))
+    mod = make_openai_module(reply="hi")
+    monkeypatch.setitem(__import__("sys").modules, "openai", mod)
+
+    adapter = OpenAIChatAdapter("http://host/v1", "gpt-x", "sk-key", tier="api")
+    assert adapter(MESSAGES) == "hi"  # call succeeds despite the log write failing

@@ -49,6 +49,18 @@ JSON file (all fields optional; env overrides field-by-field)::
     }
 
 No keys in this module, no keys in ``llm_config.json`` (commit only the indirection).
+
+Default primary tier (added 26 Jul 2026)
+-----------------------------------------
+When the primary slot is otherwise unconfigured (no ``VLA_LLM_PRIMARY_*`` env, no
+``primary`` entry in ``llm_config.json``) AND ``SOCLAAS_API_KEY`` is present in the
+environment, the primary slot defaults to NUS SoC's free OpenAI-compatible gateway
+(``https://soclaas-api.comp.nus.edu.sg/v1``, model ``qwen3.6:35b``, key read from
+``SOCLAAS_API_KEY``). This is a fallback default only — any explicit
+``VLA_LLM_PRIMARY_*`` override or ``llm_config.json`` "primary" entry still wins, field
+by field, exactly as it would over any other default. With no key present the default
+does not fire at all; the primary slot is left unconfigured and the ladder degrades to
+local/regex exactly as an empty environment always has (no crash, no network attempt).
 """
 from __future__ import annotations
 
@@ -75,6 +87,21 @@ _DEFAULT_KEY_ENV: dict[str, str] = {
     "primary": "OPENAI_API_KEY",
     "secondary": "ANTHROPIC_API_KEY",
     "local": "VLA_LOCAL_API_KEY",
+}
+
+#: SoCLaaS (NUS SoC's free OpenAI-compatible gateway) is the DEFAULT primary tier (added
+#: 26 Jul 2026) — no more cluster-sbatch-only env override. This is a fallback default
+#: only: it fills the "primary" slot's kind/base_url/model/api_key_env fields exactly like
+#: a hard-coded file_slot would, and only when neither an env var nor ``llm_config.json``
+#: names something else for that field AND the named key env var actually holds a key
+#: (checked in ``_resolve_slot``) — an absent ``SOCLAAS_API_KEY`` yields an unconfigured
+#: primary slot, degrading to local/regex exactly as an unconfigured environment always
+#: has. No key is named or committed here — only the env var name that holds it.
+_SOCLAAS_DEFAULT: dict[str, str] = {
+    "kind": "openai",
+    "base_url": "https://soclaas-api.comp.nus.edu.sg/v1",
+    "model": "qwen3.6:35b",
+    "api_key_env": "SOCLAAS_API_KEY",
 }
 
 
@@ -137,13 +164,29 @@ def _env(name: str) -> str | None:
     return val or None
 
 
+def _soclaas_key_present() -> bool:
+    """True iff ``SOCLAAS_API_KEY`` holds a non-empty value in the environment.
+
+    Gates the SoCLaaS default primary spec: with no key present the default is
+    withheld entirely (kind stays unresolved), so an unconfigured host degrades to
+    local/regex exactly as it always has — the default never blocks or crashes on a
+    dark network, it simply doesn't fire.
+    """
+    return _env("SOCLAAS_API_KEY") is not None
+
+
 def _resolve_slot(slot: str, file_slot: dict[str, Any]) -> ProviderSpec | None:
     """Merge one slot's file dict with env overrides (env wins); None if not enabled.
 
-    A slot is enabled iff a ``kind`` is present from either source. Each field is taken
-    from the env var when set, else the file, else a per-slot default.
+    A slot is enabled iff a ``kind`` is present from env, file, or (primary slot only,
+    and only when ``SOCLAAS_API_KEY`` is set) the built-in SoCLaaS default. Each field
+    is taken from the env var when set, else the file, else the SoCLaaS default (primary
+    only), else a per-slot fallback. Precedence is strictly env > file > SoCLaaS default
+    > nothing, so any explicit ``VLA_LLM_PRIMARY_*`` override or ``llm_config.json``
+    entry still wins over the default exactly as it would win over any other default.
     """
     prefix = f"VLA_LLM_{slot.upper()}_"
+    soclaas_default = _SOCLAAS_DEFAULT if slot == "primary" and _soclaas_key_present() else {}
 
     def pick(field_name: str, env_suffix: str, default: str | None = None) -> str | None:
         env_val = _env(prefix + env_suffix)
@@ -152,6 +195,9 @@ def _resolve_slot(slot: str, file_slot: dict[str, Any]) -> ProviderSpec | None:
         file_val = file_slot.get(field_name)
         if file_val is not None:
             return str(file_val)
+        soclaas_val = soclaas_default.get(field_name)
+        if soclaas_val is not None:
+            return soclaas_val
         return default
 
     kind = pick("kind", "KIND")
@@ -205,7 +251,9 @@ def _as_dict(v: Any) -> dict[str, Any]:
 # ------------------------------------------------------------------- adapter construction
 
 
-def _build_adapter(spec: ProviderSpec, call_timeout_s: float = DEFAULT_CALL_TIMEOUT_S):
+def _build_adapter(
+    spec: ProviderSpec, call_timeout_s: float = DEFAULT_CALL_TIMEOUT_S, tier_name: str = ""
+):
     """Construct the raw (un-timeout-wrapped) adapter for one spec.
 
     Raises ``ProviderUnavailable`` for an unknown kind or a spec missing required fields.
@@ -216,6 +264,10 @@ def _build_adapter(spec: ProviderSpec, call_timeout_s: float = DEFAULT_CALL_TIME
     ``call_timeout_s`` is threaded into the OpenAI adapter's request-level timeout
     (issue #46) so the configured call timeout closes the connection on expiry, not just
     the outer thread-based ``wrap_call_timeout``/``with_timeout`` backstop applied below.
+
+    ``tier_name`` (``"api"``/``"api2"``/``"local"``) is threaded into the OpenAI adapter so
+    its per-call usage log records which tier answered — SoCLaaS primary vs local Ollama
+    are otherwise indistinguishable in the log (both speak the OpenAI-compat schema).
     """
     kind = spec.kind
     if kind == "stub":
@@ -227,7 +279,11 @@ def _build_adapter(spec: ProviderSpec, call_timeout_s: float = DEFAULT_CALL_TIME
                 f"(got base_url={spec.base_url!r}, model={spec.model!r})"
             )
         return OpenAIChatAdapter(
-            spec.base_url, spec.model, spec.api_key(), call_timeout_s=call_timeout_s
+            spec.base_url,
+            spec.model,
+            spec.api_key(),
+            call_timeout_s=call_timeout_s,
+            tier=tier_name,
         )
     if kind == "anthropic":
         if not spec.model:
@@ -272,10 +328,10 @@ def build_chat_fns_with_tiers(config: LlmConfig) -> list[tuple[str, ChatFn]]:
     for i, spec in enumerate(config.slots()):
         if spec is None:
             continue
+        tier_name = DEFAULT_TIER_NAMES[i] if i < len(DEFAULT_TIER_NAMES) else SLOTS[i]
         try:
-            adapter = _build_adapter(spec, config.call_timeout_s)
+            adapter = _build_adapter(spec, config.call_timeout_s, tier_name)
         except ProviderUnavailable:
             continue
-        tier_name = DEFAULT_TIER_NAMES[i] if i < len(DEFAULT_TIER_NAMES) else SLOTS[i]
         pairs.append((tier_name, with_timeout(adapter, config.call_timeout_s)))
     return pairs

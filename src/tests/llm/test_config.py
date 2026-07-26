@@ -25,11 +25,19 @@ for slot in ("PRIMARY", "SECONDARY", "LOCAL"):
 
 
 @pytest.fixture(autouse=True)
-def _clean_env(monkeypatch):
-    for k in _ENV_KEYS + ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "VLA_LOCAL_API_KEY"]:
+def _clean_env(tmp_path, monkeypatch):
+    for k in _ENV_KEYS + [
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "VLA_LOCAL_API_KEY",
+        "SOCLAAS_API_KEY",
+    ]:
         monkeypatch.delenv(k, raising=False)
     # point config at a nonexistent path by default so no stray repo file leaks in
     monkeypatch.setenv("VLA_LLM_CONFIG", "/nonexistent/llm_config.json")
+    # any real OpenAIChatAdapter built here logs usage (core.llm.usage_log) — redirect
+    # away from the real committed reports/soclaas_usage.jsonl.
+    monkeypatch.setenv("VLA_LLM_USAGE_LOG", str(tmp_path / "_default_usage.jsonl"))
 
 
 def _write_file(tmp_path, data: dict) -> str:
@@ -193,6 +201,60 @@ def test_build_chat_fns_matches_build_chat_fns_with_tiers_fns():
     assert len(plain) == len(tiered) == 2
     msg = [{"role": "user", "content": "x"}]
     assert [fn(msg) for fn in plain] == [fn(msg) for _, fn in tiered] == ["P", "L"]
+
+
+def test_default_primary_is_soclaas_when_key_present(monkeypatch):
+    # issue: SoCLaaS is the DEFAULT primary tier now — no VLA_LLM_PRIMARY_* needed,
+    # only the key env var itself.
+    monkeypatch.setenv("SOCLAAS_API_KEY", "sk-soclaas-live")
+    cfg = load_config()
+    assert cfg.primary is not None
+    assert cfg.primary.kind == "openai"
+    assert cfg.primary.base_url == "https://soclaas-api.comp.nus.edu.sg/v1"
+    assert cfg.primary.model == "qwen3.6:35b"
+    assert cfg.primary.api_key_env == "SOCLAAS_API_KEY"
+    assert cfg.primary.api_key() == "sk-soclaas-live"
+
+
+def test_default_primary_absent_without_key_degrades_like_before(monkeypatch):
+    # no SOCLAAS_API_KEY, no other override -> primary stays unconfigured, exactly the
+    # pre-existing "empty environment" behavior (ladder falls straight to local/regex).
+    cfg = load_config()
+    assert cfg.primary is None
+    assert cfg.slots() == [None, None, None]
+    assert build_chat_fns(cfg) == []
+
+
+def test_explicit_primary_override_wins_over_soclaas_default(monkeypatch):
+    monkeypatch.setenv("SOCLAAS_API_KEY", "sk-soclaas-live")
+    monkeypatch.setenv("VLA_LLM_PRIMARY_KIND", "anthropic")
+    monkeypatch.setenv("VLA_LLM_PRIMARY_MODEL", "claude-explicit")
+    cfg = load_config()
+    assert cfg.primary is not None
+    assert cfg.primary.kind == "anthropic"
+    assert cfg.primary.model == "claude-explicit"
+
+
+def test_explicit_primary_field_override_wins_field_by_field_over_soclaas_default(monkeypatch):
+    # env still wins per-field even while the SoCLaaS default is active for the rest.
+    monkeypatch.setenv("SOCLAAS_API_KEY", "sk-soclaas-live")
+    monkeypatch.setenv("VLA_LLM_PRIMARY_MODEL", "qwen-custom")
+    cfg = load_config()
+    assert cfg.primary is not None
+    assert cfg.primary.kind == "openai"  # from the SoCLaaS default
+    assert cfg.primary.base_url == "https://soclaas-api.comp.nus.edu.sg/v1"  # default survives
+    assert cfg.primary.model == "qwen-custom"  # explicit env wins
+
+
+def test_file_primary_entry_wins_over_soclaas_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("SOCLAAS_API_KEY", "sk-soclaas-live")
+    path = _write_file(
+        tmp_path, {"primary": {"kind": "anthropic", "model": "claude-from-file"}}
+    )
+    monkeypatch.setenv("VLA_LLM_CONFIG", path)
+    cfg = load_config()
+    assert cfg.primary.kind == "anthropic"
+    assert cfg.primary.model == "claude-from-file"
 
 
 def test_malformed_json_file_is_ignored(tmp_path, monkeypatch):

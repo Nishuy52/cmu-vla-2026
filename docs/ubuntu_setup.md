@@ -218,9 +218,12 @@ multi-GB bag to a few hundred MB that move freely between machines.
      (`GDINO_VOCAB_PASS_CADENCE`, default every 3rd tick — it only feeds scene-index
      breadth, not target recall). Both are optional env overrides; unset = the module
      defaults above.
-   Before the Docker build, set the parse-provider env vars (`VLA_LLM_PRIMARY_*` / `_SECONDARY_*` /
-   `_LOCAL_*` and the key vars they name, e.g. `OPENAI_API_KEY`) or place a keyless `llm_config.json`
-   at the repo root — see `core/llm/config.py` for the full var list. Unset = ladder runs local/regex only.
+   SoCLaaS is the default primary parse tier (§8c below) — set `SOCLAAS_API_KEY` and the
+   ladder's primary slot is filled automatically, no other var needed. To point primary/
+   secondary/local at something else instead, set the parse-provider env vars
+   (`VLA_LLM_PRIMARY_*` / `_SECONDARY_*` / `_LOCAL_*` and the key vars they name, e.g.
+   `OPENAI_API_KEY`) or place a keyless `llm_config.json` at the repo root — see
+   `core/llm/config.py` for the full var list. Both unset = ladder runs local/regex only.
 4. Verify against a full training scene with the 10-minute clock before any submission
    (`docs/master_plan.md` Phase 2/3).
 
@@ -430,16 +433,37 @@ Paste the printed exports into the shell running the host node (`tools/run_host_
 No API key needed for the local slot — an empty key is fine against Ollama's openai
 adapter.
 
-**SoCLaaS primary tier (added 26 Jul 2026):** NUS SoC's free OpenAI-compatible
-gateway (`https://soclaas-api.comp.nus.edu.sg/v1`; NUS network/VPN). The challenge
-brief explicitly allows online LLM APIs at eval time. Issue a key with
+**SoCLaaS is now the DEFAULT primary parse tier (made permanent 26 Jul 2026, was a
+cluster-sbatch-only env override before).** NUS SoC's free OpenAI-compatible gateway
+(`https://soclaas-api.comp.nus.edu.sg/v1`, model `qwen3.6:35b`; NUS network/VPN). The
+challenge brief explicitly allows online LLM APIs at eval time. Issue a key with
 `soclaas-portal issue` on any SoC host (interactive; stores `SOCLAAS_API_KEY` in
-`~/.bashrc` — never commit it). Enable as the primary parse tier with:
-`VLA_LLM_PRIMARY_KIND=openai`, `VLA_LLM_PRIMARY_BASE_URL=<gateway>/v1`,
-`VLA_LLM_PRIMARY_MODEL=qwen3.6:35b`, `VLA_LLM_PRIMARY_API_KEY_ENV=SOCLAAS_API_KEY`.
-The ladder falls through primary → local → regex when the gateway is unreachable,
-so enabling it is safe everywhere (wired in tools/cluster/live_run/
-cluster_verify_run.sbatch; model list per key via `GET /v1/models`).
+`~/.bashrc` — never commit it, and never name it directly in code/config, only the env
+var that holds it).
+
+With `SOCLAAS_API_KEY` set in the environment, `core/llm/config.py` fills the primary
+slot with the SoCLaaS gateway automatically — **no `VLA_LLM_PRIMARY_*` vars needed
+anymore.** Without the key, the primary slot is simply left unconfigured, exactly as an
+empty environment always has been, and the ladder degrades straight to local/regex —
+no crash, no network attempt, no behavior change from before this default existed. Any
+explicit `VLA_LLM_PRIMARY_*` env var or an `llm_config.json` `"primary"` entry still
+overrides the default field-by-field (e.g. to point primary at a different gateway or
+model), same precedence as any other slot. The ladder falls through primary → local →
+regex when the gateway is unreachable regardless, so enabling it is safe everywhere
+(wired in `tools/cluster/live_run/cluster_verify_run.sbatch`; model list per key via
+`GET /v1/models`).
+
+**Per-call usage logging (added 26 Jul 2026):** every call through the OpenAI-compatible
+adapter (`core/llm/providers.py::OpenAIChatAdapter` — covers SoCLaaS primary, the local
+Ollama tier, and any other `kind=openai` slot) appends one JSON line to
+`reports/soclaas_usage.jsonl` (path overridable via `VLA_LLM_USAGE_LOG`) recording
+timestamp, ladder tier (`api`/`api2`/`local`), model, ok/error, latency, and token usage
+(`prompt_tokens`/`completion_tokens`/`total_tokens`, or `null` if the server didn't
+report them) — see `core/llm/usage_log.py`. This file is **committed and accumulates
+across sessions** (never truncated); it is the source for tracking SoCLaaS usage over
+the life of the project and for comparing primary vs local-tier call volume/latency. A
+one-line summary is also emitted to the process's own stdout/stderr log per call (i.e.
+it lands in the adapter log under the same redirection every run already uses).
 
 **Perception dispatch (issue #88):** the adapter runs `PerceptionPipeline.process()`
 on a dedicated worker thread by default (`core.perception.async_pipeline.

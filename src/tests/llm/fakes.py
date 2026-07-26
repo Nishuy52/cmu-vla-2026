@@ -26,9 +26,17 @@ class _OAChoice:
         self.message = _OAMessage(content)
 
 
+class _OAUsage:
+    def __init__(self, prompt_tokens: int, completion_tokens: int, total_tokens: int) -> None:
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+
+
 class _OAResponse:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, usage: _OAUsage | None = None) -> None:
         self.choices = [_OAChoice(content)]
+        self.usage = usage
 
 
 class FakeOpenAIClient:
@@ -38,6 +46,9 @@ class FakeOpenAIClient:
     #: instance (the adapter constructs the client itself).
     last: "FakeOpenAIClient | None" = None
     reply: str = "{}"
+    #: Optional (prompt_tokens, completion_tokens, total_tokens) tuple attached to the
+    #: response as a ``usage`` object; ``None`` mimics a server that omits usage entirely.
+    usage: tuple[int, int, int] | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         self.init_kwargs = kwargs
@@ -49,15 +60,24 @@ class FakeOpenAIClient:
         class _Completions:
             def create(self, **payload: Any) -> _OAResponse:
                 outer.create_calls.append(payload)
-                return _OAResponse(type(outer).reply)
+                usage = type(outer).usage
+                oa_usage = _OAUsage(*usage) if usage is not None else None
+                return _OAResponse(type(outer).reply, usage=oa_usage)
 
         self.chat = types.SimpleNamespace(completions=_Completions())
 
 
-def make_openai_module(reply: str = "{}") -> types.ModuleType:
-    """Build a fake ``openai`` module whose ``OpenAI`` returns a recording client."""
+def make_openai_module(
+    reply: str = "{}", usage: tuple[int, int, int] | None = None
+) -> types.ModuleType:
+    """Build a fake ``openai`` module whose ``OpenAI`` returns a recording client.
+
+    ``usage``, if given, is ``(prompt_tokens, completion_tokens, total_tokens)`` attached
+    to every response's ``usage`` object; omit to mimic a server with no usage reporting.
+    """
     FakeOpenAIClient.reply = reply
     FakeOpenAIClient.last = None
+    FakeOpenAIClient.usage = usage
     mod = types.ModuleType("openai")
     mod.OpenAI = FakeOpenAIClient  # type: ignore[attr-defined]
     return mod

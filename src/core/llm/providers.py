@@ -31,6 +31,7 @@ Adapters (all constructed from a resolved ``ProviderSpec``):
 from __future__ import annotations
 
 import base64
+import time
 from typing import Callable, Sequence
 
 from core.parsing.prompts import ChatFn
@@ -104,6 +105,7 @@ class OpenAIChatAdapter:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
         call_timeout_s: float | None = None,
+        tier: str = "",
     ) -> None:
         self.base_url = base_url
         self.model = model
@@ -121,6 +123,13 @@ class OpenAIChatAdapter:
         #: replacement for) the outer thread-based ``wrap_call_timeout``
         #: backstop in core.llm.timeout, which still guards non-network hangs.
         self.call_timeout_s = call_timeout_s
+        #: Ladder tier name ("api"/"api2"/"local") this adapter was built for — stamped
+        #: onto every usage-log record (core.llm.usage_log) so SoCLaaS primary vs a
+        #: local Ollama tier stay distinguishable in the log even though both speak the
+        #: same OpenAI-compat wire format. Empty when the adapter is built ad hoc
+        #: (outside config.build_chat_fns_with_tiers) — usage is still logged, just
+        #: with an empty tier tag.
+        self.tier = tier
 
     def _client(self):
         try:
@@ -144,8 +153,33 @@ class OpenAIChatAdapter:
             # httpx as the per-request timeout, so it closes the connection on
             # expiry rather than merely raising client-side after the fact.
             kwargs["timeout"] = self.call_timeout_s
-        resp = self._client().chat.completions.create(**kwargs)
+        start = time.monotonic()
+        try:
+            resp = self._client().chat.completions.create(**kwargs)
+        except Exception as exc:
+            self._log_usage(ok=False, start=start, usage=None, error=str(exc))
+            raise
+        self._log_usage(ok=True, start=start, usage=_extract_usage(resp), error=None)
         return resp.choices[0].message.content or ""
+
+    def _log_usage(
+        self, *, ok: bool, start: float, usage: dict[str, int | None] | None, error: str | None
+    ) -> None:
+        """Append a per-call usage record; never lets a logging failure break the call."""
+        latency_ms = (time.monotonic() - start) * 1000.0
+        try:
+            from core.llm.usage_log import record_usage
+
+            record_usage(
+                tier=self.tier,
+                model=self.model,
+                ok=ok,
+                latency_ms=latency_ms,
+                usage=usage,
+                error=error,
+            )
+        except Exception:  # noqa: BLE001 - usage logging is best-effort, never fatal
+            pass
 
     def chat(self, messages: list[dict[str, str]]) -> str:
         """ChatFn entrypoint: plain text messages -> reply text."""
@@ -157,6 +191,26 @@ class OpenAIChatAdapter:
 
     # a bound method already satisfies the ChatFn / VisionChatFn Callable signatures
     __call__ = chat
+
+
+def _extract_usage(resp: object) -> dict[str, int | None] | None:
+    """Pull ``{prompt_tokens, completion_tokens, total_tokens}`` off an SDK response.
+
+    The ``openai`` SDK (and OpenAI-compat servers that follow its schema, including
+    SoCLaaS and Ollama's ``/v1`` endpoint) attach a ``usage`` object to the response;
+    some minimal/local servers omit it. Uses ``getattr`` throughout (not dict access) so
+    it works whether ``usage`` is a real SDK model object or a plain namespace, and
+    returns ``None`` — not a dict of ``None``s — when there is no usage object at all, so
+    callers can tell "no usage reported" from "usage reported but zero".
+    """
+    usage_obj = getattr(resp, "usage", None)
+    if usage_obj is None:
+        return None
+    return {
+        "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
+        "completion_tokens": getattr(usage_obj, "completion_tokens", None),
+        "total_tokens": getattr(usage_obj, "total_tokens", None),
+    }
 
 
 def _openai_attach_images(
