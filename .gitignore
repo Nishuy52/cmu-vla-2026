@@ -11,3 +11,6 @@ logs/
 .pytest_cache/
 reports/gate4_grounding_probe/*.jsonl
 .claude/worktrees/
+
+# cluster verify ros bags (large, keep scores only)
+reports/cluster_verify/**/captures/**/*.mcap
