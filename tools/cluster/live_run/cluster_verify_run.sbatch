@@ -3,7 +3,7 @@
 #SBATCH -p gpu
 #SBATCH --gpus=nv:1
 #SBATCH -x xgpe0,xgpe2,xgpe6
-#SBATCH -t 40
+#SBATCH -t 55
 #SBATCH -c 16
 #SBATCH --mem=48G
 #SBATCH -o /home/c/cyuhsin/verify_run_%j.out
