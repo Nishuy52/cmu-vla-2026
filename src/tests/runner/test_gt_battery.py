@@ -1382,3 +1382,100 @@ def test_if_rubric_geometry_goto_goal_clears_own_anchor_footprint():
     assert (gx, gy) != (3.0, 0.0)
     # Approached from due south -> pushed onto the bench's south edge.
     assert gy < 0.0
+
+
+# --------------------------------------------------------------------------- issue #81:
+# offline withhold-gate parity (budget_frac/forced_assembly hooks)
+
+
+def _relaxable_gt_scene():
+    """A GTScene where "the lamp near the bench" resolves only by dropping the relation
+    clause (a lamp exists, no bench does) -- a provisional terminal grounding, mirroring
+    ``tests/heads/test_if_explore_ungrounded.py::_relaxable_scene`` at the gt_battery
+    (fully-observed, n_obs=3) layer."""
+    from core.perception.scene_index import BasicSceneIndex
+
+    gt = _synthetic_gt_scene(
+        [
+            ("table", -4.0, 0.0, 0.4, 1.0, 1.0, 0.8),  # leg 0 anchor
+            ("lamp", 6.0, 0.0, 0.3, 0.4, 0.4, 0.4),  # leg 1 / terminal anchor (no bench)
+        ],
+        scene_name="syn81relax",
+    )
+    return gt, BasicSceneIndex(gt.instances)
+
+
+_RELAXABLE_TEXT = "Go to the table and then go to the lamp near the bench."
+
+
+def test_run_instruction_head_commits_provisional_terminal_by_default():
+    """Byte-preservation: with ``enable_withhold_gates`` left at its default (False), the
+    offline battery's ``InstructionHead`` gets ``budget_frac=None``, so H4c's
+    ``_commit_forced()`` defaults True and a provisional terminal commits immediately —
+    exactly today's (pre-#81) behaviour, unchanged by this fix."""
+    gt, idx = _relaxable_gt_scene()
+    head, _io, _plan = GB._run_instruction_head(
+        _RELAXABLE_TEXT, gt, idx, start_xy=(-4.0, 0.0), max_build_ticks=GB._IF_MAX_BUILD_TICKS,
+    )
+    assert head._legs[-1].provisional, "test setup sanity: the terminal must be provisional"
+    assert head._driven_prefix == 2, "unhooked H4c must commit the provisional terminal"
+
+
+def test_run_instruction_head_withholds_provisional_terminal_when_gates_enabled():
+    """Issue #81 acceptance: with ``enable_withhold_gates=True`` the offline battery wires
+    the SAME kind of budget_frac/forced_assembly hooks the live adapter wires (a real
+    ``BudgetState`` keyed to the drive's own clock), so H4c's withhold gate fires offline
+    exactly as it does live — the provisional terminal is held back from the committed
+    prefix while budget remains fresh, instead of silently committing (the bug this issue
+    tracks)."""
+    gt, idx = _relaxable_gt_scene()
+    head, _io, _plan = GB._run_instruction_head(
+        _RELAXABLE_TEXT, gt, idx, start_xy=(-4.0, 0.0), max_build_ticks=GB._IF_MAX_BUILD_TICKS,
+        enable_withhold_gates=True,
+    )
+    assert head._legs[-1].provisional, "test setup sanity: the terminal must be provisional"
+    assert head._driven_prefix == 1, (
+        "H4c must withhold the provisional terminal offline once the hooks are wired "
+        "(driven_prefix should stop at the grounded, non-provisional leg 0)"
+    )
+
+
+def test_drive_if_trajectory_stops_short_of_withheld_provisional_terminal():
+    """Same acceptance at the DRIVEN-trajectory level (what the rubric actually scores):
+    with the gates enabled the driven path never reaches the withheld terminal anchor."""
+    from core.perception.scene_index import BasicSceneIndex
+
+    gt, idx = _relaxable_gt_scene()
+
+    driven_off = GB._drive_if_trajectory(
+        gt=gt, idx=idx, text=_RELAXABLE_TEXT, start_xy=(-4.0, 0.0),
+    )
+    driven_on = GB._drive_if_trajectory(
+        gt=gt, idx=idx, text=_RELAXABLE_TEXT, start_xy=(-4.0, 0.0), enable_withhold_gates=True,
+    )
+
+    lamp_xy = np.array([6.0, 0.0])
+    # Default: the provisional terminal commits, so the driven path reaches near the lamp.
+    assert np.min(np.linalg.norm(driven_off[:, :2] - lamp_xy, axis=1)) < 1.0
+    # Gated: the terminal is withheld, so the driven path stops at leg 0 (the table) and
+    # never approaches the lamp.
+    assert np.min(np.linalg.norm(driven_on[:, :2] - lamp_xy, axis=1)) > 1.0
+
+
+def test_offline_budget_hooks_track_a_real_budget_state():
+    """``_offline_budget_hooks`` reuses the live ``core.fsm.budget.BudgetState`` type
+    (not a new mock) keyed to the supplied clock: ``budget_frac`` rises with elapsed time
+    and ``forced_assembly`` flips True once the T-90 gate is crossed."""
+    from core.interfaces import FORCED_ASSEMBLY_S, QUESTION_BUDGET_S
+
+    clk = GB.FakeClock(0.0)
+    budget_frac, forced_assembly = GB._offline_budget_hooks(clk)
+
+    assert budget_frac() == 0.0
+    assert forced_assembly() is False
+
+    # BudgetState's own default forced-assembly gate (core.interfaces.FORCED_ASSEMBLY_S) --
+    # _offline_budget_hooks does not override it, so this is what actually fires here.
+    clk.advance(FORCED_ASSEMBLY_S)
+    assert forced_assembly() is True
+    assert budget_frac() == pytest.approx(FORCED_ASSEMBLY_S / QUESTION_BUDGET_S)

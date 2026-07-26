@@ -36,13 +36,14 @@ from dataclasses import asdict, dataclass, field
 from datetime import date
 from itertools import product
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 
+from core.fsm.budget import BudgetState
 from core.groundtruth import scoring as S
 from core.groundtruth.loader import GTScene, load_scene
-from core.interfaces import QType, TerrainPatch, WaypointCmd
+from core.interfaces import QType, QUESTION_BUDGET_S, TerrainPatch, WaypointCmd
 from core.mocks.mock_io import FakeClock, MockRobotIO
 from core.mocks.synthetic_scene import (
     FLOOR_SPACING,
@@ -527,6 +528,34 @@ def _scene_room_bounds(
 _IF_MAX_BUILD_TICKS = 12  # ticks to let the instruction head ground legs + plan the route
 
 
+def _offline_budget_hooks(clock: FakeClock) -> tuple[Callable[[], float], Callable[[], bool]]:
+    """Faithful ``budget_frac``/``forced_assembly`` closures over a real
+    :class:`~core.fsm.budget.BudgetState`, keyed to the SAME drive clock the battery ticks
+    (issue #81 — parity with ``ros_adapter.adapter_node._build_controller_callables``'s
+    ``_budget_frac``/``_forced_assembly``, which do the identical elapsed/QUESTION_BUDGET_S
+    and ``BudgetState.forced_assembly`` reads over the live controller's budget).
+
+    Reuses the live ``BudgetState`` type rather than a new mock (per the issue's ask) so the
+    offline battery's ``InstructionHead.budget_frac``/``forced_assembly`` hooks see exactly
+    the same clock-driven signal the live adapter wires -- the head's gate LOGIC
+    (``_commit_forced``/``_forced_assembly_reached``/``_clamp_gated_prefix_len``/
+    ``_obs_gated_prefix_len``) is untouched; only the hooks that starved it offline are
+    supplied. Latches the budget at ``clock``'s current time (mirrors
+    ``QuestionController._intake``'s ``budget.latch(t_received)``).
+    """
+    budget = BudgetState(clock)
+    budget.latch(clock.now())
+
+    def _budget_frac() -> float:
+        frac = budget.elapsed() / QUESTION_BUDGET_S
+        return max(0.0, min(1.0, frac))
+
+    def _forced_assembly() -> bool:
+        return bool(budget.forced_assembly)
+
+    return _budget_frac, _forced_assembly
+
+
 def _drive_if_path(
     text: str,
     gt: GTScene,
@@ -623,9 +652,23 @@ def _run_instruction_head(
     wall_cells: set[tuple[int, int]] | None = None,
     room_bounds: tuple[float, float, float, float] | None = None,
     carved_cells: set[tuple[int, int]] | None = None,
+    enable_withhold_gates: bool = False,
 ):
     """Build a scene mirror + MockRobotIO and tick the InstructionHead until its route
-    firms up. Returns ``(head, io, plan)`` (head is None when the question isn't IF)."""
+    firms up. Returns ``(head, io, plan)`` (head is None when the question isn't IF).
+
+    ``enable_withhold_gates`` (issue #81): when True, wires the SAME
+    ``budget_frac``/``forced_assembly`` hooks the live adapter wires
+    (:func:`_offline_budget_hooks`, keyed to this call's own drive clock) into the
+    :class:`~core.heads.instruction.InstructionHead`, so the H4c provisional-terminal
+    and Stage 3 goal-clamp-credibility withhold gates (both gated on
+    ``InstructionHead._commit_forced``) fire offline exactly as they do live, instead
+    of being starved by the ``None`` defaults. Default False PRESERVES today's battery
+    numbers byte-for-byte (this is the existing, deliberate byte-preservation default —
+    see the module docstring on ``InstructionHead._clamp_gated_prefix_len`` — flipping it
+    is a separately-approvable choice, not an unconditional fix, per the measured
+    regression recorded against issue #81/#77's Gate 3 probe).
+    """
     from core.parsing.regex_tier import parse_regex
     from core.heads.instruction import InstructionHead
 
@@ -644,7 +687,11 @@ def _run_instruction_head(
         start_y = float(min(r.aabb_min[1] for r in gt.instances)) + 0.5
     io = MockRobotIO(sc, clk, start_x=start_x, start_y=start_y)
 
-    head = InstructionHead(plan=plan)
+    head_kwargs: dict = {}
+    if enable_withhold_gates:
+        budget_frac, forced_assembly = _offline_budget_hooks(clk)
+        head_kwargs = {"budget_frac": budget_frac, "forced_assembly": forced_assembly}
+    head = InstructionHead(plan=plan, **head_kwargs)
     for _ in range(max_build_ticks):
         head.advance(io, idx)
         clk.advance(1.0)
@@ -663,6 +710,7 @@ def _drive_if_trajectory(
     wall_cells: set[tuple[int, int]] | None = None,
     room_bounds: tuple[float, float, float, float] | None = None,
     carved_cells: set[tuple[int, int]] | None = None,
+    enable_withhold_gates: bool = False,
 ) -> np.ndarray:
     """Simulate the DRIVEN trajectory (IF-F2), returning the pose stream as (N, 2).
 
@@ -695,10 +743,21 @@ def _drive_if_trajectory(
     route commits on tick 0, so we fall straight through to driving the follower directly
     (microseconds/step). When exploration/provisional-withholding is in play the head keeps
     ticking until the route is whole, which is exactly the general-case fidelity F2 wants.
+
+    ``enable_withhold_gates`` (issue #81): forwarded to :func:`_run_instruction_head` so the
+    head's ``budget_frac``/``forced_assembly`` hooks are wired to a real ``BudgetState``
+    keyed to this drive's own clock (see :func:`_offline_budget_hooks`) instead of the
+    starved ``None`` default. That same clock is also advanced here on every re-tick below
+    (each re-tick is exactly one of the bounded, real ``head.advance`` steps the H4c/Gate-3
+    commit decision re-evaluates against), so time-pressure relief (the T-90
+    forced-assembly gate) can still fire during a long drive, not just during the build
+    loop. Default False leaves the clock untouched and the head unhooked -- byte-identical
+    to pre-#81 behaviour.
     """
     head, io, plan = _run_instruction_head(
         text, gt, idx, start_xy=start_xy, max_build_ticks=max_build_ticks,
         wall_cells=wall_cells, room_bounds=room_bounds, carved_cells=carved_cells,
+        enable_withhold_gates=enable_withhold_gates,
     )
     if head is None:
         return np.empty((0, 2), dtype=float)
@@ -739,6 +798,8 @@ def _drive_if_trajectory(
         if route_growing:
             head_reticks_left -= 1
             io.set_pose(pose[0], pose[1])
+            if enable_withhold_gates:
+                io.raw_clock().advance(1.0)
             head.advance(io, idx)
             new_follower = head._follower
             if new_follower is not None and new_follower.path:
@@ -1508,8 +1569,17 @@ def score_scene(
     walls: bool = True,
     unity_scenes_ros2_root: os.PathLike | str | None = None,
     tol: float | None = None,
+    enable_withhold_gates: bool = False,
 ) -> list[GTQuestionScore]:
     """Score every question of one GT scene.
+
+    ``enable_withhold_gates`` (issue #81): forwarded to :func:`_drive_if_trajectory` --
+    wires the ``InstructionHead``'s ``budget_frac``/``forced_assembly`` hooks to a real
+    clock-driven ``BudgetState`` so the H4c provisional-terminal and Stage 3 goal-clamp
+    withhold gates fire offline the same way they do live. Default False preserves
+    today's battery numbers (measured to regress when armed unconditionally against at
+    least one training question -- see the issue thread); True is the parity-toggle for
+    an explicit, separately-approved comparison run.
 
     ``tol`` (issue #70): the leg-arrival tolerance passed to
     :func:`core.groundtruth.scoring.score_instruction_rubric`. ``None`` (the
@@ -1658,6 +1728,7 @@ def score_scene(
         driven = _drive_if_trajectory(
             text, gt, idx, start_xy=spawn_xy, wall_cells=wall_cells,
             room_bounds=room_bounds, carved_cells=carved_cells,
+            enable_withhold_gates=enable_withhold_gates,
         )
         leg_goals, corridor_gates, avoid_caps, leg_instance_ids, leg_instance_aabbs = (
             _if_rubric_geometry(text, gt, idx, start_xy=spawn_xy)
@@ -1892,8 +1963,12 @@ def run_gt_battery(
     unity_scenes_ros2_root: os.PathLike | str | None = None,
     tol: float | None = None,
     derive_tol: bool = False,
+    enable_withhold_gates: bool = False,
 ) -> tuple[list[GTQuestionScore], list[str]]:
     """Score every question whose scene folder is present under ``unity_root``.
+
+    ``enable_withhold_gates`` (issue #81): forwarded to every :func:`score_scene` call --
+    see that function's docstring. Default False (byte-identical to pre-#81 numbers).
 
     ``tol`` (issue #70): explicit leg-arrival tolerance, forwarded to every
     :func:`score_scene` call. ``derive_tol`` (issue #70, mutually exclusive with
@@ -1954,6 +2029,7 @@ def run_gt_battery(
                 walls=walls,
                 unity_scenes_ros2_root=unity_scenes_ros2_root,
                 tol=tol,
+                enable_withhold_gates=enable_withhold_gates,
             )
         )
     return scores, missing
@@ -2354,6 +2430,15 @@ def main(argv: list[str] | None = None) -> int:
              "p95 fit residual across scenes (a cheap no-driving pre-pass), "
              "instead of the frozen nominal core.groundtruth.scoring.LEG_ARRIVAL_TOL_M.",
     )
+    ap.add_argument(
+        "--enable-withhold-gates", action="store_true",
+        help="issue #81: wire real budget_frac/forced_assembly hooks into the offline "
+             "InstructionHead so the H4c provisional-terminal and Stage 3 goal-clamp "
+             "withhold gates fire offline the same way they do live. OFF by default "
+             "(preserves today's battery numbers) -- a separately-approved parity "
+             "comparison toggle, measured to regress at least one training question "
+             "(the arabic_room q0 Gate 3 clamp) when armed unconditionally.",
+    )
     args = ap.parse_args(argv)
 
     scenes = [s.strip() for s in args.scenes.split(",")] if args.scenes else None
@@ -2370,6 +2455,7 @@ def main(argv: list[str] | None = None) -> int:
         walls=not args.no_walls,
         unity_scenes_ros2_root=args.unity_scenes_ros2_root,
         derive_tol=args.derive_tol,
+        enable_withhold_gates=args.enable_withhold_gates,
     )
     if not scores:
         print(f"gt_battery: no scenes found under {args.groundtruth} (missing={missing})")
