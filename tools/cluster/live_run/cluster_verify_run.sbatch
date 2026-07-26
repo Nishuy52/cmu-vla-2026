@@ -3,7 +3,7 @@
 #SBATCH -p gpu
 #SBATCH --gpus=nv:1
 #SBATCH -x xgpe0,xgpe2,xgpe6
-#SBATCH -t 55
+#SBATCH -t 30
 #SBATCH -c 16
 #SBATCH --mem=48G
 #SBATCH -o /home/c/cyuhsin/verify_run_%j.out
@@ -161,7 +161,10 @@ grep -m1 -iE "ladder configured" ~/verify_run_${J}_adapter.log || true
 # messages, which is exactly what score_live_run's completeness check expects.
 BAGDIR=~/verify_run_${J}_captures/$SCENE/$QDIR
 mkdir -p "$BAGDIR"; rm -rf "$BAGDIR/bag"  # ros2 bag record refuses an existing dir
-ros2 bag record -o "$BAGDIR/bag" \
+# setsid so BAG_PID is a process-group leader — lets us signal the recorder AND its
+# rosbag2 child as a group at stop time (a bare SIGINT to the `ros2` wrapper does not
+# reliably reach the child, which is why `wait` hung the whole job to the SLURM wall).
+setsid ros2 bag record -o "$BAGDIR/bag" \
   /state_estimation /challenge_question /numerical_response /selected_object_marker \
   > ~/verify_run_${J}_bag.log 2>&1 &
 BAG_PID=$!
@@ -175,9 +178,13 @@ echo "question publishing; monitor up (deadline 780s)"
 python3 ~/live_monitor.py 780 2>&1
 MONITOR_RC=$?
 
-# stop the recorder cleanly (SIGINT lets rosbag2 finalize the mcap) before teardown
-kill -INT $BAG_PID 2>/dev/null; wait $BAG_PID 2>/dev/null
-echo "== bag capture"; ros2 bag info "$BAGDIR/bag" 2>&1 | grep -E "Messages:|Topic:|Duration:" || echo "BAG: no info (recorder may have failed)"
+# Stop the recorder — SIGINT the whole process group so rosbag2 finalizes the mcap,
+# but BOUNDED so it can never hang the job (the old `wait $BAG_PID` blocked forever
+# when the child didn't finalize -> 25min hang -> SLURM wall -> truncated bag).
+kill -INT -"$BAG_PID" 2>/dev/null || kill -INT "$BAG_PID" 2>/dev/null
+for i in $(seq 1 45); do kill -0 "$BAG_PID" 2>/dev/null || break; sleep 1; done
+kill -KILL -"$BAG_PID" 2>/dev/null; kill -KILL "$BAG_PID" 2>/dev/null
+echo "== bag capture"; timeout 30 ros2 bag info "$BAGDIR/bag" 2>&1 | grep -E "Messages:|Topic:|Duration:" || echo "BAG: no clean info (harvest reindex+convert will recover)"
 
 # ---------- per-issue verdict summary ----------
 # live_monitor only latches numerical/marker answers; an IF answer is a waypoint.
