@@ -37,6 +37,7 @@ from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.llm.timeout import DEFAULT_CALL_TIMEOUT_S, wrap_call_timeout
 from core.parsing.vocab import PHRASES, SINGLE_NOUNS
 from core.perception.detector import DetectorFn, refresh_prompt
+from core.perception.scene_index import dump_instance_index
 from core.plan_schema import Plan
 
 from core.heads.explore_step import (
@@ -225,6 +226,19 @@ def build_callables(
         fuse_hint=fuse_hint,
         detector=detector,
     )
+    # Issue #84 "prompt dead zone": GroundingDinoDetector is constructed at boot with no
+    # question latched yet (question_nouns=(), vocab_nouns=()), so its prompt stays "" and
+    # every __call__ short-circuits to zero detections until HeadState.bind() first fires
+    # on plan latch (core.heads.factory.HeadState.bind). Parsing (LLM ladder or regex) can
+    # take real wall-clock time, and exploration/perception keyframes tick throughout that
+    # window — so without this, every keyframe before latch runs the detector blind, even
+    # though the standing 114-noun vocab (:data:`_STANDING_VOCAB_NOUNS`) is known up front
+    # and does not depend on the question at all. Priming it here, immediately at
+    # build_callables() time (before any plan exists), closes that window: the detector
+    # grounds on the standing vocab from the very first keyframe, and `bind()` still fully
+    # rebuilds the prompt (question nouns first, standing vocab after) the moment the plan
+    # latches, same as before this fix.
+    refresh_prompt(detector, (), _STANDING_VOCAB_NOUNS)
     parse_fn = parse if parse is not None else _default_parse
 
     def _explore(io: RobotIO, plan, world: WorldView) -> None:
@@ -264,13 +278,18 @@ def _final_answer(state: HeadState):
     if state.plan is None:
         return None
     qt = state.plan.qtype
+    answer = None
     if qt is QType.NUMERICAL and state.numerical is not None:
-        return state.numerical.answer()
-    if qt is QType.OBJECT_REFERENCE and state.object_ref is not None:
-        return state.object_ref.verify()
-    if qt is QType.INSTRUCTION_FOLLOWING and state.instruction is not None:
-        return state.instruction.terminal_waypoint()
-    return None
+        answer = state.numerical.answer()
+    elif qt is QType.OBJECT_REFERENCE and state.object_ref is not None:
+        answer = state.object_ref.verify()
+    elif qt is QType.INSTRUCTION_FOLLOWING and state.instruction is not None:
+        answer = state.instruction.terminal_waypoint()
+    if answer is not None and state.scene is not None:
+        # Opt-in live diagnostics (issues #84/#89): snapshot the instance index at
+        # answer time. No-op unless VLA_INSTANCE_DUMP_PATH is set.
+        dump_instance_index(state.scene, tag="answer_time")
+    return answer
 
 
 def _assemble_worldview(state: HeadState) -> WorldView:

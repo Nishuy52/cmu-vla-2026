@@ -132,6 +132,49 @@ def test_associate_greedy_nearest_pairing():
     assert all(r.n_obs == 2 for r in idx.all_instances())
 
 
+def test_associate_merges_across_label_variant_not_in_scene_index_synonym_map():
+    """Issue #84 item 3: 'refridgerator' is only bridged to 'refrigerator' through
+    core.parsing.vocab.NOUN_ALIASES (consulted by the tracker's canonical_for_match) --
+    NOT through scene_index's own narrower _SYNONYM_MAP. Before the #89/#84 merge_into
+    fix, associate() would correctly gate this pair as label-compatible (labels_compatible
+    checks pass) but then hand off to index.add(), whose independent
+    _find_merge_target re-derives label equality from scene_index.normalize_label ALONE
+    -- missing the NOUN_ALIASES bridge -- so it disagreed and spawned a duplicate
+    n_obs=1 ghost labelled 'refridgerator' instead of fusing into the existing
+    'refrigerator' instance. Regression guard: must fuse into ONE instance."""
+    idx = BasicSceneIndex()
+    fridge = _front_det("refrigerator")
+    associate([(fridge, _fuse(fridge, _box_cloud(3.0, 0.0, 0.5, seed=1), _odom()))], idx)
+    variant = _front_det("refridgerator")
+    fused = _fuse(variant, _box_cloud(3.05, 0.0, 0.5, seed=2), _odom())
+    associate([(variant, fused)], idx)
+    assert len(idx.all_instances()) == 1
+    assert idx.all_instances()[0].n_obs == 2
+
+
+def test_associate_merges_repeated_sightings_despite_jitter_defeating_iou():
+    """Issue #89 repro: the tracker's own centroid-distance gate (0.75 m) can — and,
+    under live pose jitter, routinely does — match a detection to an instance whose
+    single-frame AABBs do NOT overlap (small objects' per-frame boxes are tiny, so even
+    a sub-gate jitter easily drops IoU to 0). Before the merge_into fix, associate()'s
+    own matched decision was silently overridden by index.add()'s independent, much
+    stricter IoU>0.3 re-check, splitting one real object into a new instance on every
+    jittered keyframe. Simulates 5 "sightings" of the same physical chair, each a tiny
+    tight point cluster (so AABBs from consecutive sightings never overlap) but all
+    within the association centroid gate of each other."""
+    idx = BasicSceneIndex()
+    centers = [(3.00, 0.00), (3.05, 0.30), (3.10, -0.25), (2.95, 0.35), (3.02, -0.30)]
+    for i, (cx, cy) in enumerate(centers):
+        det = _front_det("chair")
+        # half=0.02 -> box width 0.04 m; consecutive centers are >0.2 m apart, so
+        # consecutive AABBs never overlap (IoU == 0) even though every centroid stays
+        # well inside the 0.75 m association gate of the very first sighting.
+        fused = _fuse(det, _box_cloud(cx, cy, 0.5, half=0.02, seed=i), _odom())
+        associate([(det, fused)], idx)
+    assert len(idx.all_instances()) == 1  # one physical object, not 5 ghosts
+    assert idx.all_instances()[0].n_obs == len(centers)
+
+
 # ------------------------------------------------------------------ pipeline: 3 frames
 
 
@@ -252,6 +295,55 @@ def test_pipeline_smoke_on_mock_robot_io():
     assert len(pipe.index.all_instances()) == len(set(
         r.instance_id for r in pipe.index.all_instances()
     ))
+
+
+# ------------------------------------------------------------------ #84/#89 instance dump
+
+
+def test_pipeline_dumps_instances_periodically_when_env_set(monkeypatch, tmp_path):
+    from core.perception.scene_index import ENV_INSTANCE_DUMP_PATH
+
+    out = tmp_path / "instances.jsonl"
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, str(out))
+    det = _front_det()
+    pipe = PerceptionPipeline(FakeDetector([det]), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    scan = LidarScan(t=0.0, points=_box_cloud(3.0, 0.0, 0.5))
+    pipe.process(PanoFrame(0.0, img, _odom(0, 0)), scan)
+    assert out.exists()
+    assert len(out.read_text().strip().splitlines()) == 1
+
+
+def test_pipeline_does_not_dump_without_env_var(monkeypatch, tmp_path):
+    from core.perception.scene_index import ENV_INSTANCE_DUMP_PATH
+
+    monkeypatch.delenv(ENV_INSTANCE_DUMP_PATH, raising=False)
+    det = _front_det()
+    pipe = PerceptionPipeline(FakeDetector([det]), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    scan = LidarScan(t=0.0, points=_box_cloud(3.0, 0.0, 0.5))
+    pipe.process(PanoFrame(0.0, img, _odom(0, 0)), scan)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_pipeline_dump_is_throttled_by_interval(monkeypatch, tmp_path):
+    from core.perception.scene_index import (
+        ENV_INSTANCE_DUMP_INTERVAL_S,
+        ENV_INSTANCE_DUMP_PATH,
+    )
+
+    out = tmp_path / "instances.jsonl"
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, str(out))
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_INTERVAL_S, "10.0")
+    det = _front_det()
+    pipe = PerceptionPipeline(FakeDetector([det]), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    scan = LidarScan(t=0.0, points=_box_cloud(3.0, 0.0, 0.5))
+    pipe.process(PanoFrame(0.0, img, _odom(0, 0)), scan)
+    pipe.process(PanoFrame(1.0, img, _odom(0.6, 0)), scan)  # t=1.0, well under 10s interval
+    assert len(out.read_text().strip().splitlines()) == 1  # second tick throttled
+    pipe.process(PanoFrame(11.0, img, _odom(1.2, 0)), scan)  # t=11.0, interval elapsed
+    assert len(out.read_text().strip().splitlines()) == 2
 
 
 def test_pipeline_empty_detections_noop():

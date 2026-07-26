@@ -27,6 +27,12 @@ from core.perception.detector import (
     GDINO_BACKOFF_DEGRADE_N,
     GDINO_MODEL_ID,
     GDINO_REQUIRED_INSTALLS,
+    ELIGIBLE,
+    INELIGIBLE_BOTH,
+    INELIGIBLE_MALFORMED,
+    INELIGIBLE_N_OBS,
+    INELIGIBLE_SCORE,
+    answer_eligibility_reason,
     answer_min_obs,
     answer_min_score,
     is_answer_eligible,
@@ -843,6 +849,47 @@ def test_answer_min_obs_malformed_env_falls_back_to_default(monkeypatch):
 def test_answer_min_score_malformed_env_falls_back_to_default(monkeypatch):
     monkeypatch.setenv(ENV_GDINO_ANSWER_MIN_SCORE, "not-a-number")
     assert answer_min_score() == pytest.approx(DEFAULT_GDINO_ANSWER_MIN_SCORE)
+
+
+# ------------------------------------------------------------------ answer_eligibility_reason
+# (issue #84 gate observability: the offline battery's GT mocks are born n_obs=3, always
+# clearing both floors, so this breakdown is never exercised end-to-end offline -- these
+# tests exercise it directly at the unit level, covering every branch.)
+
+
+def test_eligibility_reason_eligible():
+    assert answer_eligibility_reason(_Rec(n_obs=2, score=0.30)) == ELIGIBLE
+    assert is_answer_eligible(_Rec(n_obs=2, score=0.30)) is True
+
+
+def test_eligibility_reason_n_obs_only():
+    assert answer_eligibility_reason(_Rec(n_obs=1, score=0.95)) == INELIGIBLE_N_OBS
+
+
+def test_eligibility_reason_score_only():
+    assert answer_eligibility_reason(_Rec(n_obs=5, score=0.29)) == INELIGIBLE_SCORE
+
+
+def test_eligibility_reason_both():
+    assert answer_eligibility_reason(_Rec(n_obs=1, score=0.1)) == INELIGIBLE_BOTH
+
+
+def test_eligibility_reason_malformed():
+    class _Bare:
+        pass
+
+    assert answer_eligibility_reason(_Bare()) == INELIGIBLE_MALFORMED
+
+
+def test_is_answer_eligible_logs_rejection_reason(monkeypatch, caplog):
+    """Issue #84: a gate rejection is no longer a silent boolean -- it logs the
+    breakdown at DEBUG, so a live run's debug log shows WHY an instance lost the
+    answer."""
+    import logging
+
+    caplog.set_level(logging.DEBUG, logger="core.perception.detector")
+    assert is_answer_eligible(_Rec(n_obs=1, score=0.9)) is False
+    assert any("n_obs_below_floor" in r.message for r in caplog.records)
 
 
 # ------------------------------------------------------------------ run_caption_pass (issue #86)
