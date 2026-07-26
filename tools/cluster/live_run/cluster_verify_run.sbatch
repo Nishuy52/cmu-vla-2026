@@ -48,12 +48,17 @@ export CYCLONEDDS_URI='<CycloneDDS><Domain><General><Interfaces><NetworkInterfac
 echo "== verify-run $J on $(hostname) $(date +%T)  question: $QUESTION"
 
 # ---------- optional scene swap (restart-based: swap BEFORE Unity starts) ----------
-MODEL=$WS/src/base_autonomy/vehicle_simulator/mesh/unity/environment/Model.x86_64
+# Mirrors the proven laptop flow (tools/live_harness/scene_swap.sh): overlay-copy the
+# scene's whole tree (environment/ + map files) over the baked unity dir — no delete,
+# exactly like the docker-cp overlay.
+UNITY_DIR=$WS/src/base_autonomy/vehicle_simulator/mesh/unity
+MODEL=$UNITY_DIR/environment/Model.x86_64
 if [ -n "$SCENE_DIR" ]; then
   SWAP_MODEL=$(find "$SCENE_DIR" -maxdepth 3 -name 'Model.x86_64' | head -1)
   if [ -n "$SWAP_MODEL" ]; then
-    MODEL=$SWAP_MODEL
-    echo "SCENE: swapped-in $MODEL"
+    SCENE_ROOT=$(dirname "$(dirname "$SWAP_MODEL")")
+    rsync -a "$SCENE_ROOT/" "$UNITY_DIR/"
+    echo "SCENE: overlaid $SCENE_ROOT -> $UNITY_DIR"
   else
     echo "SCENE: no Model.x86_64 under $SCENE_DIR — using baked scene"
   fi
@@ -78,8 +83,8 @@ echo "stack launched; settling 45s"; sleep 45
 (ss -ltn 2>/dev/null || true) | grep -q ":10000" && echo "ENDPOINT: :10000 up" || echo "ENDPOINT: MISSING"
 
 # ---------- ollama (local LLM tier, issue #82 retest) ----------
-export OLLAMA_HOST=127.0.0.1:11434
-~/ollama serve > ~/verify_run_${J}_ollama.log 2>&1 &
+export OLLAMA_HOST=127.0.0.1:11434 OLLAMA_MODELS=~/ollama-models
+~/ollama/bin/ollama serve > ~/verify_run_${J}_ollama.log 2>&1 &
 OLLAMA_PID=$!
 for i in $(seq 1 30); do
   (ss -ltn 2>/dev/null || true) | grep -q ":11434" && break; sleep 1
