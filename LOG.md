@@ -1747,3 +1747,32 @@ armed to ~18:48; exits if SSH ControlMaster expires (human re-auth needed).
 **Cold-pickup:** reports/autonomous_run_2026-07-26/STATUS.md. If tunnel dies before
 697761 runs, the live-scoring matrix (office/nume/obje/arabic) + #82/#77/#85 live
 checks are the outstanding cluster work; host lane needs nothing further.
+
+## 2026-07-26 (session 24 cont.) — timeout root cause fixed; batch harness; runs chained
+
+- **Root cause of every verify-run timeout found and fixed** (`46c96ba`): NOT slow
+  setup (adapter was ready in 90 s). The post-monitor `kill -INT $BAG_PID; wait
+  $BAG_PID` I added with bag capture **hung** — SIGINT to the `ros2` wrapper never
+  reached the rosbag2 child, so `wait` blocked ~25 min to the SLURM wall, killing
+  the job before the verdict block and truncating the mcap. Fix: `setsid` the
+  recorder (group leader), group-SIGINT + bounded 45 s finalize + escalating KILL,
+  `timeout` on `ros2 bag info`. Wall reverted 55 -> 30 min (runs take ~16).
+  The earlier -t 40/55 bumps were treating the wrong cause.
+- **LLM tiers were never actually running**: 698278's usage log (new) showed both
+  api(SoCLaaS) and local(ollama) failing at 1.6 ms with "openai SDK not installed".
+  Installed `openai 2.48.0` into the cluster `~/venv-gpu`. Also: the compute node
+  cannot reach the SoCLaaS gateway (probe HTTP 000; login node gets 200) — so
+  ollama-local is the tier expected to serve on GPU nodes. Live scores so far
+  (697761, 698278) are both IF-rubric 0.000 with tier=regex, i.e. no LLM grounding
+  ever happened — that, not #83, is the current live-score blocker.
+- **Batch harness added** (`31b2b73`, `a2edd57`): one allocation runs a whole
+  (scene, qdir, question) matrix with a clean relaunch + scoreable bag per
+  question; failure of one question is logged and the loop continues.
+  `AFTER=<jobid>` chains a run behind a queued one (`--dependency=afterany`).
+- **Queue discipline (user rule):** never scancel+resubmit to apply a fix — it
+  loses the place in the ~12 h nv queue. Edit runtime-loaded files in place
+  (`~/vla/src`, live_monitor.py, question_pub.py) or `scontrol update`.
+- In flight: **698999** (single livingroom_1 inst, both fixes — validates the
+  pipeline) and **699009** (batch, 10 questions across livingroom_1 + office_1,
+  chained afterany:698999). Est start 27 Jul ~11:48. Outputs persist cluster-side
+  regardless of the SSH tunnel; harvest = `harvest_verify.sh <job>`.
