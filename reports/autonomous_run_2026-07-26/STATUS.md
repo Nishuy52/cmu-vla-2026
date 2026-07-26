@@ -13,6 +13,28 @@ Cold-pickup state for the 12h autonomous plan (user-approved). Update at every m
 - Commit/push per milestone; keep host lane going if tunnel drops.
 - SSH ControlMaster re-auth is HUMAN-ONLY — if it expires, cluster lane pauses, host lane continues.
 
+## Cluster queue (serial) — STATE 26 Jul 16:10
+FIRST LIVE SCORE OBTAINED: 697761 livingroom_1 inst IF-rubric = **0.000** (offline
+0.744), legs 0/2, frechet 4.26m, coverage 0. #83 cured starvation (FSM explores/
+answers/drives full route) but the route scores 0 — wrong grounding/routing. Parse
+fell to tier=regex (SoCLaaS+ollama both configured, neither served; 697761 = old
+src, no usage log). Bag SLURM-killed@25min, recovered via `ros2 bag reindex` +
+`ros2 bag convert`. Score at reports/cluster_verify/697761/captures/scores.md.
+
+ACTIVE: job **698278** livingroom_1 inst — PENDING, backfill est 2026-07-27T18:18
+(~26h, could backfill earlier). Poller bl8jorhqp (safety net). Runs CURRENT main src
+(all fixes) + fixed -t 40 + VLA_RAW_DETECTION_DUMP_PATH + VLA_LLM_USAGE_LOG +
+compute-node SoCLaaS gateway probe. This is THE run that validates #84 raw dump /
+#89 folding / SoCLaaS-serving / usage log / clean scoreable bag.
+HARVEST when it runs (tunnel-independent — outputs persist on cluster ~/):
+  source .venv/bin/activate && tools/cluster/live_run/harvest_verify.sh 698278
+  (if bag truncated: ssh reindex+convert per 697761 procedure in LOG)
+Check first: `SOCLAAS: compute-node gateway probe HTTP <code>` in the .out, and
+verify_run_698278_usage.jsonl — tells us WHY parse fell to regex.
+
+Remaining after 698278: office_1 inst, livingroom/office nume+obje, arabic (#85).
+All serial (shared udocker unity dir). Queue is congested — each is a long wait.
+
 ## Cluster queue (serial)
 1. [PENDING ~1h45m+, backfill est 18:48 — job 697761 livingroom_1 inst — sparse poller bcjlvzfqz]
 2. [ ] office_1 inst
