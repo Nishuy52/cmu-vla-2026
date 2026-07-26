@@ -105,6 +105,19 @@ export VLA_CAMERA_COMPRESSED=1
 export VLA_EXPLORE_DEBUG_DIR=~/verify_run_${J}_debug
 mkdir -p "$VLA_EXPLORE_DEBUG_DIR"
 export VLA_INSTANCE_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/instance_index.jsonl
+# SoCLaaS primary tier (challenge brief allows online APIs; key issued via
+# soclaas-portal, lives only in ~/.bashrc — extracted here, never in the repo).
+# Ladder degrades primary -> local -> regex if the gateway is unreachable.
+eval "$(grep -h 'export SOCLAAS_API_KEY' ~/.bashrc | head -1)" || true
+if [ -n "${SOCLAAS_API_KEY:-}" ]; then
+  export VLA_LLM_PRIMARY_KIND=openai
+  export VLA_LLM_PRIMARY_BASE_URL=https://soclaas-api.comp.nus.edu.sg/v1
+  export VLA_LLM_PRIMARY_MODEL=qwen3.6:35b
+  export VLA_LLM_PRIMARY_API_KEY_ENV=SOCLAAS_API_KEY
+  echo "SOCLAAS: primary tier enabled (qwen3.6:35b)"
+else
+  echo "SOCLAAS: no key in ~/.bashrc — primary tier off"
+fi
 # issue #82: local tier via ollama (same 3b model as the laptop plan for parity)
 export VLA_LLM_LOCAL_KIND=openai
 export VLA_LLM_LOCAL_BASE_URL=http://127.0.0.1:11434/v1
