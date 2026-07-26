@@ -26,6 +26,19 @@ from core.interfaces import LidarScan, TerrainPatch
 
 # --------------------------------------------------------------------------- tunables
 CELL_M: float = 0.10  # grid resolution, metres/cell
+#: issue #90 -- snap epsilon added before every world->cell floor so that
+#: coordinates sitting on (or one float32 ULP below) an exact cell boundary
+#: floor consistently, instead of a stray-low bit flipping the result down by
+#: one cell. `TerrainPatch.points` is float32 by contract (matches the real
+#: ROS terrain message dtype); float32(n * CELL_M) rounds DOWN by one ULP for
+#: many n (e.g. float32(0.7) == 0.699999988...), so an unguarded
+#: `floor((x - origin) / cell_m)` collides two distinct lattice
+#: rows/columns into one cell and leaves the other permanently UNKNOWN (see
+#: docs/upstream_notes.md and the issue for the full repro). 1e-6 m is far
+#: below both float32/float64 rounding noise at these coordinate magnitudes
+#: and the smallest real-world coordinate difference we'd ever want to treat
+#: as "a different cell", so it cannot merge genuinely distinct cells.
+LATTICE_EPS_M: float = 1e-6
 FREE_MAX: float = 0.15  # intensity < this -> FREE (matches TerrainPatch.FREE_MAX)
 OBSERVE_RADIUS_M: float = 8.0  # lidar footprint radius for the observed mask
 GROW_PAD_CELLS: int = 8  # extra ring of cells added when the grid must grow
@@ -51,6 +64,20 @@ GROUND_OFFSET_WARMUP_PATCHES: int = 5
 #: bypassing both the constant default and the runtime estimator (e.g. a rig
 #: whose exact mount height is known ahead of time). Unset by default.
 VEHICLE_SENSOR_HEIGHT_ENV_VAR: str = "VLA_OVERHEAD_VEHICLE_SENSOR_HEIGHT_M"
+
+
+def _lattice_floor(coord, origin: float, cell_m: float):
+    """floor((coord - origin) / cell_m), snapped by LATTICE_EPS_M (issue #90).
+
+    ``coord`` may be a Python float, a numpy scalar, or an ndarray; ``np.floor``
+    dispatches correctly on all three. Always computed in float64 (callers are
+    responsible for widening float32 inputs first) -- widening alone does not
+    fix the defect since the rounding already happened in float32, so this
+    also adds a small epsilon before flooring to snap coordinates that are
+    exactly on (or one float32 ULP below) a cell boundary to the intended
+    cell instead of the one below it.
+    """
+    return np.floor((coord - origin) / cell_m + LATTICE_EPS_M)
 
 
 def _env_vehicle_sensor_height_override() -> float | None:
@@ -163,8 +190,8 @@ class OccupancyGrid:
 
     def world_to_cell(self, x: float, y: float) -> tuple[int, int]:
         """(x, y) metres -> (row, col) integer index (may be out of current bounds)."""
-        col = int(np.floor((x - self.origin_x) / self.cell_m))
-        row = int(np.floor((y - self.origin_y) / self.cell_m))
+        col = int(_lattice_floor(x, self.origin_x, self.cell_m))
+        row = int(_lattice_floor(y, self.origin_y, self.cell_m))
         return row, col
 
     def cell_to_world(self, row: int, col: int) -> tuple[float, float]:
@@ -241,12 +268,12 @@ class OccupancyGrid:
         if vehicle_z is not None:
             self._gz_offset_vehicle_zs.append(float(vehicle_z))
             self._gz_offset_min_ground_z = min(self._gz_offset_min_ground_z, float(zs.min()))
-        cols = np.floor((xs - self.origin_x) / self.cell_m).astype(np.int64)
-        rows = np.floor((ys - self.origin_y) / self.cell_m).astype(np.int64)
+        cols = _lattice_floor(xs, self.origin_x, self.cell_m).astype(np.int64)
+        rows = _lattice_floor(ys, self.origin_y, self.cell_m).astype(np.int64)
         self._ensure_bounds(rows, cols)
         # Recompute indices post-growth (origin may have shifted).
-        cols = np.floor((xs - self.origin_x) / self.cell_m).astype(np.int64)
-        rows = np.floor((ys - self.origin_y) / self.cell_m).astype(np.int64)
+        cols = _lattice_floor(xs, self.origin_x, self.cell_m).astype(np.int64)
+        rows = _lattice_floor(ys, self.origin_y, self.cell_m).astype(np.int64)
 
         # Reduce to max intensity per unique cell before writing (order-independent).
         flat = rows * self.shape[1] + cols
@@ -328,11 +355,11 @@ class OccupancyGrid:
         if pts.size == 0:
             return
         xs, ys, zs = pts[:, 0], pts[:, 1], pts[:, 2]
-        cols = np.floor((xs - self.origin_x) / self.cell_m).astype(np.int64)
-        rows = np.floor((ys - self.origin_y) / self.cell_m).astype(np.int64)
+        cols = _lattice_floor(xs, self.origin_x, self.cell_m).astype(np.int64)
+        rows = _lattice_floor(ys, self.origin_y, self.cell_m).astype(np.int64)
         self._ensure_bounds(rows, cols)
-        cols = np.floor((xs - self.origin_x) / self.cell_m).astype(np.int64)
-        rows = np.floor((ys - self.origin_y) / self.cell_m).astype(np.int64)
+        cols = _lattice_floor(xs, self.origin_x, self.cell_m).astype(np.int64)
+        rows = _lattice_floor(ys, self.origin_y, self.cell_m).astype(np.int64)
 
         # Per-point local ground: terrain ground_z where known, else the fallback
         # (env override > runtime estimator once warmed > configured constant).
