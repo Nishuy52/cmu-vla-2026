@@ -119,14 +119,24 @@ export VLA_CAMERA_COMPRESSED=1
 export VLA_EXPLORE_DEBUG_DIR=~/verify_run_${J}_debug
 mkdir -p "$VLA_EXPLORE_DEBUG_DIR"
 export VLA_INSTANCE_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/instance_index.jsonl
+# issue #84: raw pre-gate detection dump (split "never proposed" vs "gated out")
+export VLA_RAW_DETECTION_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/raw_detections.jsonl
 # SoCLaaS primary tier is now core/llm/config.py's DEFAULT primary (permanent, not a
 # cluster-only override) — the key just needs to be present in the environment; the
 # ladder fills base_url/model/api_key_env itself. Key issued via soclaas-portal, lives
 # only in ~/.bashrc — extracted here, never in the repo. Ladder degrades
 # primary -> local -> regex if the gateway is unreachable or the key is absent.
 eval "$(grep -h 'export SOCLAAS_API_KEY' ~/.bashrc | head -1)" || true
+# per-call LLM usage (tokens/latency/tier/ok/error) -> job-specific, harvestable log.
+# This is what tells us WHETHER SoCLaaS actually served the parse or the api tier fell
+# through to local/regex (and why) — the 697761 fall-through had no such record.
+export VLA_LLM_USAGE_LOG=~/verify_run_${J}_usage.jsonl
 if [ -n "${SOCLAAS_API_KEY:-}" ]; then
-  echo "SOCLAAS: primary tier enabled by default (qwen3.6:35b)"
+  echo "SOCLAAS: primary tier enabled by default (qwen3.6:35b); usage -> $VLA_LLM_USAGE_LOG"
+  # fail-fast reachability probe from THIS compute node (697761 fell to regex silently)
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 \
+    https://soclaas-api.comp.nus.edu.sg/v1/models -H "Authorization: Bearer $SOCLAAS_API_KEY" 2>/dev/null)
+  echo "SOCLAAS: compute-node gateway probe HTTP $code (200 = reachable from this node)"
 else
   echo "SOCLAAS: no key in ~/.bashrc — primary tier off, ladder falls to local/regex"
 fi
@@ -177,6 +187,8 @@ echo "== monitor rc=$MONITOR_RC"
 echo "== adapter log tail"; tail -25 ~/verify_run_${J}_adapter.log
 echo "== #82 parse tier"; grep -E "parsed: tier=|ladder" ~/verify_run_${J}_adapter.log | tail -5
 echo "== #82 ollama serve tail"; tail -5 ~/verify_run_${J}_ollama.log
+echo "== #82/SoCLaaS LLM usage log (per-call tokens/tier/ok/error)"; tail -12 "$VLA_LLM_USAGE_LOG" 2>/dev/null || echo "no usage log (no LLM call logged — tier fell through before any api/local attempt)"
+echo "== #84 raw detections (proposed-vs-gated by class, last keyframe)"; tail -1 "$VLA_RAW_DETECTION_DUMP_PATH" 2>/dev/null | python3 -c "import json,sys; d=json.loads(sys.stdin.readline() or '{}'); print(json.dumps(d.get('by_class',{})))" 2>/dev/null || echo "no raw-detection dump"
 echo "== #83 explore debug (last 3 records: pocket/free/reroot/status)"
 for f in "$VLA_EXPLORE_DEBUG_DIR"/explore_debug_*.jsonl; do
   [ -f "$f" ] || continue

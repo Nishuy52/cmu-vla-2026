@@ -12,7 +12,8 @@ mkdir -p "$OUT"
 scp -q "xlogin:verify_run_${J}.out" "$OUT/verify_run.out" 2>/dev/null \
   || scp -q "xlogin:verify_run.out" "$OUT/verify_run.out" || true
 scp -q "xlogin:verify_run_${J}_adapter.log" "xlogin:verify_run_${J}_ollama.log" \
-      "xlogin:verify_run_${J}_launch.log" "xlogin:verify_run_${J}_bag.log" "$OUT/" 2>/dev/null || true
+      "xlogin:verify_run_${J}_launch.log" "xlogin:verify_run_${J}_bag.log" \
+      "xlogin:verify_run_${J}_usage.jsonl" "$OUT/" 2>/dev/null || true
 rsync -az "xlogin:verify_run_${J}_debug/" "$OUT/debug/" 2>/dev/null || true
 # ros bag capture: ~/verify_run_${J}_captures/<scene>/<qdir>/bag  ->  $OUT/captures/...
 rsync -az "xlogin:verify_run_${J}_captures/" "$OUT/captures/" 2>/dev/null || true
