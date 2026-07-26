@@ -1608,3 +1608,47 @@ captures (split-stack offload delivered separately on this branch - T19).
 diagnosis via a cluster instance-dump run; (2) scene-swap runner (office_1
 staged at ~/scenes) + GT questions -> first cluster battery; (3) merge this
 branch (split-stack T19 + live-run kit) to main.
+
+## 2026-07-26 (session 23) - IF-blocker campaign: 5 issue lanes fixed/merged, cluster verify runs
+
+User directive: fix everything blocking a perfect instruction-following run;
+GDINO = SwinB everywhere (confirmed already wired host + cluster kit).
+Parallel worktree lanes, all merged to main same session:
+
+- **#83 exploration starvation — mechanism CONFIRMED then fixed.** Banked
+  22-Jul captures: livingroom_1 vehicle BFS pocket = 1 cell for the whole
+  run vs office 1->699 in 10 s (evidence committed,
+  reports/issue83_live_captures). Fix: mark_pose carves a 0.25 m footprint
+  disc; detect_frontiers re-roots BFS off degenerate pockets (<50 cells,
+  4x larger component exists); re-root observable in explore debug. Full
+  battery re-run: if_rubric exactly 0.744, rubric-identical to post-carve
+  baseline (reports/gt_battery_2026-07-26) - carve is battery-neutral.
+- **#88 GDINO off the tick loop:** AsyncPerceptionWorker (latest-frame-wins
+  worker thread), BasicSceneIndex lock-guarded, offline path untouched.
+  VLA_PERCEPTION_SYNC=1 debug escape. Cadence unit-proven; live measure open.
+- **#84/#89 perception:** root cause of instance explosion = tracker vs
+  scene-index making INDEPENDENT merge decisions (disagreement minted
+  duplicates) -> merge_into() trusts association; prompt primed with
+  standing vocab pre-latch (no more blind keyframes); eligibility-gate
+  rejections observable; opt-in instance dump (VLA_INSTANCE_DUMP_PATH +
+  answer-time snapshot).
+- **#77 residual:** drive chain EXONERATED (0.0000 m execution error on all
+  traced legs); residual = BFS-disconnected anchors via stamped mirror
+  geometry + frame-fit. Stage-4 withhold hooks measured REGRESSING (dropped
+  per G4; measurement posted on #81). Open question: live runs may show the
+  6 goal-clamp legs are mirror artifacts - queued on cluster.
+- **#87 flaky test fixed** (tolerance-based). **#90 filed** (float32 lattice
+  fragmentation in synthetic scenes, pre-existing, exposed by #83 fix).
+- **Cluster verification:** cluster_verify_run.sbatch (SwinB fp16, explore
+  debug + instance dump, in-job ollama with captured serve log = #82 retest,
+  overlay scene swap) + push_and_verify.sh/harvest_verify.sh. livingroom_1
+  uploaded (313 MB). Jobs: 697648 office_1 (pre-#83-fix src: #88/#82/#89
+  verify), 697653 livingroom_1 (#83-fixed src: the money run).
+- **SoCLaaS discovered** (user's Downloads): free NUS OpenAI-compatible LLM
+  gateway (qwen3.6:27b/35b etc.); challenge brief EXPLICITLY allows online
+  APIs at eval. Plan: wire as PRIMARY tier (env-only change) once user runs
+  soclaas-portal issue; ladder degrades to local -> regex regardless.
+
+**Next:** harvest 697648/697653 (verdict blocks per issue); #82 tier verdict
+from ollama log; #84 recall quantification from instance dump; SoCLaaS key +
+primary-tier A/B; merge verdicts -> close #83/#88/#89 if live numbers hold.
