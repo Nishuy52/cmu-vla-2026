@@ -87,6 +87,7 @@ from core.fsm.controller import QuestionController, State
 from core.heads import build_callables
 from core.llm.config import build_chat_fns_with_tiers, load_config
 from core.parsing import ladder as parse_ladder
+from core.perception.async_pipeline import AsyncPerceptionWorker
 from core.perception.colored_map import ColoredVoxelMap
 from core.perception.detector import GroundingDinoDetector
 from core.perception.scene_index import BasicSceneIndex
@@ -143,6 +144,15 @@ DETECTOR_REMOTE = "remote"
 # re-enters the exact _on_image path, so everything downstream is identical. Never the
 # submission path: the scored image subscribes the contract's raw topic.
 ENV_CAMERA_COMPRESSED = "VLA_CAMERA_COMPRESSED"
+
+# Issue #88: on a live run GroundingDINO forwards (~1s) were running inline in
+# _maybe_process_perception, which is called from the 5 Hz tick timer -> every forward
+# blocked waypoint publication and subscription servicing for that entire second, collapsing
+# the drive loop to ~0.8 Hz. Default ON (perception now always dispatches off the tick
+# thread via AsyncPerceptionWorker); set VLA_PERCEPTION_SYNC=1 to force the old inline
+# behaviour back (debugging only — reintroduces the cadence stall). The offline/battery path
+# (core.runner.single) never imports this module, so it is unaffected either way.
+ENV_PERCEPTION_SYNC = "VLA_PERCEPTION_SYNC"
 
 
 def make_detector(logger=None):
@@ -475,6 +485,7 @@ class AdapterNode(Node):
         # (VLA_DETECTOR=none); refresh_prompt no-ops on None.
         self._detector: GroundingDinoDetector | None = detector
         self._perception: PerceptionPipeline | None = None
+        self._perception_worker: AsyncPerceptionWorker | None = None
         self._last_pano_t: float | None = None
         if detector is not None:
             self._perception = PerceptionPipeline(detector, index=BasicSceneIndex([]))
@@ -486,6 +497,29 @@ class AdapterNode(Node):
             # gated the same way explore_debug itself is, so the unset case is untouched.
             if os.environ.get("VLA_EXPLORE_DEBUG_DIR"):
                 self._scene_index._debug_perception = self._perception
+            # issue #88: dispatch pipeline.process() off the tick thread by default (see
+            # ENV_PERCEPTION_SYNC above). BasicSceneIndex's internal lock makes the resulting
+            # concurrent index reads (heads, on the tick thread) safe against the worker
+            # thread's writes.
+            if os.environ.get(ENV_PERCEPTION_SYNC, "").strip().lower() not in (
+                "1", "true", "yes",
+            ):
+                self._perception_worker = AsyncPerceptionWorker(
+                    self._perception,
+                    on_error=lambda exc: self.get_logger().error(
+                        "perception worker error: %s" % exc
+                    ),
+                )
+                self.get_logger().info(
+                    "perception dispatch: threaded (AsyncPerceptionWorker) — set "
+                    "%s=1 to force synchronous (debug only)." % ENV_PERCEPTION_SYNC
+                )
+            else:
+                self.get_logger().warning(
+                    "%s=1: perception runs SYNCHRONOUSLY on the tick thread — a slow "
+                    "detector forward WILL stall waypoint publication (issue #88). "
+                    "Debug only, never for a live/eval run." % ENV_PERCEPTION_SYNC
+                )
         else:
             self._scene_index = BasicSceneIndex([])
         self._controller: QuestionController | None = None
@@ -644,13 +678,17 @@ class AdapterNode(Node):
 
     # ------------------------------------------------------------------ perception (H6)
     def _maybe_process_perception(self) -> None:
-        """Feed the PerceptionPipeline one (pano, scan) pair on each NEW pano (H6 / SYS-F1).
+        """Dispatch one (pano, scan) pair to perception on each NEW pano (H6/SYS-F1, #88).
 
-        Mirrors runner/single.py::_ScriptedPerception.maybe_process: process only when a new
-        pano appears (PanoFrame.t changed) and a scan is available. The pipeline mutates
-        ``self._scene_index`` (its own live index) in place, so the controller/heads resolve
-        against the growing map. No-op when perception is off (VLA_DETECTOR=none). Never
-        raises — a perception glitch must not disturb the drive loop.
+        Mirrors runner/single.py::_ScriptedPerception.maybe_process: dispatch only when a
+        new pano appears (PanoFrame.t changed) and a scan is available. When threaded
+        (the default, see ENV_PERCEPTION_SYNC), this only *submits* the frame to the
+        AsyncPerceptionWorker — a non-blocking latest-frame-wins handoff — so a slow
+        detector forward never stalls this (tick-thread) call. The worker thread runs
+        ``pipeline.process()`` and mutates ``self._scene_index`` (its own live index) in
+        place, so the controller/heads resolve against the growing map. No-op when
+        perception is off (VLA_DETECTOR=none). Never raises — a perception glitch must not
+        disturb the drive loop.
         """
         if self._perception is None:
             return
@@ -664,7 +702,10 @@ class AdapterNode(Node):
             if scan is None:
                 return
             self._last_pano_t = pano.t
-            self._perception.process(pano, scan)
+            if self._perception_worker is not None:
+                self._perception_worker.submit(pano, scan)
+            else:
+                self._perception.process(pano, scan)
         except Exception as exc:  # perception must never crash the drive loop
             self.get_logger().error("perception error: %s" % exc)
 
@@ -1106,6 +1147,14 @@ class AdapterNode(Node):
         msg.data = int(ans.value)
         self._pub_int.publish(msg)
         self.get_logger().info("published int answer: %d" % msg.data)
+
+    def destroy_node(self) -> bool:
+        # issue #88: stop the perception worker thread before tearing down the node so it
+        # never outlives rclpy shutdown (daemon thread, but a clean join avoids a mid-log
+        # get_logger() call racing node teardown).
+        if self._perception_worker is not None:
+            self._perception_worker.stop()
+        return super().destroy_node()
 
 
 def main(args=None) -> None:

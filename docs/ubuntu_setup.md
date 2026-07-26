@@ -430,6 +430,17 @@ Paste the printed exports into the shell running the host node (`tools/run_host_
 No API key needed for the local slot — an empty key is fine against Ollama's openai
 adapter.
 
+**Perception dispatch (issue #88):** the adapter runs `PerceptionPipeline.process()`
+on a dedicated worker thread by default (`core.perception.async_pipeline.
+AsyncPerceptionWorker`, latest-frame-wins) so a slow detector forward (remote or
+local GDINO) never stalls the 5 Hz tick/waypoint loop. Set `VLA_PERCEPTION_SYNC=1`
+to force the old inline (synchronous) behaviour — debug only, reintroduces the
+cadence stall; never set it for a live/eval run.
+
+| Var | Value |
+|---|---|
+| `VLA_PERCEPTION_SYNC` | unset/`0` (default: threaded); `1` forces synchronous debug mode |
+
 **Addr-file handshake:** the sbatch job picks its own ports at start (shared GPU
 nodes can already have something bound on 8765/11434 — the job probes upward for the
 first free port) and writes the live `host:port` to `~/gdino_server.addr` and

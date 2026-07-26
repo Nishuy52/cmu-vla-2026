@@ -20,6 +20,8 @@ first, and :meth:`by_label_tiered` surfaces which tier each hit came from):
 """
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 
 from core.interfaces import InstanceRecord, MarkerBox, MatchTier
@@ -139,9 +141,21 @@ def _trimmed_aabb(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 class BasicSceneIndex:
-    """Mutable in-memory scene index. Implements the SceneIndex protocol."""
+    """Mutable in-memory scene index. Implements the SceneIndex protocol.
+
+    Thread safety (issue #88): a live run now feeds this index from a dedicated
+    perception worker thread (core.perception.async_pipeline.AsyncPerceptionWorker)
+    while the tick thread's heads concurrently read it (by_label/all_instances/...)
+    to resolve answers. An internal RLock (``self._lock``) guards every read and
+    write method so index mutation (add/remove/_fuse) and iteration (by_label_tiered,
+    all_instances) are never interleaved on the same underlying list — without it, a
+    reader iterating ``self._instances`` while the worker thread deletes from it can
+    raise ``RuntimeError: list changed size during iteration``. Callers (nav/heads)
+    need no changes: the lock lives entirely inside this class.
+    """
 
     def __init__(self, instances: list[InstanceRecord] | None = None) -> None:
+        self._lock = threading.RLock()
         self._instances: list[InstanceRecord] = list(instances or [])
         self._next_id = 1 + max(
             (r.instance_id for r in self._instances), default=-1
@@ -150,7 +164,8 @@ class BasicSceneIndex:
     # ------------------------------------------------------------- read protocol
 
     def all_instances(self):
-        return list(self._instances)
+        with self._lock:
+            return list(self._instances)
 
     def remove(self, instance_id: int) -> bool:
         """Drop an instance by id; return True if one was removed.
@@ -159,11 +174,12 @@ class BasicSceneIndex:
         if the id is absent. Never mutates ``_next_id`` — freed ids are not recycled,
         so a pruned ghost's id cannot be silently reused by a later real object.
         """
-        for i, rec in enumerate(self._instances):
-            if rec.instance_id == instance_id:
-                del self._instances[i]
-                return True
-        return False
+        with self._lock:
+            for i, rec in enumerate(self._instances):
+                if rec.instance_id == instance_id:
+                    del self._instances[i]
+                    return True
+            return False
 
     def marker_for(self, record: InstanceRecord) -> MarkerBox:
         """Prior-clamped marker for a record — the H12 marker seam.
@@ -191,7 +207,8 @@ class BasicSceneIndex:
         Read-only peek used by the tracker to mint ids for unmatched detections;
         ``add`` still owns id assignment and will reassign on collision.
         """
-        return self._next_id
+        with self._lock:
+            return self._next_id
 
     def by_label(self, noun: str):
         """Typo/plural/synonym-tolerant lookup; returns matching instances, best-first.
@@ -222,7 +239,9 @@ class BasicSceneIndex:
         syn: list[InstanceRecord] = []
         head: list[InstanceRecord] = []
         typo: list[InstanceRecord] = []
-        for rec in self._instances:
+        with self._lock:
+            instances_snapshot = list(self._instances)
+        for rec in instances_snapshot:
             canon = normalize_label(rec.label)
             if canon == query:
                 exact.append(rec)
@@ -258,28 +277,30 @@ class BasicSceneIndex:
     def add(self, rec: InstanceRecord) -> InstanceRecord:
         """Add an observation, fusing into an existing same-label instance when
         their 3D AABB IoU exceeds MERGE_IOU. Returns the surviving record."""
-        target = self._find_merge_target(rec)
-        if target is None:
-            if rec.instance_id in (r.instance_id for r in self._instances):
-                rec = InstanceRecord(
-                    instance_id=self._next_id,
-                    label=rec.label,
-                    score=rec.score,
-                    n_obs=rec.n_obs,
-                    centroid=rec.centroid,
-                    aabb_min=rec.aabb_min,
-                    aabb_max=rec.aabb_max,
-                    points=rec.points,
-                    caption=rec.caption,
-                    aliases=rec.aliases,
-                )
-            self._next_id = max(self._next_id, rec.instance_id + 1)
-            self._instances.append(rec)
-            return rec
-        self._fuse(target, rec)
-        return target
+        with self._lock:
+            target = self._find_merge_target(rec)
+            if target is None:
+                if rec.instance_id in (r.instance_id for r in self._instances):
+                    rec = InstanceRecord(
+                        instance_id=self._next_id,
+                        label=rec.label,
+                        score=rec.score,
+                        n_obs=rec.n_obs,
+                        centroid=rec.centroid,
+                        aabb_min=rec.aabb_min,
+                        aabb_max=rec.aabb_max,
+                        points=rec.points,
+                        caption=rec.caption,
+                        aliases=rec.aliases,
+                    )
+                self._next_id = max(self._next_id, rec.instance_id + 1)
+                self._instances.append(rec)
+                return rec
+            self._fuse(target, rec)
+            return target
 
     def _find_merge_target(self, rec: InstanceRecord) -> InstanceRecord | None:
+        # Called only from within add()'s locked section (RLock: reentrant).
         q = normalize_label(rec.label)
         best: InstanceRecord | None = None
         best_iou = MERGE_IOU
