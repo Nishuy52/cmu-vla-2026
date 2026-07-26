@@ -225,6 +225,19 @@ def build_callables(
         fuse_hint=fuse_hint,
         detector=detector,
     )
+    # Issue #84 "prompt dead zone": GroundingDinoDetector is constructed at boot with no
+    # question latched yet (question_nouns=(), vocab_nouns=()), so its prompt stays "" and
+    # every __call__ short-circuits to zero detections until HeadState.bind() first fires
+    # on plan latch (core.heads.factory.HeadState.bind). Parsing (LLM ladder or regex) can
+    # take real wall-clock time, and exploration/perception keyframes tick throughout that
+    # window — so without this, every keyframe before latch runs the detector blind, even
+    # though the standing 114-noun vocab (:data:`_STANDING_VOCAB_NOUNS`) is known up front
+    # and does not depend on the question at all. Priming it here, immediately at
+    # build_callables() time (before any plan exists), closes that window: the detector
+    # grounds on the standing vocab from the very first keyframe, and `bind()` still fully
+    # rebuilds the prompt (question nouns first, standing vocab after) the moment the plan
+    # latches, same as before this fix.
+    refresh_prompt(detector, (), _STANDING_VOCAB_NOUNS)
     parse_fn = parse if parse is not None else _default_parse
 
     def _explore(io: RobotIO, plan, world: WorldView) -> None:

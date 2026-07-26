@@ -179,6 +179,21 @@ def test_headstate_bind_with_no_detector_is_a_noop():
     assert st.plan is not None
 
 
+def test_build_callables_primes_detector_with_standing_vocab_before_latch():
+    """Issue #84 "prompt dead zone": build_callables() primes the detector's prompt with
+    the standing vocab immediately (no question latched yet), so keyframes ticking during
+    parse latency still ground on something instead of running blind."""
+    from core.perception.detector import FakeDetector
+
+    fake = FakeDetector()
+    sc = _idx(inst(1, "chair"))
+    assert fake.prompt == ""
+    build_callables(sc, detector=fake)
+    assert fake.prompt != ""
+    assert "lamp" in fake.prompt  # standing vocab noun, unrelated to any question
+    assert fake.question_prompt == ""  # no question nouns known yet -> short pass stays off
+
+
 def test_build_callables_wires_detector_through_explore():
     from core.perception.detector import FakeDetector
 
@@ -186,7 +201,7 @@ def test_build_callables_wires_detector_through_explore():
     sc = _idx(inst(1, "chair"))
     cbs = build_callables(sc, detector=fake)
     io = MockRobotIO(SyntheticScene(0), FakeClock())
-    assert fake.prompt == ""
+    assert "lamp" in fake.prompt and "chair" not in fake.prompt.split(" . ")[0]
     cbs["explore"](io, numerical_plan("chair", [near_clause("window")]), WorldView(scene=sc))
     assert fake.prompt.startswith("chair . window .")
 
@@ -198,7 +213,7 @@ def test_build_callables_wires_detector_through_verify():
     sc = _idx(inst(1, "table"))
     cbs = build_callables(sc, detector=fake)
     io = MockRobotIO(SyntheticScene(0), FakeClock())
-    assert fake.prompt == ""
+    assert "lamp" in fake.prompt  # primed with standing vocab pre-latch
     cbs["verify"](io, object_plan("table"), WorldView(scene=sc))
     assert fake.prompt.startswith("table .")
 
