@@ -1710,3 +1710,40 @@ scored retroactively).
 - Guardrails: conservative issue-closing (measured numbers only), commit/push per
   milestone, host lane continues if the SSH ControlMaster expires (human-only re-auth).
 - Cold-pickup state: reports/autonomous_run_2026-07-26/STATUS.md.
+
+## 2026-07-26 (session 24 progress) — host lane COMPLETE; cluster queue-blocked
+
+**All four host lanes landed + pushed to main** (isolated worktrees, disjoint
+ownership, each integrated via cherry-pick with fast-tier verification):
+- `c1efcc0` **SoCLaaS = permanent default primary tier** (core/llm/config.py:
+  env > file > SoCLaaS-default > none, gated on SOCLAAS_API_KEY; degrades to
+  local/regex when absent) + per-call usage logging -> reports/soclaas_usage.jsonl
+  (accumulates across sessions). llm suite 49 passed. Validated live: gateway
+  200, qwen3.6:35b is a real model. (Risk: eval-time NUS network reachability —
+  fallback covers it.)
+- `f6f913e` **#90** float32 lattice collision fixed (epsilon-snap at 5 world->cell
+  sites); FREE fragmentation 221->9 components; nav 245 passed. Ready to close.
+- `119aff9` **#84** raw-detection dump (VLA_RAW_DETECTION_DUMP_PATH, instrumentation
+  — #84 stays open) + **#89** subphrase label folding (token-subset, over-merge
+  guarded); perception 301 passed. #89 ready pending live verify.
+- `97131d8` **#81** offline battery budget hooks wired opt-in (--enable-withhold-gates,
+  default OFF = byte-preserving). Measured delta: gates-off = 0.744 (baseline
+  reproduced), gates-on = 0.622 (regresses, expected — offline is GT-perfect so
+  gates only withhold correct answers). Recommendation on issue: keep default off.
+
+**Nothing closed unilaterally** — evidence + "ready to close" recs posted on
+#90/#89/#81; #84 kept open.
+
+**Cluster live lane BLOCKED on queue congestion (not our fault):** job 697761
+(livingroom_1 inst, bag-validation + #82/#84/#83 + SoCLaaS-live retest) submitted
+12:00, still PENDING at 13:45. Reason=Resources (genuine contention), priority
+normal, fairshare not penalized (we have 1 job). Backfill StartTime ~18:48.
+Investigated thoroughly: NOT deprioritized for volume; nv GPU pool (Titan RTX,
+xgpe5/xgpd7) contended; a100 idle but repo policy forbids (2.5x fairshare bill,
+"never for convenience"); xgpe0/2/6 idle-but-BROKEN (driver mismatch / no device /
+CUDA init fail — soc_cluster_guide.md), correctly excluded, NOT changed. Poller
+armed to ~18:48; exits if SSH ControlMaster expires (human re-auth needed).
+
+**Cold-pickup:** reports/autonomous_run_2026-07-26/STATUS.md. If tunnel dies before
+697761 runs, the live-scoring matrix (office/nume/obje/arabic) + #82/#77/#85 live
+checks are the outstanding cluster work; host lane needs nothing further.

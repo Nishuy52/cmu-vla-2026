@@ -14,7 +14,7 @@ Cold-pickup state for the 12h autonomous plan (user-approved). Update at every m
 - SSH ControlMaster re-auth is HUMAN-ONLY — if it expires, cluster lane pauses, host lane continues.
 
 ## Cluster queue (serial)
-1. [PENDING ~45min+ (queue congested, 27 deep) job 697761 — livingroom_1 inst — poller bn0v2o5uy]
+1. [PENDING ~1h45m+, backfill est 18:48 — job 697761 livingroom_1 inst — sparse poller bcjlvzfqz]
 2. [ ] office_1 inst
 3. [ ] livingroom_1 nume (#89 counts + numerical-match)
 4. [ ] office_1 nume
@@ -26,7 +26,8 @@ Cold-pickup state for the 12h autonomous plan (user-approved). Update at every m
 - A [DONE -> main c1efcc0] SoCLaaS default primary + usage logging (reports/soclaas_usage.jsonl)
 - B [DONE -> main f6f913e, commented, worktree retired] #90 float32 lattice collision
 - C [DONE -> main 97131d8; delta measuring in bg bcwvfg2wd] #81 budget hooks opt-in (default off = byte-preserving)
-- D [DONE -> main 119aff9, #84/#89 commented, worktree retired] #84 dump + #89 folding
+- D [DONE -> main 119aff9] #84 dump + #89 folding
+- ALL HOST LANES DONE. #81 delta: gates-off 0.744 / gates-on 0.622 -> keep default off (commented).
 
 ## Verified ready
 - Host scoring path OK: rosbags import, GT scenes, questions/answers, score_live_run all present in .venv.
