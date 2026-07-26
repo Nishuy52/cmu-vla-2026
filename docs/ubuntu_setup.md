@@ -430,6 +430,17 @@ Paste the printed exports into the shell running the host node (`tools/run_host_
 No API key needed for the local slot — an empty key is fine against Ollama's openai
 adapter.
 
+**SoCLaaS primary tier (added 26 Jul 2026):** NUS SoC's free OpenAI-compatible
+gateway (`https://soclaas-api.comp.nus.edu.sg/v1`; NUS network/VPN). The challenge
+brief explicitly allows online LLM APIs at eval time. Issue a key with
+`soclaas-portal issue` on any SoC host (interactive; stores `SOCLAAS_API_KEY` in
+`~/.bashrc` — never commit it). Enable as the primary parse tier with:
+`VLA_LLM_PRIMARY_KIND=openai`, `VLA_LLM_PRIMARY_BASE_URL=<gateway>/v1`,
+`VLA_LLM_PRIMARY_MODEL=qwen3.6:35b`, `VLA_LLM_PRIMARY_API_KEY_ENV=SOCLAAS_API_KEY`.
+The ladder falls through primary → local → regex when the gateway is unreachable,
+so enabling it is safe everywhere (wired in tools/cluster/live_run/
+cluster_verify_run.sbatch; model list per key via `GET /v1/models`).
+
 **Perception dispatch (issue #88):** the adapter runs `PerceptionPipeline.process()`
 on a dedicated worker thread by default (`core.perception.async_pipeline.
 AsyncPerceptionWorker`, latest-frame-wins) so a slow detector forward (remote or
