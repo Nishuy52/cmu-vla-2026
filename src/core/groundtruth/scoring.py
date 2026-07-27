@@ -61,6 +61,7 @@ from core.interfaces import InstanceRecord, MarkerBox, SceneIndex
 from core.parsing.regex_tier import _SUPERLATIVE_PREDS as _PARSER_SUPERLATIVE_PREDS
 from core.parsing.regex_tier import parse_regex
 from core.perception.scene_index import BasicSceneIndex, normalize_label
+from core.plan_walk import iter_clause_anchors, iter_target_anchors
 
 PROXIMITY_M = 1.0  # coverage radius for path scoring
 
@@ -273,10 +274,10 @@ def _independent_count(
     if plan.target is None:
         return None, "none"
     tgt_noun = normalize_label(plan.target.noun)
-    # anchors mentioned in the question (for a loose relation match)
-    anchor_nouns = {
-        normalize_label(a.noun) for cl in plan.target.clauses for a in cl.anchors
-    }
+    # anchors mentioned in the question (for a loose relation match) — recurses through
+    # each anchor's nested ``disambiguator`` chain (issue #95) so an anchor named only
+    # as a disambiguator still participates in the relation-aware match.
+    anchor_nouns = {normalize_label(a.noun) for a in iter_target_anchors(plan.target)}
     # Relation-aware set: target class matches AND (if anchors named) at least one
     # named anchor class appears in the annotation's anchors.
     rel_ids: set[str] = set()
@@ -386,9 +387,8 @@ def _scene_graph_count(
     if plan.target is None:
         return None, "none"
     tgt_noun = normalize_label(plan.target.noun)
-    anchor_nouns = {
-        normalize_label(a.noun) for cl in plan.target.clauses for a in cl.anchors
-    }
+    # Recurses through each anchor's nested ``disambiguator`` chain (issue #95).
+    anchor_nouns = {normalize_label(a.noun) for a in iter_target_anchors(plan.target)}
     q_rels = set(_question_relations(plan))
 
     # id -> label, and merged relation edges across all regions.
@@ -625,9 +625,8 @@ def _gt_target_from_referential(
     if plan.target is None:
         return None, "ambiguous", "none"
     q_rels = set(_question_relations(plan))
-    anchor_nouns = {
-        normalize_label(a.noun) for cl in plan.target.clauses for a in cl.anchors
-    }
+    # Recurses through each anchor's nested ``disambiguator`` chain (issue #95).
+    anchor_nouns = {normalize_label(a.noun) for a in iter_target_anchors(plan.target)}
     # Superlative honesty (#20): when the question carries a superlative ("closest to
     # Z" / "farthest from Z"), the discriminating constraint IS that superlative — a
     # genuine referential match must be about the anchor the superlative names, not an
@@ -646,8 +645,9 @@ def _gt_target_from_referential(
         q_rels = set()
         for c in superl_clauses:
             q_rels.update(_pred_relations(getattr(c, "pred", None)))
+        # Recurses through each anchor's nested ``disambiguator`` chain (issue #95).
         anchor_nouns = {
-            normalize_label(a.noun) for c in superl_clauses for a in c.anchors
+            normalize_label(a.noun) for a in iter_clause_anchors(superl_clauses)
         }
     id_best_j: dict[int, float] = {}
     for stmt, ann in _iter_statements(referential):
