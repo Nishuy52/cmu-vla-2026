@@ -307,7 +307,12 @@ def test_full_battery_smoke_two_scenes(tmp_path):
     # every scored OR question carries a match method label
     for s in scores:
         if s.qtype == QType.OBJECT_REFERENCE.value:
-            assert s.match_method in ("exact", "fuzzy", "relation", "unique", "none")
+            # "geometric" added with issue #92 fix 3: the geometry-grounded
+            # fallback used when the referential-statement corpus yields zero
+            # candidates for a question's target class (10 of 30 questions).
+            assert s.match_method in (
+                "exact", "fuzzy", "relation", "unique", "geometric", "none"
+            )
     # report writes without error and round-trips
     md_path, json_path = GB.write_report(scores, missing, tmp_path)
     assert md_path.exists() and json_path.exists()
