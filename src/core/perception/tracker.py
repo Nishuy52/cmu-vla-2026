@@ -93,9 +93,29 @@ def labels_compatible(a: str, b: str) -> bool:
 
 @dataclass(frozen=True)
 class TrackerConfig:
-    """Association gate. Non-spec value flagged in the task report."""
+    """Association gate. Non-spec values flagged in the task report.
 
-    gate: float = 0.75  # m; max centroid distance for a match
+    Issues #94/#89: a single fixed-radius centroid gate is the wrong criterion in
+    kind, not just in magnitude -- one value cannot simultaneously be tight enough to
+    keep desk-spaced monitors (~0.4-0.5 m apart) separate AND loose enough to
+    re-identify a chair across viewpoint-driven centroid jitter. ``gate`` stays the
+    ceiling (and the value used for classes with no dimension prior); actual
+    per-match association below now scales down from it per class footprint
+    (:func:`_assoc_gate`) and is additionally vetoed when it would produce an
+    implausibly large merged box for the class (:func:`_match_plausible`).
+    """
+
+    gate: float = 0.75  # m; ceiling on centroid distance for a match
+    gate_min: float = 0.25         # m; floor -- a class prior never gates tighter than this
+    gate_extent_frac: float = 0.5  # fraction of a class's typical diagonal used as its gate
+    # Issue #94: reject a match that would grow the fused box's sorted-axis extent past
+    # this multiple of the class's typical (data-derived) extent -- a merged instance
+    # whose extent grossly exceeds its class prior is self-evidently a bad merge,
+    # however close the centroids landed. Generous enough that legitimate multi-view
+    # growth of ONE real object (occlusion revealing more of it over time) is never
+    # blocked; tight enough that two distinct same-class objects at typical spacing
+    # (e.g. adjacent desk monitors) cannot fuse into one oversized box.
+    extent_veto_factor: float = 1.3
     # H15(a) track decay: an instance still at n_obs==1 that has not been re-observed
     # within this many keyframes of first sighting is a one-frame ghost and is pruned.
     # Confirmed tracks (n_obs>=2) are NEVER decayed. 0 disables decay.
@@ -149,55 +169,126 @@ def _fused_to_record(det: Detection, fused: Fused3D, instance_id: int) -> Instan
     )
 
 
+def _assoc_gate(label: str, cfg: TrackerConfig) -> float:
+    """Per-class association gate (issues #94/#89): scaled from the class's
+    data-derived typical diagonal instead of one fixed radius for every class.
+
+    A monitor's typical diagonal (~0.72 m) yields a much tighter gate than a sofa's
+    (~2.5 m, clipped back down to the ``cfg.gate`` ceiling) -- proportional to what
+    "the same object, re-observed" plausibly looks like for THAT class, rather than
+    one radius that is simultaneously too loose for desk-spaced monitors and
+    (coincidentally) about right for a sofa. Classes with no dimension prior fall
+    back to ``cfg.gate`` unchanged (unable to judge, so don't tighten blindly).
+    """
+    from core.perception.dimension_priors import prior_for
+
+    prior = prior_for(canonical_for_match(label))
+    if prior is None:
+        return cfg.gate
+    diag = float(np.linalg.norm(prior.typ_ext))
+    return float(np.clip(cfg.gate_extent_frac * diag, cfg.gate_min, cfg.gate))
+
+
+def _match_plausible(candidate: InstanceRecord, fused: Fused3D, cfg: TrackerConfig) -> bool:
+    """Issue #94: veto a match that would blow the fused box past a plausible size
+    for its class, however close the centroids landed under the gate.
+
+    Compares the SORTED (thin, mid, long) extent of the union of ``candidate``'s
+    current trimmed AABB and the incoming detection's raw cluster AABB against the
+    class's sorted typical extent (:mod:`core.perception.dimension_priors`, already
+    used for marker clamping -- H12/red-team OR-F6). No prior -> can't judge -> never
+    vetoes (unchanged behaviour for the ~1/3 of the vocabulary without a prior).
+
+    This is what makes the sequential same-batch folding in :func:`associate` safe:
+    genuine repeat/duplicate sightings of ONE real object keep the union near its own
+    natural size and pass; two distinct same-class objects at roughly their class's
+    typical spacing (e.g. adjacent desk monitors, adjacent dense-packed chairs) blow
+    the union past ``extent_veto_factor`` x typical and are correctly kept apart.
+    """
+    from core.perception.dimension_priors import prior_for
+
+    prior = prior_for(canonical_for_match(candidate.label))
+    if prior is None:
+        return True
+    new_min = fused.points.min(axis=0)
+    new_max = fused.points.max(axis=0)
+    combined_min = np.minimum(candidate.aabb_min, new_min)
+    combined_max = np.maximum(candidate.aabb_max, new_max)
+    ext = np.sort(combined_max - combined_min)
+    typ = np.sort(prior.typ_ext)
+    return bool(np.all(ext <= cfg.extent_veto_factor * typ))
+
+
 def associate(
     fused_dets: list[tuple[Detection, Fused3D]],
     index: BasicSceneIndex,
     cfg: TrackerConfig = DEFAULT_TRACKER_CONFIG,
 ) -> list[int]:
-    """Greedy-nearest associate fused detections to instances; update the index.
+    """Sequential nearest-plausible associate fused detections to instances.
+
+    Issues #94 (under-segmentation: distinct same-class objects fused into one) and
+    #89 (over-segmentation: one real object spawning several instances) are opposite
+    symptoms of the same wrong criterion: a single fixed-radius centroid gate,
+    checked only against the PRE-BATCH instance snapshot. That snapshot-only check
+    has a structural gap -- two detections of the very same physical object arriving
+    in the SAME batch (e.g. duplicate proposals from overlapping detector tiles) are
+    each compared only against instances that existed BEFORE this batch, never
+    against each other, so the second one can find no candidate and mints a fresh
+    ghost instance (#89) even though it is sitting right on top of the instance the
+    first one just created or matched.
+
+    Fixed here by folding sequentially: each detection is matched against a running
+    pool that starts as the pre-batch instances and gains every instance
+    matched-into or newly created earlier in THIS batch, so within-frame duplicates
+    fold together instead of each independently spawning a ghost. What makes this
+    safe against wrongly fusing two distinct nearby same-class objects (which the
+    pre-#94-fix code prevented only by construction, via a stricter "hidden"
+    contributor -- the one-shot IoU re-check inside ``index.add``/``merge_into``,
+    since removed) is that every candidate match, pre-batch or same-batch, is now
+    ALSO checked by :func:`_match_plausible`: fusing is vetoed once the resulting box
+    would grossly exceed the class's typical size, regardless of which pool the
+    candidate came from. The gate itself is also now per-class
+    (:func:`_assoc_gate`) instead of one fixed radius for every object size.
 
     Returns the list of instance_ids touched (matched-into or newly created), in the
     order the detections were processed.
     """
-    existing = index.all_instances()
-
-    # Build all label-compatible (det_i, inst_j, distance) candidate pairs under gate.
-    pairs: list[tuple[float, int, int]] = []
-    for di, (det, fused) in enumerate(fused_dets):
-        for ej, inst in enumerate(existing):
-            if not labels_compatible(det.label, inst.label):
-                continue
-            dist = float(np.linalg.norm(fused.centroid - inst.centroid))
-            if dist <= cfg.gate:
-                pairs.append((dist, di, ej))
-    pairs.sort(key=lambda p: p[0])
-
-    matched_det: dict[int, InstanceRecord] = {}
-    used_inst: set[int] = set()
-    for dist, di, ej in pairs:
-        if di in matched_det or ej in used_inst:
-            continue
-        matched_det[di] = existing[ej]
-        used_inst.add(ej)
-
+    pool: list[InstanceRecord] = list(index.all_instances())
     touched: list[int] = []
-    for di, (det, fused) in enumerate(fused_dets):
-        if di in matched_det:
-            target = matched_det[di]
-            rec = _fused_to_record(det, fused, instance_id=target.instance_id)
+    for det, fused in fused_dets:
+        gate = _assoc_gate(det.label, cfg)
+        best: InstanceRecord | None = None
+        best_dist = gate
+        for cand in pool:
+            if not labels_compatible(det.label, cand.label):
+                continue
+            dist = float(np.linalg.norm(fused.centroid - cand.centroid))
+            if dist > best_dist:
+                continue
+            if not _match_plausible(cand, fused, cfg):
+                continue
+            best = cand
+            best_dist = dist
+        if best is not None:
+            rec = _fused_to_record(det, fused, instance_id=best.instance_id)
             # Issue #89/#84: trust THIS association's own match decision (alias-bridged
-            # label compatibility + centroid gate, both already checked above) and fuse
-            # directly into `target` — do NOT hand off to index.add(), whose independent
-            # label/IoU re-derivation can (and under live pose jitter routinely does)
-            # disagree with this decision and silently mint a duplicate instance instead
-            # of fusing (see BasicSceneIndex.merge_into's docstring for the full story).
-            survivor = index.merge_into(target.instance_id, rec)
-            touched.append(survivor.instance_id)
+            # label compatibility + gate + extent-plausibility, all already checked
+            # above) and fuse directly into `best` — do NOT hand off to index.add(),
+            # whose independent label/IoU re-derivation can (and under live pose
+            # jitter routinely does) disagree with this decision and silently mint a
+            # duplicate instance instead of fusing (see BasicSceneIndex.merge_into's
+            # docstring for the full story).
+            survivor = index.merge_into(best.instance_id, rec)
+            for i, cand in enumerate(pool):
+                if cand.instance_id == survivor.instance_id:
+                    pool[i] = survivor
+                    break
         else:
             new_id = index.next_id()
             rec = _fused_to_record(det, fused, instance_id=new_id)
             survivor = index.add(rec)
-            touched.append(survivor.instance_id)
+            pool.append(survivor)
+        touched.append(survivor.instance_id)
     return touched
 
 
