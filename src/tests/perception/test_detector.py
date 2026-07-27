@@ -136,6 +136,263 @@ def test_build_gdino_prompt_lowercases():
     assert build_gdino_prompt(["Sofa"], []) == "sofa ."
 
 
+# ------------------------------------------------------- GDINO prompt token budget (#105)
+
+#: Ground truth measured directly against the real GroundingDINO text encoder
+#: (bert-base-uncased): ``build_gdino_prompt((), _STANDING_VOCAB_NOUNS)`` -- the
+#: un-budgeted 116-noun standing vocab caption -- tokenizes to exactly this many real
+#: wordpiece tokens, 37 over the 256 (``max_text_len``) limit the loaded GroundingDINO
+#: config enforces. Pinned here as a fixture constant so the calibration tests below
+#: never need ``transformers`` (absent from the ``src/`` test venv) to stay honest.
+MEASURED_STANDING_VOCAB_REAL_TOKENS = 293
+
+#: The 12 nouns the real tokenizer measurement showed get silently amputated by the
+#: pre-fix unbudgeted caption (alphabetical-tail overflow past the 256-token limit).
+MEASURED_OVERFLOW_TAIL_NOUNS = (
+    "trash can", "tray", "tv", "tv cabinet", "tv remote", "vase",
+    "wall lamp", "wardrobe", "wardrobe door", "water cooler", "whiteboard", "window",
+)
+
+
+def _standing_vocab_nouns():
+    # Read-only import of the live 116-noun standing vocab -- this module owns no
+    # part of factory.py, it only observes the vocab it ships to reproduce the #105
+    # measurement against the real, current vocab (not a hand-copied snapshot that
+    # could drift out of sync with it).
+    from core.heads.factory import _STANDING_VOCAB_NOUNS
+
+    return _STANDING_VOCAB_NOUNS
+
+
+def test_heuristic_token_estimate_never_underestimates_measured_vocab():
+    # Requirement: the dependency-free fallback heuristic must OVER-estimate, never
+    # under-estimate, relative to the real tokenizer -- pinned against the one real
+    # measurement we have (293 real tokens for the full un-budgeted vocab caption).
+    # Tests the heuristic function directly (not the real/heuristic-selecting
+    # `_default_token_estimate` seam) so this calibration check means the same thing
+    # regardless of whether `transformers` happens to be importable in the test env.
+    from core.perception.detector import _heuristic_token_estimate
+
+    prompt = build_gdino_prompt((), _standing_vocab_nouns(), max_tokens=10**9)
+    estimate = _heuristic_token_estimate(prompt)
+    assert estimate >= MEASURED_STANDING_VOCAB_REAL_TOKENS
+    # ...and not wildly so -- a heuristic pessimistic enough to discard half the
+    # vocab under-uses the real 256-token budget just as badly as overflowing it.
+    assert estimate <= 2 * MEASURED_STANDING_VOCAB_REAL_TOKENS
+
+
+def test_build_gdino_prompt_full_vocab_stays_within_default_budget():
+    from core.perception.detector import DEFAULT_GDINO_MAX_TEXT_TOKENS, _default_token_estimate
+
+    prompt = build_gdino_prompt((), _standing_vocab_nouns())
+    assert _default_token_estimate(prompt) <= DEFAULT_GDINO_MAX_TEXT_TOKENS
+
+
+# --------------------------------------------- real-tokenizer / heuristic seam (#105)
+
+
+@pytest.fixture(autouse=True)
+def _reset_tokenizer_probe_cache(monkeypatch):
+    # `_probe_real_tokenizer` caches its result at module scope (by design -- it must
+    # not reconstruct a tokenizer on every detection-path call). Reset that cache
+    # around every test in this file so tests that fake the probe's outcome, or that
+    # assert on how many times it constructs, do not leak state between each other or
+    # into unrelated tests.
+    import core.perception.detector as detector_mod
+
+    monkeypatch.setattr(detector_mod, "_cached_real_tokenizer", None)
+    yield
+    monkeypatch.setattr(detector_mod, "_cached_real_tokenizer", None)
+
+
+def test_probe_real_tokenizer_falls_back_when_transformers_unavailable(monkeypatch):
+    import builtins
+
+    from core.perception.detector import _probe_real_tokenizer
+
+    real_import = builtins.__import__
+
+    def _blocked_import(name, *args, **kwargs):
+        if name == "transformers" or name.startswith("transformers."):
+            raise ImportError("simulated: transformers not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _blocked_import)
+    assert _probe_real_tokenizer() is None
+
+
+def test_default_token_estimate_falls_back_when_probe_returns_none(monkeypatch):
+    import core.perception.detector as detector_mod
+
+    monkeypatch.setattr(detector_mod, "_probe_real_tokenizer", lambda: None)
+    # With no real tokenizer, the estimate must match the heuristic exactly (proves
+    # the fallback path is actually taken, not just "some number").
+    text = "sofa . window ."
+    assert detector_mod._default_token_estimate(text) == detector_mod._heuristic_token_estimate(text)
+
+
+def test_default_token_estimate_uses_real_tokenizer_when_probe_succeeds(monkeypatch):
+    import core.perception.detector as detector_mod
+
+    monkeypatch.setattr(detector_mod, "_probe_real_tokenizer", lambda: (lambda text: 999))
+    # A fake "real" counter returning a fixed sentinel proves the seam actually wires
+    # through to whatever `_probe_real_tokenizer` resolves, in preference over the
+    # heuristic (which would return something in the tens, not 999, for this text).
+    assert detector_mod._default_token_estimate("sofa . window .") == 999
+
+
+def test_default_token_estimate_degrades_to_heuristic_if_real_counter_raises(monkeypatch):
+    import core.perception.detector as detector_mod
+
+    def _broken_counter(text):
+        raise RuntimeError("simulated: tokenizer call failed")
+
+    monkeypatch.setattr(detector_mod, "_probe_real_tokenizer", lambda: _broken_counter)
+    text = "sofa . window ."
+    # Must not raise, and must degrade to the same value the heuristic alone gives.
+    assert detector_mod._default_token_estimate(text) == detector_mod._heuristic_token_estimate(text)
+
+
+def test_probe_real_tokenizer_caches_and_does_not_reconstruct_per_call(monkeypatch):
+    import core.perception.detector as detector_mod
+
+    calls = []
+
+    def _fake_loader():
+        calls.append(1)
+        return lambda text: len(text)
+
+    # Simulate a successful first load by seeding the cache the same way a real,
+    # successful `_probe_real_tokenizer()` call would -- then prove later calls read
+    # the cache rather than rebuilding.
+    monkeypatch.setattr(detector_mod, "_cached_real_tokenizer", _fake_loader())
+    first = detector_mod._probe_real_tokenizer()
+    second = detector_mod._probe_real_tokenizer()
+    assert first is second
+    # Sanity: the fake counter itself still behaves like a counter.
+    assert first("abc") == 3
+
+
+def test_probe_real_tokenizer_logs_once(monkeypatch, caplog):
+    import logging
+
+    import core.perception.detector as detector_mod
+
+    calls = []
+
+    class _FakeAutoTokenizer:
+        @staticmethod
+        def from_pretrained(name):
+            calls.append(name)
+
+            class _Tok:
+                def __call__(self, text):
+                    return {"input_ids": [0] * len(text.split())}
+
+            return _Tok()
+
+    fake_transformers = type("_FakeModule", (), {"AutoTokenizer": _FakeAutoTokenizer})
+    monkeypatch.setitem(__import__("sys").modules, "transformers", fake_transformers)
+
+    with caplog.at_level(logging.INFO, logger="core.perception.detector"):
+        detector_mod._probe_real_tokenizer()
+        detector_mod._probe_real_tokenizer()
+        detector_mod._probe_real_tokenizer()
+
+    assert len(calls) == 1  # tokenizer constructed exactly once, not per probe call
+    info_logs = [r for r in caplog.records if r.levelno == logging.INFO and "tokenizer loaded" in r.message]
+    assert len(info_logs) == 1
+
+
+def _kept_phrases(prompt: str) -> set[str]:
+    return {p.strip() for p in prompt.removesuffix(" .").split(" . ") if p.strip()}
+
+
+def test_build_gdino_prompt_question_anchor_nouns_survive_full_vocab_truncation():
+    # The exact #105 regression: vase/tv/window/water cooler are in the alphabetic
+    # overflow tail and were silently dropped from EVERY pass pre-fix. As question
+    # nouns (recall-priority), they must survive even though the vocab pass still
+    # overflows the budget.
+    question_nouns = ["vase", "tv", "window", "water cooler"]
+    prompt = build_gdino_prompt(question_nouns, _standing_vocab_nouns())
+    kept_phrases = _kept_phrases(prompt)
+    for noun in question_nouns:
+        assert noun in kept_phrases
+
+
+def test_build_gdino_prompt_question_nouns_never_dropped_for_vocab():
+    # A budget of 1 -- below even a single CLS/SEP pair, real or heuristic-estimated --
+    # leaves zero room for any vocab noun under either estimator, so every single one
+    # must be dropped before a single question noun is.
+    question_nouns = ["sofa", "window", "potted plant"]
+    dropped: list[str] = []
+    prompt = build_gdino_prompt(
+        question_nouns,
+        _standing_vocab_nouns(),
+        max_tokens=1,
+        dropped_out=dropped,
+    )
+    kept_phrases = _kept_phrases(prompt)
+    for noun in question_nouns:
+        assert noun in kept_phrases
+    # window/sofa/potted plant are already in the prompt as question nouns, so they
+    # are de-duplicated out of the vocab pass entirely (never counted as "dropped");
+    # every other vocab noun must be dropped at this budget.
+    expected_dropped = set(_standing_vocab_nouns()) - set(question_nouns)
+    assert set(dropped) == expected_dropped
+
+
+def test_build_gdino_prompt_over_budget_question_nouns_kept_and_logged(caplog):
+    # If even the question nouns alone blow the budget, they are still kept in
+    # full (never silently trimmed) but the condition is logged loudly.
+    import logging
+
+    question_nouns = ["sofa", "window", "potted plant", "refrigerator"]
+    with caplog.at_level(logging.ERROR, logger="core.perception.detector"):
+        prompt = build_gdino_prompt(question_nouns, (), max_tokens=1)
+    kept_phrases = _kept_phrases(prompt)
+    for noun in question_nouns:
+        assert noun in kept_phrases
+    assert any("question nouns alone" in rec.message for rec in caplog.records)
+
+
+def test_build_gdino_prompt_drop_is_reported_not_silent(caplog):
+    import logging
+
+    dropped: list[str] = []
+    with caplog.at_level(logging.WARNING, logger="core.perception.detector"):
+        prompt = build_gdino_prompt((), _standing_vocab_nouns(), dropped_out=dropped)
+    # Some nouns must actually have been dropped for this test to mean anything.
+    assert dropped
+    assert set(MEASURED_OVERFLOW_TAIL_NOUNS).issubset(set(dropped))
+    kept_phrases = _kept_phrases(prompt)
+    for noun in dropped:
+        assert noun not in kept_phrases
+    assert any("dropping" in rec.message for rec in caplog.records)
+
+
+def test_build_gdino_prompt_no_drop_when_vocab_fits_budget():
+    dropped: list[str] = []
+    prompt = build_gdino_prompt(["sofa"], ["window", "potted plant"], dropped_out=dropped)
+    assert dropped == []
+    assert prompt == "sofa . window . potted plant ."
+
+
+def test_build_gdino_prompt_custom_token_estimator_is_honoured():
+    # Injecting an estimator that treats every rendered candidate as huge should drop
+    # every vocab noun (still keeping question nouns) -- proves the seam is real, not
+    # just decorative, and that no hard dependency on a real tokenizer exists.
+    dropped: list[str] = []
+    prompt = build_gdino_prompt(
+        ["sofa"],
+        ["window", "potted plant"],
+        token_estimator=lambda text: 10**9,
+        dropped_out=dropped,
+    )
+    assert prompt == "sofa ."
+    assert dropped == ["window", "potted plant"]
+
+
 # ------------------------------------------------------------------ GDINO stub
 
 

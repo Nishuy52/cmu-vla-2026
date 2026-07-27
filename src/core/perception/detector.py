@@ -385,24 +385,238 @@ def dump_raw_detections(
         pass
 
 
-def build_gdino_prompt(question_nouns: Sequence[str], vocab_nouns: Sequence[str]) -> str:
-    """Build the GroundingDINO text prompt from question + vocab nouns.
+#: Issue #105: GroundingDINO's own BERT-class text encoder truncates its input at this
+#: many wordpiece tokens (``max_text_len`` in the exact config this project loads,
+#: ``GroundingDINO_SwinB_cfg.py``); anything past it is silently dropped by the
+#: tokenizer, never by anything in this codebase, which is why the loss was invisible
+#: for the whole project's history. The un-budgeted prompt (116 standing-vocab nouns,
+#: alphabetically sorted per :data:`core.heads.factory._STANDING_VOCAB_NOUNS`) measures
+#: 293 real ``bert-base-uncased`` tokens -- 37 over this limit -- which silently
+#: amputates the alphabet's tail (``trash can`` through ``window``) from every
+#: detection pass, on every scene, forever.
+DEFAULT_GDINO_MAX_TEXT_TOKENS: int = 256
+
+
+def _heuristic_token_estimate(text: str) -> int:
+    """Dependency-free, conservative upper bound on BERT-style wordpiece token count.
+
+    ``src/`` has no hard dependency on ``transformers`` (the fast test tier must keep
+    working without it), so this cannot call the real tokenizer -- it approximates it
+    from word length alone, calibrated against a real ``bert-base-uncased`` encoding of
+    the full 116-noun standing vocab (measured: 293 tokens, see
+    :data:`DEFAULT_GDINO_MAX_TEXT_TOKENS`). Wordpiece splits roughly track word length
+    in that measurement (max observed: 1 token per <=4 chars, 2 per <=7, 3 per <=11, 4
+    beyond), so this buckets on the same breakpoints -- deliberately loose enough that
+    it never underestimated a single word in that measurement (calibration pinned by
+    ``test_default_token_estimate_never_underestimates_measured_vocab``). ``+2`` covers
+    the CLS/SEP special tokens BERT-class tokenizers wrap every sequence in.
+
+    Deliberately a plain word-length heuristic, not a smarter approximation: the
+    failure mode this exists to prevent is silent overflow, so the estimate must stay
+    on the safe (over-count) side even for vocabulary this measurement never saw --
+    trading some caption capacity for that guarantee is the right side to err on.
+
+    This is the fallback tier only (see :func:`_default_token_estimate`): the deployed
+    environment has the real tokenizer available (``groundingdino-py`` pulls in
+    ``transformers`` transitively, ``docker/ai_module_fork/docker/Dockerfile``), where
+    exact counting keeps far more of the standing vocab than this conservative
+    approximation would.
+    """
+    if not text:
+        return 0
+    total = 2
+    for word in text.split():
+        length = len(word)
+        if length <= 4:
+            total += 1
+        elif length <= 7:
+            total += 2
+        elif length <= 11:
+            total += 3
+        else:
+            total += 4
+    return total
+
+
+#: Cache for the real-tokenizer probe (issue #105 follow-up): ``None`` before the first
+#: probe, a callable ``str -> int`` once a real tokenizer loads, or the sentinel
+#: :data:`_TOKENIZER_UNAVAILABLE` if the probe failed once and should not be retried
+#: (retrying a broken/missing install on every detection tick would waste cycles on the
+#: hot path for no benefit -- the environment does not change mid-run).
+_TOKENIZER_UNAVAILABLE = object()
+_cached_real_tokenizer: object | None = None
+
+
+def _probe_real_tokenizer() -> Callable[[str], int] | None:
+    """Load and cache a real BERT tokenizer's exact-count function, once.
+
+    Returns ``None`` (every call, cheaply) if no real tokenizer is importable/loadable
+    -- ``transformers`` absent (the ``src/`` fast test tier) or any other failure
+    constructing it. Never raises: this sits ahead of a detection-path call
+    (:func:`_default_token_estimate`), so a broken install must degrade to the
+    heuristic, not take the pipeline down with it (same discipline as
+    :func:`dump_raw_detections`'s diagnostics-must-never-break-the-run guard above).
+
+    Logs exactly once, at whichever outcome the first call resolves to, so a live run's
+    logs say once and for all whether that run budgeted the GDINO prompt exactly (real
+    tokenizer) or conservatively (heuristic fallback) -- previously undiscoverable from
+    a bag.
+    """
+    global _cached_real_tokenizer
+    if _cached_real_tokenizer is None:
+        try:
+            from transformers import AutoTokenizer  # lazy: optional dependency
+
+            tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+            def _count(text: str) -> int:
+                return len(tokenizer(text)["input_ids"])
+
+            _cached_real_tokenizer = _count
+            _LOGGER.info(
+                "build_gdino_prompt: real bert-base-uncased tokenizer loaded -- "
+                "budgeting the GDINO prompt with exact token counts."
+            )
+        except Exception:  # noqa: BLE001 - any failure degrades to the heuristic
+            _cached_real_tokenizer = _TOKENIZER_UNAVAILABLE
+            _LOGGER.info(
+                "build_gdino_prompt: no real tokenizer available (transformers not "
+                "installed, or failed to load) -- budgeting the GDINO prompt with the "
+                "conservative word-length heuristic instead."
+            )
+    if _cached_real_tokenizer is _TOKENIZER_UNAVAILABLE:
+        return None
+    return _cached_real_tokenizer  # type: ignore[return-value]
+
+
+def _default_token_estimate(text: str) -> int:
+    """Exact real-tokenizer count when available, else the conservative heuristic.
+
+    Issue #105 follow-up: the heuristic in :func:`_heuristic_token_estimate` is
+    calibrated to never under-estimate, which necessarily means it over-estimates --
+    measured at 421 estimated vs. 293 real tokens for the full standing vocab, which
+    left only 69/116 nouns fitting the 256-token budget (vs. 104/116 that actually
+    reach the model pre-budget-cut, since only the alphabetic tail past 256 real
+    tokens silently truncated). The real tokenizer is available in the deployed
+    environment (``groundingdino-py`` -> ``transformers`` transitively), so this uses
+    it whenever it loads successfully, falling back to the heuristic only where it
+    cannot (the dependency-free ``src/`` fast test tier, or if the install is somehow
+    broken) -- never letting tokenizer construction/failure propagate into the
+    detection path.
+    """
+    if not text:
+        return 0
+    real_counter = _probe_real_tokenizer()
+    if real_counter is not None:
+        try:
+            return real_counter(text)
+        except Exception:  # noqa: BLE001 - degrade to heuristic, never raise
+            _LOGGER.warning(
+                "build_gdino_prompt: real tokenizer call failed on this prompt -- "
+                "falling back to the heuristic estimate for it.",
+            )
+    return _heuristic_token_estimate(text)
+
+
+def build_gdino_prompt(
+    question_nouns: Sequence[str],
+    vocab_nouns: Sequence[str],
+    *,
+    max_tokens: int = DEFAULT_GDINO_MAX_TEXT_TOKENS,
+    token_estimator: Callable[[str], int] = _default_token_estimate,
+    dropped_out: list[str] | None = None,
+) -> str:
+    """Build the GroundingDINO text prompt from question + vocab nouns, token-budgeted.
 
     GroundingDINO expects a lowercase, ``.``-separated list of noun phrases with a
-    trailing separator, e.g. ``"sofa . window . potted plant ."``. Question nouns
-    come first (query-relevant recall priority), then any extra vocab nouns, both
+    trailing separator, e.g. ``"sofa . window . potted plant ."``. Question nouns come
+    first (query-relevant recall priority), then any extra vocab nouns, both
     de-duplicated preserving order.
+
+    Issue #105: the caption is silently truncated by GroundingDINO's text encoder past
+    ``max_tokens`` wordpiece tokens (default 256, its real ``max_text_len``) -- so this
+    budgets the caption itself rather than letting that happen invisibly downstream.
+    Priority order matters: question nouns are never dropped for vocab nouns. Vocab
+    nouns are appended in the order given (the caller's priority order, e.g.
+    alphabetical) until the next one would push the estimated token count over budget;
+    everything from that point on is the dropped tail, never cherry-picked out of
+    order, so the drop is a predictable, describable set rather than a shuffled one.
+
+    ``token_estimator`` defaults to :func:`_default_token_estimate`, a dependency-free
+    heuristic that over-estimates rather than under-estimates (calibrated against a
+    real 293-token ``bert-base-uncased`` encoding of the full standing vocab -- see
+    that function's docstring); pass the real tokenizer's ``len(tokenizer(text)[...])``
+    here for an exact count where ``transformers`` is available.
+
+    Dropping is never silent (the entire point of issue #105 is that it used to be):
+    every drop logs a warning naming the dropped nouns, and if the caller passes a
+    ``dropped_out`` list it is extended with them (in drop order) so the caller can
+    surface or assert on it without parsing logs. If the question nouns alone already
+    estimate over budget, they are still kept in full -- silently trimming the query's
+    own target/anchor nouns would be worse than a caption GroundingDINO itself
+    truncates -- but that condition is logged as an error, never swallowed.
+
+    Chunking the standing vocab across successive keyframes (so the full vocab gets
+    covered over time instead of the same tail being permanently dropped) was
+    considered and deliberately left undone here: this function is pure and stateless
+    (nouns in, prompt out) and callers (:mod:`core.heads.factory`, out of this change's
+    ownership) do not thread any per-keyframe rotation state through it today. Bolting
+    module-level rotation state onto a pure function to fake statefulness would be a
+    half-measure that changes detection recall in a way that needs its own design and
+    test coverage, not a token-budget bug fix; the dropped-tail is now at least
+    visible and reportable (this fix), which is the prerequisite for a future
+    keyframe-rotation change to be designed against.
     """
     seen: set[str] = set()
-    ordered: list[str] = []
-    for noun in list(question_nouns) + list(vocab_nouns):
+    question_ordered: list[str] = []
+    for noun in question_nouns:
         n = noun.strip().lower()
         if n and n not in seen:
             seen.add(n)
-            ordered.append(n)
-    if not ordered:
+            question_ordered.append(n)
+    vocab_ordered: list[str] = []
+    for noun in vocab_nouns:
+        n = noun.strip().lower()
+        if n and n not in seen:
+            seen.add(n)
+            vocab_ordered.append(n)
+
+    def render(nouns: list[str]) -> str:
+        return " . ".join(nouns) + " ." if nouns else ""
+
+    if not question_ordered and not vocab_ordered:
         return ""
-    return " . ".join(ordered) + " ."
+
+    kept = list(question_ordered)
+    question_tokens = token_estimator(render(kept)) if kept else 0
+    if question_tokens > max_tokens:
+        _LOGGER.error(
+            "build_gdino_prompt: question nouns alone estimate %d tokens, over the "
+            "%d-token budget (keeping all %d anyway -- never drop question nouns): %s",
+            question_tokens, max_tokens, len(kept), kept,
+        )
+
+    dropped: list[str] = []
+    fits = True
+    for noun in vocab_ordered:
+        if fits:
+            trial_tokens = token_estimator(render(kept + [noun]))
+            if trial_tokens <= max_tokens:
+                kept.append(noun)
+                continue
+            fits = False
+        dropped.append(noun)
+
+    if dropped:
+        _LOGGER.warning(
+            "build_gdino_prompt: dropping %d/%d vocab noun(s) to stay within the "
+            "%d-token budget: %s",
+            len(dropped), len(vocab_ordered), max_tokens, dropped,
+        )
+        if dropped_out is not None:
+            dropped_out.extend(dropped)
+
+    return render(kept)
 
 
 def refresh_prompt(
