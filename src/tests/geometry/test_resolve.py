@@ -593,3 +593,93 @@ def test_resolve_tier_priority_untiered_index_falls_back_to_stable_by_id():
     assert not hasattr(idx, "by_label_tiered")
     res = T.resolve(_spec("coffee table"), idx)
     assert [c.instance_id for c in res.candidates_ranked] == [1, 2]
+
+
+# --------------------------------------------------------------------- #93: near(table
+# WITH vase) -- a dropped nested disambiguator must not silently widen counting() into
+# the whole category. resolve()'s relaxation is untouched (that behaviour is correct for
+# object_reference); the gate lives in the numerical head (tests/heads/test_numerical.py).
+# This scene mirrors the live-run repro: two tables 10 m apart, one with a vase, two
+# chairs flanking each -- truth for "chairs near the table with a vase" is 2.
+
+
+def _two_tables_two_chairs_each(with_vase: bool) -> FakeIndex:
+    recs = [
+        rec(1, "table", (0.0, 0.0, 0.4), (1.2, 1.2, 0.8)),
+        rec(2, "table", (10.0, 0.0, 0.4), (1.2, 1.2, 0.8)),
+        rec(3, "chair", (1.0, 0.0, 0.5), (0.5, 0.5, 1.0)),
+        rec(4, "chair", (-1.0, 0.0, 0.5), (0.5, 0.5, 1.0)),
+        rec(5, "chair", (11.0, 0.0, 0.5), (0.5, 0.5, 1.0)),
+        rec(6, "chair", (9.0, 0.0, 0.5), (0.5, 0.5, 1.0)),
+    ]
+    if with_vase:
+        recs.append(rec(7, "vase", (0.0, 0.0, 0.9), (0.2, 0.2, 0.2)))
+    return FakeIndex(recs)
+
+
+def _chairs_near_table_with_vase_spec() -> TargetSpec:
+    table_with_vase = Anchor(
+        noun="table", disambiguator=Clause(Pred.WITH, [Anchor(noun="vase")])
+    )
+    return _spec("chair", clauses=[Clause(Pred.NEAR, [table_with_vase])])
+
+
+def test_counting_dropped_disambiguator_still_widens_but_is_audited():
+    # Documents counting()'s existing, unchanged behaviour (it is not the bug): when
+    # the vase is never detected, the 'with(vase)' disambiguator on the table anchor is
+    # dropped and near(table) admits every chair -- the widening is real and audited.
+    # The head consuming this result is responsible for not committing to it (see
+    # tests/heads/test_numerical.py::test_dropped_disambiguator_never_reports_stable).
+    idx = _two_tables_two_chairs_each(with_vase=False)
+    res = T.counting(_chairs_near_table_with_vase_spec(), idx)
+    assert res.count == 4  # full chair census, not the true answer (2)
+    assert any(a.step == "drop_disambiguator" for a in res.audit)
+
+
+def test_counting_present_disambiguator_narrows_correctly():
+    # Control: when the vase IS present, the disambiguator applies and the count is
+    # correctly narrowed to the two chairs by the vased table.
+    idx = _two_tables_two_chairs_each(with_vase=True)
+    res = T.counting(_chairs_near_table_with_vase_spec(), idx)
+    assert res.count == 2
+    assert res.ids == {3, 4}
+    assert res.audit == []
+
+
+def test_object_reference_resolve_relaxation_unchanged_for_dropped_disambiguator():
+    # #93 must not change resolve()'s behaviour: relaxation-rather-than-fail is correct
+    # for object_reference (some box must always be published). With the vase absent,
+    # resolve() still relaxes the dropped disambiguator and returns every chair,
+    # audited -- exactly as test_dropped_disambiguator_recorded_in_audit documents.
+    idx = _two_tables_two_chairs_each(with_vase=False)
+    res = T.resolve(_chairs_near_table_with_vase_spec(), idx)
+    assert {c.instance_id for c in res.candidates_ranked} == {3, 4, 5, 6}
+    assert any(a.step == "drop_disambiguator" for a in res.audit)
+
+
+def test_has_unresolved_disambiguator_true_for_class_not_found():
+    idx = _two_tables_two_chairs_each(with_vase=False)
+    res = T.counting(_chairs_near_table_with_vase_spec(), idx)
+    assert T.has_unresolved_disambiguator(res.audit) is True
+
+
+def test_has_unresolved_disambiguator_false_when_satisfied():
+    idx = _two_tables_two_chairs_each(with_vase=True)
+    res = T.counting(_chairs_near_table_with_vase_spec(), idx)
+    assert T.has_unresolved_disambiguator(res.audit) is False
+
+
+def test_has_unresolved_disambiguator_false_for_depth_limit_drop():
+    # The nesting-depth-limit drop is a structural parse-depth cap, not a perception
+    # gap -- more exploration ticks can never resolve it, so it must NOT gate the
+    # numerical head's stability the same way a not-yet-detected class does.
+    from core.plan_schema import Anchor as A, Clause as C
+
+    inner = A(noun="table")
+    for _ in range(8):  # deeper than _MAX_ANCHOR_DEPTH
+        inner = A(noun="table", disambiguator=C(Pred.NEAR, [inner]))
+    idx = FakeIndex([rec(1, "table", (0, 0, 0)), rec(2, "bowl", (0, 0, 0))])
+    spec = _spec("bowl", clauses=[Clause(Pred.ON, [inner])])
+    res = T.counting(spec, idx)
+    assert any(a.step == "drop_disambiguator" for a in res.audit)
+    assert T.has_unresolved_disambiguator(res.audit) is False
