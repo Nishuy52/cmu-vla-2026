@@ -13,6 +13,7 @@ import numpy as np
 
 from core.groundtruth.scoring import Frame2D
 from tools.score_live_run import (
+    DEFAULT_BASELINE_DIR,
     _decimate_xy,
     _load_offline_index,
     _marker_aabb_in_object_frame,
@@ -20,6 +21,7 @@ from tools.score_live_run import (
     _merge_with_existing,
     _offline_headline,
     _squash,
+    main,
 )
 
 
@@ -182,3 +184,21 @@ def test_merge_with_existing_rescore_replaces_same_question_row(tmp_path):
     assert len(merged) == 2
     assert by_question["Find the red chair."] == 0.6  # replaced
     assert by_question["Find the blue lamp."] == 0.9  # untouched
+
+
+def test_main_requires_out_when_target_given(tmp_path, capsys):
+    # A targeted invocation (single run dir or non-default root) must never
+    # silently fall back to writing into the committed DEFAULT_BASELINE_DIR
+    # (#96) — it must error and tell the caller to pass --out.
+    run_dir = tmp_path / "some_scene" / "inst"
+    (run_dir / "bag").mkdir(parents=True)
+
+    before = DEFAULT_BASELINE_DIR / "scores.json"
+    before_bytes = before.read_bytes() if before.is_file() else None
+
+    rc = main([str(run_dir)])
+
+    assert rc != 0
+    after_bytes = before.read_bytes() if before.is_file() else None
+    assert after_bytes == before_bytes  # baseline dir untouched
+    assert "--out" in capsys.readouterr().out

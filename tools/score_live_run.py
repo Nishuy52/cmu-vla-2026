@@ -31,12 +31,16 @@ scene's sim<->object registration, not of any one question.
 Usage (from the repo root, host venv)::
 
     python -m tools.score_live_run                                   # whole default baseline dir
-    python -m tools.score_live_run reports/live_baseline_2026-07-20   # explicit baseline dir
-    python -m tools.score_live_run reports/live_baseline_2026-07-20/livingroom_1/inst  # one run
+    python -m tools.score_live_run reports/live_baseline_2026-07-20 --out reports/live_baseline_2026-07-20  # explicit baseline dir
+    python -m tools.score_live_run reports/live_baseline_2026-07-20/livingroom_1/inst --out reports/scratch  # one run
 
-Writes ``<out>/scores.md`` + ``<out>/scores.json`` (default out = the scored
-baseline dir). Safe to re-run as more bags land — each invocation rescans the
-baseline dir fresh; nothing is mutated in place.
+Writes ``<out>/scores.md`` + ``<out>/scores.json``. With no ``target`` this
+defaults to the committed baseline dir (merging any existing ``scores.json``
+there); any invocation that DOES name a ``target`` must also name ``--out``
+(#96) — the default baseline dir is a committed evidence artifact and must
+never be silently overwritten by an unrelated/narrower scoring run. Safe to
+re-run as more bags land — each invocation rescans its target fresh; nothing
+is mutated in place except the chosen ``<out>``.
 
 Pure offline dev tool (tools/ — never part of the scored pipeline). CPU only.
 """
@@ -743,10 +747,30 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--offline-results", default=str(DEFAULT_OFFLINE_RESULTS))
     ap.add_argument(
         "--out", default=None,
-        help=f"output dir (default: {DEFAULT_BASELINE_DIR.relative_to(_REPO)}, merged with "
-        "any existing scores.json there — see _merge_with_existing)",
+        help="output dir. Required whenever `target` is given (a run dir or a "
+        "non-default root) — never defaults to the committed baseline dir, to "
+        f"avoid clobbering it (#96). Omit only for the no-target whole-baseline "
+        f"invocation, which defaults to {DEFAULT_BASELINE_DIR.relative_to(_REPO)} "
+        "(merged with any existing scores.json there — see _merge_with_existing).",
     )
     args = ap.parse_args(argv)
+
+    # Default output is the whole baseline dir ONLY for the documented no-target
+    # invocation (the deliverable location per the task brief). `DEFAULT_BASELINE_DIR`
+    # is a committed evidence artifact (reports/live_baseline_2026-07-20); silently
+    # merging an unrelated `target` invocation's rows into it overwrote committed
+    # history (#96). So any invocation that names a `target` (a single run dir or a
+    # non-default root) MUST also name `--out` — we error instead of guessing where
+    # the caller meant the scores to land. Checked before any of the (possibly slow
+    # or failing) GT/questions loading below so a missing `--out` fails fast.
+    if args.target is not None and args.out is None:
+        print(
+            "score_live_run: --out is required when a target is given "
+            "(pass --out to choose where these scores are written; "
+            f"omit target to score/merge the default {DEFAULT_BASELINE_DIR.relative_to(_REPO)})"
+        )
+        return 1
+    out_dir = Path(args.out) if args.out else DEFAULT_BASELINE_DIR
 
     runs = resolve_targets(args.target)
     if not runs:
@@ -758,12 +782,6 @@ def main(argv: list[str] | None = None) -> int:
     questions_index = _load_questions_index(Path(args.questions))
     answers = GB._load_answers(args.answers)
     offline_index = _load_offline_index(Path(args.offline_results))
-
-    # Default output is always the whole baseline dir (the deliverable location per the
-    # task brief), regardless of whether `target` narrowed the scan to one run — a
-    # single-run invocation still reads/merges any pre-existing scores.json for the
-    # other already-scored runs so re-running one run doesn't blank the rest.
-    out_dir = Path(args.out) if args.out else DEFAULT_BASELINE_DIR
 
     rows: list[dict] = []
     for scene, qdir, run_dir in runs:
