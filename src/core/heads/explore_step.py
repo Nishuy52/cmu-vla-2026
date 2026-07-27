@@ -32,6 +32,7 @@ from core.nav.frontiers import detect_frontiers
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
 from core.perception.detector import is_answer_eligible
 from core.plan_schema import Plan
+from core.plan_walk import iter_route_anchors, iter_target_anchors
 
 from core.heads.instruction import InstructionHead
 
@@ -613,14 +614,34 @@ class _ProvisionalInstance:
 
 
 def _plan_nouns(plan: Plan | None) -> list[str]:
-    """All nouns referenced by a plan (target + clauses, or route anchors)."""
+    """All nouns referenced by a plan (target + clauses, or route anchors), recursing
+    through every anchor's nested ``disambiguator`` chain (issue #95) — a noun that
+    appears only as a disambiguator (e.g. "the potted plant closest to the pyramid
+    candle holder") must still reach the detector prompt / affinity / missing-noun
+    logic downstream of this function, or the robot never even asks the detector to
+    look for it.
+
+    Deliberately excludes ``plan.avoid`` anchors, even though this list feeds the
+    detector prompt. This return value is used for BOTH GroundingDINO caption passes
+    (``core.perception.detector``): the short question-noun-only pass ("target recall")
+    and the full question+vocab pass ("scene-index breadth", the anchor/other-object
+    instances). Avoid anchors are breadth, not the target being grounded — they belong
+    conceptually with the full-vocab pass, not the short one. But the short pass's box
+    threshold is calibrated against it staying small (``ENV_GDINO_QUESTION_BOX_THRESHOLD``
+    = 0.25, below the 0.35 vocab-pass default, specifically because a ~2-phrase prompt
+    carries far less token-position score dilution — detector.py's own probe found a
+    117-phrase caption decodes ZERO 'teapot' at any threshold where a 2-phrase caption
+    decodes it in 194/211 keyframes). Padding this list with avoid nouns would inflate
+    the short pass for a purpose it doesn't serve, against a threshold tuned for it
+    staying small. ``_plan_nouns`` feeds both passes through one argument
+    (``factory.py``'s ``refresh_prompt`` call) with no way to split them here — that
+    routing fix is tracked separately; until then, avoid anchors stay out entirely.
+    """
     if plan is None:
         return []
     nouns: list[str] = []
     if plan.target is not None:
         nouns.append(plan.target.noun)
-        for cl in plan.target.clauses:
-            nouns.extend(a.noun for a in cl.anchors)
-    for leg in plan.route:
-        nouns.extend(a.noun for a in leg.anchors)
+        nouns.extend(a.noun for a in iter_target_anchors(plan.target))
+    nouns.extend(a.noun for a in iter_route_anchors(plan.route))
     return [n for n in nouns if n]

@@ -1,9 +1,9 @@
 """FloorAnswers: always-ready, always-legal degraded answers per qtype."""
 from __future__ import annotations
 
-from core.fsm.floors import FloorAnswers, MODAL_COUNT, PartialResults
+from core.fsm.floors import FloorAnswers, MODAL_COUNT, PartialResults, _anchor_nouns, _target_noun
 from core.interfaces import IntAnswer, MarkerBox, QType, WaypointCmd
-from core.plan_schema import Anchor, Clause, Plan, Pred, TargetSpec
+from core.plan_schema import Anchor, Clause, LegKind, Plan, Pred, RouteLeg, TargetSpec
 from tests.fsm._fakes import FakeScene, make_instance
 
 
@@ -113,6 +113,60 @@ def _plan_with_anchor(target_noun: str, anchor_noun: str) -> Plan:
         question_raw="",
         target=TargetSpec(noun=target_noun, clauses=[clause]),
     )
+
+
+def test_anchor_nouns_recurses_into_disambiguator():
+    """A noun named only inside a clause anchor's ``disambiguator`` (issue #95) --
+    e.g. "the teapot on the table near the window" -- must still reach the anchor-
+    guided floor rung, and the target noun itself must stay excluded."""
+    clause = Clause(
+        pred=Pred.ON,
+        anchors=[Anchor(noun="table", disambiguator=Clause(pred=Pred.NEAR, anchors=[Anchor(noun="window")]))],
+    )
+    plan = Plan(
+        qtype=QType.OBJECT_REFERENCE,
+        question_raw="",
+        target=TargetSpec(noun="teapot", clauses=[clause]),
+    )
+    assert set(_anchor_nouns(plan)) == {"table", "window"}
+
+
+def test_object_ref_anchor_rung_uses_nested_disambiguator_noun():
+    """Behavioural counterpart: 'table' is absent from the scene but its nested
+    disambiguator noun 'window' is present -- the anchor rung must still fire on it."""
+    window = make_instance(1, "window", centroid=(1.0, 2.0, 0.5), extent=(0.5, 0.5, 0.5))
+    column = make_instance(2, "column", centroid=(2.3, -2.4, 1.5), extent=(0.3, 0.3, 2.0))
+    clause = Clause(
+        pred=Pred.ON,
+        anchors=[Anchor(noun="table", disambiguator=Clause(pred=Pred.NEAR, anchors=[Anchor(noun="window")]))],
+    )
+    plan = Plan(
+        qtype=QType.OBJECT_REFERENCE,
+        question_raw="",
+        target=TargetSpec(noun="teapot", clauses=[clause]),
+    )
+    f = FloorAnswers()
+    f.update(FakeScene([window, column]), plan, PartialResults())
+    m = f.get(QType.OBJECT_REFERENCE)
+    assert m.label == "window"
+
+
+def test_target_noun_recurses_into_route_anchor_disambiguator():
+    """``_target_noun``'s route fallback must recurse through a route anchor's
+    disambiguator chain (issue #95) when the anchor's own noun is blank."""
+    plan = Plan(
+        qtype=QType.INSTRUCTION_FOLLOWING,
+        question_raw="",
+        route=[
+            RouteLeg(
+                kind=LegKind.GOTO,
+                anchors=[
+                    Anchor(noun="", disambiguator=Clause(pred=Pred.NEAR, anchors=[Anchor(noun="lamp")]))
+                ],
+            )
+        ],
+    )
+    assert _target_noun(plan) == "lamp"
 
 
 def test_object_ref_anchor_rung_fires_when_target_absent_but_anchor_present():

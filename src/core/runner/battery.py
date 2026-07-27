@@ -33,6 +33,7 @@ from core.mocks.mock_io import FakeClock, MockRobotIO
 from core.parsing.regex_tier import parse_regex
 from core.perception.scene_index import BasicSceneIndex
 from core.plan_schema import LegKind
+from core.plan_walk import iter_anchor_chain
 from core.runner.scenegen import SceneSpec, build_scene_for
 from core.runner.single import run_question
 
@@ -83,15 +84,22 @@ def _floor_used(flight_log: list) -> bool:
 
 
 def _target_grounded(plan: Any, idx: BasicSceneIndex) -> bool:
-    """OR/IF: does the target / first route-anchor noun resolve to >= 1 scene candidate?"""
+    """OR/IF: does the target / first route-anchor noun resolve to >= 1 scene candidate?
+
+    Route anchors recurse through nested ``disambiguator`` chains (issue #95): the
+    "first route-anchor noun" is found by walking each anchor's chain in order, so a
+    route anchor whose own noun is blank but whose disambiguator names something real
+    is not silently treated as ungrounded.
+    """
     tgt = getattr(plan, "target", None)
     if tgt is not None and getattr(tgt, "noun", None):
         return len(idx.by_label(tgt.noun)) >= 1
     route = getattr(plan, "route", None) or []
     for leg in route:
         for anchor in getattr(leg, "anchors", None) or []:
-            if getattr(anchor, "noun", None):
-                return len(idx.by_label(anchor.noun)) >= 1
+            for node in iter_anchor_chain(anchor):
+                if getattr(node, "noun", None):
+                    return len(idx.by_label(node.noun)) >= 1
     return False
 
 

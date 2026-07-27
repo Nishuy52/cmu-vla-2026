@@ -494,6 +494,106 @@ def test_or_superlative_genuine_statement_still_matches():
 # --------------------------------------------------------------------------- 3rd opinion
 
 
+# --------------------------------------------------------------------------- nested
+# disambiguator recursion (issue #95): an anchor named only inside another anchor's
+# ``disambiguator`` (e.g. "... the table THAT IS closest to the folding screen") must
+# still be visible to every ``anchor_nouns`` set these scorers build, not just the
+# top-level clause anchors.
+
+
+def test_independent_count_sees_nested_disambiguator_anchor():
+    """Statement anchors only agree with the NESTED anchor ('folding screen'), not the
+    top-level one ('table') -> recursion is required for the relation-aware (finer)
+    count instead of the class-only (coarser) fallback."""
+    ref = {
+        "regions": {
+            "0": {
+                "stmt": [
+                    {
+                        "target_index": "7",
+                        "target_class": "bowl",
+                        "anchors": {"anchor_1": {"class": "folding screen"}},
+                    },
+                ]
+            }
+        }
+    }
+    q = "How many bowls are on the table closest to the folding screen?"
+    n, source = S._independent_count(q, ref)
+    assert n == 1
+    assert source == "referential"  # not "referential_class_only"
+
+
+def test_scene_graph_count_sees_nested_disambiguator_anchor():
+    """Scene-graph edge only agrees with the nested anchor -> recursion required for
+    the relation-aware (finer) count instead of the class-only fallback."""
+    sg = {
+        "regions": {
+            "0": {
+                "objects": [
+                    {"object_id": "b1", "raw_label": "bowl"},
+                    {"object_id": "t1", "raw_label": "table"},
+                    {"object_id": "fs1", "raw_label": "folding screen"},
+                ],
+                "relationships": {"on": {"b1": ["fs1"]}},
+            }
+        }
+    }
+    q = "How many bowls are on the table closest to the folding screen?"
+    n, source = S._scene_graph_count(q, sg)
+    assert n == 1
+    assert source == "scene_graph"  # not "scene_graph_class_only"
+
+
+def test_gt_target_relation_match_via_nested_disambiguator_anchor():
+    """Non-superlative top clause ('on the table') with a nested disambiguator
+    ('that is closest to the folding screen') — the referential statement's anchor
+    only agrees with the NESTED noun, so the relation match requires recursion."""
+    ref = {
+        "regions": {
+            "0": {
+                "stmt1": [
+                    {
+                        "target_index": "9",
+                        "target_class": "bowl",
+                        "relation": "on",
+                        "anchors": {"anchor_1": {"class": "folding screen"}},
+                    },
+                ]
+            }
+        }
+    }
+    q = "Find the bowl on the table that is closest to the folding screen."
+    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    assert tid == 9
+    assert method == "relation"
+
+
+def test_gt_target_superlative_match_via_nested_disambiguator_anchor():
+    """Superlative top clause ('closest to the book') where 'book' itself carries a
+    nested disambiguator ('on the stool') — the referential statement's anchor only
+    agrees with the NESTED noun 'stool', so the superlative-restricted anchor filter
+    requires recursion into the superlative clause's own anchors."""
+    ref = {
+        "regions": {
+            "0": {
+                "stmt1": [
+                    {
+                        "target_index": "12",
+                        "target_class": "pillow",
+                        "relation": "closest",
+                        "anchors": {"anchor_1": {"class": "stool"}},
+                    },
+                ]
+            }
+        }
+    }
+    q = "Find the pillow closest to the book on the stool."
+    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    assert tid == 12
+    assert method == "relation"
+
+
 @requires_loft
 def test_numerical_scenegraph_third_opinion(loft_referential, loft_scene_graph):
     """Scene-graph relation count is reported as a distinct third opinion."""

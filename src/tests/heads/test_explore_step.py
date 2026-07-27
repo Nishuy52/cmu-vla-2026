@@ -233,6 +233,71 @@ def test_plan_nouns_extraction():
     assert set(_plan_nouns(p)) == {"table", "lamp"}
 
 
+def test_plan_nouns_recurses_into_target_disambiguator():
+    """A noun named only inside a target clause anchor's ``disambiguator`` (issue #95)
+    -- e.g. "the potted plant closest to the pyramid candle holder" -- must still reach
+    the detector-prompt/affinity noun list, or the detector never even looks for it."""
+    from core.plan_schema import Clause, Pred, TargetSpec
+
+    p = object_plan("potted plant")
+    p.target = TargetSpec(
+        noun="potted plant",
+        clauses=[
+            Clause(
+                pred=Pred.CLOSEST_TO,
+                anchors=[
+                    Anchor(
+                        noun="pyramid candle holder",
+                        disambiguator=Clause(pred=Pred.NEAR, anchors=[Anchor(noun="window")]),
+                    )
+                ],
+            )
+        ],
+    )
+    assert set(_plan_nouns(p)) == {"potted plant", "pyramid candle holder", "window"}
+
+
+def test_plan_nouns_recurses_into_route_disambiguator():
+    """Same recursion for an instruction-following route anchor's disambiguator."""
+    from core.plan_schema import Clause, Pred
+
+    p = instruction_plan(
+        [
+            RouteLeg(
+                kind=LegKind.GOTO,
+                anchors=[
+                    Anchor(
+                        noun="bowl",
+                        disambiguator=Clause(pred=Pred.ON, anchors=[Anchor(noun="table")]),
+                    )
+                ],
+            )
+        ]
+    )
+    assert set(_plan_nouns(p)) == {"bowl", "table"}
+
+
+def test_plan_nouns_excludes_avoid_anchors():
+    """``plan.avoid`` anchors are deliberately EXCLUDED (see ``_plan_nouns`` docstring):
+    this return value feeds both GroundingDINO caption passes through one argument, and
+    the short question-noun-only pass's box threshold is calibrated against it staying
+    ~2 phrases. Avoid anchors are breadth, not target-recall nouns, and must not pad it."""
+    from core.plan_schema import AvoidSpec, Clause, Pred
+
+    p = instruction_plan(
+        [RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="door")])],
+        avoid=[
+            AvoidSpec(
+                near=Anchor(
+                    noun="fireplace",
+                    disambiguator=Clause(pred=Pred.NEAR, anchors=[Anchor(noun="rug")]),
+                )
+            )
+        ],
+    )
+    assert set(_plan_nouns(p)) == {"door"}
+
+
 def test_uniform_affinity_is_zero():
     aff = uniform_affinity(["chair"])
     assert aff((1.0, 2.0)) == 0.0

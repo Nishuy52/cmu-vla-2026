@@ -29,6 +29,7 @@ from core.interfaces import (
 )
 from core.perception.detector import is_answer_eligible
 from core.perception.dimension_priors import clamp_record_marker
+from core.plan_walk import iter_anchor_chain, iter_target_anchors
 
 MODAL_COUNT: int = 2  # most-common integer answer in the training distribution (architecture §4)
 _UNIT: float = 1.0  # side of the last-resort 1x1x1 marker
@@ -63,7 +64,13 @@ class _FloorCache:
 
 
 def _target_noun(plan: Any) -> str | None:
-    """Extract the target/first-anchor noun from a plan, tolerating any shape/None."""
+    """Extract the target/first-anchor noun from a plan, tolerating any shape/None.
+
+    Route anchors are walked recursively through nested ``disambiguator`` chains
+    (issue #95): if a route anchor's own noun is somehow blank, the first noun reachable
+    through its disambiguator is still a legitimate "first noun in route order" and must
+    not be invisible to the floor just because it lives one level down.
+    """
     if plan is None:
         return None
     tgt = getattr(plan, "target", None)
@@ -74,9 +81,10 @@ def _target_noun(plan: Any) -> str | None:
     route = getattr(plan, "route", None) or []
     for leg in route:
         for anchor in getattr(leg, "anchors", None) or []:
-            noun = getattr(anchor, "noun", None)
-            if noun:
-                return str(noun)
+            for node in iter_anchor_chain(anchor):
+                noun = getattr(node, "noun", None)
+                if noun:
+                    return str(noun)
     return None
 
 
@@ -87,18 +95,18 @@ def _anchor_nouns(plan: Any) -> list[str]:
     Mirrors :func:`core.heads.explore_step._plan_nouns` but excludes the target noun
     itself — issue #42's anchor-guided rung wants only the ANCHOR side of a clause, not
     the target the rest of ``_object_reference`` is already trying (and failing) to
-    match directly.
+    match directly. Recurses through each anchor's nested ``disambiguator`` chain
+    (issue #95) so a noun named only as a disambiguator (e.g. "the table near the
+    window" for a teapot on that table) is still available to this fallback rung.
     """
     if plan is None:
         return []
     nouns: list[str] = []
     tgt = getattr(plan, "target", None)
-    if tgt is not None:
-        for clause in getattr(tgt, "clauses", None) or []:
-            for anchor in getattr(clause, "anchors", None) or []:
-                noun = getattr(anchor, "noun", None)
-                if noun:
-                    nouns.append(str(noun))
+    for anchor in iter_target_anchors(tgt):
+        noun = getattr(anchor, "noun", None)
+        if noun:
+            nouns.append(str(noun))
     return nouns
 
 
