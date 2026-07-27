@@ -222,6 +222,14 @@ run_one() {
   mkdir -p "$VLA_EXPLORE_DEBUG_DIR"
   export VLA_INSTANCE_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/instance_index.jsonl
   export VLA_RAW_DETECTION_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/raw_detections.jsonl
+  # issues #102/#98: resolved-Plan and per-leg relaxation dumps. Paths are DERIVED from
+  # VLA_EXPLORE_DEBUG_DIR (never a standalone new variable) so they land inside the
+  # already-harvested debug dir — see #119, where both emitted zero files across all 45
+  # captures because nothing in the repo ever set their env vars.
+  # Gates: core/heads/factory.py:280 (VLA_PLAN_DUMP_PATH, also needs state.plan)
+  #        core/heads/instruction.py:124 (VLA_LEG_RELAX_DUMP_PATH, IF questions only)
+  export VLA_PLAN_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/resolved_plan.jsonl
+  export VLA_LEG_RELAX_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/relaxation_audit.jsonl
   export VLA_LLM_USAGE_LOG=~/verify_batch_${J}_usage_${SLOT}.jsonl
   python -c "from ros_adapter.adapter_node import main; main()" > ~/verify_batch_${J}_adapter_${SLOT}.log 2>&1 &
   ADAPTER_PID=$!

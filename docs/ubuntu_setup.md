@@ -476,8 +476,20 @@ cadence stall; never set it for a live/eval run.
 |---|---|
 | `VLA_PERCEPTION_SYNC` | unset/`0` (default: threaded); `1` forces synchronous debug mode |
 | `VLA_EXPLORE_DEBUG_DIR` | unset (default: no-op); dir for per-run explore/frontier JSONL dumps (#83) |
-| `VLA_INSTANCE_DUMP_PATH` | unset (default: no-op); JSONL path for periodic + answer-time instance-index dumps (#84/#89) |
+| `VLA_INSTANCE_DUMP_PATH` | unset (default: no-op); JSONL path for periodic + answer-time instance-index dumps (#84/#89). Records carry per-instance `aabb_min`/`aabb_max` (#101) |
 | `VLA_INSTANCE_DUMP_INTERVAL_S` | periodic dump throttle, default 10 |
+| `VLA_RAW_DETECTION_DUMP_PATH` | unset (default: no-op); JSONL path for RAW pre-gate detections — label/score/bbox plus accepted-vs-gated reason (#84) |
+| `VLA_PLAN_DUMP_PATH` | unset (default: no-op); JSONL path for the resolved Plan at answer time (#102). Also requires a non-None plan |
+| `VLA_LEG_RELAX_DUMP_PATH` | unset (default: no-op); JSONL path for the per-leg resolver relaxation audit (#98). **Instruction-following questions only** — numerical/object-reference runs emit zero records |
+| `VLA_LLM_USAGE_LOG` | default `reports/soclaas_usage.jsonl`; per-call LLM usage (tier/model/tokens/latency/ok) |
+
+> **Set dump paths from a common debug dir, never as standalone variables.** All five
+> dump paths above are derived from `VLA_EXPLORE_DEBUG_DIR` in the cluster sbatch
+> scripts. #119 is the cautionary case: `VLA_PLAN_DUMP_PATH` and
+> `VLA_LEG_RELAX_DUMP_PATH` were implemented but set by nothing in the repo, so they
+> emitted zero files across all 45 live captures and the runs they were built to
+> explain could not be diagnosed. A new variable also cannot reach an already-queued
+> Slurm job, since the batch script is frozen at submit time.
 
 **Addr-file handshake:** the sbatch job picks its own ports at start (shared GPU
 nodes can already have something bound on 8765/11434 — the job probes upward for the
