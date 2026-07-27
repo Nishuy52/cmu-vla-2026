@@ -5,13 +5,26 @@ one ULP for many `n` (e.g. `float32(0.7) == 0.699999988079071`), so an
 unguarded `floor((x - origin) / cell_m)` used to collide two distinct lattice
 columns/rows into the same occupancy cell, leaving the other permanently
 UNKNOWN and fragmenting FREE space into a checkerboard.
+
+A first attempt at this fix (a fixed 1e-6 "cells" epsilon) was itself
+insufficient -- it left 2 collisions per axis (200/2601 cells, 7.7%) on the
+empty-room repro below, because the true float32 rounding error scales with
+coordinate magnitude and inversely with cell_m, and a fixed constant doesn't
+track either. The tests below pin the CURRENT magnitude-scaled-tolerance fix
+against that concrete regression (not just a loose upper bound), against
+float64-promotion arithmetic explicitly (so a numpy version change or a
+future float64 terrain dtype can't silently reopen the bug), against exact
+cell-boundary determinism (including negative coordinates), and across
+several cell_m values.
 """
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+from core.interfaces import TerrainPatch
 from core.mocks.synthetic_scene import SyntheticScene
-from core.nav.occupancy import FREE, OBSTACLE, UNKNOWN, OccupancyGrid
+from core.nav.occupancy import FREE, OBSTACLE, UNKNOWN, OccupancyGrid, _lattice_floor
 from tests.nav.helpers import make_points
 
 
@@ -127,3 +140,114 @@ def test_hand_built_lattice_free_region_stays_contiguous():
             x = float(np.float32(i * 0.1 + 0.05))
             y = float(np.float32(j * 0.1 + 0.05))
             assert grid.is_free(*grid.world_to_cell(x, y)), (i, j)
+
+
+def test_empty_room_has_zero_unknown_lattice_collisions():
+    """Done-criterion 1: a furniture-free scene has nothing to occlude the
+    floor, so integrating its full terrain patch must leave ZERO UNKNOWN
+    cells in the room interior -- any UNKNOWN here is pure lattice-collision
+    loss, not real scene structure. This regressed at 200/2601 (7.7%) under
+    the previous fixed-epsilon fix; must be exactly 0 now."""
+    sc = SyntheticScene(0)
+    sc.populate_default(0)
+    grid = OccupancyGrid(cell_m=0.1)
+    grid.integrate_patch(sc.terrain_patch())
+
+    r0, c0 = grid.world_to_cell(0.0, 0.0)
+    r1, c1 = grid.world_to_cell(5.0, 5.0)
+    sub = grid.state[r0 : r1 + 1, c0 : c1 + 1]
+    unknown = int((sub == UNKNOWN).sum())
+    assert unknown == 0, (unknown, sub.size)
+
+
+# Coordinates (n, cell_m) pairs where float32(n * cell_m) is known to round
+# DOWN by enough to have collided under the old fixed 1e-6 epsilon (see the
+# module docstring); n=41 and n=46 at cell_m=0.1 are the two that produced
+# the 200/2601 empty-room regression above.
+_KNOWN_PATHOLOGICAL_CASES = [
+    (0.1, [6, 7, 8, 9, 13, 14, 17, 18, 41, 42, 46, 47]),
+    (0.05, list(range(1, 100))),
+    (0.25, list(range(1, 100))),
+]
+
+
+@pytest.mark.parametrize("cell_m,ns", _KNOWN_PATHOLOGICAL_CASES)
+def test_lattice_floor_correct_under_float64_promotion(cell_m, ns):
+    """Done-criterion 2: pin correctness under float64 PROMOTION arithmetic
+    explicitly (the numpy 1.x behaviour, and the behaviour a future
+    float64-dtype terrain cloud would also hit) -- not just under numpy
+    2.x's NEP-50 weak promotion, which happens to keep float32/python-float
+    division in float32 and can mask most collisions by luck. Regardless of
+    which promotion rule produced the float32 storage error, `_lattice_floor`
+    must resolve every n back to its intended index once explicitly widened
+    to float64 the way numpy 1.x's cross-dtype promotion used to."""
+    for n in ns:
+        x32 = np.float32(n * cell_m)
+        # Explicit float64-promotion path: widen the float32-rounded value to
+        # float64 BEFORE calling the shared helper -- exactly what numpy 1.x's
+        # float32-array / python-float division used to do internally.
+        x64 = np.float64(x32)
+        col = int(_lattice_floor(x64, 0.0, cell_m))
+        assert col == n, (cell_m, n, float(x32), float(x64), col)
+
+
+@pytest.mark.parametrize("cell_m", [0.05, 0.1, 0.25])
+def test_lattice_floor_boundary_determinism(cell_m):
+    """Done-criterion 3: a point exactly on a cell boundary lands in exactly
+    one cell, deterministically (matches the documented convention: cell c
+    covers [origin + c*cell_m, origin + (c+1)*cell_m) -- the boundary itself
+    belongs to the upper cell c, not c-1), and repeated calls agree."""
+    for n in range(-5, 25):
+        boundary = n * cell_m
+        col_a = int(_lattice_floor(boundary, 0.0, cell_m))
+        col_b = int(_lattice_floor(boundary, 0.0, cell_m))
+        assert col_a == col_b == n, (cell_m, n, boundary, col_a, col_b)
+
+        # A hair below the boundary must still land in cell n - 1 (the
+        # tolerance must not swallow a full cell's worth of genuinely
+        # distinct coordinate).
+        just_below = boundary - cell_m * 0.4
+        assert int(_lattice_floor(just_below, 0.0, cell_m)) == n - 1, (
+            cell_m,
+            n,
+            just_below,
+        )
+
+        # A hair above must land in cell n (not skip ahead to n + 1).
+        just_above = boundary + cell_m * 0.4
+        assert int(_lattice_floor(just_above, 0.0, cell_m)) == n, (cell_m, n, just_above)
+
+
+def test_lattice_floor_negative_coordinates_no_off_by_one():
+    """Done-criterion 3: negative coordinates and the grid origin itself
+    (row/col 0) must not off-by-one -- floor() and round-to-nearest disagree
+    below zero, so this is checked explicitly rather than assumed to
+    generalize from the positive-side tests above."""
+    cell_m = 0.1
+    cases = [
+        (0.0, 0),  # exact origin -> cell 0, not -1
+        (-1e-8, 0),  # noise-level negative near zero must still snap to cell 0
+        (-0.05, -1),  # halfway into the cell below origin
+        (-0.1, -1),  # exact boundary -> belongs to the upper (less-negative) cell
+        (-0.1005, -2),  # well past the boundary (beyond the tolerance) -> next cell down
+        (-1.0, -10),
+    ]
+    for x, expected in cases:
+        got = int(_lattice_floor(x, 0.0, cell_m))
+        assert got == expected, (x, expected, got)
+
+
+@pytest.mark.parametrize("cell_m", [0.05, 0.1, 0.25])
+def test_lattice_floor_sweep_no_collisions_across_cell_sizes(cell_m):
+    """Done-criterion 4: sweep n=1..199 float32-decimal coordinates at
+    several cell_m values (not just the 0.1 m lattice the issue originally
+    measured) and confirm every one maps to a distinct, correct column under
+    the CURRENT (float32-storage) arithmetic path."""
+    xs = np.array([float(np.float32(n * cell_m)) for n in range(1, 200)], dtype=np.float32)
+    grid = OccupancyGrid(cell_m=cell_m)
+    pts = np.stack(
+        [xs, np.zeros_like(xs), np.zeros_like(xs), np.full_like(xs, 0.02)], axis=1
+    ).astype(np.float32)
+    grid.integrate_patch(TerrainPatch(t=0.0, points=pts, extended=False))
+    cols = [grid.world_to_cell(float(x), 0.0)[1] for x in xs]
+    assert cols == list(range(1, 200)), (cell_m, cols)

@@ -26,19 +26,41 @@ from core.interfaces import LidarScan, TerrainPatch
 
 # --------------------------------------------------------------------------- tunables
 CELL_M: float = 0.10  # grid resolution, metres/cell
-#: issue #90 -- snap epsilon added before every world->cell floor so that
+#: issue #90 -- snap tolerance added before every world->cell floor so that
 #: coordinates sitting on (or one float32 ULP below) an exact cell boundary
 #: floor consistently, instead of a stray-low bit flipping the result down by
-#: one cell. `TerrainPatch.points` is float32 by contract (matches the real
-#: ROS terrain message dtype); float32(n * CELL_M) rounds DOWN by one ULP for
-#: many n (e.g. float32(0.7) == 0.699999988...), so an unguarded
-#: `floor((x - origin) / cell_m)` collides two distinct lattice
-#: rows/columns into one cell and leaves the other permanently UNKNOWN (see
-#: docs/upstream_notes.md and the issue for the full repro). 1e-6 m is far
-#: below both float32/float64 rounding noise at these coordinate magnitudes
-#: and the smallest real-world coordinate difference we'd ever want to treat
-#: as "a different cell", so it cannot merge genuinely distinct cells.
-LATTICE_EPS_M: float = 1e-6
+#: one cell. `TerrainPatch.points`/`LidarScan.points` are float32 by contract
+#: (matches the real ROS message dtypes); float32(n * CELL_M) rounds DOWN by
+#: one ULP for many n (e.g. float32(0.7) == 0.699999988...), so an unguarded
+#: `floor((x - origin) / cell_m)` collides two distinct lattice rows/columns
+#: into one cell and leaves the other permanently UNKNOWN (see
+#: docs/upstream_notes.md and the issue for the full repro).
+#:
+#: A *fixed* epsilon in quotient ("cells") units is NOT principled: the
+#: absolute float32 rounding error at a coordinate scales with the
+#: coordinate's own magnitude (float32 has ~7 significant decimal digits,
+#: not a fixed absolute precision), and shrinks or grows relative to a cell
+#: as cell_m changes. A constant tuned for cell_m=0.1 at small coordinates
+#: (e.g. the previous 1e-6) silently stops covering the error once either
+#: assumption moves -- which is exactly what happened: it left 2 collisions
+#: per axis (200/2601 cells) on the empty-room repro at coordinates around
+#: 4.1-4.7 m, where the true error is ~1.9e-6 in quotient units, already
+#: bigger than the fixed constant.
+#:
+#: Instead, size the tolerance from first principles: the worst-case
+#: absolute error introduced by rounding a value to float32 is
+#: `FLOAT32_EPS * |value|` (FLOAT32_EPS = 2**-23, float32's relative
+#: machine epsilon). Dividing by cell_m converts that into quotient units,
+#: and a safety factor absorbs the float64 arithmetic noise on top (the
+#: subtract-then-divide is itself not exact). `LATTICE_EPS_SAFETY_FACTOR`
+#: gives ~8x headroom over the measured worst case in the synthetic-scene
+#: and boundary sweeps (see test_occupancy_lattice.py), while staying two
+#: orders of magnitude below half a cell (0.5) at any coordinate magnitude
+#: and cell_m this project uses (rooms are metres-to-tens-of-metres,
+#: cell_m in [0.05, 0.25]) -- so it can never merge two cells a real,
+#: non-float-error coordinate difference intended to keep separate.
+FLOAT32_EPS: float = float(np.finfo(np.float32).eps)  # ~1.1920929e-07
+LATTICE_EPS_SAFETY_FACTOR: float = 8.0
 FREE_MAX: float = 0.15  # intensity < this -> FREE (matches TerrainPatch.FREE_MAX)
 OBSERVE_RADIUS_M: float = 8.0  # lidar footprint radius for the observed mask
 GROW_PAD_CELLS: int = 8  # extra ring of cells added when the grid must grow
@@ -67,17 +89,33 @@ VEHICLE_SENSOR_HEIGHT_ENV_VAR: str = "VLA_OVERHEAD_VEHICLE_SENSOR_HEIGHT_M"
 
 
 def _lattice_floor(coord, origin: float, cell_m: float):
-    """floor((coord - origin) / cell_m), snapped by LATTICE_EPS_M (issue #90).
+    """floor((coord - origin) / cell_m), snapped by a magnitude-scaled
+    tolerance (issue #90) -- the single shared indexing helper for
+    ``world_to_cell``, ``integrate_patch``, ``integrate_scan_overhead`` and
+    ``integrate_scan_overhead_decimated`` so they cannot drift out of sync.
 
-    ``coord`` may be a Python float, a numpy scalar, or an ndarray; ``np.floor``
-    dispatches correctly on all three. Always computed in float64 (callers are
-    responsible for widening float32 inputs first) -- widening alone does not
-    fix the defect since the rounding already happened in float32, so this
-    also adds a small epsilon before flooring to snap coordinates that are
-    exactly on (or one float32 ULP below) a cell boundary to the intended
-    cell instead of the one below it.
+    ``coord`` may be a Python float, a numpy scalar, or an ndarray; the
+    arithmetic below dispatches correctly on all three via numpy's ufunc
+    broadcasting. Always computed in float64 (callers are responsible for
+    widening float32 inputs first) -- widening alone does not fix the defect
+    since the rounding already happened in float32, so this also adds a
+    tolerance before flooring to snap coordinates that are exactly on (or
+    one float32 ULP below) a cell boundary to the intended cell instead of
+    the one below it.
+
+    The tolerance scales with ``max(|coord|, |origin|, 1.0) / cell_m`` (see
+    the ``FLOAT32_EPS`` / ``LATTICE_EPS_SAFETY_FACTOR`` module docstring) so
+    it stays correct as coordinate magnitude and cell_m vary, instead of a
+    fixed constant tuned for one scale. This is deliberately independent of
+    whether the caller's arithmetic happens to promote to float64 (numpy 2
+    NEP-50 weak promotion) or float32 (numpy 1.x style): it bounds the
+    float32 *storage* error of ``coord``, which exists either way -- the
+    fix does not rely on which promotion rule is active.
     """
-    return np.floor((coord - origin) / cell_m + LATTICE_EPS_M)
+    coord_arr = np.asarray(coord, dtype=np.float64)
+    magnitude = np.maximum(np.abs(coord_arr), max(abs(origin), 1.0))
+    tol = LATTICE_EPS_SAFETY_FACTOR * FLOAT32_EPS * magnitude / cell_m
+    return np.floor((coord_arr - origin) / cell_m + tol)
 
 
 def _env_vehicle_sensor_height_override() -> float | None:
