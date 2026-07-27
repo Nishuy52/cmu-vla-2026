@@ -730,8 +730,8 @@ def _gt_target_from_geometry(
     that target class with the relation+anchor the question needs, even when the
     real physical relation holds in the scene. office_1's "potted plant on the file
     cabinet" is the flagship case: the corpus has 25 'near'-relation statements for
-    class 'plant' in that scene, but every one is anchored to 'book', never
-    'cabinet' — and zero 'on'-relation statements for 'plant' at all — although
+    class 'plant' in that scene, anchored to 'book' (20) and 'telephone' (5) but
+    never 'cabinet' — and zero 'on'-relation statements for 'plant' at all — although
     instance 55 ('potted plant') is verifiably ``on`` instance 69 ('file cabinet')
     by the exact geometry predicate the resolver itself trusts.
 
