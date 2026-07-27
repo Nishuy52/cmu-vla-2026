@@ -6,12 +6,17 @@ import pytest
 
 from core.groundtruth import scoring as S
 from core.groundtruth.loader import load_scene
-from core.interfaces import MarkerBox
+from core.interfaces import InstanceRecord, MarkerBox
 from core.perception.scene_index import BasicSceneIndex
 
 from core.groundtruth.scoring import Frame2D, align_scene_trajectories, fit_frame
 
-from tests.groundtruth.conftest import requires_loft, LOFT_DIR
+from tests.groundtruth.conftest import (
+    requires_loft,
+    requires_full_unity,
+    FULL_UNITY_ROOT,
+    LOFT_DIR,
+)
 
 
 # --------------------------------------------------------------------------- scene-graph between pairs (T7-S2)
@@ -618,3 +623,219 @@ def test_numerical_no_scenegraph_no_third_opinion(loft_referential):
                           referential=loft_referential, scene_graph=None)
     assert a.gt_count_scenegraph is None
     assert a.scenegraph_source == "none"
+
+
+# --------------------------------------------------------------------------- length-
+# scaled tie-break margin (issue #92 fix 2): a FIXED absolute Jaccard floor rejects
+# genuine winners on long statements (more tokens -> smaller absolute delta per
+# discriminating token) while a length-scaled floor accepts them without opening the
+# door to genuine ties (which sit at margin 0 regardless of length).
+
+
+@requires_full_unity
+def test_or_margin_scales_with_statement_length_paper_cup():
+    """office_1 'paper cup on the table closest to the projector screen' (issue #92):
+    the correct match (id 84, 'the cup that is closest to the projector screen', a
+    12-token question) scores 0.583 against a 'second closest' runner-up at 0.538 —
+    a 0.045 absolute margin that the OLD fixed 0.05 floor rejected outright. The
+    length-scaled margin must accept it."""
+    scene_dir = FULL_UNITY_ROOT / "office_1"
+    referential = __import__("json").loads(
+        (scene_dir / "office_1_referential_statements.json").read_text()
+    )
+    scene = load_scene(scene_dir)
+    idx = BasicSceneIndex(scene.instances)
+    q = "Find the paper cup on the table closest to the projector screen."
+    r = S.score_object_reference(q, idx, scene.instances, referential=referential)
+    assert r.match_method == "relation"
+    assert r.target_source == "referential"
+    assert r.gt_target_id == 84
+    assert not np.isnan(r.iou)
+
+
+@requires_full_unity
+def test_or_genuine_tie_still_ambiguous_livingroom1_pillow():
+    """Guard: office_1's neighbour scene livingroom_1 has a genuine wording tie —
+    'the olive pillow that is on the sofa' vs 'the maroon pillow that is on the
+    sofa' both score identically (0.545) against 'Find the pillow on the sofa that
+    is closest to the windows.' — no discriminating token exists (the colour words
+    aren't in the question either way), so this must stay ambiguous under the new
+    length-scaled margin exactly as it did under the old fixed one."""
+    scene_dir = FULL_UNITY_ROOT / "livingroom_1"
+    referential = __import__("json").loads(
+        (scene_dir / "livingroom_1_referential_statements.json").read_text()
+    )
+    q = "Find the pillow on the sofa that is closest to the windows."
+    tid, source, method = S._gt_target_from_referential(q, referential, [])
+    assert tid is None
+    assert source == "ambiguous"
+    assert method == "none"
+
+
+def test_or_margin_synthetic_one_token_ordinal_beats_scaled_floor():
+    """Synthetic, data-independent version of the paper-cup case: a longer question
+    where the winning statement differs from the runner-up by exactly one token
+    ('second') must be accepted even though the absolute Jaccard gap is well under
+    the old fixed 0.05 floor, because the length-scaled floor shrinks to match."""
+    ref = {
+        "regions": {
+            "0": {
+                "the cup that is closest to the printer stand": [
+                    {"target_index": "84", "target_class": "cup", "relation": "closest",
+                     "anchors": {"anchor_1": {"class": "printer stand"}}},
+                ],
+                "the cup that is second closest to the printer stand": [
+                    {"target_index": "85", "target_class": "cup", "relation": "closest",
+                     "anchors": {"anchor_1": {"class": "printer stand"}}},
+                ],
+            }
+        }
+    }
+    q = "Find the paper cup on the table closest to the printer stand."
+    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    assert tid == 84
+    assert method == "relation"
+
+
+def test_or_margin_synthetic_genuine_tie_stays_ambiguous():
+    """Synthetic control: two equally-worded, differently-coloured distractors with
+    NO discriminating token vs the question tie at margin 0 and must stay
+    ambiguous — the length-scaled floor never drops to (or below) zero."""
+    ref = {
+        "regions": {
+            "0": {
+                "the olive pillow that is on the sofa": [
+                    {"target_index": "41", "target_class": "pillow", "relation": "on",
+                     "anchors": {"anchor_1": {"class": "sofa"}}},
+                ],
+                "the maroon pillow that is on the sofa": [
+                    {"target_index": "42", "target_class": "pillow", "relation": "on",
+                     "anchors": {"anchor_1": {"class": "sofa"}}},
+                ],
+            }
+        }
+    }
+    q = "Find the pillow on the sofa that is closest to the windows."
+    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    assert tid is None
+    assert source == "ambiguous"
+    assert method == "none"
+
+
+# --------------------------------------------------------------------------- geometry
+# fallback GT target (issue #92 fix 3): when the referential-statement ladder finds
+# ZERO candidates for a single-anchor physical relation, verify it directly against
+# the GT geometry instead of leaving the question unscored.
+
+
+def _box(iid: int, label: str, xmin, xmax, ymin, ymax, zmin, zmax) -> InstanceRecord:
+    amin = np.array([xmin, ymin, zmin])
+    amax = np.array([xmax, ymax, zmax])
+    return InstanceRecord(
+        instance_id=iid, label=label, score=1.0, n_obs=3,
+        centroid=(amin + amax) / 2, aabb_min=amin, aabb_max=amax,
+        points=None, caption="",
+    )
+
+
+def test_or_geometry_fallback_unique_on_match():
+    """No referential statements at all -> the text ladder returns 'none'; a unique
+    target-class instance that geometrically satisfies 'on' the unique anchor
+    instance is an honest GT target, not a guess."""
+    cabinet = _box(1, "file cabinet", 0, 1, 0, 1, 0, 1)
+    plant_on = _box(2, "potted plant", 0.3, 0.5, 0.3, 0.5, 1.0, 1.3)
+    plant_far = _box(3, "potted plant", 5, 5.3, 5, 5.3, 0, 0.3)
+    instances = [cabinet, plant_on, plant_far]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the potted plant on the file cabinet.", idx, instances, referential=None,
+    )
+    assert r.match_method == "geometric"
+    assert r.target_source == "geometry"
+    assert r.gt_target_id == 2
+    assert not np.isnan(r.iou)
+
+
+def test_or_geometry_fallback_ambiguous_on_stays_none():
+    """Guard: two target-class instances both geometrically satisfy the relation ->
+    genuinely ambiguous, must NOT guess one -> stays 'none', not fabricated."""
+    cabinet = _box(1, "file cabinet", 0, 1, 0, 1, 0, 1)
+    plant_a = _box(2, "potted plant", 0.1, 0.3, 0.1, 0.3, 1.0, 1.3)
+    plant_b = _box(3, "potted plant", 0.6, 0.8, 0.6, 0.8, 1.0, 1.3)
+    instances = [cabinet, plant_a, plant_b]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the potted plant on the file cabinet.", idx, instances, referential=None,
+    )
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
+
+
+def test_or_geometry_fallback_declines_ordinal_relation():
+    """Superlative ('closest'/'farthest') questions are declined by the geometry
+    fallback even with zero referential candidates -- ranking every same-class
+    instance against the anchor would just re-derive our own resolver's answer as
+    its own ground truth, not an independent check."""
+    cabinet = _box(1, "file cabinet", 0, 1, 0, 1, 0, 1)
+    plant_near = _box(2, "potted plant", 1.1, 1.3, 0.4, 0.6, 0, 0.3)
+    plant_far = _box(3, "potted plant", 5, 5.3, 5, 5.3, 0, 0.3)
+    instances = [cabinet, plant_near, plant_far]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the potted plant closest to the file cabinet.",
+        idx, instances, referential=None,
+    )
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+
+
+def test_or_geometry_fallback_declines_ambiguous_text_result():
+    """The geometry fallback must only fire when the text ladder found ZERO
+    candidates ('none'), never when it found candidates but couldn't pick one
+    ('ambiguous') -- an ambiguous text result is a different failure mode this
+    fallback must not paper over."""
+    cabinet = _box(1, "file cabinet", 0, 1, 0, 1, 0, 1)
+    plant_on = _box(2, "potted plant", 0.3, 0.5, 0.3, 0.5, 1.0, 1.3)
+    plant_off = _box(3, "potted plant", 5, 5.3, 5, 5.3, 0, 0.3)
+    instances = [cabinet, plant_on, plant_off]
+    idx = BasicSceneIndex(instances)
+    ref = {
+        "regions": {
+            "0": {
+                "the black plant that is near the small cabinet": [
+                    {"target_index": "2", "target_class": "plant", "relation": "near",
+                     "anchors": {"anchor_1": {"class": "cabinet"}}},
+                ],
+                "the brown plant that is near the gray cabinet": [
+                    {"target_index": "3", "target_class": "plant", "relation": "near",
+                     "anchors": {"anchor_1": {"class": "cabinet"}}},
+                ],
+            }
+        }
+    }
+    r = S.score_object_reference(
+        "Find the potted plant on the file cabinet.", idx, instances, referential=ref,
+    )
+    assert r.target_source == "ambiguous"
+    assert r.match_method == "none"
+
+
+@requires_full_unity
+def test_or_geometry_fallback_real_office1_plant_on_cabinet():
+    """office_1 (issue #92 flagship case): 'the potted plant on the file cabinet' has
+    zero referential-statement candidates (the corpus's 25 'near'-relation plant
+    statements in this scene are all anchored to 'book', and it has zero 'on'
+    statements for 'plant' at all) -- but instance 55 IS verifiably 'on' instance 69
+    ('file cabinet') by GT geometry, and is the only plant instance that is."""
+    scene_dir = FULL_UNITY_ROOT / "office_1"
+    scene = load_scene(scene_dir)
+    idx = BasicSceneIndex(scene.instances)
+    r = S.score_object_reference(
+        "Find the potted plant on the file cabinet.",
+        idx, scene.instances, referential=None,
+    )
+    assert r.match_method == "geometric"
+    assert r.target_source == "geometry"
+    assert r.gt_target_id == 55
+    assert not np.isnan(r.iou)
