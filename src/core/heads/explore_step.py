@@ -32,7 +32,7 @@ from core.nav.frontiers import detect_frontiers
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
 from core.perception.detector import is_answer_eligible
 from core.plan_schema import Plan
-from core.plan_walk import iter_route_anchors, iter_target_anchors
+from core.plan_walk import iter_avoid_anchors, iter_route_anchors, iter_target_anchors
 
 from core.heads.instruction import InstructionHead
 
@@ -621,21 +621,20 @@ def _plan_nouns(plan: Plan | None) -> list[str]:
     logic downstream of this function, or the robot never even asks the detector to
     look for it.
 
-    Deliberately excludes ``plan.avoid`` anchors, even though this list feeds the
-    detector prompt. This return value is used for BOTH GroundingDINO caption passes
-    (``core.perception.detector``): the short question-noun-only pass ("target recall")
-    and the full question+vocab pass ("scene-index breadth", the anchor/other-object
-    instances). Avoid anchors are breadth, not the target being grounded — they belong
-    conceptually with the full-vocab pass, not the short one. But the short pass's box
-    threshold is calibrated against it staying small (``ENV_GDINO_QUESTION_BOX_THRESHOLD``
-    = 0.25, below the 0.35 vocab-pass default, specifically because a ~2-phrase prompt
-    carries far less token-position score dilution — detector.py's own probe found a
-    117-phrase caption decodes ZERO 'teapot' at any threshold where a 2-phrase caption
-    decodes it in 194/211 keyframes). Padding this list with avoid nouns would inflate
-    the short pass for a purpose it doesn't serve, against a threshold tuned for it
-    staying small. ``_plan_nouns`` feeds both passes through one argument
-    (``factory.py``'s ``refresh_prompt`` call) with no way to split them here — that
-    routing fix is tracked separately; until then, avoid anchors stay out entirely.
+    Deliberately excludes ``plan.avoid`` anchors (use :func:`_plan_avoid_nouns` for
+    those). This return value feeds BOTH GroundingDINO caption passes
+    (``core.perception.detector``) as ``refresh_prompt``'s ``question_nouns`` argument:
+    the short question-noun-only pass ("target recall") and, via ``question_nouns``'
+    priority slot, the full question+vocab pass ("scene-index breadth"). The short
+    pass's box threshold is calibrated against it staying small
+    (``ENV_GDINO_QUESTION_BOX_THRESHOLD`` = 0.25, below the 0.35 vocab-pass default,
+    specifically because a ~2-phrase prompt carries far less token-position score
+    dilution — detector.py's own probe found a 117-phrase caption decodes ZERO
+    'teapot' at any threshold where a 2-phrase caption decodes it in 194/211
+    keyframes), so only nouns that belong in the SHORT pass go here. Avoid anchors are
+    breadth, not the target being grounded — they route separately (issue #108) via
+    :func:`_plan_avoid_nouns` into ``refresh_prompt``'s ``full_only_nouns`` argument,
+    which joins the full caption only.
     """
     if plan is None:
         return []
@@ -645,3 +644,19 @@ def _plan_nouns(plan: Plan | None) -> list[str]:
         nouns.extend(a.noun for a in iter_target_anchors(plan.target))
     nouns.extend(a.noun for a in iter_route_anchors(plan.route))
     return [n for n in nouns if n]
+
+
+def _plan_avoid_nouns(plan: Plan | None) -> list[str]:
+    """Nouns referenced by a plan's ``avoid`` anchors (``between``/``near``), recursing
+    through nested disambiguators (:func:`core.plan_walk.iter_avoid_anchors`).
+
+    Issue #108: avoid anchors are objects the robot must locate so navigation can
+    penalise their region — breadth, not the target being grounded — so they belong in
+    the full question+vocab GroundingDINO caption only, never the short
+    question-noun-only caption (see :func:`_plan_nouns`'s docstring for why the short
+    pass must stay tiny). Feed this return value to ``refresh_prompt``'s
+    ``full_only_nouns`` argument, never to its ``question_nouns`` argument.
+    """
+    if plan is None:
+        return []
+    return [n for n in (a.noun for a in iter_avoid_anchors(plan.avoid)) if n]

@@ -623,6 +623,8 @@ def refresh_prompt(
     detector: object | None,
     question_nouns: Sequence[str],
     vocab_nouns: Sequence[str],
+    *,
+    full_only_nouns: Sequence[str] = (),
 ) -> str | None:
     """Rebuild ``detector.prompt`` from the latched question's nouns + standing vocab.
 
@@ -645,9 +647,30 @@ def refresh_prompt(
 
     Issue #42 dual-pass detection: if the detector also exposes a settable
     ``.question_prompt`` (both :class:`GroundingDinoDetector` and :class:`FakeDetector`
-    do), that is refreshed too, from the question nouns alone (no vocab nouns) — the short
-    caption the question-noun pass grounds on. A detector with ``.prompt`` but no
-    ``.question_prompt`` still gets its full prompt refreshed as before.
+    do), that is refreshed too, from the question nouns alone (no vocab nouns, and no
+    ``full_only_nouns`` either — see below) — the short caption the question-noun pass
+    grounds on. A detector with ``.prompt`` but no ``.question_prompt`` still gets its
+    full prompt refreshed as before.
+
+    Issue #108: ``full_only_nouns`` is the third category ``_plan_nouns`` (issue #95's
+    docstring) had nowhere correct to send — nouns that must reach the full
+    question+vocab caption (breadth: the detector needs to be asked to look for them so
+    downstream logic, e.g. avoidance-region scoring, has something to find) but must NOT
+    inflate the short question-noun-only caption, whose lower box threshold
+    (``ENV_GDINO_QUESTION_BOX_THRESHOLD``) is calibrated specifically on that caption
+    staying tiny (a 117-phrase caption decodes zero ``teapot`` at any threshold; a
+    2-phrase caption decodes it in 194/211 keyframes — detector.py's own probe). The
+    canonical caller is ``plan.avoid`` anchors (via ``core.plan_walk.iter_avoid_anchors``):
+    avoid anchors are breadth, not the target being grounded.
+
+    Priority in the full caption is ``question_nouns`` > ``full_only_nouns`` >
+    ``vocab_nouns`` — plan-relevant avoid nouns are placed ahead of the generic standing
+    vocab so issue #105's token budget (the full caption sits at exactly its 256-token
+    limit with zero headroom) drops standing-vocab nouns before it ever drops a
+    plan-relevant one. Achieved by simply prepending ``full_only_nouns`` to the
+    ``vocab_nouns`` list handed to :func:`build_gdino_prompt` for the full caption only
+    — that function's own de-dup (question nouns win ties) and budget-in-order behaviour
+    do the rest; nothing about :func:`build_gdino_prompt` itself needed to change.
 
     Thread-safety: this performs exactly one attribute assignment (``detector.prompt =
     ...``), which is atomic under the GIL — safe to call from whichever thread latches the
@@ -660,7 +683,7 @@ def refresh_prompt(
     """
     if detector is None or not hasattr(detector, "prompt"):
         return None
-    prompt = build_gdino_prompt(question_nouns, vocab_nouns)
+    prompt = build_gdino_prompt(question_nouns, list(full_only_nouns) + list(vocab_nouns))
     detector.prompt = prompt
     if hasattr(detector, "question_prompt"):
         detector.question_prompt = build_gdino_prompt(question_nouns, ())

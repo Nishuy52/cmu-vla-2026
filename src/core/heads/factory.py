@@ -49,6 +49,7 @@ from core.heads.explore_step import (
     FrontierSelectFn,
     FuseHintFn,
     MissRecoveryFn,
+    _plan_avoid_nouns,
     _plan_nouns,
     uniform_affinity,
 )
@@ -113,7 +114,12 @@ class HeadState:
         if plan is None or self.plan is not None:
             return
         self.plan = plan
-        refresh_prompt(self.detector, _plan_nouns(plan), _STANDING_VOCAB_NOUNS)
+        refresh_prompt(
+            self.detector,
+            _plan_nouns(plan),
+            _STANDING_VOCAB_NOUNS,
+            full_only_nouns=_plan_avoid_nouns(plan),
+        )
         if plan.qtype is QType.NUMERICAL:
             self.numerical = NumericalHead(plan=plan, thresholds=self.thresholds)
         elif plan.qtype is QType.OBJECT_REFERENCE:
