@@ -139,6 +139,32 @@ class Relaxation:
     detail: str
 
 
+def has_unresolved_disambiguator(audit: Sequence["Relaxation"]) -> bool:
+    """True if ``audit`` records a disambiguator drop that more perception could fix.
+
+    (#93) A dropped nested disambiguator (e.g. "the table WITH a vase" degrading to
+    "any table") widens a hard filter -- fine for :func:`resolve` (some box must be
+    published) but dangerous for :func:`counting`, where it can turn "I couldn't
+    verify this constraint" into a confident, silently-wrong integer (the vase was
+    never detected -> "near the table" admits every table -> full-category count).
+
+    Distinguishes two drop causes recorded under the ``"drop_disambiguator"`` step:
+
+    * the referenced class was never detected, or no candidate satisfied the
+      clause -- perception simply hasn't seen it yet; more exploration ticks may
+      still resolve it. This is the case callers should treat as "not yet safe to
+      commit to".
+    * the nesting depth limit (``_MAX_ANCHOR_DEPTH``) was reached -- a structural
+      parse-depth cap, not a perception gap. No amount of waiting changes it, so it
+      is excluded here: gating on it would only burn exploration budget for no
+      chance of resolution.
+    """
+    return any(
+        r.step == "drop_disambiguator" and "nesting depth limit" not in r.detail
+        for r in audit
+    )
+
+
 @dataclass(frozen=True)
 class ResolveResult:
     """Output of :func:`resolve`.
