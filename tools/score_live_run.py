@@ -673,26 +673,52 @@ def write_report(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
     return md_path, json_path
 
 
+def _merge_key(r: dict) -> tuple[str, str, str]:
+    """Row identity for ``_merge_with_existing``.
+
+    ``(scene, qdir)`` alone is NOT unique: every scene has TWO
+    instruction_following and TWO object_reference questions, both scored
+    under the same ``qdir`` (``inst``/``obje``), so that key silently
+    collapsed the two rows of a type down to whichever was merged last
+    (#97). The question text (``r["question"]``) is what actually
+    distinguishes them, so it joins the key.
+
+    ``question`` can be ``None``/empty when the bag's question text didn't
+    match anything in ``questions.json`` (see ``score_run``/
+    ``score_instruction_following_run``) — falling back to ``""`` there
+    would reintroduce the same collision for two differently-broken runs
+    of the same scene/qdir, so the fallback instead folds in ``run_dir``,
+    which is unique per run and stable across re-invocations of that same
+    run. That preserves the intended re-score semantics: re-scoring a run
+    (matched question or not) recomputes the SAME key and replaces just
+    that row, while every other already-scored row is left untouched.
+    Every branch returns a plain ``str`` tuple so ``sorted(merged)`` below
+    always compares like types.
+    """
+    question = r.get("question") or f"<no-question:{r.get('run_dir', '')}>"
+    return (r["scene"], r["qdir"], question)
+
+
 def _merge_with_existing(out_dir: Path, new_rows: list[dict]) -> list[dict]:
     """Merge freshly-scored rows into any pre-existing ``scores.json`` at ``out_dir``.
 
-    Keyed by ``(scene, qdir)`` — a re-run of one run dir (more bags landing, a
-    fix applied) replaces just that run's row and leaves every other
-    already-scored run's row untouched, so a partial re-invocation never
-    blanks previously-scored runs (the tool is "ready for re-run as more
-    bags land" per the task brief).
+    Keyed by :func:`_merge_key` (scene, qdir, question) — a re-run of one run
+    dir (more bags landing, a fix applied) replaces just that run's row and
+    leaves every other already-scored run's row untouched, so a partial
+    re-invocation never blanks previously-scored runs (the tool is "ready
+    for re-run as more bags land" per the task brief).
     """
     existing_path = out_dir / "scores.json"
-    merged: dict[tuple[str, str], dict] = {}
+    merged: dict[tuple[str, str, str], dict] = {}
     if existing_path.is_file():
         try:
             data = json.loads(existing_path.read_text(encoding="utf-8"))
             for r in data.get("rows", []):
-                merged[(r["scene"], r["qdir"])] = r
+                merged[_merge_key(r)] = r
         except (OSError, json.JSONDecodeError, KeyError):
             pass  # a corrupt/old-shape file is not fatal — we just start fresh
     for r in new_rows:
-        merged[(r["scene"], r["qdir"])] = r
+        merged[_merge_key(r)] = r
     return [merged[k] for k in sorted(merged)]
 
 
