@@ -1776,3 +1776,82 @@ checks are the outstanding cluster work; host lane needs nothing further.
   pipeline) and **699009** (batch, 10 questions across livingroom_1 + office_1,
   chained afterany:698999). Est start 27 Jul ~11:48. Outputs persist cluster-side
   regardless of the SSH tunnel; harvest = `harvest_verify.sh <job>`.
+
+---
+
+## 2026-07-27 — Issue-queue sweep: five verified fix lanes, five new defects found
+
+**Done — five lanes, each merged only after a fresh-context adversarial verifier
+returned CONFIRMED (user directive this session: "run verifiers before committing
+anything"):**
+
+- **#96, #97** (`fea1097`) — `score_live_run` evidence integrity. Merge key was
+  `(scene, qdir)`, collapsing the two same-type questions every scene has; now keyed
+  per question. Targeted runs now require `--out` instead of silently defaulting to
+  the committed baseline dir (which had already been overwritten once and recovered
+  via `git checkout`). Sole caller `harvest_verify.sh:72` already passes `--out`, so
+  the stricter CLI breaks nothing.
+- **#93** (`ca7870a`) — numerical counts no longer widen silently. Root-caused and
+  reproduced offline: when a nested disambiguator can't be satisfied,
+  `_apply_disambiguator` *drops* it, so `near(the table WITH a vase)` degrades to
+  `near(any table)` = the full class census (the live 28-vs-8). `signal()` now
+  withholds `stable`; `answer()` untouched, so the always-publish guarantee holds —
+  proven by driving a real `QuestionController` end to end (56 ticks vs 19, one
+  `IntAnswer` either way).
+- **#101, #102, #98** (`d8e0e2b`) — grounding observability: per-instance AABBs,
+  resolved-Plan dump at answer time, per-leg relaxation audit. Instrumentation only;
+  verifier ran the real 75-question battery both sides and diffed the aggregate JSON
+  byte-for-byte (`if_rubric=0.744` unchanged).
+- **#95 + fix 1 of #92** (`30c7451`) — shared recursive plan walker
+  (`src/core/plan_walk.py`) applied to five sites that stopped at top-level anchors
+  and never descended into `Anchor.disambiguator`. Offline OR `n_scored` **6 → 8 of
+  30** (both new ones IoU 1.000; `none` bucket 24 → 22). IF headline held at 0.744.
+- **#105** (`1911428`) — gdino prompt token budget (see below).
+
+**Decisions:**
+- *Verifier gates every merge.* Executor self-report is not evidence. This caught: a
+  gate implementation misdescribed in its own report, a lane reporting "no score
+  movement" when the battery had never executed, and a prompt fix that made coverage
+  worse. Verification worktrees must have `upstream/`, `data/`, `.venv/` symlinked in
+  (all git-ignored, so a fresh worktree silently cannot run the battery/replay tiers),
+  and briefs must pin `.venv/bin/python` — plain `python3` lacks `rosbags`.
+- *Avoid anchors stay out of `_plan_nouns`.* It feeds both gdino captions through one
+  argument; the short pass is calibrated for ~2 phrases (a 117-phrase caption decodes
+  ZERO `teapot` where a 2-phrase one gets 194/211). Avoid anchors are breadth, not
+  target recall. Routing them to the full caption only is #108.
+- *Real tokenizer over heuristic for prompt budgeting.* A conservative heuristic kept
+  only 69/116 nouns — worse than the 104 the bug left. `transformers` ships with
+  `groundingdino-py` in the deployed env, so budget exactly (102/116 at 256/256) and
+  fall back to the heuristic only in the test tier.
+
+**New defects found and filed (none were in the queue):**
+- **#105** gdino prompt overflows `max_text_len=256` — measured 293 tokens, 12 nouns
+  (incl. `vase`, `tv`, `window`, `water cooler`) silently truncated every run, every
+  scene. Closed the causal chain on #93: truncation → `vase` undetected →
+  disambiguator dropped → count widens to census.
+- **#106** `_merge_key` uses raw question text, not `_squash()` — case/whitespace drift
+  duplicates a row.
+- **#107** `_same_label_group_is_tied` compares NaN when all margins are `-inf`, so the
+  salience reorder never fires for absent anchor classes — exactly #91's scenario.
+- **#108** avoid-anchor nouns can't be routed to the full caption only.
+- **#109** the #93 gate burns the full explore budget when the class truly never exists.
+
+**Corrections to existing issues:**
+- **#103** — its premise is wrong: `explore_debug` *does* cover `explore_execute`
+  (single call site in a `finally`). The data we thought was missing is already banked.
+- **#91** — its leading hypothesis is wrong: all those classes are in the standing
+  vocab. Truncation (#105) explains `tv`/`window`/`water cooler`; `candle holder` and
+  `wall decal` are in the caption and still undetected, so a real recall residual
+  remains.
+- **#104** — the fitted frame is cached per *scene* (`_SCENE_CACHE`), so the per-run
+  frame-fit check it proposes cannot discriminate; suspicion shifts to the marker's
+  instance being mis-localized, linking it to #94.
+- **#94** — ruled out `BasicSceneIndex.add()` as the merge site; chaining via
+  `associate()`'s 0.75 m centroid gate remains a hypothesis, **not reproduced**.
+
+**Gate at close:** `pytest -m ""` from `src/` = 1623 passed, 37 skipped, exit 0;
+`pytest tools` = 143 passed. Offline battery IF headline 0.744 unchanged throughout.
+
+**Next step:** #106 (now that `score_live_run.py` ownership is free), then #107
+(scored-path change — needs its own battery before/after), then #94/#109. #91's
+recall residual and #92's fixes 2-3 remain the largest open score levers.
