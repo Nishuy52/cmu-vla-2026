@@ -1,0 +1,35 @@
+[WARN] [1785128786.185354629] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785128786.226696569] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785128786.237640341] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785128786.244122672] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785128786.249262624] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785128814.543051780] [vla_ai_module]: question latched: 'Find the paper cup on the table closest to the projector screen.'
+[INFO] [1785128814.676766910] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785128814.678634282] [vla_ai_module]: idle->parsing question received
+[INFO] [1785128826.628536072] [vla_ai_module]: parsing->orient parse attempted
+[INFO] [1785128826.645692975] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785128856.662737827] [vla_ai_module]: published 151 waypoints since latch
+[INFO] [1785128874.734608796] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785128886.718390371] [vla_ai_module]: published 301 waypoints since latch
+[INFO] [1785128916.730715256] [vla_ai_module]: published 451 waypoints since latch
+[INFO] [1785128946.945576241] [vla_ai_module]: published 602 waypoints since latch
+[INFO] [1785128976.950432962] [vla_ai_module]: published 752 waypoints since latch
+[INFO] [1785129007.105997312] [vla_ai_module]: published 903 waypoints since latch
+[INFO] [1785129037.115363160] [vla_ai_module]: published 1053 waypoints since latch
+[INFO] [1785129054.721474928] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785129054.940651707] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785129055.058024245] [vla_ai_module]: published marker answer: label='cup' centroid=(-0.20, -3.00, 0.36)
+[INFO] [1785129055.059907728] [vla_ai_module]: answer->done answered
+[INFO] [1785129055.062090491] [vla_ai_module]: controller DONE; last 9 events: 0.1:idle:question_latched:object_reference: 'Find the paper cup on the table closest to the projector screen.' | 0.1:idle:transition:idle->parsing question received | 12.1:parsing:parsed:tier=api | 12.1:parsing:transition:parsing->orient parse attempted | 60.2:orient:transition:orient->explore_execute orientation window closed | 240.2:explore_execute:transition:explore_execute->verify explore budget spent | 240.4:verify:transition:verify->answer verify complete | 240.5:answer:published:MarkerBox via answer_state | 240.5:answer:transition:answer->done answered

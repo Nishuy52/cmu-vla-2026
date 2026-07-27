@@ -129,6 +129,10 @@ teardown_one() {
 # ---------- run one (scene, qdir, question) tuple end to end ----------
 run_one() {
   local SCN=$1 QD=$2 SDIR=$3 QUESTION=$4 SLOT=$5
+  # `i` MUST be local: this function's ollama/bag wait-loops use `for i in $(seq ...)`,
+  # and without this they clobber the CALLER's matrix-line counter — 699009 lost a bag
+  # when two questions collided on the same SLOT name and the batch miscounted 10 as 7.
+  local i
   trap teardown_one RETURN
   echo "== slot $SLOT: scene=$SCN qdir=$QD scene_dir=${SDIR:-<baked>} question: $QUESTION"
 

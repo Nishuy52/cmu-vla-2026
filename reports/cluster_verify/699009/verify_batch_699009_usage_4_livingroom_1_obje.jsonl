@@ -1,0 +1,4 @@
+{"completion_tokens": 146, "latency_ms": 5765.2, "model": "qwen3.6:35b", "ok": true, "prompt_tokens": 2006, "tier": "api", "total_tokens": 2152, "ts": "2026-07-27T04:11:52.589883+00:00"}
+{"completion_tokens": 134, "latency_ms": 1549.2, "model": "qwen3.6:35b", "ok": true, "prompt_tokens": 288, "tier": "api", "total_tokens": 422, "ts": "2026-07-27T04:15:48.621162+00:00"}
+{"completion_tokens": 151, "latency_ms": 5858.0, "model": "qwen3.6:35b", "ok": true, "prompt_tokens": 2009, "tier": "api", "total_tokens": 2160, "ts": "2026-07-27T04:18:11.118037+00:00"}
+{"completion_tokens": 167, "latency_ms": 1800.0, "model": "qwen3.6:35b", "ok": true, "prompt_tokens": 360, "tier": "api", "total_tokens": 527, "ts": "2026-07-27T04:22:07.364923+00:00"}

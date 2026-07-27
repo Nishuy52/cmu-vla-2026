@@ -1,0 +1,75 @@
+[WARN] [1785129163.428694493] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785129163.451079326] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785129163.457818590] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785129163.461649746] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785129163.465242005] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785129192.129053923] [vla_ai_module]: question latched: 'Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.'
+[INFO] [1785129192.296887220] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785129192.299725377] [vla_ai_module]: idle->parsing question received
+[INFO] [1785129198.572542751] [vla_ai_module]: parsing->orient parse attempted
+[INFO] [1785129198.586864178] [vla_ai_module]: published 1 waypoints since latch
+[INFO] [1785129228.686963588] [vla_ai_module]: published 145 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785129252.317352636] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785129258.717514541] [vla_ai_module]: published 294 waypoints since latch
+[INFO] [1785129288.756507127] [vla_ai_module]: published 444 waypoints since latch
+[INFO] [1785129318.921867577] [vla_ai_module]: published 595 waypoints since latch
+[INFO] [1785129348.920725527] [vla_ai_module]: published 745 waypoints since latch
+[INFO] [1785129379.128587994] [vla_ai_module]: published 896 waypoints since latch
+[INFO] [1785129409.181613446] [vla_ai_module]: published 1046 waypoints since latch
+[INFO] [1785129439.333429919] [vla_ai_module]: published 1197 waypoints since latch
+[INFO] [1785129462.166784778] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785129462.322625410] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785129462.491166491] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1785129469.347564556] [vla_ai_module]: published 1347 waypoints since latch
+[INFO] [1785129499.515876669] [vla_ai_module]: published 1498 waypoints since latch
+[INFO] [1785129529.527599369] [vla_ai_module]: published 1648 waypoints since latch
+[INFO] [1785129559.612835785] [vla_ai_module]: published 1798 waypoints since latch
+[INFO] [1785129589.836305889] [vla_ai_module]: published 1949 waypoints since latch
+[INFO] [1785129619.956020440] [vla_ai_module]: published 2100 waypoints since latch
+[INFO] [1785129650.127933039] [vla_ai_module]: published 2251 waypoints since latch
+[INFO] [1785129680.134904565] [vla_ai_module]: published 2401 waypoints since latch
+[INFO] [1785129702.416180171] [vla_ai_module]: drive_out->done route drive complete
+[INFO] [1785129702.423719450] [vla_ai_module]: controller DONE; last 10 events: 0.2:idle:question_latched:instruction_following: 'Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.' | 0.2:idle:transition:idle->parsing question received | 6.4:parsing:parsed:tier=api | 6.4:parsing:transition:parsing->orient parse attempted | 60.2:orient:transition:orient->explore_execute orientation window closed | 270.0:explore_execute:transition:explore_execute->verify explore budget spent | 270.2:verify:transition:verify->answer verify complete | 270.4:answer:published:WaypointCmd via answer_state | 270.4:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 510.3:drive_out:transition:drive_out->done route drive complete
+Traceback (most recent call last):
+  File "/home/c/cyuhsin/vla/src/ros_adapter/adapter_node.py", line 1164, in main
+    rclpy.spin(node)
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 839, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 823, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 793, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 701, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/c/cyuhsin/vla/src/ros_adapter/adapter_node.py", line 1169, in main
+    rclpy.shutdown()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 134, in shutdown
+    _shutdown(context=context)
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/utilities.py", line 82, in shutdown
+    context.shutdown()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/context.py", line 129, in shutdown
+    self.__context.shutdown()
+rclpy._rclpy_pybind11.RCLError: failed to shutdown: rcl_shutdown already called on the given context, at ./src/rcl/init.c:333
+final text_encoder_type: bert-base-uncased

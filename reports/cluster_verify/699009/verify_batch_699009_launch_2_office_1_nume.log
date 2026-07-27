@@ -1,0 +1,59 @@
+[INFO] [launch]: All log files can be found below /tmp/roslog-699009/2026-07-27-12-53-35-551173-xgpd7-213497
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [localPlanner-1]: process started with pid [213500]
+[INFO] [pathFollower-2]: process started with pid [213501]
+[INFO] [static_transform_publisher-3]: process started with pid [213502]
+[INFO] [static_transform_publisher-4]: process started with pid [213503]
+[INFO] [terrainAnalysis-5]: process started with pid [213504]
+[INFO] [terrainAnalysisExt-6]: process started with pid [213505]
+[INFO] [default_server_endpoint-7]: process started with pid [213506]
+[INFO] [sim_image_repub-8]: process started with pid [213507]
+[INFO] [sensorScanGeneration-9]: process started with pid [213508]
+[INFO] [waypointConverter-10]: process started with pid [213509]
+[INFO] [visualizationTools-11]: process started with pid [213510]
+[INFO] [joy_node-12]: process started with pid [213511]
+[INFO] [vehicleSimulator-13]: process started with pid [213512]
+[static_transform_publisher-3] [WARN] [1785128016.397016765] []: Old-style arguments are deprecated; see --help for new-style arguments
+[static_transform_publisher-4] [WARN] [1785128016.402659279] []: Old-style arguments are deprecated; see --help for new-style arguments
+[static_transform_publisher-3] [INFO] [1785128016.419987411] [vehicleTransPublisher]: Spinning until stopped - publishing transform
+[static_transform_publisher-3] translation: ('-0.000000', '-0.000000', '0.000000')
+[static_transform_publisher-3] rotation: ('0.000000', '0.000000', '0.000000', '1.000000')
+[static_transform_publisher-3] from '/sensor' to '/vehicle'
+[static_transform_publisher-4] [INFO] [1785128016.423935206] [sensorTransPublisher]: Spinning until stopped - publishing transform
+[static_transform_publisher-4] translation: ('0.000000', '0.000000', '0.100000')
+[static_transform_publisher-4] rotation: ('-0.500000', '0.500000', '-0.500000', '0.500000')
+[static_transform_publisher-4] from '/sensor' to '/camera'
+[localPlanner-1] [INFO] [1785128016.452490511] [localPlanner]: Reading path files.
+[vehicleSimulator-13] [INFO] [1785128016.507432323] [vehicleSimulator]: Simulation started.
+[default_server_endpoint-7] /home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py:878: UserWarning: MultiThreadedExecutor is used with a single thread.
+[default_server_endpoint-7] Use the SingleThreadedExecutor instead.
+[default_server_endpoint-7]   warnings.warn(
+[default_server_endpoint-7] [INFO] [1785128017.099886155] [endpoint]: Starting server on 0.0.0.0:10000
+[default_server_endpoint-7] [INFO] [1785128017.166452816] [endpoint]: Connection from 127.0.0.1
+[default_server_endpoint-7] [WARN] [1785128017.221851056] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785128017.282660415] [endpoint]: RegisterSubscriber(/unity_sim/set_model_state, <class 'geometry_msgs.msg._pose_stamped.PoseStamped'>) OK
+[default_server_endpoint-7] [WARN] [1785128017.305593891] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785128017.372639824] [endpoint]: RegisterSubscriber(/tf, <class 'tf2_msgs.msg._tf_message.TFMessage'>) OK
+[localPlanner-1] [INFO] [1785128017.812236988] [localPlanner]: Initialization complete.
+[default_server_endpoint-7] [INFO] [1785128018.249714890] [endpoint]: Connection from 127.0.0.1
+[default_server_endpoint-7] [ERROR] [1785128018.253193589] [endpoint]: Exception: No more data available
+[default_server_endpoint-7] [ERROR] [1785128018.253642974] [endpoint]: Exception [Errno 32] Broken pipe
+[default_server_endpoint-7] [WARN] [1785128018.256587298] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785128018.340917874] [endpoint]: RegisterSubscriber(/unity_sim/set_model_state, <class 'geometry_msgs.msg._pose_stamped.PoseStamped'>) OK
+[default_server_endpoint-7] [INFO] [1785128018.380218067] [endpoint]: Disconnected from 127.0.0.1
+[default_server_endpoint-7] [INFO] [1785128018.434851815] [endpoint]: RegisterSubscriber(/tf, <class 'tf2_msgs.msg._tf_message.TFMessage'>) OK
+[default_server_endpoint-7] [INFO] [1785128018.879197580] [endpoint]: RegisterPublisher(/registered_scan, <class 'sensor_msgs.msg._point_cloud2.PointCloud2'>) OK
+[default_server_endpoint-7] [WARN] [1785128018.880286733] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785128018.965151805] [endpoint]: RegisterPublisher(camera/image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[default_server_endpoint-7] [WARN] [1785128018.968169039] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785128019.066816348] [endpoint]: RegisterPublisher(camera/semantic_image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[waypointConverter-10] [INFO] [1785128110.971091374] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785128127.400916757] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785128127.611256355] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785128129.280875229] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785128130.231163088] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785128130.450889767] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785128130.891105269] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785128131.100919316] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785128131.861046113] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785128132.070989616] [waypointConverter]: Waypoint reached.
