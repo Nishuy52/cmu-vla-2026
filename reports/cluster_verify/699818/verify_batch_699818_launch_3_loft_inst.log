@@ -1,0 +1,78 @@
+[INFO] [launch]: All log files can be found below /tmp/roslog-699818/2026-07-27-20-51-57-408673-xgpd8-191547
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [localPlanner-1]: process started with pid [191550]
+[INFO] [pathFollower-2]: process started with pid [191551]
+[INFO] [static_transform_publisher-3]: process started with pid [191552]
+[INFO] [static_transform_publisher-4]: process started with pid [191553]
+[INFO] [terrainAnalysis-5]: process started with pid [191554]
+[INFO] [terrainAnalysisExt-6]: process started with pid [191555]
+[INFO] [default_server_endpoint-7]: process started with pid [191556]
+[INFO] [sim_image_repub-8]: process started with pid [191557]
+[INFO] [sensorScanGeneration-9]: process started with pid [191558]
+[INFO] [waypointConverter-10]: process started with pid [191559]
+[INFO] [visualizationTools-11]: process started with pid [191560]
+[INFO] [joy_node-12]: process started with pid [191561]
+[INFO] [vehicleSimulator-13]: process started with pid [191562]
+[static_transform_publisher-3] [WARN] [1785156718.364363636] []: Old-style arguments are deprecated; see --help for new-style arguments
+[static_transform_publisher-4] [WARN] [1785156718.365214165] []: Old-style arguments are deprecated; see --help for new-style arguments
+[static_transform_publisher-3] [INFO] [1785156718.391478394] [vehicleTransPublisher]: Spinning until stopped - publishing transform
+[static_transform_publisher-3] translation: ('-0.000000', '-0.000000', '0.000000')
+[static_transform_publisher-3] rotation: ('0.000000', '0.000000', '0.000000', '1.000000')
+[static_transform_publisher-3] from '/sensor' to '/vehicle'
+[static_transform_publisher-4] [INFO] [1785156718.392978295] [sensorTransPublisher]: Spinning until stopped - publishing transform
+[static_transform_publisher-4] translation: ('0.000000', '0.000000', '0.100000')
+[static_transform_publisher-4] rotation: ('-0.500000', '0.500000', '-0.500000', '0.500000')
+[static_transform_publisher-4] from '/sensor' to '/camera'
+[localPlanner-1] [INFO] [1785156718.425973467] [localPlanner]: Reading path files.
+[vehicleSimulator-13] [INFO] [1785156718.479481428] [vehicleSimulator]: Simulation started.
+[default_server_endpoint-7] /home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py:878: UserWarning: MultiThreadedExecutor is used with a single thread.
+[default_server_endpoint-7] Use the SingleThreadedExecutor instead.
+[default_server_endpoint-7]   warnings.warn(
+[default_server_endpoint-7] [INFO] [1785156719.168250320] [endpoint]: Starting server on 0.0.0.0:10000
+[default_server_endpoint-7] [INFO] [1785156719.547573885] [endpoint]: Connection from 127.0.0.1
+[default_server_endpoint-7] [WARN] [1785156719.625952815] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[localPlanner-1] [INFO] [1785156719.674274683] [localPlanner]: Initialization complete.
+[default_server_endpoint-7] [INFO] [1785156719.690181879] [endpoint]: RegisterSubscriber(/unity_sim/set_model_state, <class 'geometry_msgs.msg._pose_stamped.PoseStamped'>) OK
+[default_server_endpoint-7] [WARN] [1785156719.715081298] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785156719.750178746] [endpoint]: RegisterSubscriber(/tf, <class 'tf2_msgs.msg._tf_message.TFMessage'>) OK
+[default_server_endpoint-7] [WARN] [1785156720.010361723] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785156720.062882687] [endpoint]: RegisterPublisher(/registered_scan, <class 'sensor_msgs.msg._point_cloud2.PointCloud2'>) OK
+[default_server_endpoint-7] [WARN] [1785156720.063335394] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785156720.098730101] [endpoint]: RegisterPublisher(camera/image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[default_server_endpoint-7] [WARN] [1785156720.099078250] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785156720.190940787] [endpoint]: RegisterPublisher(camera/semantic_image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[default_server_endpoint-7] [INFO] [1785156720.620806460] [endpoint]: Connection from 127.0.0.1
+[default_server_endpoint-7] [WARN] [1785156720.629263446] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [ERROR] [1785156720.713340018] [endpoint]: Exception: No more data available
+[default_server_endpoint-7] [ERROR] [1785156720.750677856] [endpoint]: Exception [Errno 32] Broken pipe
+[default_server_endpoint-7] [INFO] [1785156720.760294184] [endpoint]: RegisterSubscriber(/unity_sim/set_model_state, <class 'geometry_msgs.msg._pose_stamped.PoseStamped'>) OK
+[default_server_endpoint-7] [INFO] [1785156720.805986929] [endpoint]: Disconnected from 127.0.0.1
+[default_server_endpoint-7] [INFO] [1785156720.809010666] [endpoint]: RegisterSubscriber(/tf, <class 'tf2_msgs.msg._tf_message.TFMessage'>) OK
+[default_server_endpoint-7] [INFO] [1785156720.861000972] [endpoint]: RegisterPublisher(/registered_scan, <class 'sensor_msgs.msg._point_cloud2.PointCloud2'>) OK
+[default_server_endpoint-7] [INFO] [1785156720.926474016] [endpoint]: RegisterPublisher(camera/image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[default_server_endpoint-7] [INFO] [1785156720.961495285] [endpoint]: RegisterPublisher(camera/semantic_image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[default_server_endpoint-7] Traceback (most recent call last):
+[default_server_endpoint-7]   File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/home/docker/autonomy_stack_mecanum_wheel_platform/install/ros_tcp_endpoint/lib/ros_tcp_endpoint/default_server_endpoint", line 33, in <module>
+[default_server_endpoint-7]     sys.exit(load_entry_point('ros-tcp-endpoint', 'console_scripts', 'default_server_endpoint')())
+[default_server_endpoint-7]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[default_server_endpoint-7]   File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/home/docker/autonomy_stack_mecanum_wheel_platform/build/ros_tcp_endpoint/ros_tcp_endpoint/default_server_endpoint.py", line 14, in main
+[default_server_endpoint-7]     tcp_server.setup_executor()
+[default_server_endpoint-7]   File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/home/docker/autonomy_stack_mecanum_wheel_platform/build/ros_tcp_endpoint/ros_tcp_endpoint/server.py", line 167, in setup_executor
+[default_server_endpoint-7]     executor.spin()
+[default_server_endpoint-7]   File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 308, in spin
+[default_server_endpoint-7]     self.spin_once()
+[default_server_endpoint-7]   File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 911, in spin_once
+[default_server_endpoint-7]     self._spin_once_impl(timeout_sec)
+[default_server_endpoint-7]   File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 890, in _spin_once_impl
+[default_server_endpoint-7]     handler, entity, node = self.wait_for_ready_callbacks(
+[default_server_endpoint-7]                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[default_server_endpoint-7]   File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 793, in wait_for_ready_callbacks
+[default_server_endpoint-7]     return next(self._cb_iter)
+[default_server_endpoint-7]            ^^^^^^^^^^^^^^^^^^^
+[default_server_endpoint-7]   File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 694, in _wait_for_ready_callbacks
+[default_server_endpoint-7]     waitable.add_to_wait_set(wait_set)
+[default_server_endpoint-7]   File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/event_handler.py", line 124, in add_to_wait_set
+[default_server_endpoint-7]     with self.__event:
+[default_server_endpoint-7] rclpy._rclpy_pybind11.InvalidHandle: cannot use Destroyable because destruction was requested
+[ERROR] [default_server_endpoint-7]: process has died [pid 191556, exit code 1, cmd '/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/home/docker/autonomy_stack_mecanum_wheel_platform/install/ros_tcp_endpoint/lib/ros_tcp_endpoint/default_server_endpoint --ros-args -r __node:=endpoint --params-file /tmp/launch_params_qi0unjvn'].
+[ERROR] [waypointConverter-10]: process has died [pid 191559, exit code -11, cmd '/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/home/docker/autonomy_stack_mecanum_wheel_platform/install/waypoint_converter/lib/waypoint_converter/waypointConverter --ros-args -r __node:=waypointConverter --params-file /tmp/launch_params_jet11oi1 --params-file /tmp/launch_params_yw6qndqq --params-file /tmp/launch_params_dmneatfh --params-file /tmp/launch_params_nk2vgt8x --params-file /tmp/launch_params_qw3ug4t2 --params-file /tmp/launch_params_xh14jwxm --params-file /tmp/launch_params_gs6mbccy --params-file /tmp/launch_params_qkm3hlwi --params-file /tmp/launch_params_dr994w1o --params-file /tmp/launch_params_vr8xeb9m --params-file /tmp/launch_params_cmzgdsgx --params-file /tmp/launch_params_d88doa1q --params-file /tmp/launch_params_diio9yna --params-file /tmp/launch_params_6exlowut --params-file /tmp/launch_params_5fzdxux4 --params-file /tmp/launch_params_bjn52a1x --params-file /tmp/launch_params_jxv5xu8z --params-file /tmp/launch_params_vynhv040 --params-file /tmp/launch_params_z5apvyp8 --params-file /tmp/launch_params_ar76bmej --params-file /tmp/launch_params_db12h7ks'].

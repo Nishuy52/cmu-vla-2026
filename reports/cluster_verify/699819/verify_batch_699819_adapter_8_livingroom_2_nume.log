@@ -1,0 +1,48 @@
+[WARN] [1785162962.937586158] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785162962.968677723] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785162962.975933429] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785162962.979493699] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785162962.985125676] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785162991.513085872] [vla_ai_module]: question latched: 'How many cups are on the coffee table?'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785163006.905941716] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785163006.907629929] [vla_ai_module]: idle->parsing question received
+[INFO] [1785163012.982513025] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/114 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785163013.078266026] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785163043.137640622] [vla_ai_module]: published 144 waypoints since latch
+[INFO] [1785163051.569713365] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785163073.333009952] [vla_ai_module]: published 277 waypoints since latch
+[INFO] [1785163103.553467017] [vla_ai_module]: published 381 waypoints since latch
+[INFO] [1785163133.568028881] [vla_ai_module]: published 495 waypoints since latch
+[INFO] [1785163163.645929690] [vla_ai_module]: published 609 waypoints since latch
+[INFO] [1785163193.694862174] [vla_ai_module]: published 723 waypoints since latch
+[INFO] [1785163201.646826638] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785163201.943329133] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785163202.024131404] [vla_ai_module]: published int answer: 7
+[INFO] [1785163202.025685891] [vla_ai_module]: answer->done answered
+[INFO] [1785163202.027719490] [vla_ai_module]: controller DONE; last 9 events: 15.4:idle:question_latched:numerical: 'How many cups are on the coffee table?' | 15.4:idle:transition:idle->parsing question received | 21.5:parsing:parsed:tier=api | 21.5:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 210.1:explore_execute:transition:explore_execute->verify explore budget spent | 210.4:verify:transition:verify->answer verify complete | 210.5:answer:published:IntAnswer via answer_state | 210.5:answer:transition:answer->done answered
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/c/cyuhsin/vla/src/ros_adapter/adapter_node.py", line 1169, in main
+    rclpy.shutdown()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 134, in shutdown
+    _shutdown(context=context)
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/utilities.py", line 82, in shutdown
+    context.shutdown()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/context.py", line 129, in shutdown
+    self.__context.shutdown()
+rclpy._rclpy_pybind11.RCLError: failed to shutdown: rcl_shutdown already called on the given context, at ./src/rcl/init.c:333
+final text_encoder_type: bert-base-uncased

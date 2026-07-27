@@ -1,0 +1,35 @@
+[WARN] [1785156763.500002674] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785156763.520072076] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785156763.524991488] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785156763.528543266] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785156763.531998738] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785156792.257577501] [vla_ai_module]: question latched: 'Go to the cup near the TV remote and avoid the path near the cabinet.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785156805.564502015] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785156805.565654758] [vla_ai_module]: idle->parsing question received
+[INFO] [1785156811.147859733] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/114 vocab noun(s) to stay within the 256-token budget: ['tea table', 'trash can', 'tray', 'tv', 'tv cabinet', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785156811.241369220] [vla_ai_module]: published 1 waypoints since latch
+[INFO] [1785156841.338300566] [vla_ai_module]: published 152 waypoints since latch
+[INFO] [1785156852.369004476] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785156871.344423874] [vla_ai_module]: published 302 waypoints since latch
+[INFO] [1785156901.351300309] [vla_ai_module]: published 452 waypoints since latch
+[INFO] [1785156931.360613809] [vla_ai_module]: published 602 waypoints since latch
+[INFO] [1785156961.560052851] [vla_ai_module]: published 753 waypoints since latch
+[INFO] [1785156991.755238649] [vla_ai_module]: published 904 waypoints since latch
+[INFO] [1785157021.950730292] [vla_ai_module]: published 1055 waypoints since latch
+[INFO] [1785157051.956806197] [vla_ai_module]: published 1205 waypoints since latch
+[INFO] [1785157062.345936961] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785157062.548115868] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785157062.731761310] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1785157082.179997527] [vla_ai_module]: published 1356 waypoints since latch
+[INFO] [1785157112.361759485] [vla_ai_module]: published 1507 waypoints since latch
+[INFO] [1785157142.547182636] [vla_ai_module]: published 1658 waypoints since latch
+[INFO] [1785157172.749201949] [vla_ai_module]: published 1809 waypoints since latch
+[INFO] [1785157202.751794105] [vla_ai_module]: published 1959 waypoints since latch
+[INFO] [1785157232.951257238] [vla_ai_module]: published 2110 waypoints since latch
+[INFO] [1785157263.148981055] [vla_ai_module]: published 2261 waypoints since latch
+[INFO] [1785157293.154162086] [vla_ai_module]: published 2411 waypoints since latch
+[INFO] [1785157323.163777380] [vla_ai_module]: published 2561 waypoints since latch
+[INFO] [1785157332.330747044] [vla_ai_module]: drive_out->done watchdog_floor>=570s
+[INFO] [1785157332.332340463] [vla_ai_module]: controller DONE; last 10 events: 18.9:parsing:parsed:tier=api | 18.9:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 270.1:explore_execute:transition:explore_execute->verify explore budget spent | 270.3:verify:transition:verify->answer verify complete | 270.5:answer:answer_from_floor:verify yielded nothing | 270.5:answer:published:WaypointCmd via answer_state | 270.5:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 540.1:drive_out:publish_suppressed:already published; watchdog_floor>=570s | 540.1:drive_out:transition:drive_out->done watchdog_floor>=570s

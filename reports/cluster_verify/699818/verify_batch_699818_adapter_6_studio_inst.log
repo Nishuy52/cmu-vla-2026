@@ -1,0 +1,47 @@
+[WARN] [1785159515.320230795] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785159515.340068868] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785159515.344788337] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785159515.346918893] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785159515.348851187] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785159544.093626475] [vla_ai_module]: question latched: 'Go to the vases on the cabinet below the TV and stop at the guitar near the couch.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785159559.137615279] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785159559.139097741] [vla_ai_module]: idle->parsing question received
+[INFO] [1785159567.711163022] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/111 vocab noun(s) to stay within the 256-token budget: ['table', 'tea table', 'trash can', 'tray', 'tv cabinet', 'tv remote', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785159567.831149781] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785159598.065927538] [vla_ai_module]: published 143 waypoints since latch
+[INFO] [1785159604.178311686] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785159628.283227556] [vla_ai_module]: published 248 waypoints since latch
+[INFO] [1785159658.443545589] [vla_ai_module]: published 352 waypoints since latch
+[INFO] [1785159688.468445484] [vla_ai_module]: published 491 waypoints since latch
+[INFO] [1785159718.633537955] [vla_ai_module]: published 629 waypoints since latch
+[INFO] [1785159748.776553546] [vla_ai_module]: published 764 waypoints since latch
+[INFO] [1785159778.939708031] [vla_ai_module]: published 902 waypoints since latch
+[INFO] [1785159808.965040693] [vla_ai_module]: published 1036 waypoints since latch
+[INFO] [1785159814.110195831] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785159814.324761682] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785159814.406349952] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1785159839.209694560] [vla_ai_module]: published 1173 waypoints since latch
+[INFO] [1785159869.304416308] [vla_ai_module]: published 1310 waypoints since latch
+[INFO] [1785159899.379111516] [vla_ai_module]: published 1449 waypoints since latch
+[INFO] [1785159929.567702227] [vla_ai_module]: published 1585 waypoints since latch
+[INFO] [1785159959.779556319] [vla_ai_module]: published 1719 waypoints since latch
+[INFO] [1785159989.902516275] [vla_ai_module]: published 1852 waypoints since latch
+[INFO] [1785160020.059961743] [vla_ai_module]: published 1987 waypoints since latch
+[INFO] [1785160050.191830068] [vla_ai_module]: published 2123 waypoints since latch
+[INFO] [1785160080.306134253] [vla_ai_module]: published 2256 waypoints since latch
+[INFO] [1785160084.106691775] [vla_ai_module]: drive_out->done watchdog_floor>=570s
+[INFO] [1785160084.109042177] [vla_ai_module]: controller DONE; last 10 events: 15.0:idle:transition:idle->parsing question received | 23.6:parsing:parsed:tier=api | 23.6:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 270.0:explore_execute:transition:explore_execute->verify explore budget spent | 270.2:verify:transition:verify->answer verify complete | 270.3:answer:published:WaypointCmd via answer_state | 270.3:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 540.0:drive_out:publish_suppressed:already published; watchdog_floor>=570s | 540.0:drive_out:transition:drive_out->done watchdog_floor>=570s

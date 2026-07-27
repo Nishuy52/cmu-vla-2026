@@ -1,0 +1,2 @@
+{"completion_tokens": 153, "latency_ms": 6720.0, "model": "qwen3.6:35b", "ok": true, "prompt_tokens": 2008, "tier": "api", "total_tokens": 2161, "ts": "2026-07-27T15:14:09.955626+00:00"}
+{"completion_tokens": 160, "latency_ms": 2323.4, "model": "qwen3.6:35b", "ok": true, "prompt_tokens": 294, "tier": "api", "total_tokens": 454, "ts": "2026-07-27T15:17:49.637701+00:00"}
