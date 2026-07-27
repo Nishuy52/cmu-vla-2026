@@ -397,7 +397,7 @@ def dump_raw_detections(
 DEFAULT_GDINO_MAX_TEXT_TOKENS: int = 256
 
 
-def _default_token_estimate(text: str) -> int:
+def _heuristic_token_estimate(text: str) -> int:
     """Dependency-free, conservative upper bound on BERT-style wordpiece token count.
 
     ``src/`` has no hard dependency on ``transformers`` (the fast test tier must keep
@@ -415,6 +415,12 @@ def _default_token_estimate(text: str) -> int:
     failure mode this exists to prevent is silent overflow, so the estimate must stay
     on the safe (over-count) side even for vocabulary this measurement never saw --
     trading some caption capacity for that guarantee is the right side to err on.
+
+    This is the fallback tier only (see :func:`_default_token_estimate`): the deployed
+    environment has the real tokenizer available (``groundingdino-py`` pulls in
+    ``transformers`` transitively, ``docker/ai_module_fork/docker/Dockerfile``), where
+    exact counting keeps far more of the standing vocab than this conservative
+    approximation would.
     """
     if not text:
         return 0
@@ -430,6 +436,86 @@ def _default_token_estimate(text: str) -> int:
         else:
             total += 4
     return total
+
+
+#: Cache for the real-tokenizer probe (issue #105 follow-up): ``None`` before the first
+#: probe, a callable ``str -> int`` once a real tokenizer loads, or the sentinel
+#: :data:`_TOKENIZER_UNAVAILABLE` if the probe failed once and should not be retried
+#: (retrying a broken/missing install on every detection tick would waste cycles on the
+#: hot path for no benefit -- the environment does not change mid-run).
+_TOKENIZER_UNAVAILABLE = object()
+_cached_real_tokenizer: object | None = None
+
+
+def _probe_real_tokenizer() -> Callable[[str], int] | None:
+    """Load and cache a real BERT tokenizer's exact-count function, once.
+
+    Returns ``None`` (every call, cheaply) if no real tokenizer is importable/loadable
+    -- ``transformers`` absent (the ``src/`` fast test tier) or any other failure
+    constructing it. Never raises: this sits ahead of a detection-path call
+    (:func:`_default_token_estimate`), so a broken install must degrade to the
+    heuristic, not take the pipeline down with it (same discipline as
+    :func:`dump_raw_detections`'s diagnostics-must-never-break-the-run guard above).
+
+    Logs exactly once, at whichever outcome the first call resolves to, so a live run's
+    logs say once and for all whether that run budgeted the GDINO prompt exactly (real
+    tokenizer) or conservatively (heuristic fallback) -- previously undiscoverable from
+    a bag.
+    """
+    global _cached_real_tokenizer
+    if _cached_real_tokenizer is None:
+        try:
+            from transformers import AutoTokenizer  # lazy: optional dependency
+
+            tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+            def _count(text: str) -> int:
+                return len(tokenizer(text)["input_ids"])
+
+            _cached_real_tokenizer = _count
+            _LOGGER.info(
+                "build_gdino_prompt: real bert-base-uncased tokenizer loaded -- "
+                "budgeting the GDINO prompt with exact token counts."
+            )
+        except Exception:  # noqa: BLE001 - any failure degrades to the heuristic
+            _cached_real_tokenizer = _TOKENIZER_UNAVAILABLE
+            _LOGGER.info(
+                "build_gdino_prompt: no real tokenizer available (transformers not "
+                "installed, or failed to load) -- budgeting the GDINO prompt with the "
+                "conservative word-length heuristic instead."
+            )
+    if _cached_real_tokenizer is _TOKENIZER_UNAVAILABLE:
+        return None
+    return _cached_real_tokenizer  # type: ignore[return-value]
+
+
+def _default_token_estimate(text: str) -> int:
+    """Exact real-tokenizer count when available, else the conservative heuristic.
+
+    Issue #105 follow-up: the heuristic in :func:`_heuristic_token_estimate` is
+    calibrated to never under-estimate, which necessarily means it over-estimates --
+    measured at 421 estimated vs. 293 real tokens for the full standing vocab, which
+    left only 69/116 nouns fitting the 256-token budget (vs. 104/116 that actually
+    reach the model pre-budget-cut, since only the alphabetic tail past 256 real
+    tokens silently truncated). The real tokenizer is available in the deployed
+    environment (``groundingdino-py`` -> ``transformers`` transitively), so this uses
+    it whenever it loads successfully, falling back to the heuristic only where it
+    cannot (the dependency-free ``src/`` fast test tier, or if the install is somehow
+    broken) -- never letting tokenizer construction/failure propagate into the
+    detection path.
+    """
+    if not text:
+        return 0
+    real_counter = _probe_real_tokenizer()
+    if real_counter is not None:
+        try:
+            return real_counter(text)
+        except Exception:  # noqa: BLE001 - degrade to heuristic, never raise
+            _LOGGER.warning(
+                "build_gdino_prompt: real tokenizer call failed on this prompt -- "
+                "falling back to the heuristic estimate for it.",
+            )
+    return _heuristic_token_estimate(text)
 
 
 def build_gdino_prompt(

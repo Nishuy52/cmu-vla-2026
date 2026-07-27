@@ -164,14 +164,17 @@ def _standing_vocab_nouns():
     return _STANDING_VOCAB_NOUNS
 
 
-def test_default_token_estimate_never_underestimates_measured_vocab():
-    # Requirement: the default heuristic must OVER-estimate, never under-estimate,
-    # relative to the real tokenizer -- pinned against the one real measurement we
-    # have (293 real tokens for the full un-budgeted vocab caption).
-    from core.perception.detector import _default_token_estimate
+def test_heuristic_token_estimate_never_underestimates_measured_vocab():
+    # Requirement: the dependency-free fallback heuristic must OVER-estimate, never
+    # under-estimate, relative to the real tokenizer -- pinned against the one real
+    # measurement we have (293 real tokens for the full un-budgeted vocab caption).
+    # Tests the heuristic function directly (not the real/heuristic-selecting
+    # `_default_token_estimate` seam) so this calibration check means the same thing
+    # regardless of whether `transformers` happens to be importable in the test env.
+    from core.perception.detector import _heuristic_token_estimate
 
     prompt = build_gdino_prompt((), _standing_vocab_nouns(), max_tokens=10**9)
-    estimate = _default_token_estimate(prompt)
+    estimate = _heuristic_token_estimate(prompt)
     assert estimate >= MEASURED_STANDING_VOCAB_REAL_TOKENS
     # ...and not wildly so -- a heuristic pessimistic enough to discard half the
     # vocab under-uses the real 256-token budget just as badly as overflowing it.
@@ -183,6 +186,122 @@ def test_build_gdino_prompt_full_vocab_stays_within_default_budget():
 
     prompt = build_gdino_prompt((), _standing_vocab_nouns())
     assert _default_token_estimate(prompt) <= DEFAULT_GDINO_MAX_TEXT_TOKENS
+
+
+# --------------------------------------------- real-tokenizer / heuristic seam (#105)
+
+
+@pytest.fixture(autouse=True)
+def _reset_tokenizer_probe_cache(monkeypatch):
+    # `_probe_real_tokenizer` caches its result at module scope (by design -- it must
+    # not reconstruct a tokenizer on every detection-path call). Reset that cache
+    # around every test in this file so tests that fake the probe's outcome, or that
+    # assert on how many times it constructs, do not leak state between each other or
+    # into unrelated tests.
+    import core.perception.detector as detector_mod
+
+    monkeypatch.setattr(detector_mod, "_cached_real_tokenizer", None)
+    yield
+    monkeypatch.setattr(detector_mod, "_cached_real_tokenizer", None)
+
+
+def test_probe_real_tokenizer_falls_back_when_transformers_unavailable(monkeypatch):
+    import builtins
+
+    from core.perception.detector import _probe_real_tokenizer
+
+    real_import = builtins.__import__
+
+    def _blocked_import(name, *args, **kwargs):
+        if name == "transformers" or name.startswith("transformers."):
+            raise ImportError("simulated: transformers not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _blocked_import)
+    assert _probe_real_tokenizer() is None
+
+
+def test_default_token_estimate_falls_back_when_probe_returns_none(monkeypatch):
+    import core.perception.detector as detector_mod
+
+    monkeypatch.setattr(detector_mod, "_probe_real_tokenizer", lambda: None)
+    # With no real tokenizer, the estimate must match the heuristic exactly (proves
+    # the fallback path is actually taken, not just "some number").
+    text = "sofa . window ."
+    assert detector_mod._default_token_estimate(text) == detector_mod._heuristic_token_estimate(text)
+
+
+def test_default_token_estimate_uses_real_tokenizer_when_probe_succeeds(monkeypatch):
+    import core.perception.detector as detector_mod
+
+    monkeypatch.setattr(detector_mod, "_probe_real_tokenizer", lambda: (lambda text: 999))
+    # A fake "real" counter returning a fixed sentinel proves the seam actually wires
+    # through to whatever `_probe_real_tokenizer` resolves, in preference over the
+    # heuristic (which would return something in the tens, not 999, for this text).
+    assert detector_mod._default_token_estimate("sofa . window .") == 999
+
+
+def test_default_token_estimate_degrades_to_heuristic_if_real_counter_raises(monkeypatch):
+    import core.perception.detector as detector_mod
+
+    def _broken_counter(text):
+        raise RuntimeError("simulated: tokenizer call failed")
+
+    monkeypatch.setattr(detector_mod, "_probe_real_tokenizer", lambda: _broken_counter)
+    text = "sofa . window ."
+    # Must not raise, and must degrade to the same value the heuristic alone gives.
+    assert detector_mod._default_token_estimate(text) == detector_mod._heuristic_token_estimate(text)
+
+
+def test_probe_real_tokenizer_caches_and_does_not_reconstruct_per_call(monkeypatch):
+    import core.perception.detector as detector_mod
+
+    calls = []
+
+    def _fake_loader():
+        calls.append(1)
+        return lambda text: len(text)
+
+    # Simulate a successful first load by seeding the cache the same way a real,
+    # successful `_probe_real_tokenizer()` call would -- then prove later calls read
+    # the cache rather than rebuilding.
+    monkeypatch.setattr(detector_mod, "_cached_real_tokenizer", _fake_loader())
+    first = detector_mod._probe_real_tokenizer()
+    second = detector_mod._probe_real_tokenizer()
+    assert first is second
+    # Sanity: the fake counter itself still behaves like a counter.
+    assert first("abc") == 3
+
+
+def test_probe_real_tokenizer_logs_once(monkeypatch, caplog):
+    import logging
+
+    import core.perception.detector as detector_mod
+
+    calls = []
+
+    class _FakeAutoTokenizer:
+        @staticmethod
+        def from_pretrained(name):
+            calls.append(name)
+
+            class _Tok:
+                def __call__(self, text):
+                    return {"input_ids": [0] * len(text.split())}
+
+            return _Tok()
+
+    fake_transformers = type("_FakeModule", (), {"AutoTokenizer": _FakeAutoTokenizer})
+    monkeypatch.setitem(__import__("sys").modules, "transformers", fake_transformers)
+
+    with caplog.at_level(logging.INFO, logger="core.perception.detector"):
+        detector_mod._probe_real_tokenizer()
+        detector_mod._probe_real_tokenizer()
+        detector_mod._probe_real_tokenizer()
+
+    assert len(calls) == 1  # tokenizer constructed exactly once, not per probe call
+    info_logs = [r for r in caplog.records if r.levelno == logging.INFO and "tokenizer loaded" in r.message]
+    assert len(info_logs) == 1
 
 
 def _kept_phrases(prompt: str) -> set[str]:
@@ -202,15 +321,15 @@ def test_build_gdino_prompt_question_anchor_nouns_survive_full_vocab_truncation(
 
 
 def test_build_gdino_prompt_question_nouns_never_dropped_for_vocab():
-    # A budget exactly as tight as the question nouns alone (12 est. tokens for these
-    # three) leaves zero room for any vocab noun -- every single one must be dropped
-    # before a single question noun is.
+    # A budget of 1 -- below even a single CLS/SEP pair, real or heuristic-estimated --
+    # leaves zero room for any vocab noun under either estimator, so every single one
+    # must be dropped before a single question noun is.
     question_nouns = ["sofa", "window", "potted plant"]
     dropped: list[str] = []
     prompt = build_gdino_prompt(
         question_nouns,
         _standing_vocab_nouns(),
-        max_tokens=12,
+        max_tokens=1,
         dropped_out=dropped,
     )
     kept_phrases = _kept_phrases(prompt)
