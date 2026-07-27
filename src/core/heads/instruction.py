@@ -531,8 +531,8 @@ class InstructionHead:
                 rest = [c for c in ranked if c.label.strip().lower() != norm]
                 ranked = exact + rest
 
-        # Only re-order when the toolbox left an instance-id-only tie (no superlative
-        # margin distinguishing the top survivors) and we have a previous leg to anchor on.
+        # Only re-order when the toolbox left a genuine tie (no superlative margin,
+        # no clause evidence distinguishing the top survivors).
         #
         # Issue #71 (resolve-outcome parity audit): reordering the FULL survivor pool by
         # raw distance discarded whatever label discrimination the toolbox's own ranking
@@ -556,8 +556,26 @@ class InstructionHead:
         # the same "no discriminating evidence" bar the toolbox's own tie-breaks
         # apply. Mirrors ``core.runner.gt_battery._if_rubric_geometry``'s
         # ``_resolve_anchor_rec`` symmetrically (the #71/#73/#75 convergence rule).
-        if prev_xy is not None and len(ranked) > 1 and not _has_superlative(anchor):
-            px, py = prev_xy
+        #
+        # Issue #107: two things changed here from the #75 version.
+        #
+        # 1. The tie is no longer gated on ``prev_xy is not None``. A first-leg (or
+        #    otherwise prior-less) anchor used to skip this reorder entirely and fall
+        #    straight through to resolve()'s own list order, which for an unevaluable
+        #    disambiguator is instance_id-ascending -- an annotation/detection-order
+        #    artifact with no relation to the world (verified: permuting instance_id
+        #    while leaving geometry fixed changed the winning object). Ordering must
+        #    be invariant under renumbering, so a tied group is now ALWAYS re-ordered
+        #    by a declared, world-grounded prior -- route continuity when there is a
+        #    previous leg to anchor on, declared salience when there is not (see
+        #    ``_declared_salience_key``) -- never left to fall through to list order.
+        # 2. The sort key's final tie-break used to end in ``instance_id`` -- exactly
+        #    the same renumbering-sensitive artifact this reorder exists to escape,
+        #    just demoted to last place instead of first. It is replaced with
+        #    ``_quantized_position``: a property of the *world* (the candidate's own
+        #    centroid, rounded to a stable precision) that is reproducible across
+        #    both renumbering and repeated runs.
+        if len(ranked) > 1 and not _has_superlative(anchor):
             top_label = ranked[0].label
             same = [c for c in ranked if c.label == top_label]
             if len(same) > 1 and _same_label_group_is_tied(
@@ -565,14 +583,22 @@ class InstructionHead:
             ):
                 tie_break_group_size = len(same)  # issue #98: fell back over this many
                 rest = [c for c in ranked if c.label != top_label]
-                same = sorted(
-                    same,
-                    key=lambda c: (
-                        (float(TB.P._as3(c.centroid)[0]) - px) ** 2
-                        + (float(TB.P._as3(c.centroid)[1]) - py) ** 2,
-                        getattr(c, "instance_id", 0),
-                    ),
-                )
+                if prev_xy is not None:
+                    px, py = prev_xy
+                    same = sorted(
+                        same,
+                        key=lambda c: (
+                            (float(TB.P._as3(c.centroid)[0]) - px) ** 2
+                            + (float(TB.P._as3(c.centroid)[1]) - py) ** 2,
+                            _declared_salience_key(c),
+                            _quantized_position(c),
+                        ),
+                    )
+                else:
+                    same = sorted(
+                        same,
+                        key=lambda c: (_declared_salience_key(c), _quantized_position(c)),
+                    )
                 ranked = same + rest
         audit = AnchorAudit(
             steps=tuple(r.step for r in res.audit),
@@ -1429,6 +1455,57 @@ def _has_superlative(anchor: Anchor) -> bool:
 
 _SALIENCE_TIE_EPS = 1e-9  # float-equality tolerance for the issue #75 clause-score tie check
 
+#: Issue #107 -- decimal places for the quantised-position final tie-break.
+#: VLA-3D geometry is metres; 3 dp is millimetre precision, well below sensor/
+#: annotation noise, so two DISTINCT physical objects essentially never collide
+#: here while float jitter within the "same" object always rounds away.
+_POS_QUANT_PREC = 3
+
+
+def _quantized_position(c) -> tuple[float, float]:
+    """Deterministic final tie-break key (issue #107): the candidate's own (x, y)
+    centroid, quantised to :data:`_POS_QUANT_PREC` decimal places.
+
+    This replaces ``instance_id`` as the last-resort tie-break in the same-label
+    salience reorder. ``instance_id`` is a detection/annotation-order artifact --
+    renumbering a scene's instances (permuting IDs, geometry unchanged) changes it
+    for a candidate without changing anything about the candidate itself, so using
+    it as a sort key makes the final pick depend on numbering rather than on the
+    world. Quantised position is a property of the object: it is identical for a
+    given physical instance under any renumbering and identical across repeated
+    runs (unlike raw float centroids, which can jitter at the ULP level between
+    otherwise-identical resolves).
+    """
+    x = float(TB.P._as3(c.centroid)[0])
+    y = float(TB.P._as3(c.centroid)[1])
+    return (round(x, _POS_QUANT_PREC), round(y, _POS_QUANT_PREC))
+
+
+def _declared_salience_key(c) -> tuple[int, float, float]:
+    """Sort key for the same-label salience reorder when there is no previous leg
+    to anchor route-continuity on (issue #107, first leg / standalone reference).
+
+    Ascending on this tuple ranks the most trustworthy/prominent candidate first.
+    Every component is a property of how the object was actually perceived or how
+    large it physically is -- never list position, never ``instance_id``:
+
+      1. ``-n_obs``  -- candidates seen in more distinct keyframes are more
+                        reliably localized (the same signal ``MIN_COMMIT_OBS``
+                        already uses elsewhere to gate confident commits).
+      2. ``-score``  -- higher max detector confidence.
+      3. ``-volume`` -- larger physical footprint (AABB extents product) is a
+                        more prominent, more likely-intended reference object
+                        when nothing else distinguishes the group.
+
+    Chosen over inheriting resolve()'s list order (which is what silently fell
+    through to instance_id order before this fix) precisely because these three
+    are grounded in the perceived world and are therefore invariant under
+    instance_id renumbering, unlike list/detection order.
+    """
+    ext = c.extents
+    volume = float(ext[0]) * float(ext[1]) * float(ext[2])
+    return (-int(c.n_obs), -float(c.score), -volume)
+
 
 def _same_label_group_is_tied(same, clause, idx, th) -> bool:
     """True iff ``same`` (a same-labeled survivor group from ``resolve()``'s own
@@ -1456,6 +1533,20 @@ def _same_label_group_is_tied(same, clause, idx, th) -> bool:
     to see that evidence from outside ``resolve()``. A same-label group is
     already tier-tied by construction (same label), so this clause-score check is
     the remaining discriminator.
+
+    Issue #107 -- non-finite margins, explicitly: ``_eval_clause`` returns
+    ``margin=float("-inf")`` when the clause's own anchor class was never
+    perceived (``"anchor not found"``). Comparing two such margins with
+    ``abs(a - b) <= eps`` computes ``abs(-inf - -inf) == nan``, and ``nan`` compares
+    False against everything -- so the old code silently landed on "not tied" by
+    accident whenever the whole group shared that sentinel, never on purpose. That
+    is backwards: a clause nobody in the group could evaluate is exactly ZERO
+    discriminating evidence, i.e. the group is MORE tied than a normal float-equal
+    tie, not less. This is handled as its own explicit branch below rather than
+    relying on IEEE-754 arithmetic to fall out the right way; a future refactor
+    that clamps the sentinel to a finite value (removing the ``nan``) must not be
+    able to silently flip this verdict, because the branch no longer depends on
+    what the arithmetic happens to do with it.
     """
     if clause is None:
         return True
@@ -1463,10 +1554,23 @@ def _same_label_group_is_tied(same, clause, idx, th) -> bool:
     if not results:
         return True
     s0, m0 = results[0].score, results[0].margin
-    return all(
-        abs(r.score - s0) <= _SALIENCE_TIE_EPS and abs(r.margin - m0) <= _SALIENCE_TIE_EPS
-        for r in results
-    )
+    m0_finite = math.isfinite(m0)
+    for r in results:
+        if abs(r.score - s0) > _SALIENCE_TIE_EPS:
+            return False
+        r_finite = math.isfinite(r.margin)
+        if r_finite != m0_finite:
+            # Issue #107: one candidate carries a real (finite) margin and another
+            # carries the non-finite "anchor not found" sentinel -- that mismatch
+            # IS discriminating evidence (one of them evaluated the clause and the
+            # other genuinely didn't), so the group is deliberately NOT tied.
+            return False
+        if r_finite and abs(r.margin - m0) > _SALIENCE_TIE_EPS:
+            return False
+        # else: both non-finite (issue #107) -- every candidate hit the same
+        # "clause unevaluable" sentinel, which is the most-tied case there is.
+        # Deliberately treated as tied (continue) rather than compared by value.
+    return True
 
 
 def _vehicle_z(io: RobotIO) -> float:
