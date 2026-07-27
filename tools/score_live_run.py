@@ -31,12 +31,16 @@ scene's sim<->object registration, not of any one question.
 Usage (from the repo root, host venv)::
 
     python -m tools.score_live_run                                   # whole default baseline dir
-    python -m tools.score_live_run reports/live_baseline_2026-07-20   # explicit baseline dir
-    python -m tools.score_live_run reports/live_baseline_2026-07-20/livingroom_1/inst  # one run
+    python -m tools.score_live_run reports/live_baseline_2026-07-20 --out reports/live_baseline_2026-07-20  # explicit baseline dir
+    python -m tools.score_live_run reports/live_baseline_2026-07-20/livingroom_1/inst --out reports/scratch  # one run
 
-Writes ``<out>/scores.md`` + ``<out>/scores.json`` (default out = the scored
-baseline dir). Safe to re-run as more bags land — each invocation rescans the
-baseline dir fresh; nothing is mutated in place.
+Writes ``<out>/scores.md`` + ``<out>/scores.json``. With no ``target`` this
+defaults to the committed baseline dir (merging any existing ``scores.json``
+there); any invocation that DOES name a ``target`` must also name ``--out``
+(#96) — the default baseline dir is a committed evidence artifact and must
+never be silently overwritten by an unrelated/narrower scoring run. Safe to
+re-run as more bags land — each invocation rescans its target fresh; nothing
+is mutated in place except the chosen ``<out>``.
 
 Pure offline dev tool (tools/ — never part of the scored pipeline). CPU only.
 """
@@ -673,26 +677,52 @@ def write_report(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
     return md_path, json_path
 
 
+def _merge_key(r: dict) -> tuple[str, str, str]:
+    """Row identity for ``_merge_with_existing``.
+
+    ``(scene, qdir)`` alone is NOT unique: every scene has TWO
+    instruction_following and TWO object_reference questions, both scored
+    under the same ``qdir`` (``inst``/``obje``), so that key silently
+    collapsed the two rows of a type down to whichever was merged last
+    (#97). The question text (``r["question"]``) is what actually
+    distinguishes them, so it joins the key.
+
+    ``question`` can be ``None``/empty when the bag's question text didn't
+    match anything in ``questions.json`` (see ``score_run``/
+    ``score_instruction_following_run``) — falling back to ``""`` there
+    would reintroduce the same collision for two differently-broken runs
+    of the same scene/qdir, so the fallback instead folds in ``run_dir``,
+    which is unique per run and stable across re-invocations of that same
+    run. That preserves the intended re-score semantics: re-scoring a run
+    (matched question or not) recomputes the SAME key and replaces just
+    that row, while every other already-scored row is left untouched.
+    Every branch returns a plain ``str`` tuple so ``sorted(merged)`` below
+    always compares like types.
+    """
+    question = r.get("question") or f"<no-question:{r.get('run_dir', '')}>"
+    return (r["scene"], r["qdir"], question)
+
+
 def _merge_with_existing(out_dir: Path, new_rows: list[dict]) -> list[dict]:
     """Merge freshly-scored rows into any pre-existing ``scores.json`` at ``out_dir``.
 
-    Keyed by ``(scene, qdir)`` — a re-run of one run dir (more bags landing, a
-    fix applied) replaces just that run's row and leaves every other
-    already-scored run's row untouched, so a partial re-invocation never
-    blanks previously-scored runs (the tool is "ready for re-run as more
-    bags land" per the task brief).
+    Keyed by :func:`_merge_key` (scene, qdir, question) — a re-run of one run
+    dir (more bags landing, a fix applied) replaces just that run's row and
+    leaves every other already-scored run's row untouched, so a partial
+    re-invocation never blanks previously-scored runs (the tool is "ready
+    for re-run as more bags land" per the task brief).
     """
     existing_path = out_dir / "scores.json"
-    merged: dict[tuple[str, str], dict] = {}
+    merged: dict[tuple[str, str, str], dict] = {}
     if existing_path.is_file():
         try:
             data = json.loads(existing_path.read_text(encoding="utf-8"))
             for r in data.get("rows", []):
-                merged[(r["scene"], r["qdir"])] = r
+                merged[_merge_key(r)] = r
         except (OSError, json.JSONDecodeError, KeyError):
             pass  # a corrupt/old-shape file is not fatal — we just start fresh
     for r in new_rows:
-        merged[(r["scene"], r["qdir"])] = r
+        merged[_merge_key(r)] = r
     return [merged[k] for k in sorted(merged)]
 
 
@@ -717,10 +747,30 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--offline-results", default=str(DEFAULT_OFFLINE_RESULTS))
     ap.add_argument(
         "--out", default=None,
-        help=f"output dir (default: {DEFAULT_BASELINE_DIR.relative_to(_REPO)}, merged with "
-        "any existing scores.json there — see _merge_with_existing)",
+        help="output dir. Required whenever `target` is given (a run dir or a "
+        "non-default root) — never defaults to the committed baseline dir, to "
+        f"avoid clobbering it (#96). Omit only for the no-target whole-baseline "
+        f"invocation, which defaults to {DEFAULT_BASELINE_DIR.relative_to(_REPO)} "
+        "(merged with any existing scores.json there — see _merge_with_existing).",
     )
     args = ap.parse_args(argv)
+
+    # Default output is the whole baseline dir ONLY for the documented no-target
+    # invocation (the deliverable location per the task brief). `DEFAULT_BASELINE_DIR`
+    # is a committed evidence artifact (reports/live_baseline_2026-07-20); silently
+    # merging an unrelated `target` invocation's rows into it overwrote committed
+    # history (#96). So any invocation that names a `target` (a single run dir or a
+    # non-default root) MUST also name `--out` — we error instead of guessing where
+    # the caller meant the scores to land. Checked before any of the (possibly slow
+    # or failing) GT/questions loading below so a missing `--out` fails fast.
+    if args.target is not None and args.out is None:
+        print(
+            "score_live_run: --out is required when a target is given "
+            "(pass --out to choose where these scores are written; "
+            f"omit target to score/merge the default {DEFAULT_BASELINE_DIR.relative_to(_REPO)})"
+        )
+        return 1
+    out_dir = Path(args.out) if args.out else DEFAULT_BASELINE_DIR
 
     runs = resolve_targets(args.target)
     if not runs:
@@ -732,12 +782,6 @@ def main(argv: list[str] | None = None) -> int:
     questions_index = _load_questions_index(Path(args.questions))
     answers = GB._load_answers(args.answers)
     offline_index = _load_offline_index(Path(args.offline_results))
-
-    # Default output is always the whole baseline dir (the deliverable location per the
-    # task brief), regardless of whether `target` narrowed the scan to one run — a
-    # single-run invocation still reads/merges any pre-existing scores.json for the
-    # other already-scored runs so re-running one run doesn't blank the rest.
-    out_dir = Path(args.out) if args.out else DEFAULT_BASELINE_DIR
 
     rows: list[dict] = []
     for scene, qdir, run_dir in runs:
