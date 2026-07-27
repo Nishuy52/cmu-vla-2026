@@ -537,8 +537,10 @@ class ObjectRefScore:
     iou: float
     our_marker: MarkerBox | None
     gt_target_id: int | None
-    target_source: str  # "referential" | "unique_in_scene" | "ambiguous" | "none"
-    match_method: str = "none"  # "exact" | "fuzzy" | "relation" | "unique" | "none"
+    # "referential" | "unique_in_scene" | "geometry" | "ambiguous" | "none"
+    target_source: str
+    # "exact" | "fuzzy" | "relation" | "unique" | "geometric" | "none"
+    match_method: str = "none"
     our_target_id: int | None = None  # instance id of our top resolver pick, if any
     note: str = ""
     #: Parse-time notes off the resolved Plan (e.g. "unparsed clause text dropped: ...")
@@ -650,6 +652,7 @@ def _gt_target_from_referential(
             normalize_label(a.noun) for a in iter_clause_anchors(superl_clauses)
         }
     id_best_j: dict[int, float] = {}
+    id_best_union: dict[int, int] = {}
     for stmt, ann in _iter_statements(referential):
         if not _anchor_agrees(tgt_noun, str(ann.get("target_class", ""))):
             continue
@@ -674,9 +677,12 @@ def _gt_target_from_referential(
         # Bridge-normalise the statement noun to the question's so a whitelisted synonym
         # swap ("night stand" -> "bedside table") does not deflate the ordinal-phrasing
         # overlap the tie-break depends on.
-        j = _jaccard(q, _bridge_normalise_stmt(_norm_stmt(stmt), tgt_noun))
+        stmt_norm = _bridge_normalise_stmt(_norm_stmt(stmt), tgt_noun)
+        j = _jaccard(q, stmt_norm)
         tid = int(tid)
-        id_best_j[tid] = max(id_best_j.get(tid, 0.0), j)
+        if j > id_best_j.get(tid, -1.0):
+            id_best_j[tid] = j
+            id_best_union[tid] = len(set(q.split()) | set(stmt_norm.split()))
     if len(id_best_j) == 1:
         return next(iter(id_best_j)), "referential", "relation"
     if id_best_j:
@@ -685,12 +691,102 @@ def _gt_target_from_referential(
         # against picking arbitrarily among equally-worded distractors).
         ranked = sorted(id_best_j.items(), key=lambda kv: kv[1], reverse=True)
         (top_id, top_j), (_, second_j) = ranked[0], ranked[1]
-        # A small strict margin is enough: ordinal variants ("second"/"third closest")
-        # differ from the base phrasing by one token, which separates them here, while
-        # equally-worded distractors tie at margin 0 and stay "ambiguous".
-        if top_j >= 0.5 and top_j - second_j >= 0.05:
+        # Length-scaled margin (issue #92 fix 2). A FIXED absolute floor (the old
+        # ``0.05``) is wrong: Jaccard is a token-SET ratio, so the delta a single
+        # discriminating token contributes shrinks as the statement gets longer. Two
+        # ordinal variants ("closest" vs "second closest") differ from each other by
+        # exactly one token that is absent from the question (the word "second"):
+        # adding one token neither side shares with the question changes
+        #   j = I/U  ->  j' = I/(U+1)   (I = intersection size, U = union size)
+        # so a genuine one-token distinction produces a margin of
+        #   j - j' = I/(U*(U+1)) ~= top_j/(U+1)   (since I ~= top_j * U)
+        # i.e. the SAME discriminating token is worth less absolute Jaccard on a
+        # longer statement, so the floor must shrink with length too, not stay fixed.
+        # We require the observed margin to clear HALF that theoretical one-token
+        # delta: comfortable headroom above 0 (where every genuine phrasing tie in
+        # this corpus sits exactly, since no discriminating token exists to move the
+        # score) while still safely below what a real one-token ordinal distinction
+        # produces (verified empirically ~1.7-2x this floor across every "closest" /
+        # "second closest" pair in the training corpus). ``top_id``'s own matched
+        # statement's union size against the question is the length reference, since
+        # that pairing is what determines the size of a one-token nudge here.
+        union = id_best_union[top_id]
+        margin_required = top_j / (2.0 * (union + 1))
+        if top_j >= 0.5 and top_j - second_j >= margin_required:
             return top_id, "referential", "relation"
         return None, "ambiguous", "none"
+    return None, "none", "none"
+
+
+def _gt_target_from_geometry(
+    plan, index: SceneIndex, instances: list[InstanceRecord], thresholds: Thresholds
+) -> tuple[int | None, str, str]:
+    """Geometry-grounded fallback GT target (issue #92 fix 3 — corpus coverage).
+
+    Scope, established before writing this (issue #92): 10 of the 30 training
+    object-reference questions get ZERO candidates out of the referential-statement
+    ladder (:func:`_gt_target_from_referential` step 3 returns ``id_best_j`` empty,
+    ``target_source == "none"``) — the generated statement corpus simply never pairs
+    that target class with the relation+anchor the question needs, even when the
+    real physical relation holds in the scene. office_1's "potted plant on the file
+    cabinet" is the flagship case: the corpus has 25 'near'-relation statements for
+    class 'plant' in that scene, but every one is anchored to 'book', never
+    'cabinet' — and zero 'on'-relation statements for 'plant' at all — although
+    instance 55 ('potted plant') is verifiably ``on`` instance 69 ('file cabinet')
+    by the exact geometry predicate the resolver itself trusts.
+
+    Of those 10, this fallback safely resolves the subset with exactly ONE clause,
+    ONE anchor (no nested disambiguator), and a predicate the resolver's own
+    ``core.geometry.toolbox._BINARY_PREDS`` maps to a single physical relation
+    (``on``/``near``/``above``/``under``/``with``/``in`` — NOT the broadened,
+    synonym-merged relation-string family :data:`_PRED_TO_RELATIONS` uses for text
+    matching, which is deliberately loose because the text corpus splits one real
+    relation across several annotation strings; geometry has no such limitation, so
+    using the loose family here would accept "near" as evidence of "on" and let two
+    genuinely different objects tie as "winners"). This resolves 1 of the 10 in the
+    training set (the office_1 case above); the rest need either ordinal ranking (5,
+    which would just re-derive our own resolver's answer as "ground truth" — not an
+    independent check, so deliberately out of scope), a ``between`` triple (3), or
+    multiple/nested anchors (1) that would widen this fallback's honesty guarantee
+    beyond what a single verified geometric fact gives us. Those remain "none",
+    flagged, same as before.
+
+    Honesty is preserved exactly like the text ladder: the target and anchor noun
+    still go through :meth:`SceneIndex.by_label` (the SAME vocab bridge the rest of
+    the pipeline trusts — this does not loosen or bypass it), and we only return an
+    id when it is the sole target-class instance that geometrically satisfies the
+    EXACT predicate against the sole matching anchor instance. Any ambiguity (more
+    than one candidate anchor, more than one candidate target satisfying the
+    predicate, an unmapped/ordinal/``between``/multi-anchor clause) falls through to
+    ``"none"`` rather than guessing.
+    """
+    if plan.target is None:
+        return None, "none", "none"
+    clauses = plan.target.clauses
+    if len(clauses) != 1 or _is_superlative_clause(clauses[0]):
+        return None, "none", "none"
+    clause = clauses[0]
+    if clause.negated or len(clause.anchors) != 1:
+        return None, "none", "none"
+    anchor = clause.anchors[0]
+    if anchor.disambiguator is not None:
+        return None, "none", "none"
+    fn = T._BINARY_PREDS.get(clause.pred)
+    if fn is None or fn is T.in_ or fn is T.with_feature:
+        # `in`/`with` describe containment/possession, not a support/adjacency
+        # relation the referential-statement generator would encode as `on`/`near`/
+        # `above` in the first place -- out of this fallback's stated scope.
+        return None, "none", "none"
+    anchor_matches = index.by_label(anchor.noun)
+    if len(anchor_matches) != 1:
+        return None, "none", "none"
+    anchor_inst = anchor_matches[0]
+    candidates = index.by_label(plan.target.noun)
+    winners = [
+        r.instance_id for r in candidates if fn(r, anchor_inst, thresholds).passed
+    ]
+    if len(winners) == 1:
+        return winners[0], "geometry", "geometric"
     return None, "none", "none"
 
 
@@ -708,7 +804,11 @@ def score_object_reference(
     MarkerBox. GT target, in priority order: (1) the referential-statement annotation
     matching the question (``target_source == "referential"``); (2) category
     uniqueness — if the scene holds exactly one instance of the target noun it needs
-    no disambiguation and IS the target (``"unique_in_scene"``). When neither pins a
+    no disambiguation and IS the target (``"unique_in_scene"``); (3) — only when (1)
+    found genuinely ZERO candidates, never when it found some but couldn't disambiguate
+    — a direct geometric relation check against the GT AABBs for single-anchor
+    physical relations the statement corpus doesn't cover (``"geometry"``, issue #92
+    fix 3; see :func:`_gt_target_from_geometry`). When none of the three pins a
     trustworthy target the IoU is left undefined (NaN) and flagged
     (``"ambiguous"``/``"none"``) rather than guessed — we never fabricate a target.
     """
@@ -730,9 +830,15 @@ def score_object_reference(
             unique_target_id = cat[0].instance_id
 
     gt_id, source, method = _gt_target_from_referential(text, referential, instances)
-    # Prefer a referential-annotated target; else fall back to category-uniqueness.
+    # Prefer a referential-annotated target; else fall back to category-uniqueness;
+    # else (issue #92 fix 3) a direct geometric relation check, but ONLY when the
+    # statement ladder found genuinely ZERO candidates ("none") — an "ambiguous"
+    # result means candidates exist but a text tie-break failed to pick one, which
+    # is a different failure mode this geometric check must not paper over.
     if gt_id is None and unique_target_id is not None:
         gt_id, source, method = unique_target_id, "unique_in_scene", "unique"
+    elif gt_id is None and source == "none" and plan.target is not None:
+        gt_id, source, method = _gt_target_from_geometry(plan, index, instances, thresholds)
     by_id = {r.instance_id: r for r in instances}
 
     if our_marker is None:
