@@ -27,6 +27,9 @@ Determinism / no network: everything runs offline against the injected scene + m
 """
 from __future__ import annotations
 
+import json
+import os
+import time
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -38,7 +41,7 @@ from core.llm.timeout import DEFAULT_CALL_TIMEOUT_S, wrap_call_timeout
 from core.parsing.vocab import PHRASES, SINGLE_NOUNS
 from core.perception.detector import DetectorFn, refresh_prompt
 from core.perception.scene_index import dump_instance_index
-from core.plan_schema import Plan
+from core.plan_schema import Anchor, Clause, Plan, RouteLeg, TargetSpec, AvoidSpec
 
 from core.heads.explore_step import (
     AffinityFactory,
@@ -256,6 +259,162 @@ def build_callables(
     return {"parse": parse_fn, "explore": _explore, "verify": _verify, "probe": _probe}
 
 
+# --------------------------------------------------------------------------- instrumentation
+#
+# Issue #102: three investigations this week each hit the same wall -- an answer scored
+# wrong, with no artifact showing whether the resolved Plan's restricting clause was ever
+# evaluated (and ignored) or never resolved at all. dump_instance_index (#84/#89) already
+# snapshots the live instance index at answer time; this adds the resolved Plan itself
+# (target/clauses/anchors, recursing fully through nested Anchor.disambiguator clauses) plus
+# whatever candidate-count context is cleanly reachable from here. Same contract as every
+# other debug dump in this codebase: single env-var lookup, zero I/O when unset, failures
+# swallowed -- a debug dump must never break the run it observes.
+
+#: Path to append JSONL resolved-Plan records to. Unset (default) -> dump_plan is a no-op.
+ENV_PLAN_DUMP_PATH: str = "VLA_PLAN_DUMP_PATH"
+
+#: Depth guard for walking Anchor.disambiguator nesting (a Clause's Anchor can itself carry
+#: a disambiguator Clause, recursively). The schema has no cycle in practice, but a debug
+#: dump must never hang/stack-overflow on a pathological or (bugged) cyclic Plan.
+_PLAN_DUMP_MAX_DEPTH: int = 16
+
+
+def _anchor_to_dict(anchor: Anchor, depth: int) -> dict:
+    if depth > _PLAN_DUMP_MAX_DEPTH:
+        return {
+            "noun": anchor.noun,
+            "raw": anchor.raw,
+            "attributes": list(anchor.attributes),
+            "disambiguator": "<max-depth-exceeded>",
+        }
+    disamb = None
+    if anchor.disambiguator is not None:
+        disamb = _clause_to_dict(anchor.disambiguator, depth + 1)
+    return {
+        "noun": anchor.noun,
+        "raw": anchor.raw,
+        "attributes": list(anchor.attributes),
+        "disambiguator": disamb,
+    }
+
+
+def _clause_to_dict(clause: Clause, depth: int) -> dict:
+    return {
+        "pred": clause.pred.value,
+        "negated": clause.negated,
+        "anchors": [_anchor_to_dict(a, depth + 1) for a in clause.anchors],
+    }
+
+
+def _target_to_dict(target: TargetSpec | None, depth: int) -> dict | None:
+    if target is None:
+        return None
+    return {
+        "noun": target.noun,
+        "raw": target.raw,
+        "attributes": list(target.attributes),
+        "clauses": [_clause_to_dict(c, depth + 1) for c in target.clauses],
+    }
+
+
+def _route_leg_to_dict(leg: RouteLeg, depth: int) -> dict:
+    return {"kind": leg.kind.value, "anchors": [_anchor_to_dict(a, depth + 1) for a in leg.anchors]}
+
+
+def _avoid_to_dict(av: AvoidSpec, depth: int) -> dict:
+    return {
+        "between": [_anchor_to_dict(a, depth + 1) for a in av.between] if av.between else None,
+        "near": _anchor_to_dict(av.near, depth + 1) if av.near is not None else None,
+    }
+
+
+def _plan_to_dict(plan: Plan) -> dict:
+    """Full recursive walk of a resolved ``Plan`` (target/clauses/anchors/route/avoid),
+    depth-capped against a pathological/cyclic ``Anchor.disambiguator`` nesting."""
+    return {
+        "qtype": plan.qtype.value,
+        "question_raw": plan.question_raw,
+        "parse_tier": plan.parse_tier,
+        "notes": plan.notes,
+        "target": _target_to_dict(plan.target, 0),
+        "route": [_route_leg_to_dict(leg, 0) for leg in plan.route],
+        "avoid": [_avoid_to_dict(av, 0) for av in plan.avoid],
+    }
+
+
+def dump_plan(state: "HeadState", tag: str = "answer_time") -> None:
+    """Append one JSONL record of the resolved ``Plan`` (+ whatever candidate-count
+    context is cleanly reachable), if :data:`ENV_PLAN_DUMP_PATH` is set. No-op (no I/O
+    at all) when unset, matching ``core.perception.scene_index.dump_instance_index``.
+
+    Issue #102 honesty note -- true PER-CLAUSE before/after candidate counts (the
+    motivating ask: "did the restricting clause resolve and get ignored, or never
+    resolve at all") are NOT reachable here without changing scored-path code, so this
+    does not fabricate them:
+
+    * NUMERICAL: ``core.geometry.toolbox.counting`` computes one final ``CountResult``
+      (cardinality of the fully-AND-filtered set) and never retains an intermediate
+      per-clause survivor count; ``NumericalHead.advance`` (``core/heads/numerical.py``,
+      not owned by this change) keeps only the final ``count``, discarding even
+      ``CountResult.explanations``/``.audit``. What IS dumped: the WHOLE-TARGET
+      before-any-clause census (``len(scene.by_label(noun))``) alongside the final
+      answer count -- exactly the signal that would have shown the #101/#102 motivating
+      defect (a numerical answer equal to the raw class census through a clause that
+      never actually restricted anything).
+    * OBJECT_REFERENCE: ``ObjectRefHead`` DOES retain the full ``ResolveResult``
+      (``self._result``) from its last ``resolve()`` call, so this dumps its relaxation
+      ``audit`` trail (which fallback rung, if any, produced the final survivors) and
+      the final survivor count alongside the same before-any-clause census. The audit
+      trail directly answers "resolved and ignored" (audit empty, clause genuinely
+      applied) vs "never resolved" (audit shows category_only/drop_relation).
+      ``ResolveResult.pass_matrix`` is per-clause PASS/FAIL but only over the FINAL
+      survivor set, not a before-this-clause population, and is deliberately NOT
+      reported here as a "per-clause count" -- doing so over ``hard_clauses`` (which
+      the fallback ladder may have already dropped clauses from) would silently
+      misattribute pass/fail to the wrong original clause index.
+    * INSTRUCTION_FOLLOWING: no ``target``/count semantics apply; only the Plan
+      structure (route/avoid) is dumped.
+
+    Any failure (bad path, unwritable dir, etc.) is swallowed -- diagnostics must never
+    break the run they are observing.
+    """
+    path = os.environ.get(ENV_PLAN_DUMP_PATH)
+    if not path or state.plan is None:
+        return
+    try:
+        record: dict = {
+            "wall_time": time.time(),
+            "tag": tag,
+            "plan": _plan_to_dict(state.plan),
+        }
+        target = state.plan.target
+        if target is not None and state.scene is not None:
+            candidates: dict = {
+                "noun": target.noun,
+                "before_any_filter": len(state.scene.by_label(target.noun)),
+            }
+            qt = state.plan.qtype
+            if qt is QType.NUMERICAL and state.numerical is not None:
+                candidates["after_all_filters"] = state.numerical.count
+                candidates["granularity"] = "whole_target_aggregate"
+            elif qt is QType.OBJECT_REFERENCE and state.object_ref is not None:
+                res = state.object_ref._result
+                if res is not None:
+                    candidates["after_all_filters"] = len(res.candidates_ranked)
+                    candidates["relaxation_audit"] = [
+                        {"step": r.step, "detail": r.detail} for r in res.audit
+                    ]
+                candidates["granularity"] = "whole_target_aggregate"
+            record["candidates"] = candidates
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "a") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except Exception:  # noqa: BLE001 - diagnostics must never break the run
+        pass
+
+
 # --------------------------------------------------------------------------- internals
 
 
@@ -289,6 +448,9 @@ def _final_answer(state: HeadState):
         # Opt-in live diagnostics (issues #84/#89): snapshot the instance index at
         # answer time. No-op unless VLA_INSTANCE_DUMP_PATH is set.
         dump_instance_index(state.scene, tag="answer_time")
+        # Opt-in live diagnostics (issue #102): the resolved Plan that produced this
+        # answer. No-op unless VLA_PLAN_DUMP_PATH is set.
+        dump_plan(state, tag="answer_time")
     return answer
 
 

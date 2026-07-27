@@ -434,6 +434,22 @@ def test_dump_instance_index_writes_jsonl_record(monkeypatch, tmp_path):
     assert rec["instances"][0]["eligibility_reason"] == "eligible"
 
 
+def test_dump_instance_index_includes_aabb(monkeypatch, tmp_path):
+    # Issue #101: per-instance AABB corners so an on(table)-style geometry predicate
+    # can be replayed offline from the dump alone (centroid alone can't tell you).
+    out = tmp_path / "instances.jsonl"
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, str(out))
+    idx = BasicSceneIndex([_rec(1, "table", [0.0, 0.5, 1.0], [2.0, 1.5, 1.25])])
+    dump_instance_index(idx, tag="periodic")
+    rec = json.loads(out.read_text().strip())
+    inst = rec["instances"][0]
+    assert inst["aabb_min"] == [0.0, 0.5, 1.0]
+    assert inst["aabb_max"] == [2.0, 1.5, 1.25]
+    # plain JSON lists, not numpy arrays/scalars leaking through
+    assert isinstance(inst["aabb_min"], list)
+    assert all(isinstance(c, float) for c in inst["aabb_min"])
+
+
 def test_dump_instance_index_surfaces_gate_rejection_reason(monkeypatch, tmp_path):
     """Issue #84 gate observability: an instance that fails the answer-eligibility gate
     (n_obs=1, below the default min-obs floor of 2) shows up in the dump as ineligible
