@@ -134,6 +134,30 @@ teardown_one() {
     || echo "TEARDOWN: done (ports/display released)"
 }
 
+# The recorder never finalizes on SIGINT (issue #114) — it is SIGKILLed above with the
+# mcap payload intact but no metadata.yaml, so `rosbags` cannot open it. reindex+convert
+# is deterministic (18/18 recovered), so do it HERE and leave a readable bag behind
+# instead of making every harvest a manual two-step.
+finalize_bag() {
+  local bag=$1
+  [ -d "$bag" ] || return 0
+  if [ -f "$bag/metadata.yaml" ] && timeout 30 ros2 bag info "$bag" >/dev/null 2>&1; then
+    echo "BAG: clean, no recovery needed"; return 0
+  fi
+  echo "BAG: no metadata (recorder did not finalize, #114) — reindex+convert"
+  timeout 120 ros2 bag reindex -s mcap "$bag" >/dev/null 2>&1
+  local tmp="${bag}.recovered"
+  rm -rf "$tmp"
+  printf 'output_bags:\n  - uri: %s\n    storage_id: mcap\n    all_topics: true\n' "$tmp" > "/tmp/bagconv_$$.yaml"
+  if timeout 300 ros2 bag convert -i "$bag" -o "/tmp/bagconv_$$.yaml" >/dev/null 2>&1 && [ -f "$tmp/metadata.yaml" ]; then
+    rm -rf "$bag"; mv "$tmp" "$bag"
+    echo "BAG: recovered in-job"
+  else
+    echo "BAG: RECOVERY FAILED — harvest must recover manually"; rm -rf "$tmp"
+  fi
+  rm -f "/tmp/bagconv_$$.yaml"
+}
+
 # ---------- run one (scene, qdir, question) tuple end to end ----------
 run_one() {
   local SCN=$1 QD=$2 SDIR=$3 QUESTION=$4 SLOT=$5
@@ -231,6 +255,7 @@ run_one() {
   kill -INT -"$BAG_PID" 2>/dev/null || kill -INT "$BAG_PID" 2>/dev/null
   for i in $(seq 1 45); do kill -0 "$BAG_PID" 2>/dev/null || break; sleep 1; done
   kill -KILL -"$BAG_PID" 2>/dev/null; kill -KILL "$BAG_PID" 2>/dev/null
+  finalize_bag "$BAGDIR/bag"
   echo "== bag capture"
   timeout 30 ros2 bag info "$BAGDIR/bag" 2>&1 | grep -E "Messages:|Topic:|Duration:" \
     || echo "BAG: no clean info (harvest reindex+convert will recover)"
