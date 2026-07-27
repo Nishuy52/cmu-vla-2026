@@ -1,0 +1,44 @@
+[WARN] [1785143256.746837709] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785143256.767121289] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785143256.771660652] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785143256.774558814] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785143256.777126242] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785143285.124039068] [vla_ai_module]: question latched: 'Go near the potted plant on the table and stop at the painting near the TV.'
+[INFO] [1785143285.204093120] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785143285.205554685] [vla_ai_module]: idle->parsing question received
+[INFO] [1785143295.069065911] [vla_ai_module]: parsing->orient parse attempted
+[INFO] [1785143295.109027446] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+[INFO] [1785143325.265745176] [vla_ai_module]: published 151 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785143345.218409588] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785143355.289605823] [vla_ai_module]: published 275 waypoints since latch
+[INFO] [1785143385.338243329] [vla_ai_module]: published 425 waypoints since latch
+[INFO] [1785143415.348291507] [vla_ai_module]: published 574 waypoints since latch
+[INFO] [1785143445.388487327] [vla_ai_module]: published 719 waypoints since latch
+[INFO] [1785143475.512918531] [vla_ai_module]: published 868 waypoints since latch
+[INFO] [1785143505.572986497] [vla_ai_module]: published 1018 waypoints since latch
+[INFO] [1785143535.738714338] [vla_ai_module]: published 1169 waypoints since latch
+[INFO] [1785143555.228780237] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785143555.401098298] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785143555.468532329] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1785143565.802181023] [vla_ai_module]: published 1319 waypoints since latch
+[INFO] [1785143595.950158519] [vla_ai_module]: published 1469 waypoints since latch
+[INFO] [1785143625.995944098] [vla_ai_module]: published 1617 waypoints since latch
+[INFO] [1785143656.170657114] [vla_ai_module]: published 1767 waypoints since latch
+[INFO] [1785143686.342952587] [vla_ai_module]: published 1916 waypoints since latch
+[INFO] [1785143716.512730946] [vla_ai_module]: published 2066 waypoints since latch
+[INFO] [1785143746.593267208] [vla_ai_module]: published 2216 waypoints since latch
+[INFO] [1785143776.612717877] [vla_ai_module]: published 2364 waypoints since latch
+[INFO] [1785143802.278786094] [vla_ai_module]: drive_out->done route drive complete
+[INFO] [1785143802.280113554] [vla_ai_module]: controller DONE; last 10 events: 0.1:idle:question_latched:instruction_following: 'Go near the potted plant on the table and stop at the painting near the TV.' | 0.1:idle:transition:idle->parsing question received | 9.9:parsing:parsed:tier=api | 9.9:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 270.1:explore_execute:transition:explore_execute->verify explore budget spent | 270.3:verify:transition:verify->answer verify complete | 270.3:answer:published:WaypointCmd via answer_state | 270.3:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 517.2:drive_out:transition:drive_out->done route drive complete
