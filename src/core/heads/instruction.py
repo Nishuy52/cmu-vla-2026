@@ -28,8 +28,11 @@ Units: `map` frame, metres. Deterministic: all timing via the odom timestamp pas
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import math
+import os
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -106,6 +109,81 @@ _PROVISIONAL_STEPS = frozenset(
     {"drop_relation", "category_only", "drop_disambiguator", "relax_attributes"}
 )
 
+# --------------------------------------------------------------------------- instrumentation
+#
+# Issue #98: when an anchor's relational disambiguator can't be evaluated (its class was
+# never perceived), the resolve() fallback ladder silently drops it and the head falls back
+# to a same-label salience tie-break (see the reorder block in _ranked_anchor below) -- a
+# real score and an arbitrary tie-break over N same-label candidates are indistinguishable
+# in every other artifact. This dump makes the distinction visible: per resolved leg, which
+# relaxation rung(s) the resolve audit recorded and the size of the candidate pool the head
+# fell back over. Opt-in only, same contract as core.perception.scene_index.dump_instance_index
+# (issues #84/#89): unset env var -> zero I/O, no behaviour change; any failure swallowed.
+
+#: Path to append JSONL leg-relaxation records to. Unset (default) -> no-op.
+ENV_LEG_RELAX_DUMP_PATH: str = "VLA_LEG_RELAX_DUMP_PATH"
+
+
+@dataclass(frozen=True)
+class AnchorAudit:
+    """Diagnostic-only trail for one anchor resolve, additive to the scored path.
+
+    steps: the resolve() fallback rungs taken (empty == resolved with no relaxation).
+    candidate_count: len(res.candidates_ranked) -- the pool size the anchor was ranked
+                      (and, on a relaxed resolve, fell back) over.
+    tie_break_group_size: size of the same-label group actually re-sorted by the
+                           salience tie-break in _ranked_anchor, or None when that
+                           reorder never ran (no tie, or a distinguishing superlative).
+    """
+
+    steps: tuple[str, ...] = ()
+    candidate_count: int = 0
+    tie_break_group_size: int | None = None
+
+
+def dump_leg_relaxations(plan: "Plan | None", legs: list["_GroundedLeg"]) -> None:
+    """Append one JSONL record of each leg's anchor relaxation audit, if
+    :data:`ENV_LEG_RELAX_DUMP_PATH` is set. No-op (no I/O at all) when unset.
+
+    Issue #98: makes a leg grounded only via a dropped disambiguator + same-label
+    tie-break visible as such, instead of looking identical to a genuinely grounded
+    leg in every other artifact.
+    """
+    path = os.environ.get(ENV_LEG_RELAX_DUMP_PATH)
+    if not path:
+        return
+    try:
+        record = {
+            "wall_time": time.time(),
+            "question_raw": plan.question_raw if plan is not None else None,
+            "legs": [
+                {
+                    "index": i,
+                    "kind": leg.kind.value,
+                    "nouns": list(leg.nouns),
+                    "grounded": leg.grounded,
+                    "provisional": leg.provisional,
+                    "anchors": [
+                        {
+                            "relax_steps": list(a.steps),
+                            "candidate_count": a.candidate_count,
+                            "tie_break_group_size": a.tie_break_group_size,
+                        }
+                        for a in leg.anchor_audits
+                    ],
+                }
+                for i, leg in enumerate(legs)
+            ],
+        }
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "a") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except Exception:  # noqa: BLE001 - diagnostics must never break the run
+        pass
+
+
 # Pre-grounding-movement plan, Stage 3 (docs/proposals/pre_grounding_movement_plan.md
 # §1(3), decision 3) — goal-credibility withhold gate. A GOTO/VIA_NEAR leg's resolved
 # goal (``_GroundedLeg.goal_clamp_m``) can sit far from its anchor's actual centroid
@@ -170,6 +248,10 @@ class _GroundedLeg:
     #: resolved. Feeds Gate 3 in ``_committable_prefix_len`` (withhold an uncreditable
     #: clamp) and the re-ground improvement trigger in ``_maybe_reground_rebuild``.
     goal_clamp_m: float | None = None
+    #: Issue #98 — per-anchor resolve() relaxation audit (diagnostic-only; read by
+    #: dump_leg_relaxations, never by any scoring/geometry logic). One entry per
+    #: this leg's anchors, in anchor order.
+    anchor_audits: tuple["AnchorAudit", ...] = ()
 
 
 @dataclass
@@ -308,6 +390,8 @@ class InstructionHead:
                 prev_gate = None
             prev_kind = gl.kind
         self._legs = legs
+        # Issue #98: diagnostic-only, no-op unless VLA_LEG_RELAX_DUMP_PATH is set.
+        dump_leg_relaxations(self.plan, legs)
 
     def _ground_one(
         self, leg: RouteLeg, scene, prev_xy: tuple[float, float] | None = None,
@@ -317,12 +401,14 @@ class InstructionHead:
         nouns = tuple(a.noun for a in leg.anchors)
         if scene is None:
             return _GroundedLeg(leg.kind, False, None, nouns)
-        recs, provisional = self._resolve_leg_anchors(leg, scene, prev_xy)
+        recs, provisional, audits = self._resolve_leg_anchors(leg, scene, prev_xy)
         if any(r is None for r in recs):
             # IF-F6: a corridor leg whose two anchors share a noun but has < 2 distinct
             # instances lands here (recs[1] is None) and stays ungrounded — which now
             # correctly feeds the H3 explore path, not a zero-width-gate recovery beeline.
-            return _GroundedLeg(leg.kind, False, None, nouns, provisional=provisional)
+            return _GroundedLeg(
+                leg.kind, False, None, nouns, provisional=provisional, anchor_audits=tuple(audits)
+            )
         grounded = all(r.n_obs >= MIN_GROUND_OBS for r in recs)
         if leg.kind is LegKind.CORRIDOR_BETWEEN:
             gate = TB.corridor_gate(recs[0], recs[1], scene)
@@ -348,6 +434,7 @@ class InstructionHead:
         return _GroundedLeg(
             leg.kind, grounded, geom, nouns, record=recs[0], runner_up=runner_up,
             provisional=provisional, min_n_obs=min_n_obs, goal_clamp_m=goal_clamp_m,
+            anchor_audits=tuple(audits),
         )
 
     def _resolve_leg_anchors(
@@ -356,10 +443,11 @@ class InstructionHead:
         """Resolve every anchor of a leg to a best InstanceRecord, enforcing DISTINCT
         instances across the leg's anchors (IF-F6).
 
-        Returns ``(recs, provisional)`` where ``recs`` is one record (or None) per
-        anchor in order, and ``provisional`` is True iff ANY anchor's resolve leaned on
-        a relaxation rung (H4c). "the two X" / "between the two X" duplicate the anchor
-        (regex_tier ``_split_pair``); resolving both independently yields the SAME
+        Returns ``(recs, provisional, audits)`` where ``recs`` is one record (or None)
+        per anchor in order, ``provisional`` is True iff ANY anchor's resolve leaned on
+        a relaxation rung (H4c), and ``audits`` is one :class:`AnchorAudit` per anchor
+        (issue #98, diagnostic-only). "the two X" / "between the two X" duplicate the
+        anchor (regex_tier ``_split_pair``); resolving both independently yields the SAME
         top-ranked instance -> a zero-width gate -> whole-route recovery collapse. Here
         the second anchor of a shared-noun pair takes the next distinct ranked instance;
         if fewer than 2 exist the leg stays ungrounded.
@@ -367,31 +455,34 @@ class InstructionHead:
         recs: list[object | None] = []
         used: set[int] = set()
         provisional = False
+        audits: list[AnchorAudit] = []
         for anchor in leg.anchors:
-            best, prov = self._resolve_anchor_distinct(anchor, scene, used, prev_xy)
+            best, prov, audit = self._resolve_anchor_distinct(anchor, scene, used, prev_xy)
             provisional = provisional or prov
             recs.append(best)
+            audits.append(audit)
             if best is not None:
                 used.add(getattr(best, "instance_id", -1))
-        return recs, provisional
+        return recs, provisional, audits
 
     def _resolve_anchor_distinct(
         self, anchor: Anchor, scene, used: set[int],
         prev_xy: tuple[float, float] | None = None,
     ):
         """Best ranked InstanceRecord for ``anchor`` NOT already claimed by an earlier
-        anchor of the same leg (``used``); plus whether the resolve was relaxation-audited.
+        anchor of the same leg (``used``); plus whether the resolve was relaxation-audited
+        and its :class:`AnchorAudit` (issue #98, diagnostic-only).
         """
-        ranked, provisional = self._ranked_anchor(anchor, scene, prev_xy)
+        ranked, provisional, audit = self._ranked_anchor(anchor, scene, prev_xy)
         for c in ranked:
             if getattr(c, "instance_id", -1) not in used:
-                return c, provisional
-        return None, provisional
+                return c, provisional, audit
+        return None, provisional, audit
 
     def _ranked_anchor(
         self, anchor: Anchor, scene, prev_xy: tuple[float, float] | None = None
     ):
-        """(ranked survivors minus demoted, provisional?) for one anchor spec.
+        """(ranked survivors minus demoted, provisional?, AnchorAudit) for one anchor spec.
 
         ``provisional`` mirrors H4c: True when the resolve audit trail contains a
         relaxation rung (a filter was dropped to land on these candidates).
@@ -418,6 +509,10 @@ class InstructionHead:
         res = TB.resolve(spec, scene, self.thresholds)
         ranked = [c for c in res.candidates_ranked if c.instance_id not in self._demoted]
         provisional = any(r.step in _PROVISIONAL_STEPS for r in res.audit)
+        # Issue #98: diagnostic-only audit trail, never read by any scoring/geometry
+        # logic below -- tie_break_group_size is filled in only if the same-label
+        # salience reorder actually runs (end of this method).
+        tie_break_group_size: int | None = None
 
         # Issue #73 (post-#71 parity audit, home_building_1 asymmetry): once the
         # resolve fallback ladder has dropped every relation clause (category_only,
@@ -468,6 +563,7 @@ class InstructionHead:
             if len(same) > 1 and _same_label_group_is_tied(
                 same, anchor.disambiguator, scene, self.thresholds
             ):
+                tie_break_group_size = len(same)  # issue #98: fell back over this many
                 rest = [c for c in ranked if c.label != top_label]
                 same = sorted(
                     same,
@@ -478,7 +574,12 @@ class InstructionHead:
                     ),
                 )
                 ranked = same + rest
-        return ranked, provisional
+        audit = AnchorAudit(
+            steps=tuple(r.step for r in res.audit),
+            candidate_count=len(res.candidates_ranked),
+            tie_break_group_size=tie_break_group_size,
+        )
+        return ranked, provisional, audit
 
     def _resolve_anchor(
         self, anchor: Anchor, scene, prev_xy: tuple[float, float] | None = None
@@ -489,7 +590,7 @@ class InstructionHead:
         confidently rejected on arrival) are skipped so re-resolution lands on the
         runner-up.
         """
-        ranked, _ = self._ranked_anchor(anchor, scene, prev_xy)
+        ranked, _, _ = self._ranked_anchor(anchor, scene, prev_xy)
         if not ranked:
             return (None, None)
         return (ranked[0], ranked[1] if len(ranked) > 1 else None)
