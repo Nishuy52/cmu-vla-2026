@@ -1,0 +1,92 @@
+# Cold-pickup — live-run improvement campaign
+
+**Refresh this file at every milestone.** Everything here is committed; a dead session
+loses nothing but the harvest step. Supersedes `RESUME-0430.md`.
+
+## Operating loop (user directive, 28 Jul)
+
+**Do NOT implement fixes in the main session.** The loop is:
+1. **WAIT** for every verifier — a claim that looks dominant often gets refuted
+   (12 of 26 verdicts were refutations, including the headline "instance explosion"
+   narrative and an AABB-clamp hypothesis that measurement killed).
+2. **SYNTHESISE** in the main session — rank by expected-points-per-effort.
+3. **DELEGATE** one agent per bounded confirmed defect (goal, owned files,
+   done-criteria, tests).
+4. **RE-VERIFY** with a fresh-context verifier before claiming any fix works.
+
+## Current state (28 Jul ~05:00)
+
+### Live scoreboard — 45 questions, 15 scenes, all 3 types
+| type | live | offline |
+|---|---|---|
+| instruction_following | **0.367** | 0.800 |
+| numerical | **0.133** | 1.000 |
+| object_reference | **0.005** | 1.000 |
+| all 45 | **0.167** | — |
+
+The harness is solid (45/45 SUCCESS, all `tier=api`). **The bottleneck is perception.**
+
+### In flight
+- **Cluster:** `701116` RUNNING (inst x8) -> `701117` (inst x7) -> `701118` (nume x15)
+  -> `701119` (obje x15), chained. First run that captures the #102/#98 dumps.
+  Harvest: `tools/cluster/live_run/harvest_verify.sh <job>` then recover bags
+  (`ros2 bag reindex -s mcap` + `ros2 bag convert`) — these predate the #114 in-job fix.
+- **Diagnosis workflow:** runId `wf_d5c85523-ce5`. Resume with
+  `Workflow({scriptPath: ".../workflows/scripts/live-failure-diagnosis-wf_d5c85523-ce5.js", resumeFromRunId: "wf_d5c85523-ce5"})`
+  — completed agents replay from cache. Synthesis was still pending at last check
+  (30/35 agents done, 26 verdicts: 14 confirmed / 12 refuted).
+
+### Next actions, in order
+1. Collect the workflow synthesis (resume it if it died).
+2. File an issue per confirmed finding not yet filed (rule: every defect AND every
+   proposed fix gets its own verified issue; see `reports/cluster_verify/699009/FINDINGS-INDEX.md`).
+3. Synthesise the ranked plan; then **delegate** fixes, one agent per defect.
+4. Re-verify each fix against the replay harness before believing it.
+5. Harvest 701116-701119 as they land.
+
+## Verified facts — do not re-derive
+
+- **Perception is 100% of the numerical gap (#120).** Controlled swap: same parser +
+  same `counting()`, GT index -> **15/15**; live index -> reproduces our wrong answers
+  **13/13**. Parser/counting/scoring/navigation exonerated.
+- **Coverage is the under-appreciated half**: median tracked-vs-GT instance count is
+  **0.45x** — we track fewer than half the instances GT has (home_building_1 85/432).
+  There is NO scene-wide instance explosion.
+- **Within detected classes we over-produce**: chair 23 vs 6, pillow 30 vs 4,
+  picture 37 vs 9, cup 14 vs 2 — spatially SPREAD (only 1-22% of pairs within 0.5 m),
+  boxes inflated **1.1-4.5x** (#123).
+- **Two fixes tested on recorded snapshots and REFUTED (#123)** — do not retry:
+  clamping tracked extents (correct 1->1 of 15); evidence gating (mean|err| 4.93->2.13
+  but correct only 1->2 of 15, far too weak for the generalization protocol).
+- **The replay harness is the right acceptance test**: replay `toolbox.counting()` over
+  `reports/cluster_verify/699819/debug/<slot>/instance_index.jsonl` (`tag=answer_time`)
+  to A/B a perception change offline against real live data before any cluster run.
+- **obje answers are wrong, not just unscoreable (#118)** — 6 of 7 now-scoreable score
+  exactly 0.000 IoU. The earlier all-`n/a` masked a real failure.
+- **Colour attributes never populated live (#121)** — `color_bins=()`, `caption=""`;
+  colour-qualified questions return a confident 0.
+
+## Operational gotchas
+
+- **Never `scancel` to apply a fix** — loses the queue place. Only runtime-loaded files
+  update on a queued job (`~/vla/src`, `~/live_monitor.py`, `~/question_pub.py`); the
+  sbatch body is frozen at submit. Use `scontrol hold`/`release` to sync `src` safely
+  between jobs — a running job re-imports `src` per question, so syncing mid-run splits
+  it across code versions.
+- **Fable-verify batch scripts before submitting** — caught two silent run-invalidators
+  (unexpanded `~` so the scene overlay never happened; one shared matrix filename so all
+  chained jobs would read the last matrix).
+- **Bags never finalize on SIGINT (#114)** — fixed in-job for future submissions only.
+- **Schema trap**: `by_class`/`total_instances` are TOP-LEVEL in `instance_index.jsonl`,
+  not under `live_instances`.
+- **`score_live_run` needs an explicit `--out`** (#96) or it overwrites the committed
+  20-Jul baseline; its merge key drops rows for repeated scene+qtype (#97).
+- **Keep agent concurrency modest** — a 35-agent fan-out destroyed the usage limit.
+- Dump env vars must be DERIVED from `VLA_EXPLORE_DEBUG_DIR`, never standalone (#119).
+
+## Open issues: 24+ — key ones
+
+#120 perception is the numerical gap · #123 inflation + both negative results ·
+#118 obje answers wrong · #121 colour attributes · #91 missing-class disambiguators ·
+#94 under-segmentation · #119 dump plumbing · #122 `_eval_clause` anchor selection ·
+#77 corridor threading · #96/#97 score_live_run data loss
