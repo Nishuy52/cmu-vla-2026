@@ -94,7 +94,11 @@ done
 echo "== sync kit scripts + matrix"
 scp -q "$KIT"/cluster_verify_batch.sbatch "$KIT"/question_pub.py "$KIT"/live_monitor.py \
        "$KIT"/topic_probe.py xlogin:
-scp -q "$MATRIX" xlogin:verify_batch_matrix.txt
+# A chained job reads its matrix at RUN time (~12h later), so a single shared
+# filename means every queued job would run whichever matrix was pushed LAST.
+# Give each submission its own file and pass it through --export.
+MTAG="$(date +%Y%m%d_%H%M%S)_$$"
+scp -q "$MATRIX" "xlogin:verify_batch_matrix_${MTAG}.txt"
 
 echo "== submit"
 # Optional: chain behind an already-queued job, e.g. AFTER=698999 (or a full
@@ -109,7 +113,7 @@ if [ -n "${AFTER:-}" ]; then
   DEP_ARG="--dependency=$DEP_SPEC"
   echo "   chaining: $DEP_ARG"
 fi
-JOB=$(ssh xlogin "cd ~ && sbatch $DEP_ARG --export=ALL ~/cluster_verify_batch.sbatch" | grep -oE '[0-9]+')
+JOB=$(ssh xlogin "cd ~ && sbatch $DEP_ARG --export=ALL,MATRIX=\$HOME/verify_batch_matrix_${MTAG}.txt ~/cluster_verify_batch.sbatch" | grep -oE '[0-9]+')
 echo "SUBMITTED batch job $JOB (scenes=$SCENES_CSV, $(wc -l < "$MATRIX") question(s))"
 echo "   watch:   ssh xlogin tail -f '~/verify_batch_${JOB}.out'"
 echo "   harvest: tools/cluster/live_run/harvest_verify.sh $JOB"

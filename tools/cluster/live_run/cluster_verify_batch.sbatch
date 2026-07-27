@@ -50,6 +50,7 @@ ROOT=~/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT
 WS=$ROOT/home/docker/autonomy_stack_mecanum_wheel_platform
 XR=~/xstack/root
 J=$SLURM_JOB_ID
+WALL_MIN=${WALL_MIN:-175}   # keep in sync with #SBATCH -t (wall-guard budget)
 MATRIX=${MATRIX:-~/verify_batch_matrix.txt}
 UNITY_DIR=$WS/src/base_autonomy/vehicle_simulator/mesh/unity
 MODEL=$UNITY_DIR/environment/Model.x86_64
@@ -106,6 +107,7 @@ mkdir -p "$CAP_ROOT"
 
 # ---------- per-question teardown: kill everything, wait for ports to free ----------
 teardown_one() {
+  local i busy
   kill "${QPUB_PID:-}" "${ADAPTER_PID:-}" "${OLLAMA_PID:-}" "${LAUNCH_PID:-}" \
        "${UNITY_PID:-}" "${XVFB_PID:-}" 2>/dev/null
   kill -KILL -"${BAG_PID:-}" 2>/dev/null; kill -KILL "${BAG_PID:-}" 2>/dev/null
@@ -122,13 +124,24 @@ teardown_one() {
   pkill -9 -f "Xvfb :99" 2>/dev/null || true
   pkill -9 -f "ollama serve" 2>/dev/null || true
   pkill -9 -f "ros_adapter.adapter_node" 2>/dev/null || true
+  # ros2 launch may fail to reap a stack node (localPlanner/pathFollower/bridge...);
+  # a survivor holds :10000 or keeps publishing into the shared DDS domain, poisoning
+  # every later question. All stack binaries live under the workspace path.
+  pkill -9 -f "autonomy_stack_mecanum_wheel_platform" 2>/dev/null || true
   rm -f /tmp/.X11-unix/X99 2>/dev/null || true
-  echo "TEARDOWN: done (ports/display released)"
+  (ss -ltn 2>/dev/null || true) | grep -q ":10000 " \
+    && echo "TEARDOWN: WARNING :10000 STILL BUSY — next question will likely fail" \
+    || echo "TEARDOWN: done (ports/display released)"
 }
 
 # ---------- run one (scene, qdir, question) tuple end to end ----------
 run_one() {
   local SCN=$1 QD=$2 SDIR=$3 QUESTION=$4 SLOT=$5
+  # SDIR arrives as DATA from the matrix file, so a leading `~` is NOT expanded by
+  # bash (only assignment/word expansion does that) — `find "~/scenes/x"` fails and the
+  # overlay is silently skipped, leaving the PREVIOUS scene baked in while the run is
+  # still labelled/scored as this scene. Expand it explicitly.
+  SDIR=${SDIR/#\~/$HOME}
   # `i` MUST be local: this function's ollama/bag wait-loops use `for i in $(seq ...)`,
   # and without this they clobber the CALLER's matrix-line counter — 699009 lost a bag
   # when two questions collided on the same SLOT name and the batch miscounted 10 as 7.
@@ -243,6 +256,13 @@ i=0
 while IFS='|' read -r SCENE QDIR SCENE_DIR QUESTION || [ -n "${SCENE:-}" ]; do
   [ -z "${SCENE:-}" ] && continue
   case "$SCENE" in \#*) continue ;; esac
+  # Wall-guard: an inst question costs the full 780s monitor + ~4min overhead, so a
+  # 15-question sweep can exceed -t. Stop cleanly with captures intact rather than
+  # being SIGKILLed mid-question (which truncates that bag and skips the verdict).
+  if [ $SECONDS -gt $(( WALL_MIN*60 - 1200 )) ]; then
+    echo "WALL-GUARD: ${i} question(s) done, $(( SECONDS/60 ))min elapsed of ${WALL_MIN} — stopping before the wall"
+    break
+  fi
   SLOT="${i}_${SCENE}_${QDIR}"
   if run_one "$SCENE" "$QDIR" "$SCENE_DIR" "$QUESTION" "$SLOT"; then
     echo "== slot $SLOT: run_one returned OK"
