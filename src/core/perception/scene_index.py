@@ -81,6 +81,11 @@ def dump_instance_index(
     counts against ground truth. ``extra`` is merged into the top-level record as-is
     (e.g. a caller-specific qtype/answer value) when given.
 
+    Issue #101: each instance entry also carries ``aabb_min``/``aabb_max`` (rounded
+    trimmed AABB corners, same rounding as ``position``) so an on(table)-style
+    geometry predicate can be replayed offline from the dump alone, without needing
+    the live run's full point cloud.
+
     Any failure (bad path, unwritable dir, etc.) is swallowed — diagnostics must never
     break the run they are observing, matching ``core.heads.explore_debug.maybe_dump``.
     """
@@ -110,6 +115,11 @@ def dump_instance_index(
                     "id": int(rec.instance_id),
                     "label": rec.label,
                     "position": [round(float(c), 3) for c in rec.centroid],
+                    # Issue #101: trimmed AABB corners, rounded like position, so an
+                    # on(table)-style geometry predicate can be replayed offline
+                    # against this dump alone (centroid-only was insufficient).
+                    "aabb_min": [round(float(c), 3) for c in rec.aabb_min],
+                    "aabb_max": [round(float(c), 3) for c in rec.aabb_max],
                     "score": round(float(rec.score), 4),
                     "n_obs": int(rec.n_obs),
                     # Issue #84 gate observability: whether THIS instance would win the
