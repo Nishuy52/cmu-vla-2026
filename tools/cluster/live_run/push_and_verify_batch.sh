@@ -22,7 +22,15 @@ KIT=$REPO/tools/cluster/live_run
 MATRIX=$(mktemp)
 trap 'rm -f "$MATRIX"' EXIT
 
-echo "== build matrix locally from questions.json"
+# QTYPES=inst[,nume,obje] restricts which question types enter the matrix, so a
+# single allocation can sweep ONE type across MANY scenes (max scene diversity per
+# ~175min job) instead of all types across few scenes. Default: all three.
+export QTYPES=${QTYPES:-inst,nume,obje}
+# QMAX=<n> caps questions per (scene, qtype) — QMAX=1 takes just the first, which
+# is what a broad cross-scene sweep wants.
+export QMAX=${QMAX:-99}
+
+echo "== build matrix locally from questions.json (qtypes=$QTYPES qmax=$QMAX)"
 IFS=',' read -ra SCENES <<< "$SCENES_CSV"
 python3 - "$MATRIX" "${SCENES[@]}" <<'PYEOF'
 import json
@@ -49,12 +57,18 @@ missing = [s for s in wanted if s not in by_scene]
 if missing:
     sys.exit(f"unknown scene(s) in questions.json: {missing} (have: {sorted(by_scene)})")
 
+import os
+keep_qdirs = {t.strip() for t in os.environ.get("QTYPES", "inst,nume,obje").split(",") if t.strip()}
+qmax = int(os.environ.get("QMAX", "99"))
+
 lines = []
 for scene in wanted:
     questions = by_scene[scene]
     scene_dir = f"~/scenes/{scene}"
     for qtype, qdir in QTYPE_TO_QDIR.items():
-        for q in questions.get(qtype, []):
+        if qdir not in keep_qdirs:
+            continue
+        for q in questions.get(qtype, [])[:qmax]:
             q = " ".join(q.split())  # collapse newlines/whitespace -> one line
             lines.append(f"{scene}|{qdir}|{scene_dir}|{q}")
 
