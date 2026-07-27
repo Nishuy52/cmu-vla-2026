@@ -277,9 +277,11 @@ def test_plan_nouns_recurses_into_route_disambiguator():
     assert set(_plan_nouns(p)) == {"bowl", "table"}
 
 
-def test_plan_nouns_includes_avoid_anchor_disambiguator():
-    """``plan.avoid`` anchors (and their nested disambiguators) also feed the detector
-    prompt -- the detector must be able to see an avoided object to steer clear of it."""
+def test_plan_nouns_excludes_avoid_anchors():
+    """``plan.avoid`` anchors are deliberately EXCLUDED (see ``_plan_nouns`` docstring):
+    this return value feeds both GroundingDINO caption passes through one argument, and
+    the short question-noun-only pass's box threshold is calibrated against it staying
+    ~2 phrases. Avoid anchors are breadth, not target-recall nouns, and must not pad it."""
     from core.plan_schema import AvoidSpec, Clause, Pred
 
     p = instruction_plan(
@@ -293,7 +295,7 @@ def test_plan_nouns_includes_avoid_anchor_disambiguator():
             )
         ],
     )
-    assert set(_plan_nouns(p)) == {"door", "fireplace", "rug"}
+    assert set(_plan_nouns(p)) == {"door"}
 
 
 def test_uniform_affinity_is_zero():
