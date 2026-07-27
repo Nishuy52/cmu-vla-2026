@@ -32,6 +32,7 @@ from core.nav.frontiers import detect_frontiers
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
 from core.perception.detector import is_answer_eligible
 from core.plan_schema import Plan
+from core.plan_walk import iter_avoid_anchors, iter_route_anchors, iter_target_anchors
 
 from core.heads.instruction import InstructionHead
 
@@ -613,14 +614,25 @@ class _ProvisionalInstance:
 
 
 def _plan_nouns(plan: Plan | None) -> list[str]:
-    """All nouns referenced by a plan (target + clauses, or route anchors)."""
+    """All nouns referenced by a plan (target + clauses, or route anchors), recursing
+    through every anchor's nested ``disambiguator`` chain (issue #95) — a noun that
+    appears only as a disambiguator (e.g. "the potted plant closest to the pyramid
+    candle holder") must still reach the detector prompt / affinity / missing-noun
+    logic downstream of this function, or the robot never even asks the detector to
+    look for it.
+
+    Also includes ``plan.avoid`` anchors: the detector has to actually see an avoided
+    object to know where it is, so its noun belongs in the same vocabulary as any
+    other referenced object — unlike the other four call sites fixed alongside this
+    one, which are about a specific target/anchor rather than "everything the
+    detector should be watching for".
+    """
     if plan is None:
         return []
     nouns: list[str] = []
     if plan.target is not None:
         nouns.append(plan.target.noun)
-        for cl in plan.target.clauses:
-            nouns.extend(a.noun for a in cl.anchors)
-    for leg in plan.route:
-        nouns.extend(a.noun for a in leg.anchors)
+        nouns.extend(a.noun for a in iter_target_anchors(plan.target))
+    nouns.extend(a.noun for a in iter_route_anchors(plan.route))
+    nouns.extend(a.noun for a in iter_avoid_anchors(plan.avoid))
     return [n for n in nouns if n]
