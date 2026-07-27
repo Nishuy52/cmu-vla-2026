@@ -136,6 +136,144 @@ def test_build_gdino_prompt_lowercases():
     assert build_gdino_prompt(["Sofa"], []) == "sofa ."
 
 
+# ------------------------------------------------------- GDINO prompt token budget (#105)
+
+#: Ground truth measured directly against the real GroundingDINO text encoder
+#: (bert-base-uncased): ``build_gdino_prompt((), _STANDING_VOCAB_NOUNS)`` -- the
+#: un-budgeted 116-noun standing vocab caption -- tokenizes to exactly this many real
+#: wordpiece tokens, 37 over the 256 (``max_text_len``) limit the loaded GroundingDINO
+#: config enforces. Pinned here as a fixture constant so the calibration tests below
+#: never need ``transformers`` (absent from the ``src/`` test venv) to stay honest.
+MEASURED_STANDING_VOCAB_REAL_TOKENS = 293
+
+#: The 12 nouns the real tokenizer measurement showed get silently amputated by the
+#: pre-fix unbudgeted caption (alphabetical-tail overflow past the 256-token limit).
+MEASURED_OVERFLOW_TAIL_NOUNS = (
+    "trash can", "tray", "tv", "tv cabinet", "tv remote", "vase",
+    "wall lamp", "wardrobe", "wardrobe door", "water cooler", "whiteboard", "window",
+)
+
+
+def _standing_vocab_nouns():
+    # Read-only import of the live 116-noun standing vocab -- this module owns no
+    # part of factory.py, it only observes the vocab it ships to reproduce the #105
+    # measurement against the real, current vocab (not a hand-copied snapshot that
+    # could drift out of sync with it).
+    from core.heads.factory import _STANDING_VOCAB_NOUNS
+
+    return _STANDING_VOCAB_NOUNS
+
+
+def test_default_token_estimate_never_underestimates_measured_vocab():
+    # Requirement: the default heuristic must OVER-estimate, never under-estimate,
+    # relative to the real tokenizer -- pinned against the one real measurement we
+    # have (293 real tokens for the full un-budgeted vocab caption).
+    from core.perception.detector import _default_token_estimate
+
+    prompt = build_gdino_prompt((), _standing_vocab_nouns(), max_tokens=10**9)
+    estimate = _default_token_estimate(prompt)
+    assert estimate >= MEASURED_STANDING_VOCAB_REAL_TOKENS
+    # ...and not wildly so -- a heuristic pessimistic enough to discard half the
+    # vocab under-uses the real 256-token budget just as badly as overflowing it.
+    assert estimate <= 2 * MEASURED_STANDING_VOCAB_REAL_TOKENS
+
+
+def test_build_gdino_prompt_full_vocab_stays_within_default_budget():
+    from core.perception.detector import DEFAULT_GDINO_MAX_TEXT_TOKENS, _default_token_estimate
+
+    prompt = build_gdino_prompt((), _standing_vocab_nouns())
+    assert _default_token_estimate(prompt) <= DEFAULT_GDINO_MAX_TEXT_TOKENS
+
+
+def _kept_phrases(prompt: str) -> set[str]:
+    return {p.strip() for p in prompt.removesuffix(" .").split(" . ") if p.strip()}
+
+
+def test_build_gdino_prompt_question_anchor_nouns_survive_full_vocab_truncation():
+    # The exact #105 regression: vase/tv/window/water cooler are in the alphabetic
+    # overflow tail and were silently dropped from EVERY pass pre-fix. As question
+    # nouns (recall-priority), they must survive even though the vocab pass still
+    # overflows the budget.
+    question_nouns = ["vase", "tv", "window", "water cooler"]
+    prompt = build_gdino_prompt(question_nouns, _standing_vocab_nouns())
+    kept_phrases = _kept_phrases(prompt)
+    for noun in question_nouns:
+        assert noun in kept_phrases
+
+
+def test_build_gdino_prompt_question_nouns_never_dropped_for_vocab():
+    # A budget exactly as tight as the question nouns alone (12 est. tokens for these
+    # three) leaves zero room for any vocab noun -- every single one must be dropped
+    # before a single question noun is.
+    question_nouns = ["sofa", "window", "potted plant"]
+    dropped: list[str] = []
+    prompt = build_gdino_prompt(
+        question_nouns,
+        _standing_vocab_nouns(),
+        max_tokens=12,
+        dropped_out=dropped,
+    )
+    kept_phrases = _kept_phrases(prompt)
+    for noun in question_nouns:
+        assert noun in kept_phrases
+    # window/sofa/potted plant are already in the prompt as question nouns, so they
+    # are de-duplicated out of the vocab pass entirely (never counted as "dropped");
+    # every other vocab noun must be dropped at this budget.
+    expected_dropped = set(_standing_vocab_nouns()) - set(question_nouns)
+    assert set(dropped) == expected_dropped
+
+
+def test_build_gdino_prompt_over_budget_question_nouns_kept_and_logged(caplog):
+    # If even the question nouns alone blow the budget, they are still kept in
+    # full (never silently trimmed) but the condition is logged loudly.
+    import logging
+
+    question_nouns = ["sofa", "window", "potted plant", "refrigerator"]
+    with caplog.at_level(logging.ERROR, logger="core.perception.detector"):
+        prompt = build_gdino_prompt(question_nouns, (), max_tokens=1)
+    kept_phrases = _kept_phrases(prompt)
+    for noun in question_nouns:
+        assert noun in kept_phrases
+    assert any("question nouns alone" in rec.message for rec in caplog.records)
+
+
+def test_build_gdino_prompt_drop_is_reported_not_silent(caplog):
+    import logging
+
+    dropped: list[str] = []
+    with caplog.at_level(logging.WARNING, logger="core.perception.detector"):
+        prompt = build_gdino_prompt((), _standing_vocab_nouns(), dropped_out=dropped)
+    # Some nouns must actually have been dropped for this test to mean anything.
+    assert dropped
+    assert set(MEASURED_OVERFLOW_TAIL_NOUNS).issubset(set(dropped))
+    kept_phrases = _kept_phrases(prompt)
+    for noun in dropped:
+        assert noun not in kept_phrases
+    assert any("dropping" in rec.message for rec in caplog.records)
+
+
+def test_build_gdino_prompt_no_drop_when_vocab_fits_budget():
+    dropped: list[str] = []
+    prompt = build_gdino_prompt(["sofa"], ["window", "potted plant"], dropped_out=dropped)
+    assert dropped == []
+    assert prompt == "sofa . window . potted plant ."
+
+
+def test_build_gdino_prompt_custom_token_estimator_is_honoured():
+    # Injecting an estimator that treats every rendered candidate as huge should drop
+    # every vocab noun (still keeping question nouns) -- proves the seam is real, not
+    # just decorative, and that no hard dependency on a real tokenizer exists.
+    dropped: list[str] = []
+    prompt = build_gdino_prompt(
+        ["sofa"],
+        ["window", "potted plant"],
+        token_estimator=lambda text: 10**9,
+        dropped_out=dropped,
+    )
+    assert prompt == "sofa ."
+    assert dropped == ["window", "potted plant"]
+
+
 # ------------------------------------------------------------------ GDINO stub
 
 
