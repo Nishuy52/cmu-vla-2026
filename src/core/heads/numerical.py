@@ -27,7 +27,12 @@ from typing import Callable
 
 from core.fsm.controller import StabilitySignal
 from core.interfaces import IntAnswer, QType, SceneIndex
-from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds, counting
+from core.geometry.toolbox import (
+    DEFAULT_THRESHOLDS,
+    Thresholds,
+    counting,
+    has_unresolved_disambiguator,
+)
 from core.plan_schema import Plan
 
 STABLE_TICKS: int = 3  # consecutive equal counts required before firing early
@@ -74,6 +79,13 @@ class NumericalHead:
     # None because advance() was never given a usable scene/plan" state below, so answer()
     # can withhold rather than fabricate a zero (see advance()'s empty-index branch).
     _index_empty: bool = False
+    # (#93) Set by advance() when the current count rests on a dropped nested
+    # disambiguator whose class simply hasn't been detected yet (as opposed to a
+    # depth-limit drop -- see has_unresolved_disambiguator). signal() reads this to
+    # withhold the "stable" verdict so the FSM doesn't bank an early answer on a
+    # filter that silently widened to the whole category; the watchdog/budget floor
+    # still guarantees an answer eventually via answer() (never withheld here).
+    _disambiguator_unresolved: bool = False
 
     # ------------------------------------------------------------------ update
     def advance(self, scene: SceneIndex | None) -> None:
@@ -92,9 +104,11 @@ class NumericalHead:
             return
         self._index_empty = False
         min_obs = self._answer_min_obs(scene)
-        n, ids = counting(self.plan.target, scene, min_obs=min_obs, th=self.thresholds)
+        result = counting(self.plan.target, scene, min_obs=min_obs, th=self.thresholds)
+        n, ids = result.count, result.ids
         self.count = n
         self.contrib_min_obs = self._min_obs(scene, ids)
+        self._disambiguator_unresolved = has_unresolved_disambiguator(result.audit)
         if n == self._run_count:
             self._run_len += 1
         else:
@@ -126,6 +140,7 @@ class NumericalHead:
     def _reset_run(self) -> None:
         self._run_count = None
         self._run_len = 0
+        self._disambiguator_unresolved = False
 
     # ------------------------------------------------------------------ read-out
     def signal(self) -> StabilitySignal:
@@ -135,10 +150,21 @@ class NumericalHead:
         to fire early — exploration must also have covered at least COVERAGE_MIN_FRAC
         of the scene, guarding against locking in an under-count after seeing only part
         of the scene. With no probe injected (default), behaviour is stability-only.
+
+        (#93) Nor is a held run enough when the count rests on a dropped nested
+        disambiguator whose class hasn't been detected yet (`_disambiguator_unresolved`):
+        a stable-looking count that widened "near the table WITH a vase" to "near any
+        table" is not a verified count, it's an unverified filter that happened to hold
+        steady. Reporting it as stable would let the FSM bank it early; withholding the
+        verdict costs nothing but exploration time (answer() still always publishes the
+        current count, so the always-answer guarantee is untouched) and gives perception
+        more ticks to find the missing class before commitment.
         """
         held = self._run_len >= self.stable_ticks and self._run_count is not None
         if held and self.coverage_frac is not None:
             held = self.coverage_frac() >= COVERAGE_MIN_FRAC
+        if held and self._disambiguator_unresolved:
+            held = False
         margin = STABLE_MARGIN if held else 0.0
         return StabilitySignal(
             winner_margin=margin,
