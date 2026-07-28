@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import json
+import math
+import tempfile
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from core.groundtruth import scoring as S
 from core.groundtruth.loader import load_scene
 from core.interfaces import QType
+from core.perception.scene_index import BasicSceneIndex
 from core.runner import gt_battery as GB
 
 _SRC = Path(__file__).resolve().parents[2]
@@ -1484,3 +1488,169 @@ def test_offline_budget_hooks_track_a_real_budget_state():
     clk.advance(FORCED_ASSEMBLY_S)
     assert forced_assembly() is True
     assert budget_frac() == pytest.approx(FORCED_ASSEMBLY_S / QUESTION_BUDGET_S)
+
+
+# ----------------------------------------------------------------------- issue #124
+# The sim->object frame fit is spurious: a single mis-ranked terminal-goal
+# correspondence can rotate the whole scene, and the endpoint residual gate does not
+# catch it. Fix: try the IDENTITY first (verified against the live sim's own
+# object_list.txt by id); only fall back to the endpoint fit when that doesn't
+# apply, and gate any fitted (non-identity) frame on a free-space sanity check.
+
+
+def _write_object_list(tmp_path, scene_name, rows):
+    """``rows`` is ``[(id, x, y, z, label), ...]`` -> a real object_list.txt on disk."""
+    scene_dir = tmp_path / scene_name / scene_name
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f'{oid} {x} {y} {z} 0.3 0.3 0.3 0.0 "{label}"' for oid, x, y, z, label in rows
+    ]
+    (scene_dir / "object_list.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_identity_frame_chosen_when_object_list_matches(tmp_path):
+    """object_list.txt ids match the GT instances within tolerance -> the IDENTITY is
+    used directly, no endpoint fit attempted at all."""
+    gt = _synthetic_gt_scene(
+        [("chair", 1.0, 2.0, 0.5, 0.5, 0.5, 1.0), ("lamp", -3.0, 0.5, 0.4, 0.2, 0.2, 0.4)],
+        scene_name="s124a",
+    )
+    _write_object_list(
+        tmp_path, "s124a",
+        [(0, 1.01, 1.99, 0.48, "chair"), (1, -2.98, 0.53, 0.42, "lamp")],
+    )
+    idx = BasicSceneIndex(gt.instances)
+    if_traj, if_cands, frame, residual, pairs = GB._fit_scene_if_frame(
+        gt, idx, [], None, unity_scenes_ros2_root=tmp_path,
+    )
+    assert frame is not None
+    assert frame.theta == 0.0
+    np.testing.assert_allclose(frame.t, [0.0, 0.0])
+    assert residual < GB.IDENTITY_MATCH_TOL_M
+
+
+def test_identity_frame_declined_when_delta_too_large(tmp_path):
+    """object_list.txt ids match, but the measured centroid delta is well past the
+    identity tolerance -> no identity verdict, caller falls back to the endpoint fit."""
+    gt = _synthetic_gt_scene(
+        [("chair", 1.0, 2.0, 0.5, 0.5, 0.5, 1.0)], scene_name="s124b",
+    )
+    _write_object_list(
+        tmp_path, "s124b", [(0, 1.0 + 5.0, 2.0, 0.5, "chair")],  # 5 m off -> not identity
+    )
+    idx = BasicSceneIndex(gt.instances)
+    assert GB._identity_frame_if_matched(gt, tmp_path) is None
+    # No IF trajectories at all -> the endpoint-fit path also has nothing to fit;
+    # the whole thing correctly resolves to "no frame" rather than a false identity.
+    if_traj, if_cands, frame, residual, pairs = GB._fit_scene_if_frame(
+        gt, idx, [], None, unity_scenes_ros2_root=tmp_path,
+    )
+    assert frame is None
+    assert residual is None
+
+
+def test_identity_frame_none_when_object_list_missing(tmp_path):
+    """No object_list.txt on disk for the scene -> no identity verdict (not an error)."""
+    gt = _synthetic_gt_scene(
+        [("chair", 1.0, 2.0, 0.5, 0.5, 0.5, 1.0)], scene_name="s124c",
+    )
+    assert GB._identity_frame_if_matched(gt, tmp_path) is None
+
+
+def _scene_with_regions(objs, region_box, scene_name):
+    """A synthetic GTScene like ``_synthetic_gt_scene`` but with one GT region (the
+    "floor") covering ``region_box = (x0, y0, x1, y1)``, needed to exercise the
+    free-space gate's "on floor" side against a bounded footprint."""
+    from core.groundtruth.loader import GTRegion
+
+    gt = _synthetic_gt_scene(objs, scene_name=scene_name)
+    x0, y0, x1, y1 = region_box
+    region = GTRegion(
+        region_id=0, label="room",
+        aabb_min=np.array([x0, y0, 0.0]), aabb_max=np.array([x1, y1, 3.0]),
+    )
+    gt.regions.append(region)
+    return gt
+
+
+def test_free_space_gate_rejects_nonsense_fit(monkeypatch):
+    """Regression (issue #124): a fit whose ENDPOINT residual clears the alignment
+    gate, but whose own source trajectory points map almost entirely off the GT
+    floor once the fit is applied, must be REJECTED -- not silently scored. This
+    reproduces the confirmed defect shape: a large spurious rotation that still
+    passes the (endpoint-only) residual check."""
+    gt = _scene_with_regions(
+        [("chair", 0.0, 0.0, 0.5, 0.5, 0.5, 1.0)],
+        region_box=(-2.0, -2.0, 2.0, 2.0),
+        scene_name="s124d",
+    )
+    idx = BasicSceneIndex(gt.instances)
+
+    # Trajectory living entirely inside the floor region in the SIM frame.
+    traj = np.array([[0.0, 0.0, 0.75], [1.0, 0.0, 0.75]], dtype=float)
+
+    # A large-rotation, large-translation frame (shape of the confirmed spurious
+    # fits: theta up to 154 deg, |t| up to 10.7 m) that maps the trajectory WAY
+    # outside the floor region -- but report a tiny residual, as the real defect did
+    # (the endpoint correspondence alone can't tell this fit is nonsense).
+    bad_frame = S.Frame2D(theta=math.radians(150.0), t=np.array([50.0, 50.0]))
+    monkeypatch.setattr(GB.S, "align_scene_trajectories", lambda pairs: (bad_frame, 0.05))
+    # Feed one IF question so `pairs` is non-empty and the fit path (not identity,
+    # no object_list.txt) actually runs.
+    monkeypatch.setattr(GB, "_terminal_goal_candidates", lambda text, idx: [np.array([1.0, 0.0])])
+    monkeypatch.setattr(GB.S, "load_trajectory_ply", lambda *a, **k: traj)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        qdir = Path(tmp) / gt.scene_name
+        qdir.mkdir(parents=True)
+        (qdir / "trajectory_q4.ply").write_bytes(b"")
+        if_traj, if_cands, frame, residual, pairs = GB._fit_scene_if_frame(
+            gt, idx, ["go to the chair"], Path(tmp),
+        )
+
+    assert frame is None
+    assert residual == float("inf")
+
+
+def test_free_space_gate_accepts_sane_fit(monkeypatch):
+    """Sanity counterpart: a fit whose mapped source points DO land on the GT floor
+    (e.g. a small, honest correction) is accepted as before -- the gate only rejects
+    genuinely nonsensical fits, not every non-identity one."""
+    gt = _scene_with_regions(
+        # Chair sits well clear of the trajectory's path (0,0)->(1,0) so a sane fit
+        # doesn't also trip the "in furniture" side of the gate.
+        [("chair", -1.8, 1.8, 0.5, 0.3, 0.3, 1.0)],
+        region_box=(-2.0, -2.0, 2.0, 2.0),
+        scene_name="s124e",
+    )
+    idx = BasicSceneIndex(gt.instances)
+    traj = np.array([[0.0, 0.0, 0.75], [1.0, 0.0, 0.75]], dtype=float)
+
+    sane_frame = S.Frame2D(theta=0.0, t=np.array([0.1, 0.0]))
+    monkeypatch.setattr(GB.S, "align_scene_trajectories", lambda pairs: (sane_frame, 0.1))
+    monkeypatch.setattr(GB, "_terminal_goal_candidates", lambda text, idx: [np.array([1.1, 0.0])])
+    monkeypatch.setattr(GB.S, "load_trajectory_ply", lambda *a, **k: traj)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        qdir = Path(tmp) / gt.scene_name
+        qdir.mkdir(parents=True)
+        (qdir / "trajectory_q4.ply").write_bytes(b"")
+        if_traj, if_cands, frame, residual, pairs = GB._fit_scene_if_frame(
+            gt, idx, ["go to the chair"], Path(tmp),
+        )
+
+    assert frame is sane_frame
+    assert residual == 0.1
+
+
+def test_free_space_fraction_uses_footprint_fallback_when_no_regions():
+    """A GTScene with no region CSV (regions=[]) still runs the free-space check by
+    falling back to the instance-AABB footprint, instead of vacuously scoring
+    on_floor=0 for every scene lacking a region file."""
+    gt = _synthetic_gt_scene(
+        [("chair", 0.0, 0.0, 0.5, 1.0, 1.0, 1.0)], scene_name="s124f",
+    )
+    pts = np.array([[0.0, 0.0]])  # dead centre of the only instance's footprint
+    on_floor, in_furniture = GB._free_space_fraction(pts, gt)
+    assert on_floor == 1.0
+    assert in_furniture == 1.0  # also inside the (only) furniture item, as expected

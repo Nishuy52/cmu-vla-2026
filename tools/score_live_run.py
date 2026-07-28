@@ -290,6 +290,7 @@ def _load_scene_context(
     groundtruth_root: Path,
     questions_dir: Path,
     questions_index: dict[str, dict[str, list[str]]],
+    unity_scenes_ros2_root: Path | None = None,
 ) -> SceneContext | None:
     if scene in _SCENE_CACHE:
         return _SCENE_CACHE[scene]
@@ -303,8 +304,13 @@ def _load_scene_context(
     entry_questions = questions_index.get(scene, {})
     if_texts = entry_questions.get("instruction_following", [])
 
+    # Issue #124: IDENTITY-first, verified against the live sim's own
+    # object_list.txt by id -- see GB._fit_scene_if_frame's docstring. Falls back
+    # to the (now free-space-gated) endpoint-correspondence fit only when
+    # object_list.txt is unavailable or its ids don't match closely enough.
     _if_traj, _if_cands, frame, residual, pairs = GB._fit_scene_if_frame(
-        gt, idx, if_texts, questions_dir
+        gt, idx, if_texts, questions_dir,
+        unity_scenes_ros2_root=unity_scenes_ros2_root,
     )
     spawn_xy: tuple[float, float] | None = None
     if frame is not None and pairs:
@@ -550,6 +556,7 @@ def score_run(
     questions_index: dict[str, dict[str, list[str]]],
     answers: dict | None,
     offline_index: dict[tuple[str, str, str], dict],
+    unity_scenes_ros2_root: Path | None = None,
 ) -> dict:
     qtype = QDIR_TO_QTYPE[qdir]
     bag_dir = run_dir / "bag"
@@ -578,6 +585,7 @@ def score_run(
     ctx = _load_scene_context(
         scene, groundtruth_root=groundtruth_root, questions_dir=questions_dir,
         questions_index=questions_index,
+        unity_scenes_ros2_root=unity_scenes_ros2_root,
     )
     if ctx is None:
         row["headline_live"] = None
@@ -743,6 +751,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--groundtruth", default=str(DEFAULT_GROUNDTRUTH))
     ap.add_argument("--questions", default=str(GB.DEFAULT_QUESTIONS))
     ap.add_argument("--questions-dir", default=str(GB.DEFAULT_QUESTIONS_ROOT))
+    ap.add_argument(
+        "--unity-scenes-ros2-root", default=str(GB.DEFAULT_UNITY_SCENES_ROS2_ROOT),
+        help="root holding <scene>/<scene>/object_list.txt (issue #124: the live "
+        "sim's own object poses, used to verify the sim<->object frame is the "
+        "identity before falling back to an endpoint-correspondence fit).",
+    )
     ap.add_argument("--answers", default=str(GB.DEFAULT_ANSWERS))
     ap.add_argument("--offline-results", default=str(DEFAULT_OFFLINE_RESULTS))
     ap.add_argument(
@@ -789,6 +803,7 @@ def main(argv: list[str] | None = None) -> int:
             scene, qdir, run_dir,
             groundtruth_root=groundtruth_root, questions_dir=questions_dir,
             questions_index=questions_index, answers=answers, offline_index=offline_index,
+            unity_scenes_ros2_root=Path(args.unity_scenes_ros2_root),
         )
         rows.append(row)
         print(
