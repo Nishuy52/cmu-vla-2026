@@ -256,12 +256,41 @@ def associate(
     candidate came from. The gate itself is also now per-class
     (:func:`_assoc_gate`) instead of one fixed radius for every object size.
 
-    Returns the list of instance_ids touched (matched-into or newly created), in the
-    order the detections were processed.
+    Returns the list of instance_ids touched (matched-into or newly created), ALIGNED
+    to the input ``fused_dets`` order (i.e. ``touched[i]`` is the instance the i-th
+    input detection landed in) -- NOT the order detections were internally processed.
+
+    Issue #112: the sequential same-batch fold above makes the result depend on
+    processing order UNLESS that order is itself a deterministic function of the
+    detection set rather than of however the caller happened to list them (GDINO's
+    raw per-tile output order, which correlates with nothing physical). Before
+    folding, the batch is therefore canonicalised into a stable order keyed on
+    world-grounded, data-derived properties only -- canonical label, then centroid
+    (x, y, z), then cluster extent as a final tiebreak for the vanishingly rare
+    exact-centroid tie. Deliberately excludes ``instance_id`` and input/arrival
+    index as sort keys: #111/#113 were closed precisely because such numbering
+    artifacts were allowed to decide physical outcomes, and using them here would
+    reintroduce the same defect class this fix exists to close.
     """
     pool: list[InstanceRecord] = list(index.all_instances())
-    touched: list[int] = []
-    for det, fused in fused_dets:
+
+    def _order_key(item: tuple[int, tuple[Detection, Fused3D]]):
+        _, (det, fused) = item
+        cx, cy, cz = (float(c) for c in fused.centroid)
+        ext = fused.points.max(axis=0) - fused.points.min(axis=0)
+        return (
+            canonical_for_match(det.label),
+            round(cx, 6),
+            round(cy, 6),
+            round(cz, 6),
+            tuple(round(float(e), 6) for e in ext),
+        )
+
+    indexed = list(enumerate(fused_dets))
+    indexed.sort(key=_order_key)
+
+    touched_by_input_idx: dict[int, int] = {}
+    for orig_idx, (det, fused) in indexed:
         gate = _assoc_gate(det.label, cfg)
         best: InstanceRecord | None = None
         best_dist = gate
@@ -294,8 +323,8 @@ def associate(
             rec = _fused_to_record(det, fused, instance_id=new_id)
             survivor = index.add(rec)
             pool.append(survivor)
-        touched.append(survivor.instance_id)
-    return touched
+        touched_by_input_idx[orig_idx] = survivor.instance_id
+    return [touched_by_input_idx[i] for i in range(len(fused_dets))]
 
 
 def decay_singletons(
