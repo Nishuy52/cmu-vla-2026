@@ -235,3 +235,62 @@ another replay of the same bag**, never to live-run figures.
 `picture 131` against a GT count of **0** for that class in office_1 is the naming
 loss from section 1 of this study showing up in replay: the objects are being seen,
 under a label the scene's GT never uses.
+
+## 5. Amendment to correction 2 — the granularity caveat was itself over-cautious
+
+Correction 2 above says the duplication figure is inflated by GT annotating large
+structures coarsely. **Measured, that is not materially true of the 3D instance
+duplication.** Recomputed over the 15 banked answer-time indexes with structural
+classes excluded, and then restricted to GT objects small enough that "the detector
+saw parts of one big thing" cannot apply:
+
+| basis | GT | found | recall | instances | duplication |
+|---|---|---|---|---|---|
+| structural excluded, all GT sizes | 1379 | 113 | 8.2% | 611 | **5.4x** |
+| structural excluded, GT diagonal < 1.5 m | 1069 | 72 | 6.7% | 370 | **5.1x** |
+
+Duplication stays at ~5.1x on objects where granularity is not a possible
+explanation. So the two effects are separate and both real:
+
+- **Granularity explains the 2D proposal counts** — 18 `window` boxes on an 8 m
+  window wall annotated as one object. That is why #131's NMS could not touch them.
+- **Granularity does NOT explain the 3D instance duplication.** ~5x duplication
+  survives every control applied.
+
+The headline duplication number should be quoted as **~5.1-5.4x with structural
+classes excluded**, and it is a genuine defect, not an annotation artifact.
+
+## 6. Gate-rejection instrumentation — what actually blocks a merge
+
+`associate()` instrumented to tally which check rejects each candidate pair, over a
+full `office_1_q1` replay:
+
+```
+label     107,586  (88.6%)
+distance   13,067  (10.8%)
+extent        855  ( 0.7%)
+```
+
+- **#130 is REFUTED.** The extent veto blocks 0.7% of candidate pairs. The proposed
+  "inflation -> veto -> new instance -> more inflation" cycle does not exist.
+- **The 88.6% label share is NOT a defect** — it is the expected background of
+  genuinely different classes being compared. Checked directly: among instance pairs
+  within 1.0 m of each other, only **1.0%** are label variants sharing a token
+  (27.5% same-label, 71.5% unrelated classes). Label fragmentation hurts counting
+  and GT matching; it is not the association blocker.
+
+Same-label instance pairs within 2.0 m, bucketed by the **real** gate
+(`clip(0.5 * ||prior.typ_ext||, 0.25, 0.75)`):
+
+| bucket | pairs | share |
+|---|---|---|
+| within gate, unmerged anyway | 63 | 8.4% |
+| **gate < d <= 1.5 m — #128's territory** | **462** | **61.9%** |
+| 1.5-2.0 m | 221 | 29.6% |
+
+**Method note:** the gate column in #128's original evidence table was computed with
+the wrong attribute name (`typical_extents`; the real field is `ClassPrior.typ_ext`),
+so that probe silently fell back to GT diagonals as a proxy. Redone against the real
+computation the conclusion holds — the 0.75 m ceiling clamps every large class
+(`floor` typ_diag 10.50, `counter` 3.29, `bookcase` 2.84, `shelf` 2.62, `table` 1.57)
+— but the original table was not measuring what it claimed to.
