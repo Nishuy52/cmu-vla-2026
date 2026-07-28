@@ -90,3 +90,26 @@ The harness is solid (45/45 SUCCESS, all `tier=api`). **The bottleneck is percep
 #118 obje answers wrong · #121 colour attributes · #91 missing-class disambiguators ·
 #94 under-segmentation · #119 dump plumbing · #122 `_eval_clause` anchor selection ·
 #77 corridor threading · #96/#97 score_live_run data loss
+
+## Run-reliability verifications (28 Jul, both done)
+
+- **#126 wedging — CONFIRMED, worse than claimed.** All **15/15** IF runs stop short of the
+  last commanded waypoint by **0.16-2.43 m** (median ~1.0), with `tail_motion = 0.00 m`
+  (fully stationary for the final quarter). 4 of 15 exceed the ~1.746 m terminal tolerance,
+  so those legs fail on this alone. Likely the stock planner's <0.5 m clearance obstacle-stop.
+- **#127 loft — claim REFUTED, but a real harness defect found.** `ENDPOINT: MISSING` yet the
+  slot was recorded SUCCESS. However loft scores **0.000 OFFLINE too** (legs 0/1) and the
+  adapter did not crash (clean FSM lifecycle, 19 publications) — so its zero is genuine and
+  must NOT be excluded from the mean as a harness artifact.
+
+## Fixes delegated (28 Jul ~05:20) — awaiting agent reports
+
+Three worktree-isolated executors, each with the offline battery as a no-regression gate
+(baseline IF 0.7444 / numerical 15/15 / obje 12/30 at IoU 1.000):
+- **#126** terminal-waypoint standoff (confirm mechanism first, then fix)
+- **#125** floor degenerate instance extents to the class prior — acceptance test is the
+  offline replay over `reports/cluster_verify/699819/debug/<slot>/instance_index.jsonl`
+- **#122** `_eval_clause` pick a passing anchor, not the highest-scoring one
+
+Next: integrate each after a fresh-context verifier pass; do NOT merge on the executor's
+own report.
