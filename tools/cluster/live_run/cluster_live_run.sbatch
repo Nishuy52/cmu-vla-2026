@@ -52,7 +52,11 @@ kill -0 $UNITY_PID 2>/dev/null && echo "UNITY: alive" || { echo "UNITY: DEAD"; }
 timeout 1380 ros2 launch vehicle_simulator system_simulation.launch > ~/live_run_${J}_launch.log 2>&1 &
 LAUNCH_PID=$!
 echo "stack launched; settling 45s"; sleep 45
-(ss -ltn 2>/dev/null || true) | grep -q ":10000" && echo "ENDPOINT: :10000 up" || echo "ENDPOINT: MISSING"
+# ENDPOINT_OK gates the final printed verdict (#127): no bag is captured by
+# this smoke-test script (never scored/aggregated), so there is no sentinel
+# to drop here — just don't let a dead sim stack print as SUCCESS.
+ENDPOINT_OK=1
+(ss -ltn 2>/dev/null || true) | grep -q ":10000" && echo "ENDPOINT: :10000 up" || { echo "ENDPOINT: MISSING"; ENDPOINT_OK=0; }
 
 # ---------- ai_module adapter (venv torch/GDINO + ROOT rclpy) ----------
 source ~/venv-gpu/bin/activate
@@ -90,4 +94,12 @@ echo "== bridge log tail"; tail -3 ~/live_run_${J}_bridge.log 2>/dev/null
 echo "== grounded or floor?"; grep -E "answer_from_floor|answer_from_head|published int answer|instances" ~/live_run_${J}_adapter.log | tail -5
 kill $QPUB_PID $BRIDGE_PID $ADAPTER_PID $LAUNCH_PID $UNITY_PID $XVFB_PID 2>/dev/null
 sleep 2
-[ $MONITOR_RC -eq 0 ] && echo "LIVE-RUN-DONE: SUCCESS" || echo "LIVE-RUN-DONE: rc=$MONITOR_RC"
+# #127: a missing sim endpoint outranks MONITOR_RC — a dead stack must never
+# print as SUCCESS, even for this no-scoring smoke test.
+if [ "$ENDPOINT_OK" -eq 0 ]; then
+  echo "LIVE-RUN-DONE: DEGRADED (ENDPOINT MISSING — sim stack never came up)"
+elif [ $MONITOR_RC -eq 0 ]; then
+  echo "LIVE-RUN-DONE: SUCCESS"
+else
+  echo "LIVE-RUN-DONE: rc=$MONITOR_RC"
+fi

@@ -91,7 +91,14 @@ kill -0 $UNITY_PID 2>/dev/null && echo "UNITY: alive" || { echo "UNITY: DEAD"; }
 timeout 1380 ros2 launch vehicle_simulator system_simulation.launch > ~/verify_run_${J}_launch.log 2>&1 &
 LAUNCH_PID=$!
 echo "stack launched; settling 45s"; sleep 45
-(ss -ltn 2>/dev/null || true) | grep -q ":10000" && echo "ENDPOINT: :10000 up" || echo "ENDPOINT: MISSING"
+# ENDPOINT_OK gates the final verdict below (#127): a missing :10000 means the
+# autonomy stack never came up, so nothing driven for this question can be
+# trusted even if the adapter still runs its full FSM and "answers" — the run
+# must land DEGRADED, not SUCCESS, and be kept OUT of the scoring aggregate
+# (DEGRADED sentinel dropped next to BAGDIR below; harvest_verify.sh skips any
+# run dir carrying it, same as the batch script's #127 fix).
+ENDPOINT_OK=1
+(ss -ltn 2>/dev/null || true) | grep -q ":10000" && echo "ENDPOINT: :10000 up" || { echo "ENDPOINT: MISSING"; ENDPOINT_OK=0; }
 
 # ---------- ollama (local LLM tier, issue #82 retest) ----------
 # shared node: 11434 may already be bound (697648 lesson) — probe upward
@@ -169,6 +176,11 @@ grep -m1 -iE "ladder configured" ~/verify_run_${J}_adapter.log || true
 # messages, which is exactly what score_live_run's completeness check expects.
 BAGDIR=~/verify_run_${J}_captures/$SCENE/$QDIR
 mkdir -p "$BAGDIR"; rm -rf "$BAGDIR/bag"  # ros2 bag record refuses an existing dir
+# Sentinel lives next to (not inside) the bag dir so it never confuses ros2
+# bag's own metadata/reindex handling; harvest_verify.sh checks for it. This
+# job never reuses BAGDIR (one question per allocation), so no stale-sentinel
+# hazard here — unlike the batch script, there is nothing to clear first.
+[ "$ENDPOINT_OK" -eq 0 ] && : > "$BAGDIR/DEGRADED"
 # setsid so BAG_PID is a process-group leader — lets us signal the recorder AND its
 # rosbag2 child as a group at stop time (a bare SIGINT to the `ros2` wrapper does not
 # reliably reach the child, which is why `wait` hung the whole job to the SLURM wall).
@@ -260,4 +272,13 @@ echo "== grounded or floor?"; grep -E "answer_from_floor|answer_from_head|publis
 echo "== gpu"; nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader
 kill $QPUB_PID $ADAPTER_PID $OLLAMA_PID $LAUNCH_PID $UNITY_PID $XVFB_PID ${BAG_PID:-} 2>/dev/null
 sleep 2
-[ $MONITOR_RC -eq 0 ] && echo "VERIFY-RUN-DONE: SUCCESS" || echo "VERIFY-RUN-DONE: rc=$MONITOR_RC"
+# #127: a missing sim endpoint outranks MONITOR_RC/transition:answer-> — the
+# adapter can run a full FSM and "answer" against a stack that never came up
+# (final pose stuck at spawn), so that must never read as SUCCESS.
+if [ "$ENDPOINT_OK" -eq 0 ]; then
+  echo "VERIFY-RUN-DONE: DEGRADED (ENDPOINT MISSING — sim stack never came up)"
+elif [ $MONITOR_RC -eq 0 ]; then
+  echo "VERIFY-RUN-DONE: SUCCESS"
+else
+  echo "VERIFY-RUN-DONE: rc=$MONITOR_RC"
+fi

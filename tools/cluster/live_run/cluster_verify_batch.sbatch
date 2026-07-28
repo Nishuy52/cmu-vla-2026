@@ -249,7 +249,14 @@ run_one() {
   # required captures/<scene>/<qdir>/bag leaf stays exact while multiple
   # slots reuse the same (scene, qdir) across the batch without clobbering) ----
   local BAGDIR=$CAP_ROOT/$SLOT/$SCN/$QD
-  mkdir -p "$BAGDIR"; rm -rf "$BAGDIR/bag"
+  # Clear any stale DEGRADED sentinel at the SAME point the old bag is cleared
+  # (#127 gap 2): SLOT already bakes in the loop index (${i}_${SCENE}_${QDIR}),
+  # so BAGDIR is unique per matrix line within one job and nothing left by an
+  # earlier slot should ever be sitting here — but that uniqueness is an
+  # invariant of SLOT's naming, not of this function, so clear defensively
+  # rather than trust it silently forever. Order matters: clear BEFORE the
+  # fresh per-slot write below, never after.
+  mkdir -p "$BAGDIR"; rm -rf "$BAGDIR/bag" "$BAGDIR/DEGRADED"
   # Sentinel lives next to (not inside) the bag dir so it never confuses
   # ros2 bag's own metadata/reindex handling; harvest_verify.sh checks for it.
   [ "$ENDPOINT_OK" -eq 0 ] && : > "$BAGDIR/DEGRADED"
