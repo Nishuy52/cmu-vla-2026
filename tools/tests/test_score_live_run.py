@@ -18,6 +18,7 @@ from tools.score_live_run import (
     _load_offline_index,
     _marker_aabb_in_object_frame,
     _match_question,
+    _merge_key,
     _merge_with_existing,
     _offline_headline,
     _squash,
@@ -184,6 +185,68 @@ def test_merge_with_existing_rescore_replaces_same_question_row(tmp_path):
     assert len(merged) == 2
     assert by_question["Find the red chair."] == 0.6  # replaced
     assert by_question["Find the blue lamp."] == 0.9  # untouched
+
+
+def test_merge_key_squashes_question_case_and_whitespace():
+    # (#106) The merge key must be at least as tolerant as _match_question —
+    # otherwise identical questions that differ only in case/whitespace
+    # (a launcher change, a re-encode, a different adapter build) hash to
+    # different keys and silently duplicate the row instead of replacing it.
+    base = {"scene": "s", "qdir": "inst", "question": "Find the red chair."}
+    variants = [
+        {"scene": "s", "qdir": "inst", "question": "find the red chair."},
+        {"scene": "s", "qdir": "inst", "question": "  Find the red chair.  "},
+        {"scene": "s", "qdir": "inst", "question": "FIND THE RED CHAIR."},
+        {"scene": "s", "qdir": "inst", "question": "Find   the red\tchair."},
+    ]
+    base_key = _merge_key(base)
+    for v in variants:
+        assert _merge_key(v) == base_key
+
+
+def test_merge_with_existing_collapses_question_case_and_whitespace_variants(tmp_path):
+    # (#106) direct end-to-end reproduction via _merge_with_existing: a
+    # re-score of the same question with drifted case/whitespace must
+    # replace, not duplicate.
+    existing = {
+        "rows": [
+            {
+                "scene": "s", "qdir": "inst", "question": "Find the red chair.",
+                "run_dir": "reports/s/inst", "headline_live": 0.2,
+            },
+        ]
+    }
+    (tmp_path / "scores.json").write_text(json.dumps(existing), encoding="utf-8")
+
+    new_rows = [
+        {
+            "scene": "s", "qdir": "inst", "question": "find the red chair.  ",
+            "run_dir": "reports/s/inst", "headline_live": 0.8,
+        },
+    ]
+    merged = _merge_with_existing(tmp_path, new_rows)
+    assert len(merged) == 1
+    assert merged[0]["headline_live"] == 0.8  # replaced, not appended
+
+
+def test_merge_key_no_question_fallback_still_uses_run_dir():
+    # The "no question matched" branch must stay keyed on run_dir (unique,
+    # canonical) rather than being squashed itself.
+    row = {"scene": "s", "qdir": "inst", "question": None, "run_dir": "reports/s/inst"}
+    assert _merge_key(row) == ("s", "inst", "<no-question:reports/s/inst>")
+
+
+def test_write_report_records_offline_baseline_source(tmp_path):
+    # (#139) scores.json must record which fixed baseline file the `offline`
+    # column came from, so it cannot be mistaken for a per-run recomputation.
+    from tools.score_live_run import write_report
+
+    offline_path = tmp_path / "some_baseline" / "gt_battery_results.json"
+    rows = [{"scene": "s", "qdir": "inst", "question": "Q1", "headline_live": 0.5}]
+    _md, json_path = write_report(rows, tmp_path / "out", offline_results_path=offline_path)
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["offline_baseline_source"] == str(offline_path)
 
 
 def test_main_requires_out_when_target_given(tmp_path, capsys):
