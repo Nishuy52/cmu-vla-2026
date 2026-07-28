@@ -14,11 +14,7 @@ geometry + semantics the answer heads need:
 Each object row becomes an :class:`~core.interfaces.InstanceRecord`:
 
 * ``label``   = ``raw_label`` (verbatim, lowercased) — the notes confirm challenge
-  question nouns match ``raw_label`` exactly, not the coarser NYU labels. A small,
-  scene-and-object-id-scoped table (:data:`_SCENE_LABEL_CORRECTIONS`) additionally
-  grants specific mislabelled objects an extra ``aliases`` entry when geometry
-  unambiguously contradicts ``raw_label`` (issue #110) — ``label`` itself is never
-  overwritten and no CSV row is touched.
+  question nouns match ``raw_label`` exactly, not the coarser NYU labels.
 * ``aabb_min/aabb_max`` = the **AABB-of-OBB approximation** (see :func:`obb_to_aabb`):
   the object's oriented box is rotated by its heading, then the axis-aligned min/max
   over the 8 rotated corners is taken. This is a strict *over*-approximation — a box
@@ -401,48 +397,6 @@ def _object_region_map(
     return mapping
 
 
-# --------------------------------------------------------------------------- scene-scoped label corrections
-
-#: Ground-truth ANNOTATION errors where an object's geometry unambiguously
-#: contradicts its ``raw_label``, corrected without editing the frozen VLA-3D CSV
-#: (the GT is the scoring substrate; hand-editing it would silently change every
-#: historical number). Each entry keys on the SPECIFIC ``(scene_name, object_id)``
-#: and adds the corrected noun as an extra alias on that one InstanceRecord —
-#: ``raw_label``/``label`` stay verbatim, and ``BasicSceneIndex.by_label_tiered``
-#: matches ``aliases`` by exact string only (never fuzzily), so this only ever adds
-#: one more way to reach the one object named, never a class-wide bridge.
-#:
-#: Issue #110: livingroom_1 object_id 91 carries ``raw_label == "tv remote"`` (VLA-3D
-#: ``nyu_label`` "remote control") but its OBB is a 1.697 x 0.019 x 0.976 m panel
-#: centred at z=1.385m, at essentially the same (x, y) as the tv cabinet (object_id
-#: 103, z 0.28-0.56m) — a wall-mounted television, not a remote: no handheld remote is
-#: 1.7 m wide or mounted 1.4 m up. The SAME scene also has object_id 72, also labelled
-#: ``"tv remote"``, whose OBB (0.204 x 0.051 x 0.019 m, centre z=0.28m — tabletop
-#: height, remote-sized) genuinely IS a remote. That pair is exactly why the fix
-#: cannot be a class-wide ``"tv remote" -> "tv"`` bridge in
-#: :mod:`core.perception.vocab` (VOCAB_BRIDGE): a blanket bridge would make a "tv"
-#: query in this scene return BOTH objects (or, matched the other way, could make a
-#: "remote" query second-guess a genuine remote elsewhere). Keying on
-#: ``(scene_name, object_id)`` is the narrowest correction that resolves the
-#: mislabelled panel to "tv" while leaving object_id 72 exactly as annotated.
-_SCENE_LABEL_CORRECTIONS: dict[tuple[str, int], tuple[str, ...]] = {
-    ("livingroom_1", 91): ("tv",),
-}
-
-
-def _apply_scene_label_corrections(scene_name: str, instances: list[InstanceRecord]) -> None:
-    """Append any :data:`_SCENE_LABEL_CORRECTIONS` aliases for ``scene_name`` in place.
-
-    Only touches instances whose ``(scene_name, instance_id)`` has an entry; every
-    other instance's ``aliases`` is left exactly as :func:`parse_object_csv` built it.
-    """
-    for rec in instances:
-        extra = _SCENE_LABEL_CORRECTIONS.get((scene_name, rec.instance_id))
-        if not extra:
-            continue
-        rec.aliases = tuple(rec.aliases) + tuple(a for a in extra if a not in rec.aliases)
-
-
 # --------------------------------------------------------------------------- top level
 
 
@@ -480,7 +434,6 @@ def load_scene(folder: os.PathLike | str, scene_name: str | None = None) -> GTSc
         raise FileNotFoundError(f"no *_object_result.csv in {fdir}")
 
     instances = parse_object_csv(files["object_csv"])
-    _apply_scene_label_corrections(name, instances)
     regions = parse_region_csv(files["region_csv"]) if "region_csv" in files else []
     object_region = _object_region_map(files["object_csv"], files.get("scene_graph"))
 
