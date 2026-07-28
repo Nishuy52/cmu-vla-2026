@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import os
 import sys
@@ -982,6 +983,8 @@ def _nearest_free_goal(
     return (x, y)
 
 
+_LOG = logging.getLogger("core.runner.gt_battery")
+
 _SALIENCE_TIE_EPS = 1e-9  # float-equality tolerance for the issue #75 clause-score tie check
 
 #: Issue #113 (mirrors core.heads.instruction._POS_QUANT_PREC) -- decimal places for
@@ -1012,6 +1015,18 @@ def _quantized_position(c) -> tuple[float, float]:
     x = float(P._as3(c.centroid)[0])
     y = float(P._as3(c.centroid)[1])
     return (round(x, _POS_QUANT_PREC), round(y, _POS_QUANT_PREC))
+
+
+def _position_tiebreak_collision(same, key_fn) -> bool:
+    """Issue #116 guard (mirrors ``core.heads.instruction._position_tiebreak_collision``):
+    True iff two DISTINCT candidates in ``same`` produce an identical full sort
+    key (through ``_quantized_position``) under ``key_fn`` -- a millimetre-precision
+    centroid collision that makes the tie-break degenerate to resolve()'s own
+    (instance_id-correlated) pre-sort order for those candidates. Detection only:
+    never changes ``same``'s order.
+    """
+    keys = [key_fn(c) for c in same]
+    return len(set(keys)) != len(keys)
 
 
 def _declared_salience_key(c) -> tuple[int, float, float]:
@@ -1247,19 +1262,31 @@ def _if_rubric_geometry(
                 rest = [c for c in ranked if c.label != top_label]
                 if approach_xy is not None:
                     ax, ay = approach_xy
-                    same = sorted(
-                        same,
-                        key=lambda c: (
+
+                    def _key(c, ax=ax, ay=ay):
+                        return (
                             (float(P._as3(c.centroid)[0]) - ax) ** 2
                             + (float(P._as3(c.centroid)[1]) - ay) ** 2,
                             _declared_salience_key(c),
                             _quantized_position(c),
-                        ),
-                    )
+                        )
                 else:
-                    same = sorted(
-                        same,
-                        key=lambda c: (_declared_salience_key(c), _quantized_position(c)),
+
+                    def _key(c):
+                        return (_declared_salience_key(c), _quantized_position(c))
+
+                same = sorted(same, key=_key)
+                # Issue #116 guard: detect (never correct -- sorted() is stable and
+                # already ran above) a residual tie surviving _quantized_position.
+                if _position_tiebreak_collision(same, _key):
+                    _LOG.warning(
+                        "IF rubric tie-break: quantised-position collision in "
+                        "same-label group (label=%r, group_size=%d) -- sort key "
+                        "still ties after _quantized_position; order among the "
+                        "colliding candidates fell back to resolve()'s pre-sort "
+                        "order (issue #116).",
+                        top_label,
+                        len(same),
                     )
                 ranked = same + rest
 

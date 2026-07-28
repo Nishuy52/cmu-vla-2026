@@ -140,11 +140,18 @@ class AnchorAudit:
     tie_break_group_size: size of the same-label group actually re-sorted by the
                            salience tie-break in _ranked_anchor, or None when that
                            reorder never ran (no tie, or a distinguishing superlative).
+    position_collision: issue #116 guard -- True iff the same-label group's sort
+                         key still tied after ``_quantized_position`` (two
+                         candidates' centroids collided at millimetre precision),
+                         meaning their relative order fell back to resolve()'s own
+                         pre-sort order instead of any declared property. Detection
+                         only: never changes which candidate was actually picked.
     """
 
     steps: tuple[str, ...] = ()
     candidate_count: int = 0
     tie_break_group_size: int | None = None
+    position_collision: bool = False
 
 
 def dump_leg_relaxations(plan: "Plan | None", legs: list["_GroundedLeg"]) -> None:
@@ -174,6 +181,7 @@ def dump_leg_relaxations(plan: "Plan | None", legs: list["_GroundedLeg"]) -> Non
                             "relax_steps": list(a.steps),
                             "candidate_count": a.candidate_count,
                             "tie_break_group_size": a.tie_break_group_size,
+                            "position_collision": a.position_collision,
                         }
                         for a in leg.anchor_audits
                     ],
@@ -524,6 +532,7 @@ class InstructionHead:
         # logic below -- tie_break_group_size is filled in only if the same-label
         # salience reorder actually runs (end of this method).
         tie_break_group_size: int | None = None
+        position_collision = False  # issue #116 guard, see below
 
         # Issue #73 (post-#71 parity audit, home_building_1 asymmetry): once the
         # resolve fallback ladder has dropped every relation clause (category_only,
@@ -596,25 +605,39 @@ class InstructionHead:
                 rest = [c for c in ranked if c.label != top_label]
                 if prev_xy is not None:
                     px, py = prev_xy
-                    same = sorted(
-                        same,
-                        key=lambda c: (
+
+                    def _key(c, px=px, py=py):
+                        return (
                             (float(TB.P._as3(c.centroid)[0]) - px) ** 2
                             + (float(TB.P._as3(c.centroid)[1]) - py) ** 2,
                             _declared_salience_key(c),
                             _quantized_position(c),
-                        ),
-                    )
+                        )
                 else:
-                    same = sorted(
-                        same,
-                        key=lambda c: (_declared_salience_key(c), _quantized_position(c)),
+
+                    def _key(c):
+                        return (_declared_salience_key(c), _quantized_position(c))
+
+                same = sorted(same, key=_key)
+                # Issue #116 guard: detect (never correct -- sorted() is stable and
+                # already ran above) a residual tie surviving _quantized_position.
+                if _position_tiebreak_collision(same, _key):
+                    position_collision = True
+                    _LOG.warning(
+                        "IF tie-break: quantised-position collision in same-label "
+                        "group (label=%r, group_size=%d) -- sort key still ties "
+                        "after _quantized_position; order among the colliding "
+                        "candidates fell back to resolve()'s pre-sort order "
+                        "(issue #116).",
+                        top_label,
+                        len(same),
                     )
                 ranked = same + rest
         audit = AnchorAudit(
             steps=tuple(r.step for r in res.audit),
             candidate_count=len(res.candidates_ranked),
             tie_break_group_size=tie_break_group_size,
+            position_collision=position_collision,
         )
         return ranked, provisional, audit
 
@@ -1610,6 +1633,25 @@ def _quantized_position(c) -> tuple[float, float]:
     x = float(TB.P._as3(c.centroid)[0])
     y = float(TB.P._as3(c.centroid)[1])
     return (round(x, _POS_QUANT_PREC), round(y, _POS_QUANT_PREC))
+
+
+def _position_tiebreak_collision(same, key_fn) -> bool:
+    """Issue #116 guard: True iff two DISTINCT candidates in ``same`` produce an
+    identical full sort key (through ``_quantized_position``) under ``key_fn``.
+
+    ``_quantized_position`` was adopted (#107/#113) specifically so the final
+    tie-break is a world property instead of ``instance_id`` order. But it is a
+    millimetre-precision quantisation, not an injective one: two distinct
+    candidates whose centroids collide at that precision on both axes produce
+    the SAME key, so Python's stable sort silently preserves their relative
+    pre-sort order -- which traces back to resolve()'s own candidate order,
+    the exact instance_id-correlated artifact #107/#111/#113 exist to remove.
+
+    This function only detects that degenerate case (for logging/diagnostics);
+    it never changes ``same``'s order, so behaviour is unaffected either way.
+    """
+    keys = [key_fn(c) for c in same]
+    return len(set(keys)) != len(keys)
 
 
 def _declared_salience_key(c) -> tuple[int, float, float]:
