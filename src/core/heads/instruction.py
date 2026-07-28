@@ -612,11 +612,16 @@ class InstructionHead:
                             + (float(TB.P._as3(c.centroid)[1]) - py) ** 2,
                             _declared_salience_key(c),
                             _quantized_position(c),
+                            _quantized_geometry(c),
                         )
                 else:
 
                     def _key(c):
-                        return (_declared_salience_key(c), _quantized_position(c))
+                        return (
+                            _declared_salience_key(c),
+                            _quantized_position(c),
+                            _quantized_geometry(c),
+                        )
 
                 same = sorted(same, key=_key)
                 # Issue #116 guard: detect (never correct -- sorted() is stable and
@@ -1650,6 +1655,30 @@ def _quantized_position(c) -> tuple[float, float]:
     x = float(TB.P._as3(c.centroid)[0])
     y = float(TB.P._as3(c.centroid)[1])
     return (round(x, _POS_QUANT_PREC), round(y, _POS_QUANT_PREC))
+
+
+def _quantized_geometry(c) -> tuple[float, float, float, float]:
+    """Further WORLD-grounded tie-break terms for the residual case where two
+    DISTINCT candidates collide on :func:`_quantized_position` (issue #116,
+    mirrors ``core.runner.gt_battery._quantized_geometry``): the candidate's own
+    z centroid and AABB extent (dx, dy, dz), quantised to the same
+    :data:`_POS_QUANT_PREC` precision.
+
+    (x, y) alone collides for two objects stacked at the same footprint but
+    different height (z), or two objects sharing a footprint centroid but
+    differing in size -- both are still properties of the object, never of its
+    ``instance_id`` or list position, so appending them preserves renumbering
+    invariance while shrinking the set of distinct physical objects that can
+    still tie after :func:`_quantized_position`.
+    """
+    z = float(TB.P._as3(c.centroid)[2])
+    ext = c.extents
+    return (
+        round(z, _POS_QUANT_PREC),
+        round(float(ext[0]), _POS_QUANT_PREC),
+        round(float(ext[1]), _POS_QUANT_PREC),
+        round(float(ext[2]), _POS_QUANT_PREC),
+    )
 
 
 def _position_tiebreak_collision(same, key_fn) -> bool:

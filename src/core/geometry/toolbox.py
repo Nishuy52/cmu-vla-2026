@@ -1120,11 +1120,13 @@ def _tier_priority_order(
     artifact AND a real navigation defect, since corridor-leg anchors ("the sofa and
     the coffee table") carry no disambiguator by construction.
 
-    BARE-noun queries are exempt (mirrors ``_match_anchor_noun``'s #21 exemption):
-    "table" legitimately means every table, cousins and exact alike, so imposing a
-    tier preference there would wrongly bias a same-class superlative/count pool.
-    Falls back to plain stable-by-id when the index exposes no tiered lookup (test
-    doubles) or the noun is bare.
+    BARE-noun queries are exempt from the TIER grouping only (mirrors
+    ``_match_anchor_noun``'s #21 exemption): "table" legitimately means every
+    table, cousins and exact alike, so imposing a tier preference there would
+    wrongly bias a same-class superlative/count pool. Falls back to plain
+    stable-by-id when the index exposes no tiered lookup (test doubles) --
+    still only for the tier component; see #116 below for why a bare noun must
+    NOT also skip the clause-score ordering.
 
     Issue #73: an exact label is strictly more specific than an alias/cousin
     label — that specificity ordering does not stop at the label tier. When
@@ -1138,17 +1140,32 @@ def _tier_priority_order(
     This never re-ranks ACROSS tiers (exact still always beats alias/cousin) and
     never fires when no clause context is given (``hard_clauses`` empty), so every
     existing tier-only call site is unaffected.
+
+    Issue #116 (livingroom_1 "vase between the TV and the door", surfaced once
+    #110 gave the scene a resolvable "tv"): the ORIGINAL bare-noun exemption
+    above returned ``_stable_by_id`` unconditionally, which threw away the
+    ``hard_clauses`` score-based ordering too -- not just the tier grouping --
+    for every bare-noun query (e.g. plain "vase", not "coffee table"). That let
+    two same-label survivors with genuinely DIFFERENT ``between()`` margins
+    (real, world-grounded discriminating evidence -- the caller's own
+    ``_same_label_group_is_tied`` correctly judges this pair NOT tied, so it
+    never engages its own quantised-position reorder) fall through to bare
+    instance_id order regardless, which flips under renumbering -- reproducing
+    exactly the #113 defect this whole tier-priority scheme exists to prevent.
+    A bare noun has no tier distinction to make (every candidate is
+    trivially the same "tier"), but that is orthogonal to whether clause
+    evidence exists to order same-tier survivors by; the fix is to skip ONLY
+    the tier grouping for bare nouns, never the score-based ordering.
     """
     from core.perception.scene_index import normalize_label
     from core.perception.vocab import head_noun
 
     query = normalize_label(noun)
-    if query == head_noun(query):
-        return _stable_by_id(recs)
-    tiered = getattr(index, "by_label_tiered", None)
-    if tiered is None:
-        return _stable_by_id(recs)
-    tier_by_id = {rec.instance_id: tier for rec, tier in tiered(noun)}
+    bare = query == head_noun(query)
+    tiered = None if bare else getattr(index, "by_label_tiered", None)
+    tier_by_id: dict[int, MatchTier] = (
+        {} if bare or tiered is None else {rec.instance_id: tier for rec, tier in tiered(noun)}
+    )
     worst = MatchTier.TYPO
     score_by_id: dict[int, float] = {}
     if hard_clauses and th is not None:
@@ -1158,6 +1175,8 @@ def _tier_priority_order(
             )
             for r in recs
         }
+    if not tier_by_id and not score_by_id:
+        return _stable_by_id(recs)
     return sorted(
         recs,
         key=lambda r: (

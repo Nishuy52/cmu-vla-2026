@@ -12,12 +12,23 @@ scenes:
     evaluable clause or not.
 
 ``livingroom_1``'s "stop at the vase between the TV and the door" is the
-canonical case: the scene has no "tv" instance at all, so the BETWEEN
-disambiguator is unevaluable for every vase candidate (every one gets
-_eval_clause's -inf "anchor not found" sentinel). Pre-fix, the surviving order
-is resolve()'s own list order, which is instance_id-ascending -- so the winner
-tracks the *id*, not the object, under renumbering. This file proves that fails
-against the code as it stood before this change and passes after.
+canonical case. Originally the scene had no "tv" instance at all, so the
+BETWEEN disambiguator was unevaluable for every vase candidate (every one got
+_eval_clause's -inf "anchor not found" sentinel) and the surviving order was
+resolve()'s own list order, instance_id-ascending -- so the winner tracked the
+*id*, not the object, under renumbering.
+
+Issue #110 gave livingroom_1's mislabelled panel a "tv" alias, so BETWEEN(tv,
+door) is now evaluable: only 2 of the 4 vases pass the hard filter, and their
+margins genuinely differ (real, world-grounded evidence), so
+``_same_label_group_is_tied`` correctly judges the pair NOT tied and the
+same-label reorder below never engages (``tie_break_group_size`` stays
+``None``). That moved the renumbering-sensitivity into ``resolve()``'s own
+internal tie-break (``core.geometry.toolbox._tier_priority_order``, issue
+#116) -- fixed there to keep using clause-score evidence for bare-noun queries
+instead of falling straight to instance_id order. This file's invariance
+assertions (below) still hold; only the fixture's expected ``candidate_count``/
+``tie_break_group_size`` shape changed with #110's scene fix.
 """
 from __future__ import annotations
 
@@ -113,10 +124,14 @@ class TestRenumberingInvariance:
         anchor = _vase_between_tv_and_door_anchor()
         ranked, _, audit = head._ranked_anchor(anchor, idx, prev_xy=prev_xy)
         assert ranked, "expected at least one vase candidate to survive resolve()"
-        # This is exactly the degenerate, no-evidence case issue #107 is about: the
-        # disambiguator's anchor class ('tv') is absent, so every vase carries the
-        # -inf sentinel and the group must be judged tied.
-        assert audit.tie_break_group_size == 4
+        # Issue #110 gave the scene a resolvable "tv", so BETWEEN(tv, door) is now
+        # evaluable: only the 2 vases that pass the hard filter reach here, and
+        # their margins genuinely differ -- real discriminating evidence, so the
+        # same-label reorder must NOT engage (tie_break_group_size stays None).
+        # The invariance under renumbering this test exists to prove now rests on
+        # resolve()'s own internal ordering (issue #116), not this reorder.
+        assert audit.candidate_count == 2
+        assert audit.tie_break_group_size is None
         return _winner_fingerprint(ranked[0])
 
     @pytest.mark.parametrize("prev_xy", [None, (0.0, 0.0), (-1.0, 2.0)], ids=[
