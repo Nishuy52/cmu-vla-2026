@@ -28,6 +28,7 @@ import time
 import numpy as np
 
 from core.interfaces import InstanceRecord, MarkerBox, MatchTier
+from core.perception.colour import ColourTally, build_caption, merge_tallies, top_bins
 
 # Re-exported for backward compatibility: this module used to define MatchTier
 # itself; it now lives on core.interfaces (see SceneIndex.by_label_tiered, #24) so
@@ -129,6 +130,14 @@ def dump_instance_index(
                     "aabb_max": [round(float(c), 3) for c in rec.aabb_max],
                     "score": round(float(rec.score), 4),
                     "n_obs": int(rec.n_obs),
+                    # Issue #121: colour bins + caption, so a replay dump alone lets
+                    # tools/perception_eval.py-style consumers audit colour coverage
+                    # and accuracy without needing the live pipeline's in-memory index.
+                    "caption": rec.caption,
+                    "color_bins": [
+                        {"name": b.name, "rgb": list(b.rgb), "fraction": round(b.fraction, 4)}
+                        for b in rec.color_bins
+                    ],
                     # Issue #84 gate observability: whether THIS instance would win the
                     # answer-eligibility gate right now, and why not when it doesn't --
                     # makes the gate's rejections visible in the same stream that already
@@ -333,6 +342,14 @@ class BasicSceneIndex:
         self._next_id = 1 + max(
             (r.instance_id for r in self._instances), default=-1
         )
+        # Issue #121: raw per-instance colour tally (point counts + RGB sums per
+        # scheme name), kept OUTSIDE InstanceRecord so it can accumulate losslessly
+        # across every re-observation — InstanceRecord.color_bins only ever holds the
+        # up-to-3 dominant bins derived FROM this, recomputed on every fuse. Seeded
+        # only for instances built through add()/merge_into() with a colour_obs
+        # (the live perception path); GT-constructed indices (passed instances=...)
+        # never populate this, unaffected.
+        self._colour_tally: dict[int, ColourTally] = {}
 
     # ------------------------------------------------------------- read protocol
 
@@ -379,6 +396,7 @@ class BasicSceneIndex:
             for i, rec in enumerate(self._instances):
                 if rec.instance_id == instance_id:
                     del self._instances[i]
+                    self._colour_tally.pop(instance_id, None)
                     return True
             return False
 
@@ -475,9 +493,18 @@ class BasicSceneIndex:
 
     # -------------------------------------------------------------- write / merge
 
-    def add(self, rec: InstanceRecord) -> InstanceRecord:
+    def add(
+        self, rec: InstanceRecord, colour_obs: ColourTally | None = None
+    ) -> InstanceRecord:
         """Add an observation, fusing into an existing same-label instance when
-        their 3D AABB IoU exceeds MERGE_IOU. Returns the surviving record."""
+        their 3D AABB IoU exceeds MERGE_IOU. Returns the surviving record.
+
+        ``colour_obs`` (issue #121): this observation's raw pixel-colour tally
+        (see :mod:`core.perception.colour`), if the caller computed one. On a
+        brand-new instance it seeds that instance's colour bins/caption directly;
+        on a fuse it is folded into the target's running tally by :meth:`_fuse`.
+        ``None`` (the default, and every non-live caller) leaves colour untouched.
+        """
         with self._lock:
             target = self._find_merge_target(rec)
             if target is None:
@@ -496,11 +523,21 @@ class BasicSceneIndex:
                     )
                 self._next_id = max(self._next_id, rec.instance_id + 1)
                 self._instances.append(rec)
+                if colour_obs is not None:
+                    self._seed_colour(rec, colour_obs)
                 return rec
-            self._fuse(target, rec)
+            self._fuse(target, rec, colour_obs=colour_obs)
             return target
 
-    def merge_into(self, instance_id: int, rec: InstanceRecord) -> InstanceRecord:
+    def _seed_colour(self, rec: InstanceRecord, colour_obs: ColourTally) -> None:
+        """First colour observation for a brand-new instance (issue #121)."""
+        self._colour_tally[rec.instance_id] = colour_obs
+        rec.color_bins = top_bins(colour_obs)
+        rec.caption = build_caption(rec.color_bins, rec.extents)
+
+    def merge_into(
+        self, instance_id: int, rec: InstanceRecord, colour_obs: ColourTally | None = None
+    ) -> InstanceRecord:
         """Fuse ``rec`` (one fresh single-frame observation) directly into the existing
         instance identified by ``instance_id`` — trusting that decision unconditionally,
         with NO re-derivation of label/IoU compatibility.
@@ -532,9 +569,9 @@ class BasicSceneIndex:
         with self._lock:
             for existing in self._instances:
                 if existing.instance_id == instance_id:
-                    self._fuse(existing, rec)
+                    self._fuse(existing, rec, colour_obs=colour_obs)
                     return existing
-            return self.add(rec)
+            return self.add(rec, colour_obs=colour_obs)
 
     def _find_merge_target(self, rec: InstanceRecord) -> InstanceRecord | None:
         # Called only from within add()'s locked section (RLock: reentrant).
@@ -560,9 +597,22 @@ class BasicSceneIndex:
                 best = existing
         return best
 
-    def _fuse(self, target: InstanceRecord, other: InstanceRecord) -> None:
+    def _fuse(
+        self,
+        target: InstanceRecord,
+        other: InstanceRecord,
+        colour_obs: ColourTally | None = None,
+    ) -> None:
         """Fuse ``other`` into ``target`` in place: concat points, recompute the
-        trimmed AABB and centroid, bump n_obs, keep max score."""
+        trimmed AABB and centroid, bump n_obs, keep max score.
+
+        Issue #121: ``colour_obs`` (this observation's raw pixel-colour tally, if
+        any) is folded into ``target``'s running :class:`ColourTally` — ACCUMULATED
+        across every re-observation, never overwritten by the latest keyframe — and
+        ``target.color_bins``/``target.caption`` are recomputed from the merged
+        totals. ``None`` (no colour observation this frame, e.g. the whole cluster
+        fell outside the panorama) leaves any existing colour untouched.
+        """
         # Deferred import: dimension_priors imports normalize_label from this
         # module, so a module-level import here would be a load cycle.
         from core.perception.dimension_priors import floor_degenerate_aabb
@@ -585,3 +635,9 @@ class BasicSceneIndex:
         target.centroid = (lo + hi) / 2.0
         target.n_obs += other.n_obs
         target.score = max(target.score, other.score)
+        if colour_obs is not None:
+            prior = self._colour_tally.get(target.instance_id)
+            merged = merge_tallies(prior, colour_obs) if prior is not None else colour_obs
+            self._colour_tally[target.instance_id] = merged
+            target.color_bins = top_bins(merged)
+            target.caption = build_caption(target.color_bins, target.extents)

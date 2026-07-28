@@ -29,6 +29,8 @@ import numpy as np
 
 from core.interfaces import InstanceRecord, LidarScan, OdomState, PanoFrame
 from core.parsing.vocab import NOUN_ALIASES
+from core.perception.colour import ColourTally, tally_from_colors
+from core.perception.pano_projection import project_points_to_pano, sample_colors
 from core.perception.detector import (
     Detection,
     DetectorFn,
@@ -86,6 +88,29 @@ def labels_compatible(a: str, b: str) -> bool:
     here only ever widens which CO-LOCATED detection can join an existing track; it
     never on its own decides two spatially-unrelated detections are the same object."""
     return canonical_for_match(a) == canonical_for_match(b) or labels_foldable(a, b)
+
+
+# --------------------------------------------------------------------------- colour
+
+
+def colour_tally_for_cluster(points: np.ndarray, pano: PanoFrame) -> ColourTally | None:
+    """Issue #121: quantise a fused detection's lidar points into a colour tally.
+
+    Projects the cluster's map-frame ``points`` back onto ``pano`` with the same
+    forward-projection machinery :class:`~core.perception.colored_map.ColoredVoxelMap`
+    uses (:mod:`core.perception.pano_projection`) — reused, not reimplemented, so
+    live colour and the debug-viz colored map agree pixel-for-pixel. Returns
+    ``None`` when the cluster has no points or none of them land on the panorama
+    this keyframe (out of VFOV / range-gated) — no observation, not a "gray"
+    observation (see :func:`core.perception.colour.tally_from_colors`).
+    """
+    if points is None or len(points) == 0:
+        return None
+    rows, cols, valid = project_points_to_pano(points, pano.odom)
+    if not valid.any():
+        return None
+    colors = sample_colors(pano.image, rows, cols, valid)
+    return tally_from_colors(colors, valid)
 
 
 # --------------------------------------------------------------------------- config
@@ -229,6 +254,7 @@ def associate(
     fused_dets: list[tuple[Detection, Fused3D]],
     index: BasicSceneIndex,
     cfg: TrackerConfig = DEFAULT_TRACKER_CONFIG,
+    colour_obs: list[ColourTally | None] | None = None,
 ) -> list[int]:
     """Sequential nearest-plausible associate fused detections to instances.
 
@@ -271,6 +297,15 @@ def associate(
     index as sort keys: #111/#113 were closed precisely because such numbering
     artifacts were allowed to decide physical outcomes, and using them here would
     reintroduce the same defect class this fix exists to close.
+
+    ``colour_obs`` (issue #121), if given, is a list of per-detection colour tallies
+    (:mod:`core.perception.colour`) parallel to ``fused_dets`` -- index ``i``'s tally
+    is threaded into the scene index for detection ``i`` so it accumulates into
+    whichever instance that detection lands in. It is indexed by the detection's
+    ORIGINAL input position (``orig_idx``), never by processing position, so #112's
+    canonicalisation above cannot pair a tally with a different detection's
+    instance. ``None`` (the default, and every pre-#121 caller) leaves colour
+    untouched, unchanged behaviour.
     """
     pool: list[InstanceRecord] = list(index.all_instances())
 
@@ -291,6 +326,7 @@ def associate(
 
     touched_by_input_idx: dict[int, int] = {}
     for orig_idx, (det, fused) in indexed:
+        obs = colour_obs[orig_idx] if colour_obs is not None else None
         gate = _assoc_gate(det.label, cfg)
         best: InstanceRecord | None = None
         best_dist = gate
@@ -313,15 +349,15 @@ def associate(
             # jitter routinely does) disagree with this decision and silently mint a
             # duplicate instance instead of fusing (see BasicSceneIndex.merge_into's
             # docstring for the full story).
-            survivor = index.merge_into(best.instance_id, rec)
-            for i, cand in enumerate(pool):
+            survivor = index.merge_into(best.instance_id, rec, colour_obs=obs)
+            for pool_idx, cand in enumerate(pool):
                 if cand.instance_id == survivor.instance_id:
-                    pool[i] = survivor
+                    pool[pool_idx] = survivor
                     break
         else:
             new_id = index.next_id()
             rec = _fused_to_record(det, fused, instance_id=new_id)
-            survivor = index.add(rec)
+            survivor = index.add(rec, colour_obs=obs)
             pool.append(survivor)
         touched_by_input_idx[orig_idx] = survivor.instance_id
     return [touched_by_input_idx[i] for i in range(len(fused_dets))]
@@ -442,6 +478,11 @@ class PerceptionPipeline:
         raw_records: list[list] = []  # [Detection, gate, instance_id] triples (mutable placeholder)
 
         fused_dets: list[tuple[Detection, Fused3D]] = []
+        # Issue #121: one colour tally per accepted fused detection, parallel to
+        # fused_dets (index i's tally belongs to fused_dets[i]) — computed here where
+        # the current pano image is in scope, then threaded through associate() into
+        # whichever instance each detection lands in.
+        colour_obs: list[ColourTally | None] = []
         for tile_dets in per_tile:
             for det in tile_dets:
                 fused = fuse_detection(
@@ -450,12 +491,13 @@ class PerceptionPipeline:
                 )
                 if fused is not None:
                     fused_dets.append((det, fused))
+                    colour_obs.append(colour_tally_for_cluster(fused.points, pano))
                     if dump_raw:
                         raw_records.append([det, GATE_ACCEPTED, None])
                 elif dump_raw:
                     raw_records.append([det, GATE_NO_LIDAR_CLUSTER, None])
 
-        touched = associate(fused_dets, self.index, self.tracker_cfg)
+        touched = associate(fused_dets, self.index, self.tracker_cfg, colour_obs=colour_obs)
 
         if dump_raw:
             # Back-fill the instance id each accepted detection landed in: associate()
