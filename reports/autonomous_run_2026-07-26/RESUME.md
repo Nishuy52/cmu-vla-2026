@@ -113,3 +113,47 @@ Three worktree-isolated executors, each with the offline battery as a no-regress
 
 Next: integrate each after a fresh-context verifier pass; do NOT merge on the executor's
 own report.
+
+## Fix campaign status (28 Jul, end of session)
+
+MERGED + VERIFIED on main:
+- **#122** `_eval_clause` picks a passing anchor, not the highest-scoring (`2e85b1f`).
+  Moves no number today by design — banked for when the index improves.
+- **#125** degenerate instance extents floored to the class prior (`17e6f9c`).
+  Real effect **1/15 -> 2/15** (the implementer claimed 0->1; verification corrected it UP).
+- **#126** terminal GOTO waypoint standoff (`afac7b9`) — **MERGED AS PARTIAL, NOT A FIX.**
+  Raises clearance 0.1 -> only 0.2-0.3 m, short of the 0.45 m it targets and the ~0.5 m
+  the planner needs. Merged as a strict no-regression improvement only.
+- **replay A/B harness** `tools/replay_live_numerical.py` (`61208c6`).
+
+### AUTHORITATIVE replay baselines (supersede all earlier hand-rolled figures)
+```
+raw recorded boxes    exact-match 1/15 (arabic_room)   mean|err| 4.933
+degenerate_floor      exact-match 2/15 (+office_2)     mean|err| 4.867
+```
+The earlier 4.867/4.800 figures were WRONG — off by one on hotel_room_1. The harness is
+faithful to the recorded data and the head's own logic (verified by calling `toolbox.on()`
+directly: exactly 23 pillows pass, matching the harness). The 1-count gap vs the live run
+is live-vs-snapshot skew, inherent to snapshot replay.
+
+A/B a perception change with:
+```
+python -m tools.replay_live_numerical --variant-a raw --variant-b pkg.mod:my_transform
+```
+
+### PENDING — not merged
+- **lateral cluster segmentation** in `fusion.py`, committed as `0b0ba0d` on branch
+  `feat/perception-replay-harness`. UNVERIFIED. That branch also carries the harness
+  (already cherry-picked to main) and a third tool from a concurrent session — do NOT
+  merge the branch wholesale.
+- **#132 clearance-field accounting gap** — requesting 0.45 m yields 0.2-0.3 m. Affects
+  the long-shipped VIA_NEAR mechanism too, so every clearance-based goal placement has
+  likely been landing ~0.2 m short. This, not #126, is the real wedge blocker.
+
+### Corrections worth remembering
+- The 4 wedging runs' terminal anchors are **compact** (arabic jar 0.23 m, trash can
+  0.65 m, potted plant 0.31 m, mirror 0.34 m) — NOT large. The figures 2.43/2.34/2.21 m
+  are WEDGE DISTANCES from #126, mis-transcribed into LOG.md as footprint diagonals.
+- Three consecutive executors under-reported failing tests (one omitted 5). Always count
+  failures independently; environment-caused failures must be stated, not omitted.
+- Two agents ended turns waiting on background jobs. Briefs must forbid ending in a wait.
