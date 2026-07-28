@@ -160,6 +160,81 @@ def test_empty_scan_returns_none():
     assert fuse_detection(det, empty, _odom()) is None
 
 
+# ------------------------------------------------------------------ lateral (3D) clustering
+
+
+def test_two_lateral_objects_yield_separate_component_not_merged():
+    """Two same-class objects at the same range but different lateral offsets, both
+    inside one detection's frustum, must NOT collapse into one merged box (the
+    under-segmentation bug: 112 monitor detections -> 1 tracked instance)."""
+    det = _front_detection()  # wide bbox: cy +/- 120/60 px -> a generous frustum
+    left = _box_cloud(3.0, -0.5, 0.5, half=0.15, n=30, seed=11)
+    right = _box_cloud(3.0, 0.5, 0.5, half=0.15, n=30, seed=12)
+    scan = LidarScan(t=0.0, points=np.vstack([left, right]).astype(np.float32))
+    fused = fuse_detection(det, scan, _odom())
+    assert fused is not None
+    # the winning component must be ONE of the two objects, not a merge of both:
+    # a merged cluster would have points spanning y across both centres (~1.0 m
+    # apart, half=0.15 -> span up to ~1.3 m); a single object's points span at
+    # most ~0.3 m in y.
+    y_span = fused.points[:, 1].max() - fused.points[:, 1].min()
+    assert y_span < 0.5
+    assert fused.n_points == 30
+
+
+def test_single_object_not_shattered_by_lateral_clustering():
+    """A single object's own point cloud (contiguous within the default
+    cluster_radius) must remain one component, not fragment into several
+    below-min_points pieces that get rejected."""
+    det = _front_detection()
+    cloud = _box_cloud(3.0, 0.0, 0.5, half=0.2, n=60, seed=13)
+    fused = fuse_detection(det, LidarScan(t=0.0, points=cloud), _odom())
+    assert fused is not None
+    assert fused.n_points == 60  # nothing shattered off
+
+
+def test_lateral_clustering_tightens_box_vs_old_cone_slab():
+    """On a synthetic cone with two laterally-spread point groups at the same range
+    (what the old algorithm accepted whole, since range clustering alone can't split
+    same-range points), the new fused box must be tighter than the old cone-slab
+    box would have been."""
+    det = _front_detection()
+    true_obj = _box_cloud(3.0, 0.0, 0.5, half=0.15, n=30, seed=14)
+    # a second, laterally-offset cluster at (near-identical range) -- old algorithm's
+    # range-only clustering would keep both (same range bucket), inflating the AABB.
+    decoy = _box_cloud(3.02, 1.2, 0.5, half=0.15, n=30, seed=15)
+    scan = LidarScan(t=0.0, points=np.vstack([true_obj, decoy]).astype(np.float32))
+    fused = fuse_detection(det, scan, _odom())
+    assert fused is not None
+    new_span_y = fused.points[:, 1].max() - fused.points[:, 1].min()
+
+    old_all = np.vstack([true_obj, decoy])
+    old_span_y = old_all[:, 1].max() - old_all[:, 1].min()
+    assert new_span_y < old_span_y
+    assert new_span_y < 0.5  # tight to a single object, not the merged slab (~1.5 m)
+
+
+def test_custom_cluster_radius_can_merge_or_split():
+    """A larger cluster_radius bridges a gap that a smaller one splits; both objects
+    still resolvable via the config knob (documents the tunable's effect). Sampled
+    dense enough (n=40 per side in a small cube) that a moderate tight radius does
+    not itself fragment a single side by chance."""
+    det = _front_detection()
+    left = _box_cloud(3.0, -0.5, 0.5, half=0.1, n=40, seed=16)
+    right = _box_cloud(3.0, 0.5, 0.5, half=0.1, n=40, seed=17)
+    scan = LidarScan(t=0.0, points=np.vstack([left, right]).astype(np.float32))
+
+    tight_cfg = FusionConfig(cluster_radius=0.15)  # < the ~0.8 m inter-object gap
+    fused_tight = fuse_detection(det, scan, _odom(), tight_cfg)
+    assert fused_tight is not None
+    assert fused_tight.n_points <= 45  # one side only, not a cross-object merge
+
+    loose_cfg = FusionConfig(cluster_radius=2.0)  # bridges the inter-object gap
+    fused_loose = fuse_detection(det, scan, _odom(), loose_cfg)
+    assert fused_loose is not None
+    assert fused_loose.n_points == 80  # bridged: both sides merge into one component
+
+
 def test_apex_offset_by_odom_position():
     """Frustum apex follows the vehicle: object at map (5,2) seen from (2,2)."""
     det = _front_detection()  # front tile, yaw 0 -> looks along +x

@@ -216,7 +216,7 @@ def test_field_counts_per_subsystem():
     }
     assert counts == {
         "geometry": 18,  # +3 colour-salience knobs (issues #11/#12)
-        "fusion": 5,
+        "fusion": 6,  # +1 lateral-clustering radius knob (issue: cone-inflation fix)
         "tracker": 5,  # +3 size-aware association knobs (issues #94/#89)
         "keyframe": 3,
         "nav": 21,
