@@ -306,6 +306,61 @@ def test_backoff_degrades_at_n_and_caps(fake_server, caplog):
     assert caplog.records == []
 
 
+# ------------------------------------------------------------------ issue #131 / #134: cross-tile NMS parity
+
+
+def test_same_label_near_duplicates_collapse_through_remote_path(fake_server):
+    """Ported from #131 (see test_detector.py's
+    test_same_tile_duplicate_boxes_collapse_to_the_higher_score): the question pass and
+    the vocab pass can each return their own near-identical box for the same physical
+    object. RemoteDetector.__call__ must run the union through
+    suppress_cross_tile_duplicates before returning, exactly like
+    GroundingDinoDetector.__call__ — only the stronger box should survive."""
+
+    def response(body):
+        if body["caption"] == "teapot .":
+            return 200, {
+                "per_tile": [[{"bbox_xyxy": [100.0, 200.0, 180.0, 300.0], "label": "chair", "score": 0.55}]]
+            }
+        return 200, {
+            "per_tile": [[{"bbox_xyxy": [102.0, 198.0, 178.0, 302.0], "label": "chair", "score": 0.31}]]
+        }
+
+    fake_server.response = response
+    det = _detector(fake_server, vocab_pass_cadence=1)
+    det.question_prompt = "teapot ."
+    det.prompt = "chair ."
+
+    out = det(_tiles(1))
+
+    assert sum(len(t) for t in out) == 1
+    assert out[0][0].score == pytest.approx(0.55)
+
+
+def test_distinct_same_class_objects_survive_through_remote_path(fake_server):
+    """Ported from #131 (see test_detector.py's test_distinct_bearings_both_survive):
+    two clearly separate same-label boxes must not be merged by the ported
+    suppression — both must reach the caller."""
+
+    def response(body):
+        return 200, {
+            "per_tile": [
+                [
+                    {"bbox_xyxy": [10.0, 300.0, 60.0, 400.0], "label": "chair", "score": 0.5},
+                    {"bbox_xyxy": [400.0, 300.0, 460.0, 400.0], "label": "chair", "score": 0.45},
+                ]
+            ]
+        }
+
+    fake_server.response = response
+    det = _detector(fake_server)
+    det.question_prompt = "chair ."
+
+    out = det(_tiles(1))
+
+    assert sorted(d.score for d in out[0]) == [pytest.approx(0.45), pytest.approx(0.5)]
+
+
 # ------------------------------------------------------------------ recovery
 
 
