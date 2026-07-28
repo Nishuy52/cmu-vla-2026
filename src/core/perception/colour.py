@@ -137,13 +137,75 @@ def quantise_pixel_names(colors: np.ndarray) -> np.ndarray:
 
     ``colors``: (N, 3) uint8/float RGB. Returns an (N,) array of scheme-name
     strings, one of :data:`CENTROIDS_RGB`'s 14 keys per row (never ``white`` —
-    it has no centroid; see module docstring).
+    it has no centroid; see module docstring). This is the raw nearest-centroid
+    assignment with NO distance gate — always picks a name, however far it is.
+    Callers that need to distinguish "genuinely this colour" from "nothing in
+    the 14-name scheme is actually close" must use :func:`nearest_centroid` (see
+    the out-of-gamut guard below); :func:`tally_from_colors` does exactly that.
     """
     lab = rgb_to_lab(np.asarray(colors, dtype=np.float64))
     diffs = lab[:, None, :] - _CENTROID_LAB[None, :, :]
     d2 = np.einsum("nkc,nkc->nk", diffs, diffs)
     idx = np.argmin(d2, axis=1)
     return np.asarray(_CENTROID_NAMES, dtype=object)[idx]
+
+
+def nearest_centroid(colors: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Nearest-centroid scheme name AND its Lab distance for each row in ``colors``.
+
+    Returns ``(names, distances)``, both (N,) — ``names`` identical to
+    :func:`quantise_pixel_names`, ``distances`` the Lab distance from the pixel
+    to that assigned centroid (always >= 0, never gated). The distance is what
+    the out-of-gamut guard (:data:`MAX_CENTROID_LAB_DISTANCE`) thresholds.
+    """
+    lab = rgb_to_lab(np.asarray(colors, dtype=np.float64))
+    diffs = lab[:, None, :] - _CENTROID_LAB[None, :, :]
+    d2 = np.einsum("nkc,nkc->nk", diffs, diffs)
+    idx = np.argmin(d2, axis=1)
+    names = np.asarray(_CENTROID_NAMES, dtype=object)[idx]
+    dist = np.sqrt(d2[np.arange(len(idx)), idx])
+    return names, dist
+
+
+# ------------------------------------------------------------- out-of-gamut guard
+
+#: Issue #121 follow-up: ``white`` (and off-white/cream/beige/light-gray more
+#: generally) has NO centroid in the 14-name scheme — it never occurs in the GT
+#: corpus (see module docstring) — so nearest-centroid alone has no notion of
+#: "none of these 14 names actually fit"; it always snaps to whichever is
+#: numerically closest, however far that is (pure white (250,250,250) landed on
+#: ``aqua`` at Lab distance ~43). A pixel farther than this from every centroid
+#: is UNCLASSIFIABLE: the truthful answer is "this scheme has no name for it",
+#: not a confident guess.
+#:
+#: Threshold evidence (reproduced against every ``*_object_result.csv`` across
+#: all 15 VLA-3D Unity scenes, 2990 colour slots): restricting to the 2776
+#: slots where this module's OWN nearest-centroid assignment agrees with GT's
+#: own declared scheme name (i.e. actually-correct classifications, not the
+#: separate pre-existing gray/tan-vs-aqua/pink edge cases), the Lab distance to
+#: the assigned centroid is <= 21.71 for 2775 of those 2776 slots (99.96%); the
+#: single exception is one saturated "purple" GT slot (medium-orchid RGB
+#: (186,85,211), a rare high-variance outlier for a name with only 22 samples)
+#: at 38.58. 25.0 sits in the resulting gap: comfortably above the 21.71
+#: ceiling of essentially every legitimately-classified corpus colour, and
+#: comfortably below every one of pure white / off-white / beige / light-gray's
+#: nearest-centroid distances (28.85 - 42.66, measured directly on those RGBs).
+MAX_CENTROID_LAB_DISTANCE: float = 25.0
+
+#: Sentinel tally key for pixels beyond :data:`MAX_CENTROID_LAB_DISTANCE` from
+#: every centroid. Never a real scheme name (deliberately not in
+#: :data:`CENTROIDS_RGB`), never emitted by :func:`top_bins`.
+UNCLASSIFIABLE: str = "_unclassifiable"
+
+#: If at least this fraction of a tally's pixels are unclassifiable, the whole
+#: observation abstains (:func:`abstain_reason` -> ``"out_of_gamut"``) rather
+#: than reporting whatever minority of pixels happened to land near a real
+#: centroid. 0.5: unclassifiable pixels outright outnumbering every real-name
+#: bin combined is the clearest "this object's colour isn't in the scheme"
+#: signal available; a small minority of stray out-of-gamut pixels (specular
+#: highlight, shadow fringe) on an otherwise clearly-coloured object should not
+#: by itself veto an otherwise confident classification.
+MAX_UNCLASSIFIABLE_FRACTION: float = 0.5
 
 
 # ----------------------------------------------------------------------- tally
@@ -199,10 +261,20 @@ def tally_from_colors(colors: np.ndarray | None, valid: np.ndarray) -> ColourTal
     obs = np.asarray(colors)[np.asarray(valid, dtype=bool)]
     if len(obs) == 0:
         return None
-    names = quantise_pixel_names(obs)
+    names, dist = nearest_centroid(obs)
+    # Out-of-gamut guard (issue #121 follow-up): a pixel farther than
+    # MAX_CENTROID_LAB_DISTANCE from every centroid gets no name at all -- it is
+    # tallied under the UNCLASSIFIABLE sentinel, never one of the 14 scheme
+    # names, so a genuinely white/off-white/beige/light-gray surface can never
+    # be reported as (say) "aqua" or "pink" just because that was numerically
+    # closest.
+    far = dist > MAX_CENTROID_LAB_DISTANCE
     tally = ColourTally(sat_sum=float(_pixel_saturation(obs).sum()))
+    n_far = int(far.sum())
+    if n_far:
+        tally.counts[UNCLASSIFIABLE] = n_far
     for name in _CENTROID_NAMES:
-        mask = names == name
+        mask = (names == name) & ~far
         n = int(mask.sum())
         if n:
             tally.counts[name] = n
@@ -211,12 +283,20 @@ def tally_from_colors(colors: np.ndarray | None, valid: np.ndarray) -> ColourTal
 
 
 def merge_tallies(a: ColourTally, b: ColourTally) -> ColourTally:
-    """Elementwise-sum two tallies (accumulate-across-observations, issue #121)."""
+    """Elementwise-sum two tallies (accumulate-across-observations, issue #121).
+
+    ``UNCLASSIFIABLE`` (issue #121 follow-up) has a ``counts`` entry but
+    deliberately no ``rgb_sums`` entry (:func:`tally_from_colors` never stores
+    one — an out-of-gamut pixel is never turned into a :class:`ColorBin`, so
+    there is nothing to average), so the ``rgb_sums`` side of this merge must
+    default-and-skip rather than index ``b.rgb_sums[name]`` directly.
+    """
     counts = dict(a.counts)
     rgb_sums = {k: v.copy() for k, v in a.rgb_sums.items()}
     for name, n in b.counts.items():
         counts[name] = counts.get(name, 0) + n
-        rgb_sums[name] = rgb_sums.get(name, np.zeros(3, dtype=np.float64)) + b.rgb_sums[name]
+        if name in b.rgb_sums:
+            rgb_sums[name] = rgb_sums.get(name, np.zeros(3, dtype=np.float64)) + b.rgb_sums[name]
     return ColourTally(counts=counts, rgb_sums=rgb_sums, sat_sum=a.sat_sum + b.sat_sum)
 
 
@@ -254,11 +334,29 @@ HIGH_AGREEMENT_FRACTION: float = 0.90
 
 
 def dominant_fraction(tally: ColourTally) -> float:
-    """Winning bin's share of the tally's total quantised pixels, in [0, 1]."""
+    """Winning NAMED bin's share of the tally's total quantised pixels, in [0, 1].
+
+    The :data:`UNCLASSIFIABLE` sentinel is never a candidate winner here — an
+    out-of-gamut pixel is not a colour bin, so it cannot "win" a dominance
+    check. A tally that is mostly unclassifiable is instead caught by the
+    dedicated ``out_of_gamut`` gate in :func:`abstain_reason`.
+    """
     total = tally.total
     if total == 0:
         return 0.0
-    return max(tally.counts.values()) / total
+    named = {k: v for k, v in tally.counts.items() if k != UNCLASSIFIABLE}
+    if not named:
+        return 0.0
+    return max(named.values()) / total
+
+
+def unclassifiable_fraction(tally: ColourTally) -> float:
+    """Share of the tally's pixels that landed farther than
+    :data:`MAX_CENTROID_LAB_DISTANCE` from every centroid, in [0, 1]."""
+    total = tally.total
+    if total == 0:
+        return 0.0
+    return tally.counts.get(UNCLASSIFIABLE, 0) / total
 
 
 def mean_saturation(tally: ColourTally) -> float:
@@ -272,11 +370,13 @@ def mean_saturation(tally: ColourTally) -> float:
 def abstain_reason(tally: ColourTally | None) -> str | None:
     """``None`` if ``tally`` is confident enough to commit to a colour bin, else
     a short machine-readable reason (``"no_observation"``, ``"too_few_pixels"``,
-    ``"mixed_distribution"``, ``"low_saturation"``)."""
+    ``"out_of_gamut"``, ``"mixed_distribution"``, ``"low_saturation"``)."""
     if tally is None or tally.total == 0:
         return "no_observation"
     if tally.total < MIN_TALLY_PIXELS:
         return "too_few_pixels"
+    if unclassifiable_fraction(tally) >= MAX_UNCLASSIFIABLE_FRACTION:
+        return "out_of_gamut"
     frac = dominant_fraction(tally)
     if frac < MIN_DOMINANT_FRACTION:
         return "mixed_distribution"
@@ -311,7 +411,8 @@ def top_bins(tally: ColourTally | None, max_bins: int = MAX_COLOUR_BINS) -> tupl
     if abstain_reason(tally) is not None:
         return ()
     total = tally.total
-    ranked = sorted(tally.counts.items(), key=lambda kv: -kv[1])[:max_bins]
+    named_counts = {k: v for k, v in tally.counts.items() if k != UNCLASSIFIABLE}
+    ranked = sorted(named_counts.items(), key=lambda kv: -kv[1])[:max_bins]
     bins = []
     for name, n in ranked:
         mean_rgb = tally.rgb_sums[name] / n
@@ -357,19 +458,24 @@ def build_caption(color_bins: tuple[ColorBin, ...], extents: np.ndarray) -> str:
 __all__ = [
     "CENTROIDS_RGB",
     "HIGH_AGREEMENT_FRACTION",
+    "MAX_CENTROID_LAB_DISTANCE",
     "MAX_COLOUR_BINS",
+    "MAX_UNCLASSIFIABLE_FRACTION",
     "MIN_DOMINANT_FRACTION",
     "MIN_MEAN_SATURATION",
     "MIN_TALLY_PIXELS",
+    "UNCLASSIFIABLE",
     "ColourTally",
     "abstain_reason",
     "build_caption",
     "dominant_fraction",
     "mean_saturation",
     "merge_tallies",
+    "nearest_centroid",
     "quantise_pixel_names",
     "rgb_to_lab",
     "srgb_to_linear",
     "tally_from_colors",
     "top_bins",
+    "unclassifiable_fraction",
 ]

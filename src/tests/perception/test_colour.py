@@ -12,6 +12,7 @@ import numpy as np
 from core.interfaces import InstanceRecord
 from core.perception.colour import (
     HIGH_AGREEMENT_FRACTION,
+    MAX_UNCLASSIFIABLE_FRACTION,
     MIN_DOMINANT_FRACTION,
     MIN_MEAN_SATURATION,
     abstain_reason,
@@ -22,6 +23,7 @@ from core.perception.colour import (
     quantise_pixel_names,
     tally_from_colors,
     top_bins,
+    unclassifiable_fraction,
 )
 from core.perception.scene_index import BasicSceneIndex
 
@@ -82,14 +84,18 @@ def test_mixed_distribution_abstains():
     """No clear majority colour: an even 3-way red/blue/green split -> abstain,
     not a coin flip that happens to pick one of the three."""
     rng = np.random.default_rng(2)
-    red = _rgb_block((220.0, 110.0, 100.0), 40, rng, noise=5.0)
-    blue = _rgb_block((30.0, 90.0, 220.0), 40, rng, noise=5.0)
-    green = _rgb_block((30.0, 180.0, 60.0), 40, rng, noise=5.0)
+    # Centroid-exact RGBs (see CENTROIDS_RGB) so noise alone stays well inside
+    # MAX_CENTROID_LAB_DISTANCE -- this test targets the dominance gate
+    # specifically, not the separate out-of-gamut gate.
+    red = _rgb_block((229.8, 117.5, 106.5), 40, rng, noise=5.0)
+    blue = _rgb_block((69.6, 128.2, 183.2), 40, rng, noise=5.0)
+    green = _rgb_block((44.5, 141.7, 78.1), 40, rng, noise=5.0)
     colors = np.concatenate([red, blue, green], axis=0)
     valid = np.ones(len(colors), dtype=bool)
 
     tally = tally_from_colors(colors, valid)
     assert tally is not None
+    assert unclassifiable_fraction(tally) < MAX_UNCLASSIFIABLE_FRACTION
     assert dominant_fraction(tally) < MIN_DOMINANT_FRACTION
     assert abstain_reason(tally) == "mixed_distribution"
     assert top_bins(tally) == ()
@@ -231,3 +237,95 @@ def test_scene_index_merge_keeps_prior_confident_colour_when_new_obs_is_weak():
     survivor = index.merge_into(1, _rec(2, [0.1, 0.1, 0.1], [1.1, 1.1, 1.1]), colour_obs=None)
     assert survivor.color_bins != ()
     assert survivor.color_bins[0].name == "red"
+
+
+# --------------------------------------------------------------------- out-of-gamut guard (white/off-white/beige/light-gray)
+
+
+def test_pure_white_is_unclassifiable_and_abstains():
+    colors = _rgb_block((250.0, 250.0, 250.0), 100, np.random.default_rng(10), noise=3.0)
+    valid = np.ones(len(colors), dtype=bool)
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert unclassifiable_fraction(tally) >= MAX_UNCLASSIFIABLE_FRACTION
+    assert abstain_reason(tally) == "out_of_gamut"
+    assert top_bins(tally) == ()
+
+
+def test_off_white_is_unclassifiable_and_abstains():
+    colors = _rgb_block((230.0, 232.0, 228.0), 100, np.random.default_rng(11), noise=3.0)
+    valid = np.ones(len(colors), dtype=bool)
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert unclassifiable_fraction(tally) >= MAX_UNCLASSIFIABLE_FRACTION
+    assert abstain_reason(tally) == "out_of_gamut"
+    assert top_bins(tally) == ()
+
+
+def test_beige_is_unclassifiable_and_abstains():
+    colors = _rgb_block((240.0, 235.0, 220.0), 100, np.random.default_rng(12), noise=3.0)
+    valid = np.ones(len(colors), dtype=bool)
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert unclassifiable_fraction(tally) >= MAX_UNCLASSIFIABLE_FRACTION
+    assert abstain_reason(tally) == "out_of_gamut"
+    assert top_bins(tally) == ()
+
+
+def test_light_gray_is_unclassifiable_and_abstains():
+    """(200, 200, 205) is the closest of the four reported failure RGBs to the
+    nearest real centroid (~28.85 Lab units) -- still comfortably beyond
+    MAX_CENTROID_LAB_DISTANCE (25.0)."""
+    colors = _rgb_block((200.0, 200.0, 205.0), 100, np.random.default_rng(13), noise=3.0)
+    valid = np.ones(len(colors), dtype=bool)
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert unclassifiable_fraction(tally) >= MAX_UNCLASSIFIABLE_FRACTION
+    assert abstain_reason(tally) == "out_of_gamut"
+    assert top_bins(tally) == ()
+
+
+def test_noisy_cream_beige_couch_abstains_not_confidently_pink():
+    """Reproduces the reported failure: a cream/beige surface under realistic
+    sensor noise (sigma ~8/channel) used to land >50% in a single named bin
+    (pink/aqua) with mean_saturation/dominant_fraction both clearing the
+    ordinary confidence gates -- the out-of-gamut guard must catch it before
+    either of those gates gets a chance to (mis)approve it."""
+    rng = np.random.default_rng(14)
+    base = np.tile([222.0, 216.0, 190.0], (200, 1))
+    colors = np.clip(base + rng.normal(0.0, 8.0, size=base.shape), 0, 255)
+    valid = np.ones(len(colors), dtype=bool)
+
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert unclassifiable_fraction(tally) >= MAX_UNCLASSIFIABLE_FRACTION
+    assert abstain_reason(tally) == "out_of_gamut"
+    assert top_bins(tally) == ()
+
+
+def test_out_of_gamut_guard_does_not_disturb_clear_primary_colour():
+    """Regression guard: the new out-of-gamut check must not affect a clearly
+    in-gamut saturated colour (already covered by test_clear_primary_colour_
+    does_not_abstain, re-asserted here against the specific new gate)."""
+    rng = np.random.default_rng(15)
+    colors = _rgb_block((220.0, 110.0, 100.0), 200, rng, noise=8.0)
+    valid = np.ones(len(colors), dtype=bool)
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert unclassifiable_fraction(tally) < MAX_UNCLASSIFIABLE_FRACTION
+    assert abstain_reason(tally) is None
+    assert top_bins(tally)[0].name == "red"
+
+
+def test_out_of_gamut_guard_does_not_disturb_uniform_gray():
+    """Regression guard: a genuinely uniform low-saturation gray surface (well
+    within the scheme -- its own centroid is nearby) must keep classifying,
+    unaffected by the new out-of-gamut gate."""
+    rng = np.random.default_rng(16)
+    colors = _rgb_block((110.0, 121.0, 121.0), 100, rng, noise=1.0)
+    valid = np.ones(len(colors), dtype=bool)
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert unclassifiable_fraction(tally) < MAX_UNCLASSIFIABLE_FRACTION
+    assert abstain_reason(tally) is None
+    assert top_bins(tally)[0].name == "gray"
