@@ -151,10 +151,16 @@ def _fused_to_record(det: Detection, fused: Fused3D, instance_id: int) -> Instan
     The scene index recomputes a trimmed AABB on merge; here we seed a raw
     min/max box + centroid from the cluster so a brand-new instance is well-formed.
     """
+    from core.perception.dimension_priors import floor_degenerate_aabb
+
     pts = fused.points
     aabb_min = pts.min(axis=0).astype(float)
     aabb_max = pts.max(axis=0).astype(float)
     canon = normalize_label(det.label)
+    # Issue #125: a single-viewpoint cluster can be (near-)flat on an axis (e.g. a
+    # front-shell-only sighting); raise only that broken axis to a plausible floor
+    # so the record is never geometrically degenerate at birth.
+    aabb_min, aabb_max = floor_degenerate_aabb(aabb_min, aabb_max, canon)
     aliases = NOUN_ALIASES.get(canon, ())
     return InstanceRecord(
         instance_id=instance_id,

@@ -483,3 +483,39 @@ def test_associate_does_not_fold_chair_and_table():
     fused = _fuse(table, _box_cloud(3.02, 0.0, 0.5, seed=2), _odom())
     associate([(table, fused)], idx)
     assert len(idx.all_instances()) == 2
+
+
+# ------------------------------------------------------------ degenerate AABB (#125)
+
+
+def _flat_cloud(cx, cy, cz, half=0.2, n=40, seed=0):
+    """A cluster that is exactly flat on z (a front-shell-only sighting)."""
+    rng = np.random.default_rng(seed)
+    return np.column_stack([
+        cx + rng.uniform(-half, half, n),
+        cy + rng.uniform(-half, half, n),
+        np.full(n, cz),
+    ]).astype(np.float32)
+
+
+def test_new_instance_with_flat_cloud_gets_floored_z_extent():
+    idx = BasicSceneIndex()
+    chair = _front_det("chair")
+    fused = _fuse(chair, _flat_cloud(3.0, 0.0, 0.5, seed=1), _odom())
+    associate([(chair, fused)], idx)
+    rec = idx.all_instances()[0]
+    assert rec.aabb_max[2] - rec.aabb_min[2] > 0.0
+    # centre (z) of the floored box is preserved at the flat cloud's z.
+    assert abs((rec.aabb_min[2] + rec.aabb_max[2]) / 2.0 - 0.5) < 1e-6
+
+
+def test_merged_instance_stays_floored_when_both_sightings_flat():
+    idx = BasicSceneIndex()
+    chair = _front_det("chair")
+    fused1 = _fuse(chair, _flat_cloud(3.0, 0.0, 0.5, seed=1), _odom())
+    associate([(chair, fused1)], idx)
+    fused2 = _fuse(chair, _flat_cloud(3.02, 0.0, 0.5, seed=2), _odom())
+    associate([(chair, fused2)], idx)
+    rec = idx.all_instances()[0]
+    assert rec.n_obs == 2
+    assert rec.aabb_max[2] - rec.aabb_min[2] > 0.0

@@ -528,18 +528,25 @@ class BasicSceneIndex:
     def _fuse(self, target: InstanceRecord, other: InstanceRecord) -> None:
         """Fuse ``other`` into ``target`` in place: concat points, recompute the
         trimmed AABB and centroid, bump n_obs, keep max score."""
+        # Deferred import: dimension_priors imports normalize_label from this
+        # module, so a module-level import here would be a load cycle.
+        from core.perception.dimension_priors import floor_degenerate_aabb
+
         clouds = [p for p in (target.points, other.points) if p is not None and len(p)]
         if clouds:
             fused = np.vstack(clouds).astype(float)
             target.points = fused
             lo, hi = _trimmed_aabb(fused)
-            target.aabb_min = lo
-            target.aabb_max = hi
-            target.centroid = (lo + hi) / 2.0
         else:
             # no points to trim with — union the boxes as a fallback
-            target.aabb_min = np.minimum(target.aabb_min, other.aabb_min)
-            target.aabb_max = np.maximum(target.aabb_max, other.aabb_max)
-            target.centroid = (target.aabb_min + target.aabb_max) / 2.0
+            lo = np.minimum(target.aabb_min, other.aabb_min)
+            hi = np.maximum(target.aabb_max, other.aabb_max)
+        # Issue #125: the trimmed/unioned box can still land (near-)flat on an axis
+        # (duplicate/collinear points, or two already-degenerate boxes unioned) —
+        # raise only that broken axis to a plausible floor, centre preserved.
+        lo, hi = floor_degenerate_aabb(lo, hi, target.label)
+        target.aabb_min = lo
+        target.aabb_max = hi
+        target.centroid = (lo + hi) / 2.0
         target.n_obs += other.n_obs
         target.score = max(target.score, other.score)

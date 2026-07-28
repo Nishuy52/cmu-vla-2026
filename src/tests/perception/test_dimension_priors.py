@@ -7,9 +7,12 @@ from core.interfaces import InstanceRecord
 from core.perception.dimension_priors import (
     _DATA_PRIORS,
     _HAND_PRIORS,
+    ABS_MIN_EXTENT_FALLBACK_M,
+    DEGENERATE_EXTENT_M,
     UNDEROBS_MAX_N_OBS,
     clamp_extents,
     clamp_record_marker,
+    floor_degenerate_aabb,
     prior_for,
 )
 from core.perception.scene_index import BasicSceneIndex
@@ -112,6 +115,67 @@ def test_inflate_only_up_to_max_n_obs():
     above = clamp_extents(np.array([0.01, 0.30, 0.40]), "pillow", n_obs=UNDEROBS_MAX_N_OBS + 1)
     assert min(at) >= prior.typ_ext[0] - 1e-9      # still inflated at the boundary
     assert min(above) < prior.typ_ext[0]           # not inflated just above it
+
+
+# --------------------------------------------------------------- degenerate floor (#125)
+
+def test_degenerate_axis_raised_to_prior_floor():
+    # zero-thickness z axis (e.g. a single lidar sweep plane) on a chair.
+    lo = np.array([0.0, 0.0, 0.0])
+    hi = np.array([0.6, 0.7, 0.0])
+    new_lo, new_hi = floor_degenerate_aabb(lo, hi, "chair")
+    ext = new_hi - new_lo
+    assert ext[2] >= DEGENERATE_EXTENT_M
+    # thin-rank floor for chair is the prior's smallest sorted-axis minimum.
+    prior = prior_for("chair")
+    assert ext[2] >= prior.min_ext.min() - 1e-9
+    # healthy axes untouched.
+    assert new_lo[0] == 0.0 and new_hi[0] == 0.6
+    assert new_lo[1] == 0.0 and new_hi[1] == 0.7
+
+
+def test_degenerate_floor_preserves_centroid():
+    lo = np.array([1.0, -2.0, 0.5])
+    hi = np.array([1.6, -1.3, 0.5])  # z is degenerate, centred at 0.5
+    new_lo, new_hi = floor_degenerate_aabb(lo, hi, "chair")
+    centre = (new_lo + new_hi) / 2.0
+    assert np.allclose(centre, [(1.0 + 1.6) / 2.0, (-2.0 + -1.3) / 2.0, 0.5])
+
+
+def test_healthy_box_is_untouched_by_floor():
+    lo = np.array([0.0, 0.0, 0.0])
+    hi = np.array([0.6, 0.7, 0.8])  # every axis well above the threshold
+    new_lo, new_hi = floor_degenerate_aabb(lo, hi, "chair")
+    assert np.array_equal(new_lo, lo)
+    assert np.array_equal(new_hi, hi)
+
+
+def test_no_prior_class_uses_absolute_fallback():
+    lo = np.array([0.0, 0.0, 0.0])
+    hi = np.array([0.3, 0.3, 0.0])
+    new_lo, new_hi = floor_degenerate_aabb(lo, hi, "nonexistent-class")
+    ext = new_hi - new_lo
+    assert ext[2] == ABS_MIN_EXTENT_FALLBACK_M
+    assert ext[2] >= DEGENERATE_EXTENT_M
+
+
+def test_thin_but_not_degenerate_axis_left_alone():
+    # 3 cm axis is above the 2 cm degenerate threshold: not touched, even though it
+    # is below several classes' prior min -- this is NOT the general clamp.
+    lo = np.array([0.0, 0.0, 0.0])
+    hi = np.array([0.03, 0.7, 0.8])
+    new_lo, new_hi = floor_degenerate_aabb(lo, hi, "chair")
+    assert new_hi[0] - new_lo[0] == 0.03
+
+
+def test_multiple_degenerate_axes_each_raised():
+    lo = np.array([0.0, 0.0, 0.0])
+    hi = np.array([0.0, 0.0, 0.8])
+    new_lo, new_hi = floor_degenerate_aabb(lo, hi, "chair")
+    ext = new_hi - new_lo
+    assert ext[0] >= DEGENERATE_EXTENT_M
+    assert ext[1] >= DEGENERATE_EXTENT_M
+    assert ext[2] == 0.8
 
 
 # --------------------------------------------------------------- marker seam

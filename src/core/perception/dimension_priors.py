@@ -187,6 +187,59 @@ def _underobserved(sorted_ext: np.ndarray, prior: ClassPrior, n_obs: int) -> boo
     return bool(sorted_ext[0] < UNDEROBS_THIN_FRAC * prior.min_ext[0])
 
 
+# --------------------------------------------------------------- degenerate floor
+
+# Below this per-axis extent (metres) an AABB is geometrically broken, not merely
+# thin: a single-viewpoint trimmed box can land with (near-)zero width on an axis
+# when duplicate/collinear points survive the 2nd/98th-pct trim, and a zero-extent
+# axis can NEVER satisfy the footprint-IoM gate that on()/near()/between() share
+# (core.geometry.toolbox), regardless of how correct the instance semantics are
+# (issue #125). Matches the measurement threshold used to size the problem.
+DEGENERATE_EXTENT_M: float = 0.02  # 2 cm
+
+# Fallback floor for the minority of challenge-vocabulary classes with no dimension
+# prior at all. Small and conservative — enough to clear DEGENERATE_EXTENT_M with a
+# little headroom, never large enough to look like a real clamp/inflate.
+ABS_MIN_EXTENT_FALLBACK_M: float = 0.03  # 3 cm
+
+
+def floor_degenerate_aabb(
+    aabb_min: np.ndarray, aabb_max: np.ndarray, label: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """Raise any (near-)zero-extent axis up to a plausible floor, centre preserved.
+
+    Issue #125: a trimmed single-viewpoint AABB can land with an axis extent below
+    :data:`DEGENERATE_EXTENT_M` — most often an exact-zero XY footprint — which
+    permanently fails every footprint-gated relation predicate no matter how correct
+    the instance's semantics are. This grows ONLY the broken axis (or axes), about
+    the box's existing centre, up to the class prior's thinnest-rank minimum
+    (:attr:`ClassPrior.min_ext`), or :data:`ABS_MIN_EXTENT_FALLBACK_M` when the class
+    has no prior. An axis already at/above the threshold is returned unchanged.
+
+    Deliberately NOT :func:`clamp_extents`: that function clamps every axis to the
+    class-min unconditionally (the marker-rendering path) — a general resize of
+    already-valid boxes, which #123 measured as a net-negative change when applied
+    more broadly. This is narrower on purpose: a healthy box is a true no-op here.
+    """
+    lo = np.asarray(aabb_min, dtype=float).copy()
+    hi = np.asarray(aabb_max, dtype=float).copy()
+    ext = hi - lo
+    degenerate = ext < DEGENERATE_EXTENT_M
+    if not np.any(degenerate):
+        return lo, hi
+
+    prior = prior_for(label)
+    floor = float(prior.min_ext.min()) if prior is not None else ABS_MIN_EXTENT_FALLBACK_M
+    floor = max(floor, DEGENERATE_EXTENT_M)
+
+    centre = (lo + hi) / 2.0
+    for axis in np.nonzero(degenerate)[0]:
+        half = max(float(ext[axis]), floor) / 2.0
+        lo[axis] = centre[axis] - half
+        hi[axis] = centre[axis] + half
+    return lo, hi
+
+
 def clamp_extents(
     extents: np.ndarray,
     label: str,
