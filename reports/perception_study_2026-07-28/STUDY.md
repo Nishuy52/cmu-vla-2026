@@ -150,3 +150,88 @@ Jobs 701116+701117 (15 instruction-following runs) scored mean **0.400**, agains
 the 0.367 baseline of the 20 Jul sweep. 701118/701119 (numerical, object
 reference) harvested but produced no `scores.md` — their captured bags need the
 #114 reindex/convert recovery. Their debug dumps are intact and were used above.
+
+---
+
+# Corrections — appended 28 Jul, later the same day
+
+Two claims above are wrong and one is refuted. The original text is left intact so
+the record shows what was believed and on what basis.
+
+## 1. The tile-overlap mechanism in "1. Over-proposal at the 2D stage" is WRONG
+
+That section says tiles "overlap ~10 degrees by construction (`tiling.py:65`)" and
+frames the over-proposal as cross-tile double counting. Verified numerically:
+
+```
+DEFAULT_N_TILES   = 4
+DEFAULT_TILE_HFOV = 90.0 deg
+spacing (360/4)   = 90.0 deg
+true overlap      = 0.0 deg
+```
+
+**The shipped tiles do not overlap at all.** `DEFAULT_SEAM_OVERLAP = 10 deg` is a
+dangling constant referenced nowhere in `src/`, and the `tile_specs` docstring's
+"~10deg for the 4x90deg default" is arithmetically false. Filed as #136.
+
+The real sources of redundant proposals are (a) the dual-pass union — the question
+caption and the vocab caption both re-detect the same object on a vocab-pass tick,
+unioned with no dedupe — and (b) multiple boxes per object within a single pass.
+
+## 2. The 5.8x duplication figure is INFLATED
+
+It conflates two different things:
+
+- genuine duplicate instances of one object, and
+- **legitimate multi-part detection of a large object that GT annotates as one.**
+
+GT annotates large structures coarsely. office_1's single `window` object measures
+**7.81 x 0.51 x 2.10 m** — an entire window wall. `hotel_room_2 window` is 2.92 m;
+`livingroom_1 table` is 2.09 m. Detecting such a thing as many parts is the detector
+working correctly against a coarse annotation, not a perception defect.
+
+The duplication problem is real — `home_building_2` has three ~0.5 m `lamp` objects
+and 23 proposals in one keyframe, which granularity cannot explain — but the
+headline multiplier overstates it and should not be quoted as 5.8x without this
+caveat. It has not been re-derived with granularity controlled for.
+
+**This does not weaken #128, it sharpens it.** For a counting question, collapsing
+an 8 m window wall's parts into ONE instance is exactly the required behaviour, and
+a correctly-sized association gate is the mechanism that would do it.
+
+## 3. #131 (cross-tile NMS) is REFUTED as a fix
+
+Swept over 199,589 banked proposals / 10,310 keyframes:
+
+| IoU | removed | office_1 `window` | hb_2 `lamp` | chinese `chair` (must stay plural) | hotel_1 `pillow` (must stay plural) |
+|---|---|---|---|---|---|
+| 0.75 | 3.3% | 18 -> **18** | 23 -> **23** | 12 -> 8 | 16 -> 14 |
+| 0.55 | 5.1% | 18 -> **18** | 23 -> 22 | 12 -> 8 | 16 -> 14 |
+| 0.35 | 6.9% | 18 -> **18** | 23 -> 21 | 12 -> 8 | 16 -> **11** |
+
+`office_1 window` does not move at any threshold — those boxes have essentially zero
+mutual overlap, confirming they are distinct regions of the wall rather than
+duplicates. Lowering the threshold buys nothing on the pathological cases while
+steadily damaging the legitimate ones. Kept on `fix/131-cross-tile-nms` as optional
+3.3% hygiene, not a scoring fix.
+
+## 4. Replay baseline now exists
+
+`tools/perception_replay.py` + `tools/perception_eval.py` (branch
+`feat/perception-replay-harness`, commit `d22633f` — take that commit, NOT the branch
+tip, which carries an unrelated unverified fusion change, #133). Full baseline replay
+of `office_1_q1` on unmodified perception:
+
+```
+GT 112 · instances 370 · found 28 · recall 25.0% · duplication 13.21x
+inflation 1.39x · shell adjacency 28.4% (GT 9.8%)
+worst: picture 131 (GT 0) · book 43 (GT 3) · table 25 (GT 2) · floor 23 (GT 1)
+```
+
+Index at `reports/perception_replay/office_1_q1.jsonl`. Note it processes 1240
+keyframes against a live run's ~146, so these numbers are comparable **only to
+another replay of the same bag**, never to live-run figures.
+
+`picture 131` against a GT count of **0** for that class in office_1 is the naming
+loss from section 1 of this study showing up in replay: the objects are being seen,
+under a label the scene's GT never uses.
