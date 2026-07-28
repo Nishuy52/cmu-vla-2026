@@ -75,6 +75,25 @@ DEFAULT_ANSWERS = _SRC.parent / "docs" / "gt_answers_numerical.json"
 #: object-frame costmap.
 DEFAULT_UNITY_SCENES_ROS2_ROOT = _SRC.parent / "data" / "unity_scenes_ros2"
 
+_LOGGER = logging.getLogger(__name__)
+
+#: Issue #124: mean matched-id centroid delta (metres) below which the sim<->object
+#: frame is treated as the IDENTITY (see :func:`_identity_frame_if_matched`), rather
+#: than fit from IF trajectory endpoints. Measured across all 15 scenes the true
+#: identity delta is 0.003-0.045 m (id/label match 100%); 0.1 m leaves comfortable
+#: headroom while still rejecting any real registration offset.
+IDENTITY_MATCH_TOL_M = 0.1
+
+#: Issue #124: free-space sanity gate for a FITTED (non-identity) sim<->object frame.
+#: A trajectory endpoint fit whose OWN source points, once mapped through the
+#: candidate frame, mostly land off the GT floor or inside GT furniture describes a
+#: robot driving through walls/furniture -- a geometric impossibility, regardless of
+#: how small the endpoint-correspondence residual looks. Confirmed on real data: the
+#: two worst spurious fits (arabic_room, home_building_1) score 0.00 / 0.11 on-floor
+#: under this check while every honest (identity) scene scores 1.00.
+FREE_SPACE_ON_FLOOR_MIN = 0.95
+FREE_SPACE_IN_FURNITURE_MAX = 0.10
+
 # The instruction-following trajectory files sit at questions/<scene>/trajectory_q{4,5}.ply.
 # questions.json order is 1 numerical, 2 object_reference, 2 instruction_following, so the
 # two IF questions map to q4 and q5 respectively (docs/vla3d_notes.md §5).
@@ -364,6 +383,146 @@ WALL_FIT_MAX_RESIDUAL_M: float = 0.8
 def _traversable_ply_path(scene_name: str, root: os.PathLike | str | None = None) -> Path:
     base = Path(root) if root is not None else DEFAULT_UNITY_SCENES_ROS2_ROOT
     return base / scene_name / scene_name / "traversable_area.ply"
+
+
+def _object_list_path(scene_name: str, root: os.PathLike | str | None = None) -> Path:
+    """``<root>/<scene>/<scene>/object_list.txt`` — the LIVE sim's own object poses,
+    in the SAME frame the live ``/state_estimation`` odom and
+    ``/selected_object_marker`` are published in (see issue #124)."""
+    base = Path(root) if root is not None else DEFAULT_UNITY_SCENES_ROS2_ROOT
+    return base / scene_name / scene_name / "object_list.txt"
+
+
+def _load_object_list(
+    scene_name: str, root: os.PathLike | str | None = None
+) -> dict[int, np.ndarray] | None:
+    """Parse ``object_list.txt`` (issue #124) into ``{object_id: xyz_centre}``.
+
+    Line format (whitespace-separated, one object per line)::
+
+        <id> <x> <y> <z> <sx> <sy> <sz> <yaw> "<label>"
+
+    Only ``id``/``x``/``y``/``z`` are needed here (id-matched against the VLA-3D
+    ``object_id`` to test whether the sim and object frames already coincide).
+    Returns ``None`` when the file is absent (a scene without live sim data,
+    or this dataset simply not extracted here) -- callers fall back to the
+    fitted-frame path, unchanged.
+    """
+    path = _object_list_path(scene_name, root)
+    if not path.exists():
+        return None
+    out: dict[int, np.ndarray] = {}
+    with open(path, encoding="utf-8") as fh:
+        for line_no, line in enumerate(fh, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 8)
+            if len(parts) < 4:
+                _LOGGER.warning(
+                    "%s:%d: malformed object_list.txt row (fewer than 4 fields): %r",
+                    path, line_no, line,
+                )
+                continue
+            try:
+                oid = int(float(parts[0]))
+                xyz = np.array([float(parts[1]), float(parts[2]), float(parts[3])])
+            except ValueError:
+                _LOGGER.warning(
+                    "%s:%d: malformed object_list.txt row (unparseable numeric "
+                    "fields): %r", path, line_no, line,
+                )
+                continue
+            out[oid] = xyz
+    return out
+
+
+def _identity_frame_if_matched(
+    gt: GTScene, unity_scenes_ros2_root: os.PathLike | str | None = None
+) -> tuple["S.Frame2D", float] | None:
+    """Issue #124: test whether the sim<->object transform is simply the IDENTITY.
+
+    Matches ``object_list.txt`` (the live sim's own object poses) to ``gt.instances``
+    by id (``InstanceRecord.instance_id == object_id``, see
+    :func:`core.groundtruth.loader.parse_object_csv`) and measures the mean 3D
+    centre delta over matched ids. Confirmed on the full 15-scene dataset: id/label
+    match 100% everywhere, mean delta 0.003-0.045 m -- so when a scene clears
+    :data:`IDENTITY_MATCH_TOL_M` the identity frame IS the correct registration and
+    no endpoint-correspondence fit should be attempted at all (a fit can only make a
+    correct identity worse). Returns ``None`` (no verdict) when ``object_list.txt``
+    is missing, no ids match, or the measured delta exceeds the tolerance -- callers
+    then fall back to the fitted-frame path.
+    """
+    obj_list = _load_object_list(gt.scene_name, unity_scenes_ros2_root)
+    if not obj_list:
+        return None
+    by_id = {rec.instance_id: rec for rec in gt.instances}
+    deltas: list[float] = []
+    for oid, xyz in obj_list.items():
+        rec = by_id.get(oid)
+        if rec is None:
+            continue
+        centre = rec.obb_center if rec.obb_center is not None else rec.centroid
+        deltas.append(float(np.linalg.norm(np.asarray(centre, dtype=float) - xyz)))
+    if not deltas:
+        return None
+    mean_delta = float(np.mean(deltas))
+    if mean_delta > IDENTITY_MATCH_TOL_M:
+        return None
+    return S.Frame2D(theta=0.0, t=np.zeros(2)), mean_delta
+
+
+def _free_space_fraction(pts_xy: np.ndarray, gt: GTScene) -> tuple[float, float]:
+    """``(on_floor_fraction, in_furniture_fraction)`` of ``pts_xy`` (object frame).
+
+    "On floor" = inside ANY GT region's XY footprint (``gt.regions``); a scene with
+    no region CSV falls back to the GT instance-AABB union footprint
+    (:func:`_gt_footprint_bounds`) so the check still runs (never silently skipped).
+    "In furniture" = inside any GT instance's XY footprint -- a real driven/reference
+    trajectory should almost never sit inside furniture geometry.
+    """
+    if pts_xy.shape[0] == 0:
+        return 1.0, 0.0
+    if gt.regions:
+        boxes = [(r.aabb_min[:2], r.aabb_max[:2]) for r in gt.regions]
+    else:
+        x0, y0, x1, y1 = _gt_footprint_bounds(gt, 0.0)
+        boxes = [(np.array([x0, y0]), np.array([x1, y1]))]
+    on_floor = np.zeros(pts_xy.shape[0], dtype=bool)
+    for lo, hi in boxes:
+        on_floor |= np.all((pts_xy >= lo) & (pts_xy <= hi), axis=1)
+    in_furniture = np.zeros(pts_xy.shape[0], dtype=bool)
+    for rec in gt.instances:
+        lo, hi = rec.aabb_min[:2], rec.aabb_max[:2]
+        in_furniture |= np.all((pts_xy >= lo) & (pts_xy <= hi), axis=1)
+    return float(on_floor.mean()), float(in_furniture.mean())
+
+
+def _fit_passes_free_space_gate(
+    frame: "S.Frame2D", if_traj: list[np.ndarray | None], gt: GTScene
+) -> tuple[bool, float, float]:
+    """Issue #124 loud-failure gate for a FITTED (non-identity) frame.
+
+    Maps the fit's OWN source points (the GT reference trajectories used to derive
+    it -- zero live data, so this rejects a bad fit before any live/driven data is
+    even involved) through ``frame`` and checks they describe a physically sane
+    drive: mostly on GT floor, almost never inside GT furniture. A rigid fit that
+    passes the endpoint-residual gate can still be geometrically nonsense (a single
+    mis-ranked terminal-goal correspondence can rotate the whole scene) -- this is
+    the check that catches it. No trajectory points at all -> nothing to check,
+    pass rather than reject blindly.
+    """
+    pieces = [t[:, :2] for t in if_traj if t is not None and t.shape[0] > 0]
+    if not pieces:
+        return True, 1.0, 0.0
+    pts = np.concatenate(pieces, axis=0)
+    mapped = frame.apply(pts)
+    on_floor, in_furniture = _free_space_fraction(mapped, gt)
+    ok = (
+        on_floor >= FREE_SPACE_ON_FLOOR_MIN
+        and in_furniture <= FREE_SPACE_IN_FURNITURE_MAX
+    )
+    return ok, on_floor, in_furniture
 
 
 def _derive_wall_cells(
@@ -1592,6 +1751,8 @@ def _fit_scene_if_frame(
     idx: BasicSceneIndex,
     if_texts: list[str],
     questions_dir: os.PathLike | str | None,
+    *,
+    unity_scenes_ros2_root: os.PathLike | str | None = None,
 ) -> tuple[
     list[np.ndarray | None],
     list[list[np.ndarray]],
@@ -1599,23 +1760,38 @@ def _fit_scene_if_frame(
     float | None,
     list[tuple[np.ndarray, np.ndarray]],
 ]:
-    """Fit the scene's sim<->object rigid transform from IF trajectory endpoints.
+    """Resolve the scene's sim<->object transform (issue #124: IDENTITY-first).
 
     Extracted from :func:`score_scene` (issue #70) so a cheap PRE-PASS can compute
     every scene's ``fit_residual_m`` WITHOUT running the expensive simulated drive
-    (:func:`_drive_if_trajectory`) that follows it in ``score_scene`` — the residual
-    is a pure function of the loaded trajectory PLYs + resolved terminal-goal
-    candidates + a rigid least-squares fit, entirely independent of any arrival
-    tolerance or driving. This lets a battery run derive its OWN p95 residual across
-    scenes (:func:`collect_scene_fit_residuals`) and feed
-    :func:`core.groundtruth.arrival.derived_arrival_tol_m` a live measurement
-    before the real (expensive) scoring pass, rather than the frozen nominal
-    :data:`core.groundtruth.arrival.NOMINAL_FIT_RESIDUAL_P95_M` the head uses.
+    (:func:`_drive_if_trajectory`) that follows it in ``score_scene``.
 
-    Returns ``(if_traj, if_cands, frame, residual, pairs)`` — identical to what
-    ``score_scene`` used to compute inline (``pairs`` added so the caller can
-    still read the first trajectory's start point for the spawn hint); pure
-    refactor, no behaviour change.
+    Issue #124: the previous behaviour ALWAYS fit a rigid transform from a single
+    IF-question endpoint correspondence per question (2 per scene) — a resolver
+    mis-rank on either terminal goal rotates the WHOLE scene, and the endpoint
+    residual gate cannot catch this (verified: fits with theta up to 154 deg /
+    |t| up to 10.7 m all cleared the 1.0 m gate). But the live sim's own
+    ``object_list.txt`` proves the true sim<->object transform is the IDENTITY
+    (id/label match 100%, mean centre delta 0.003-0.045 m across all 15 scenes).
+    So the order here is now:
+
+    1. Try the IDENTITY, verified against ``object_list.txt`` by id
+       (:func:`_identity_frame_if_matched`). If it matches within
+       :data:`IDENTITY_MATCH_TOL_M`, use it directly — no endpoint fit is even
+       attempted, since a fit can only make a correct identity worse.
+    2. Otherwise (no ``object_list.txt``, e.g. this dataset not extracted, or a
+       genuine non-identity registration) fall back to the endpoint-correspondence
+       fit + meth-F11 candidate-search fallback, as before.
+    3. A FITTED (non-identity) frame is then run through a free-space sanity gate
+       (:func:`_fit_passes_free_space_gate`) — its own source trajectory points must
+       mostly land on GT floor and almost never inside GT furniture. A fit that
+       fails is a geometric impossibility and is REJECTED (``frame=None``,
+       ``residual`` forced past the alignment gate) rather than silently accepted
+       just because its endpoint residual happened to look small.
+
+    Returns ``(if_traj, if_cands, frame, residual, pairs)`` — same shape as before
+    the refactor (``pairs`` added so the caller can still read the first
+    trajectory's start point for the spawn hint).
     """
     if_traj: list[np.ndarray | None] = []
     if_goal: list[np.ndarray | None] = []
@@ -1637,6 +1813,12 @@ def _fit_scene_if_frame(
     pairs = [
         (t, g) for t, g in zip(if_traj, if_goal) if t is not None and t.shape[0] > 0
     ]
+
+    identity = _identity_frame_if_matched(gt, unity_scenes_ros2_root)
+    if identity is not None:
+        frame, residual = identity
+        return if_traj, if_cands, frame, residual, pairs
+
     frame, residual = S.align_scene_trajectories(pairs) if pairs else (None, None)
 
     # meth-F11 fallback: when the default top-candidate fit fails the alignment gate,
@@ -1651,6 +1833,28 @@ def _fit_scene_if_frame(
         if alt is not None:
             frame, residual = alt
 
+    # Issue #124 loud-failure gate: a fitted (non-identity) frame that clears the
+    # endpoint-residual gate can still be geometrically nonsense. Reject it outright
+    # when its own source points, mapped through it, mostly miss the GT floor or land
+    # inside GT furniture — rather than silently scoring against a spurious frame.
+    if frame is not None:
+        ok, on_floor, in_furniture = _fit_passes_free_space_gate(frame, if_traj, gt)
+        if not ok:
+            _LOGGER.warning(
+                "%s: REJECTING sim->object frame fit (theta=%.1f deg, |t|=%.2f m, "
+                "endpoint residual=%s) -- free-space gate failed: on_floor=%.2f "
+                "(need >= %.2f), in_furniture=%.2f (need <= %.2f). This fit would "
+                "drive the scene's own reference trajectories through walls/"
+                "furniture; treating the scene as unaligned instead of scoring "
+                "against a spurious frame.",
+                gt.scene_name, math.degrees(frame.theta), float(np.linalg.norm(frame.t)),
+                f"{residual:.3f} m" if residual is not None else "None",
+                on_floor, FREE_SPACE_ON_FLOOR_MIN,
+                in_furniture, FREE_SPACE_IN_FURNITURE_MAX,
+            )
+            frame = None
+            residual = float("inf")
+
     return if_traj, if_cands, frame, residual, pairs
 
 
@@ -1660,6 +1864,7 @@ def collect_scene_fit_residuals(
     questions_path: os.PathLike | str = DEFAULT_QUESTIONS,
     questions_dir: os.PathLike | str = DEFAULT_QUESTIONS_ROOT,
     scenes: list[str] | None = None,
+    unity_scenes_ros2_root: os.PathLike | str | None = None,
 ) -> dict[str, float | None]:
     """Cheap pre-pass (issue #70): one ``fit_residual_m`` per scene, no driving.
 
@@ -1684,7 +1889,8 @@ def collect_scene_fit_residuals(
         idx = BasicSceneIndex(gt.instances)
         if_texts = entry["questions"].get("instruction_following", [])
         _traj, _cands, _frame, residual, _pairs = _fit_scene_if_frame(
-            gt, idx, if_texts, questions_dir
+            gt, idx, if_texts, questions_dir,
+            unity_scenes_ros2_root=unity_scenes_ros2_root,
         )
         out[scene_name] = residual
     return out
@@ -1780,7 +1986,8 @@ def score_scene(
     # endpoints (+ shared start); then score each with the fitted frame applied.
     if_texts = questions.get("instruction_following", [])
     if_traj, if_cands, frame, residual, pairs = _fit_scene_if_frame(
-        gt, idx, if_texts, questions_dir
+        gt, idx, if_texts, questions_dir,
+        unity_scenes_ros2_root=unity_scenes_ros2_root,
     )
 
     # The GT trajectory's (shared) start, mapped into the object frame, is the robot
@@ -2126,6 +2333,7 @@ def run_gt_battery(
             questions_path=questions_path,
             questions_dir=questions_dir,
             scenes=scenes,
+            unity_scenes_ros2_root=unity_scenes_ros2_root,
         )
         finite = [r for r in residuals.values() if r is not None]
         if finite:
