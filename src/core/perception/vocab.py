@@ -252,6 +252,83 @@ def colour_synonyms(colour: str) -> frozenset[str]:
     return frozenset()
 
 
+# ------------------------------------------------------------- structural classes
+#
+# Issue #129: the room's architectural "shell" (floor/ceiling/walls) and its built-in
+# openings (windows, doors, door frames, columns) are proposed by the open-vocab
+# detector like any other class, but GT annotates exactly ONE of each per scene while
+# a floor's box sweeps most of the camera frame and re-detects as dozens of fragments
+# (up to 20 "floor" instances vs GT's 1 -- #129 evidence table). Tracked as ordinary
+# countable instances, those fragments inflate any class census. Per the training
+# corpus (docs/question_analysis.md), NO training question ever counts a structural
+# class, so excluding them from a census costs nothing on the scored question set.
+#
+# But `window` is simultaneously the 4th most frequent object HEAD across the
+# training questions and is used almost entirely as a spatial ANCHOR ("how many
+# sofas are below a window?") -- so structural classes must stay fully visible to
+# every existing anchor/target/relation lookup. This classifier is therefore
+# consulted ONLY by this module's own callers and BasicSceneIndex's own census-only
+# surfaces (:meth:`BasicSceneIndex.countable_instances`, ``dump_instance_index``'s
+# ``by_class``); :meth:`BasicSceneIndex.by_label`/``by_label_tiered``/``all_instances``
+# stay completely classification-blind, so every existing anchor/target/relation
+# lookup (including this module's own ``resolve``/``counting`` callers) is
+# byte-for-byte unchanged by this classifier's existence.
+#
+# Classification rule: a label is structural iff it names the room's architectural
+# shell or a built-in opening set into that shell -- floor, ceiling, wall, window,
+# door, door frame, column -- rather than a freestanding, portable, or functional
+# object placed WITHIN the room. Matched on the label's HEAD NOUN (the last
+# whitespace token of the normalised label, see :func:`head_noun`), never by
+# substring, so a compound that merely CONTAINS a structural word but denotes a
+# portable object is correctly excluded: "floor lamp" (head "lamp") is furniture,
+# not structural, despite literally containing the word "floor". Conversely a
+# structural word carrying its own modifier still generalises correctly through the
+# head-noun match: "bay window" / "sliding door" / "load-bearing wall" (heads
+# "window" / "door" / "wall") all classify as structural without being individually
+# enumerated. "door frame" is listed as its own exact canonical form because its
+# head noun ("frame") is otherwise a portable-object word ("picture frame") --
+# folding on the head alone would wrongly pull every "* frame" into structural.
+#
+# What this rule predicts for classes never seen in this project's scenes:
+# - "column" / "pillar" -> structural (a fixed shell/support member), matching the
+#   issue's own "reasonably column" guidance.
+# - "skylight" (head "skylight"), or a scene that instead labels the same thing
+#   "roof window" (head "window") -> structural either way: an opening set into the
+#   shell.
+# - "curtain" / "blinds" -> NOT structural: portable window dressing hung on a rod,
+#   independently countable and removable without altering the room's shell —
+#   exactly the kind of class the issue explicitly warns against lumping in with
+#   `floor` (it made the same mistake with `window` originally).
+# - "baseboard" / "crown molding" -> NOT structural under the rule AS WRITTEN (their
+#   head nouns are not one of the six listed heads). This is a deliberately
+#   conservative miss: extending the head set to a genuinely new structural class
+#   needs its own data-verified justification, not a guess bundled into this fix.
+STRUCTURAL_HEADS: frozenset[str] = frozenset(
+    {"floor", "ceiling", "wall", "window", "door", "column"}
+)
+#: Multi-word canonical forms that are structural despite a head noun ("frame")
+#: that is NOT itself structural in isolation (see rule note above).
+STRUCTURAL_EXACT: frozenset[str] = frozenset({"door frame"})
+
+
+def is_structural_class(label: str) -> bool:
+    """True iff ``label`` names room-shell structure or a built-in opening in it.
+
+    See the module-level note above for the full rule, its justification, and what
+    it predicts for classes not seen in this project's scenes. Consulted only by
+    census/reporting surfaces (:meth:`~core.perception.scene_index.BasicSceneIndex.
+    countable_instances`, ``dump_instance_index``'s ``by_class``) -- never by any
+    label-matching method used for anchor or target resolution.
+    """
+    normalize_label = _norm()
+    canon = normalize_label(label)
+    if not canon:
+        return False
+    if canon in STRUCTURAL_EXACT:
+        return True
+    return head_noun(canon) in STRUCTURAL_HEADS
+
+
 __all__ = [
     "VOCAB_BRIDGE",
     "bridge_synonyms",
@@ -263,4 +340,7 @@ __all__ = [
     "COLOUR_NEUTRAL",
     "colour_synonyms",
     "colour_cross_hue",
+    "STRUCTURAL_HEADS",
+    "STRUCTURAL_EXACT",
+    "is_structural_class",
 ]
