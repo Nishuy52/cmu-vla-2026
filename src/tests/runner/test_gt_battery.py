@@ -87,11 +87,14 @@ def test_drive_if_trajectory_not_truncated_by_build_draining():
     # draining radius — proof the whole route was driven, not just the near cluster.
     # It must cross the whole 8 m route to the far side. The GOTO goal is projected to a
     # free cell off the table's (1 m) AABB and the follower stops a step short, so the
-    # closest approach sits ~1-1.5 m from the centroid; assert the vehicle got to the far
-    # neighbourhood (not that it hit the exact centroid) — proof the whole route was driven.
+    # closest approach sits ~1-1.6 m from the centroid (issue #132: the terminal standoff
+    # now correctly accounts for the costmap's own inflation radius on top of the anchor's
+    # half-diagonal, so the stood-off goal sits a bit farther out than before the fix);
+    # assert the vehicle got to the far neighbourhood (not that it hit the exact centroid)
+    # — proof the whole route was driven.
     term = np.array([4.0, 0.0])
     min_term = float(np.min(np.hypot(driven[:, 0] - term[0], driven[:, 1] - term[1])))
-    assert min_term <= 1.5, f"driven trajectory never reached the terminal (min {min_term:.2f} m)"
+    assert min_term <= 1.7, f"driven trajectory never reached the terminal (min {min_term:.2f} m)"
 
 
 def test_drive_if_trajectory_progresses_with_moving_pose():
@@ -1461,10 +1464,14 @@ def test_drive_if_trajectory_stops_short_of_withheld_provisional_terminal():
 
     lamp_xy = np.array([6.0, 0.0])
     # Default: the provisional terminal commits, so the driven path reaches near the lamp.
-    assert np.min(np.linalg.norm(driven_off[:, :2] - lamp_xy, axis=1)) < 1.0
+    # (issue #132: the terminal standoff now correctly adds the costmap's inflation radius
+    # to the push target, so the committed goal -- and the closest driven approach -- sits
+    # a bit farther from the small lamp's centroid than before the fix, still comfortably
+    # inside the rubric's arrival tolerance.)
+    assert np.min(np.linalg.norm(driven_off[:, :2] - lamp_xy, axis=1)) < 1.3
     # Gated: the terminal is withheld, so the driven path stops at leg 0 (the table) and
     # never approaches the lamp.
-    assert np.min(np.linalg.norm(driven_on[:, :2] - lamp_xy, axis=1)) > 1.0
+    assert np.min(np.linalg.norm(driven_on[:, :2] - lamp_xy, axis=1)) > 1.3
 
 
 def test_offline_budget_hooks_track_a_real_budget_state():

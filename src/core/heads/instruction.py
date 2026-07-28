@@ -42,7 +42,7 @@ from core.geometry import toolbox as TB
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.groundtruth.arrival import NOMINAL_ARRIVAL_TOL_M
 from core.nav.breadcrumbs import BreadcrumbFollower
-from core.nav.costmap import Costmap
+from core.nav.costmap import VEHICLE_RADIUS_M, Costmap
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
 from core.nav import planner as _planner
 from core.nav.planner import astar, free_space_via_point, plan_through
@@ -875,20 +875,37 @@ class InstructionHead:
     def _near_thresh(self, rec) -> float:
         """The proximity threshold for a "near" via, scaled to the anchor's footprint.
 
-        Half the anchor's footprint diagonal (so the via clears the object's shell) plus a
-        vehicle-radius clearance — NOT a fixed 1.2 m standoff, which overshoots the rubric's
-        arrival band for every compact anchor (T11). For a compact anchor (half-diag small)
-        this lands the via within ``ARRIVAL_TOL_M`` of the centroid, exactly where "near"
-        is credited; for a large anchor the half-diag term dominates and the via sits just
-        outside its shell (no in-footprint via), the best reachable "near" the geometry
-        allows.
+        Half the anchor's footprint diagonal (so the via clears the object's shell) plus
+        the costmap's own inflation radius (so the push target is measured from the same
+        blocked boundary ``_clearance_field`` measures against, not the raw un-inflated
+        footprint) plus a vehicle-radius clearance — NOT a fixed 1.2 m standoff, which
+        overshoots the rubric's arrival band for every compact anchor (T11).
+
+        Issue #132: ``Costmap.base_blocked`` (what ``_clearance_field`` measures distance
+        to) is the anchor's raw footprint already dilated by ``Costmap.vehicle_radius_m``
+        (``Costmap._inflate``) — the blocked boundary sits ``vehicle_radius_m`` FARTHER
+        from the centroid than ``half_diag`` alone. Omitting that inflation radius here
+        meant a push aimed at "``VIA_NEAR_CLEARANCE_M`` past the boundary" only ever
+        travelled "``VIA_NEAR_CLEARANCE_M`` past the raw footprint edge", landing short of
+        the actual blocked boundary by one inflation radius — reproduced on the real
+        terminal-leg anchor footprints (arabic jar, trash can, potted plant, mirror):
+        goal clearance measured 0.2-0.3 m against a 0.45 m target. Falls back to
+        ``VEHICLE_RADIUS_M`` (the costmap default) when no costmap exists yet (pre-route
+        grounding pass), so the threshold never depends on ungrounded state.
+
+        For a compact anchor (half-diag small) this lands the via within
+        ``ARRIVAL_TOL_M`` of the centroid, exactly where "near" is credited; for a large
+        anchor the half-diag term dominates and the via sits just outside its shell (no
+        in-footprint via), the best reachable "near" the geometry allows.
         """
         try:
             ext = rec.aabb_max - rec.aabb_min
             half_diag = 0.5 * float((float(ext[0]) ** 2 + float(ext[1]) ** 2) ** 0.5)
         except Exception:  # noqa: BLE001 — a malformed rec falls back to the fixed offset
             half_diag = 0.0
-        return half_diag + VIA_NEAR_CLEARANCE_M
+        cm = self._costmap
+        inflation_m = cm.vehicle_radius_m if cm is not None else VEHICLE_RADIUS_M
+        return half_diag + inflation_m + VIA_NEAR_CLEARANCE_M
 
     def _project_free(self, xy: tuple[float, float]) -> tuple[float, float]:
         """Nudge a point off an obstacle onto the nearest passable cell (if a costmap exists)."""
