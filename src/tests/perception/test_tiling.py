@@ -22,6 +22,20 @@ def test_four_tiles_cover_360_with_overlap():
         assert np.isclose(np.rad2deg(s.vfov), 120.0)
 
 
+def test_default_tiles_have_zero_seam_overlap():
+    """Adjacent tiles at the defaults exactly touch; they do not overlap.
+
+    spacing = 360deg / 4 tiles = 90deg; hfov = 90deg -> overlap = hfov - spacing = 0deg.
+    Guards against DEFAULT_SEAM_OVERLAP-style dangling constants drifting back in.
+    """
+    specs = T.tile_specs()
+    n = len(specs)
+    spacing = 360.0 / n
+    for s in specs:
+        overlap = np.rad2deg(s.hfov) - spacing
+        assert np.isclose(overlap, 0.0, atol=1e-9)
+
+
 def test_tile_grid_spans_expected_fov():
     g = T.tile_grids()[0]
     assert np.rad2deg(g.azimuth.max()) > 40.0

@@ -3,10 +3,13 @@
 The challenge camera is a 360deg-H / 120deg-V equirectangular strip
 (``docs/upstream_notes.md`` gotcha 7; :class:`core.interfaces.PanoFrame`). Open-vocab
 detectors expect ordinary pinhole frames, so we reproject the strip into four
-overlapping 90deg-HFOV gnomonic tiles (``docs/architecture.md`` §6 "Panorama
-handling"). Each tile shares the panorama's full 120deg VFOV and overlaps its
-neighbours by ~10deg so a thin object straddling a seam still lands whole in one
-tile.
+90deg-HFOV gnomonic tiles (``docs/architecture.md`` §6 "Panorama handling"). Each
+tile shares the panorama's full 120deg VFOV. With the default 4 tiles at 90deg
+HFOV each, tile spacing is 360/4 = 90deg, equal to the HFOV itself, so adjacent
+tiles exactly touch at their edges with 0deg overlap (verify: 360deg / 4 tiles =
+90deg spacing vs 90deg hfov -> overlap = hfov - spacing = 0deg). A thin object
+straddling a seam can therefore be split across two tiles with nothing to
+re-join it (see :func:`tile_specs`).
 
 Geometry, all pure numpy and deterministic:
 
@@ -62,7 +65,11 @@ ELEVATION_SIGN: float = -1.0
 DEFAULT_N_TILES: int = 4
 DEFAULT_TILE_HFOV: float = np.deg2rad(90.0)
 DEFAULT_TILE_VFOV: float = PANO_VFOV          # tiles share the full 120deg VFOV
-DEFAULT_SEAM_OVERLAP: float = np.deg2rad(10.0)  # neighbours overlap ~10deg (informational)
+# NOTE: there is no seam overlap at the defaults. spacing = 360/4 = 90deg, equal to
+# the 90deg tile HFOV, so overlap = hfov - spacing = 0deg (tiles exactly touch, they
+# do not overlap). A previous DEFAULT_SEAM_OVERLAP = 10deg constant here was never
+# wired into tile_specs() and misled a root-cause investigation (issue #131); it has
+# been removed rather than fixed because seam overlap is not actually implemented.
 
 
 # --------------------------------------------------------------------------- equirect rays
@@ -196,8 +203,10 @@ def tile_specs(
 
     Tiles are centred evenly every ``2pi / n_tiles`` starting at the panorama
     centre column (camera azimuth 0 = along heading). Overlap between neighbours is
-    ``hfov - 2pi/n_tiles`` (~10deg for the 4x90deg default). Default pixel dims keep
-    the tile's horizontal angular resolution close to the source panorama.
+    ``hfov - 2pi/n_tiles``, which is 0deg for the 4x90deg default (360/4 = 90deg
+    spacing == 90deg hfov, so adjacent tiles exactly touch rather than overlap).
+    Default pixel dims keep the tile's horizontal angular resolution close to the
+    source panorama.
     """
     spacing = 2.0 * np.pi / n_tiles
     if tile_width is None:
