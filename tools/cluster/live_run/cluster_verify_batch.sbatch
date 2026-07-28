@@ -203,7 +203,14 @@ run_one() {
   timeout 900 ros2 launch vehicle_simulator system_simulation.launch > ~/verify_batch_${J}_launch_${SLOT}.log 2>&1 &
   LAUNCH_PID=$!
   echo "stack launched; settling 45s"; sleep 45
-  (ss -ltn 2>/dev/null || true) | grep -q ":10000" && echo "ENDPOINT: :10000 up" || echo "ENDPOINT: MISSING"
+  # ENDPOINT_OK gates the final verdict below (#127): a missing :10000 means the
+  # autonomy stack never came up, so nothing driven for this question can be
+  # trusted even if the adapter still runs its full FSM and "answers" — the slot
+  # must land DEGRADED, not SUCCESS, and be kept OUT of the scoring aggregate
+  # (see the DEGRADED sentinel dropped next to BAGDIR below, and
+  # harvest_verify.sh, which skips any run dir carrying that sentinel).
+  local ENDPOINT_OK=1
+  (ss -ltn 2>/dev/null || true) | grep -q ":10000" && echo "ENDPOINT: :10000 up" || { echo "ENDPOINT: MISSING"; ENDPOINT_OK=0; }
 
   # ---- ollama (local LLM tier) ----
   OPORT=11434
@@ -242,7 +249,17 @@ run_one() {
   # required captures/<scene>/<qdir>/bag leaf stays exact while multiple
   # slots reuse the same (scene, qdir) across the batch without clobbering) ----
   local BAGDIR=$CAP_ROOT/$SLOT/$SCN/$QD
-  mkdir -p "$BAGDIR"; rm -rf "$BAGDIR/bag"
+  # Clear any stale DEGRADED sentinel at the SAME point the old bag is cleared
+  # (#127 gap 2): SLOT already bakes in the loop index (${i}_${SCENE}_${QDIR}),
+  # so BAGDIR is unique per matrix line within one job and nothing left by an
+  # earlier slot should ever be sitting here — but that uniqueness is an
+  # invariant of SLOT's naming, not of this function, so clear defensively
+  # rather than trust it silently forever. Order matters: clear BEFORE the
+  # fresh per-slot write below, never after.
+  mkdir -p "$BAGDIR"; rm -rf "$BAGDIR/bag" "$BAGDIR/DEGRADED"
+  # Sentinel lives next to (not inside) the bag dir so it never confuses
+  # ros2 bag's own metadata/reindex handling; harvest_verify.sh checks for it.
+  [ "$ENDPOINT_OK" -eq 0 ] && : > "$BAGDIR/DEGRADED"
   setsid ros2 bag record -o "$BAGDIR/bag" \
     /state_estimation /challenge_question /numerical_response /selected_object_marker \
     > ~/verify_batch_${J}_bag_${SLOT}.log 2>&1 &
@@ -274,7 +291,16 @@ run_one() {
   echo "== slot $SLOT adapter log tail"; tail -25 ~/verify_batch_${J}_adapter_${SLOT}.log
   echo "== slot $SLOT parse tier"; grep -E "parsed: tier=|ladder" ~/verify_batch_${J}_adapter_${SLOT}.log | tail -5
   echo "== slot $SLOT LLM usage"; tail -12 "$VLA_LLM_USAGE_LOG" 2>/dev/null || echo "no usage log"
-  [ $MONITOR_RC -eq 0 ] && echo "SLOT $SLOT: SUCCESS" || echo "SLOT $SLOT: rc=$MONITOR_RC"
+  # #127: a missing sim endpoint outranks MONITOR_RC/transition:answer-> — the
+  # adapter can run a full FSM and "answer" against a stack that never came
+  # up (final pose stuck at spawn), so that must never read as SUCCESS.
+  if [ "$ENDPOINT_OK" -eq 0 ]; then
+    echo "SLOT $SLOT: DEGRADED (ENDPOINT MISSING — sim stack never came up)"
+  elif [ $MONITOR_RC -eq 0 ]; then
+    echo "SLOT $SLOT: SUCCESS"
+  else
+    echo "SLOT $SLOT: rc=$MONITOR_RC"
+  fi
   return 0
 }
 
