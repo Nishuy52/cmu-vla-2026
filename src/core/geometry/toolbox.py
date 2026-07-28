@@ -879,20 +879,26 @@ def _eval_clause(
 
     if clause.pred is Pred.BETWEEN:
         best = None
+        best_passing = None
         for b1 in anchor_recs[0]:
             for b2 in anchor_recs[1]:
                 r = between(cand, b1, b2, th)
                 if best is None or r.score > best.score:
                     best = r
-        return _apply_negation(best, clause)
+                if r.passed and (best_passing is None or r.score > best_passing.score):
+                    best_passing = r
+        return _apply_negation(best_passing if best_passing is not None else best, clause)
 
     fn = _BINARY_PREDS[clause.pred]
     best = None
+    best_passing = None
     for b in anchor_recs[0]:
         r = fn(cand, b, th)
         if best is None or r.score > best.score:
             best = r
-    return _apply_negation(best, clause)
+        if r.passed and (best_passing is None or r.score > best_passing.score):
+            best_passing = r
+    return _apply_negation(best_passing if best_passing is not None else best, clause)
 
 
 def _apply_negation(r: PredResult, clause: Clause) -> PredResult:

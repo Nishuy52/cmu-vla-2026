@@ -683,3 +683,93 @@ def test_has_unresolved_disambiguator_false_for_depth_limit_drop():
     res = T.counting(spec, idx)
     assert any(a.step == "drop_disambiguator" for a in res.audit)
     assert T.has_unresolved_disambiguator(res.audit) is False
+
+
+# --------------------------------------------------- issue #122: pick a passing anchor
+
+# `on()` deliberately decouples score from passed: score is a footprint-IoM gated only
+# on vertical support, while passed additionally requires the anchor-larger gate
+# (toolbox.py:381). So a low-overlap anchor that IS bigger than the candidate can pass
+# while a full-overlap anchor that is NOT bigger fails outright -- exactly the anchor
+# pair `_eval_clause` must not let the higher score shadow.
+
+
+def test_eval_clause_prefers_passing_anchor_over_higher_scoring_failure():
+    bowl = rec(1, "bowl", (0, 0, 1.05), (0.4, 0.4, 0.1))  # bottom z=1.0
+    # table_pass: bigger footprint than the bowl, partial (62%) overlap -> passes,
+    # lower score.
+    table_pass = rec(2, "table", (0.45, 0, 0.5), (1.0, 1.0, 1.0))
+    # table_fail: same footprint as the bowl (not strictly larger) but full overlap
+    # -> higher score, fails the anchor-larger gate.
+    table_fail = rec(3, "table", (0, 0, 0.5), (0.4, 0.4, 1.0))
+    idx = FakeIndex([bowl, table_pass, table_fail])
+
+    r_pass = T.on(bowl, table_pass)
+    r_fail = T.on(bowl, table_fail)
+    assert r_pass.passed and not r_fail.passed
+    assert r_fail.score > r_pass.score  # the decoupling that makes this exploitable
+
+    clause = Clause(Pred.ON, [Anchor(noun="table")])
+    result = T._eval_clause(bowl, clause, idx, T.DEFAULT_THRESHOLDS)
+    assert result.passed is True
+    assert result.explanation == r_pass.explanation
+
+
+def test_eval_clause_falls_back_to_highest_score_when_none_pass():
+    bowl = rec(1, "bowl", (0, 0, 1.05), (0.4, 0.4, 0.1))
+    table_fail = rec(3, "table", (0, 0, 0.5), (0.4, 0.4, 1.0))  # fails anchor-larger
+    table_worse = rec(4, "table", (5, 5, 0.5), (0.3, 0.3, 1.0))  # far away, lower score
+    idx = FakeIndex([bowl, table_fail, table_worse])
+
+    r_fail = T.on(bowl, table_fail)
+    r_worse = T.on(bowl, table_worse)
+    assert not r_fail.passed and not r_worse.passed
+    assert r_fail.score > r_worse.score
+
+    clause = Clause(Pred.ON, [Anchor(noun="table")])
+    result = T._eval_clause(bowl, clause, idx, T.DEFAULT_THRESHOLDS)
+    # unchanged behaviour: the genuine-failure explanation/margin is the previous
+    # highest-scoring result, not an arbitrary one.
+    assert result.passed is False
+    assert result.explanation == r_fail.explanation
+    assert result.margin == r_fail.margin
+
+
+def test_eval_clause_multi_anchor_all_pass_still_picks_highest_score():
+    # sanity: when multiple anchors pass, the highest-scoring passer still wins
+    # (this branch of the ladder is unchanged by the fix).
+    bowl = rec(1, "bowl", (0, 0, 1.05), (0.4, 0.4, 0.1))  # bottom z=1.0
+    table_full = rec(2, "table", (0, 0, 0.5), (1.0, 1.0, 1.0))  # full overlap -> passes, score 1.0
+    table_partial = rec(3, "table", (0.45, 0, 0.5), (1.0, 1.0, 1.0))  # partial -> also passes, lower score
+    idx = FakeIndex([bowl, table_full, table_partial])
+
+    r_full = T.on(bowl, table_full)
+    r_partial = T.on(bowl, table_partial)
+    assert r_full.passed and r_partial.passed
+    assert r_full.score > r_partial.score
+
+    clause = Clause(Pred.ON, [Anchor(noun="table")])
+    result = T._eval_clause(bowl, clause, idx, T.DEFAULT_THRESHOLDS)
+    assert result.passed is True
+    assert result.explanation == r_full.explanation
+
+
+def test_eval_clause_between_prefers_passing_pair():
+    # BETWEEN's score/passed stay monotonically aligned, but the selection loop
+    # must still be checked: with one anchor pair passing and another failing
+    # (off the capsule), the passing pair must be returned even if a failing pair
+    # from a different anchor combination scored higher on some other metric.
+    a = rec(1, "chair", (0, 0, 0))
+    b1_near = rec(2, "table", (-1, 0, 0))
+    b2_near = rec(3, "table", (1, 0, 0))  # a sits squarely between these -> passes
+    b1_far = rec(4, "lamp", (-1, 10, 0))
+    b2_far = rec(5, "lamp", (1, 10, 0))  # a is nowhere near this segment -> fails
+    idx = FakeIndex([a, b1_near, b2_near, b1_far, b2_far])
+
+    clause_pass = Clause(Pred.BETWEEN, [Anchor(noun="table"), Anchor(noun="table")])
+    result = T._eval_clause(a, clause_pass, idx, T.DEFAULT_THRESHOLDS)
+    assert result.passed is True
+
+    clause_fail = Clause(Pred.BETWEEN, [Anchor(noun="lamp"), Anchor(noun="lamp")])
+    result_fail = T._eval_clause(a, clause_fail, idx, T.DEFAULT_THRESHOLDS)
+    assert result_fail.passed is False
