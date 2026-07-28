@@ -1,0 +1,341 @@
+{
+  "scenes": [
+    {
+      "scene": "office_1",
+      "n_gt": 112,
+      "n_live": 370,
+      "n_found": 28,
+      "recall": 0.25,
+      "duplication_factor": 13.214285714285714,
+      "inflation": 1.3897180372812779,
+      "shell_live": 0.28378378378378377,
+      "shell_gt": 0.09821428571428571,
+      "per_class": [
+        {
+          "label": "couch sofa",
+          "live": 1,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "picture",
+          "live": 131,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "counter display ledge ledge",
+          "live": 1,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "cabinet shelf",
+          "live": 10,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "counter nightstand",
+          "live": 1,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "computer monitor projector screen",
+          "live": 2,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "calligraphy painting",
+          "live": 1,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "bookcase",
+          "live": 10,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "counter counter ledge",
+          "live": 1,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "counter ledge ledge",
+          "live": 1,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "door door",
+          "live": 2,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "counter",
+          "live": 10,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "plant",
+          "live": 13,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "door door frame",
+          "live": 9,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "ottoman",
+          "live": 2,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "sofa",
+          "live": 3,
+          "gt": 0,
+          "ratio": Infinity
+        },
+        {
+          "label": "floor",
+          "live": 23,
+          "gt": 1,
+          "ratio": 23.0
+        },
+        {
+          "label": "book",
+          "live": 43,
+          "gt": 3,
+          "ratio": 14.333333333333334
+        },
+        {
+          "label": "table",
+          "live": 25,
+          "gt": 2,
+          "ratio": 12.5
+        },
+        {
+          "label": "file cabinet",
+          "live": 6,
+          "gt": 1,
+          "ratio": 6.0
+        },
+        {
+          "label": "chair",
+          "live": 52,
+          "gt": 12,
+          "ratio": 4.333333333333333
+        },
+        {
+          "label": "computer monitor",
+          "live": 11,
+          "gt": 6,
+          "ratio": 1.8333333333333333
+        },
+        {
+          "label": "box",
+          "live": 5,
+          "gt": 3,
+          "ratio": 1.6666666666666667
+        },
+        {
+          "label": "shelf",
+          "live": 3,
+          "gt": 2,
+          "ratio": 1.5
+        },
+        {
+          "label": "projector screen",
+          "live": 1,
+          "gt": 1,
+          "ratio": 1.0
+        },
+        {
+          "label": "door",
+          "live": 2,
+          "gt": 3,
+          "ratio": 0.6666666666666666
+        },
+        {
+          "label": "bench",
+          "live": 1,
+          "gt": 2,
+          "ratio": 0.5
+        },
+        {
+          "label": "computer mouse",
+          "live": 0,
+          "gt": 6,
+          "ratio": 0.0
+        },
+        {
+          "label": "paper box",
+          "live": 0,
+          "gt": 3,
+          "ratio": 0.0
+        },
+        {
+          "label": "phone",
+          "live": 0,
+          "gt": 3,
+          "ratio": 0.0
+        },
+        {
+          "label": "paper",
+          "live": 0,
+          "gt": 7,
+          "ratio": 0.0
+        },
+        {
+          "label": "potted plant",
+          "live": 0,
+          "gt": 4,
+          "ratio": 0.0
+        },
+        {
+          "label": "door frame",
+          "live": 0,
+          "gt": 3,
+          "ratio": 0.0
+        },
+        {
+          "label": "water cooler",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "coffee machine",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "bottle",
+          "live": 0,
+          "gt": 2,
+          "ratio": 0.0
+        },
+        {
+          "label": "lamp",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "wall",
+          "live": 0,
+          "gt": 4,
+          "ratio": 0.0
+        },
+        {
+          "label": "paper cup",
+          "live": 0,
+          "gt": 3,
+          "ratio": 0.0
+        },
+        {
+          "label": "keyboard",
+          "live": 0,
+          "gt": 6,
+          "ratio": 0.0
+        },
+        {
+          "label": "focus light",
+          "live": 0,
+          "gt": 8,
+          "ratio": 0.0
+        },
+        {
+          "label": "laptop",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "ceiling",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "map wall decal",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "pen",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "eye glasses",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "window",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "trash bin",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "water tank",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "marker",
+          "live": 0,
+          "gt": 5,
+          "ratio": 0.0
+        },
+        {
+          "label": "folder",
+          "live": 0,
+          "gt": 5,
+          "ratio": 0.0
+        },
+        {
+          "label": "clock",
+          "live": 0,
+          "gt": 1,
+          "ratio": 0.0
+        },
+        {
+          "label": "file",
+          "live": 0,
+          "gt": 2,
+          "ratio": 0.0
+        },
+        {
+          "label": "potted cactus",
+          "live": 0,
+          "gt": 3,
+          "ratio": 0.0
+        }
+      ]
+    }
+  ]
+}
