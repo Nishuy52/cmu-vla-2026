@@ -108,11 +108,19 @@ def _via_leg(noun: str) -> RouteLeg:
     return RouteLeg(kind=LegKind.VIA_NEAR, anchors=[Anchor(noun=noun)])
 
 
-def test_via_near_shares_the_defect_and_is_fixed_by_the_same_near_thresh():
+def test_via_near_on_real_footprints_already_clears_target_via_ring_slack():
     """VIA_NEAR (``_via_point`` / ``free_space_via_point``) is placed using the same
-    ``_near_thresh`` as the terminal-leg standoff, so it shares the #132 accounting
-    gap and is fixed by the same change: each real anchor footprint's VIA_NEAR goal
-    must reach VIA_NEAR_CLEARANCE_M."""
+    ``_near_thresh`` as the terminal-leg standoff, so it shares the #132 EXPRESSION
+    (the same missing ``vehicle_radius_m`` term). But this does NOT reproduce as an
+    observable shortfall for these four real, compact footprints in the open:
+    ``free_space_via_point`` searches a ring spanning +/-0.3 m around ``near_thresh``
+    and keeps whichever passable cell in that band has the MOST clearance -- for a
+    compact anchor in open space that band already reaches comfortably past
+    VIA_NEAR_CLEARANCE_M regardless of the pre-#132 near_thresh error, so this test is
+    a non-regression check (still true post-fix, with more margin), not a
+    reproduction. The genuine VIA_NEAR reproduction (a confined geometry where the
+    ring's slack canNOT absorb the gap) is
+    ``test_via_near_confined_geometry_reproduces_and_is_fixed`` below."""
     from core.heads.instruction import InstructionHead
 
     for label, sx, sy in ANCHOR_FOOTPRINTS:
@@ -136,3 +144,70 @@ def test_via_near_shares_the_defect_and_is_fixed_by_the_same_near_thresh():
             f"{label}: VIA_NEAR goal clearance {clr:.3f} m short of "
             f"{VIA_NEAR_CLEARANCE_M} m target"
         )
+
+
+def _via_confined_goal(*, use_pre_132_near_thresh: bool):
+    """A small anchor ("plant", 0.3x0.3) sitting just inside a dead-end alcove: three
+    walls confine it, with the only opening 1.0 m out from the centroid along +x into
+    the open room. The ring search's clearance-maximizing pick is still bounded BY THE
+    ALCOVE for the pre-#132 near_thresh (too short to reach the opening), but the
+    #132-corrected near_thresh reaches past the opening into the open room -- so
+    (unlike ``ANCHOR_FOOTPRINTS`` in the open) the ring's +/-0.3 m slack canNOT paper
+    over the missing ``vehicle_radius_m`` term here. Returns (clearance_m, goal)."""
+    from core.heads.instruction import InstructionHead
+
+    orig = InstructionHead._near_thresh
+
+    def _pre_132_near_thresh(self, rec):
+        ext = rec.aabb_max - rec.aabb_min
+        half_diag = 0.5 * float((float(ext[0]) ** 2 + float(ext[1]) ** 2) ** 0.5)
+        return half_diag + VIA_NEAR_CLEARANCE_M
+
+    if use_pre_132_near_thresh:
+        InstructionHead._near_thresh = _pre_132_near_thresh
+    try:
+        sc = SyntheticScene(0)
+        sc.rooms = [Room(0.0, 0.0, 20.0, 20.0)]
+        sc.place_box("plant", 5.0, 5.0, 0.3, 0.3, 0.6)
+        wall_t = 0.2
+        corridor_half_w, alcove_len = 0.6, 1.0
+        x0, x1 = 4.6, 5.0 + alcove_len
+        sc.place_box("wall_n", (x0 + x1) / 2.0, 5.0 + corridor_half_w + wall_t / 2.0,
+                     x1 - x0, wall_t, 1.0)
+        sc.place_box("wall_s", (x0 + x1) / 2.0, 5.0 - corridor_half_w - wall_t / 2.0,
+                     x1 - x0, wall_t, 1.0)
+        sc.place_box("wall_w", x0 - wall_t / 2.0, 5.0,
+                     wall_t, 2 * (corridor_half_w + wall_t), 1.0)
+        idx = BasicSceneIndex(sc.instances())
+        head = InstructionHead(plan=instruction_plan([_via_leg("plant")]))
+        io = _IO(sc, start=(1.0, 1.0))
+        for _ in range(10):
+            head.advance(io, idx)
+            io.advance_time(1.0)
+            if head._follower is not None and head._follower.path:
+                break
+        leg = head._legs[0]
+        assert leg.geom is not None, "confined VIA_NEAR leg never grounded a goal"
+        goal = leg.geom
+        return head._clearance_m(goal), goal
+    finally:
+        InstructionHead._near_thresh = orig
+
+
+def test_via_near_confined_geometry_reproduces_and_is_fixed():
+    """The genuine VIA_NEAR reproduction of #132: in the confined alcove geometry, the
+    pre-#132 ``_near_thresh`` (missing ``vehicle_radius_m``) leaves the ring search
+    unable to reach past the alcove's opening, landing well short of
+    VIA_NEAR_CLEARANCE_M; the #132-corrected ``_near_thresh`` (used by the current,
+    unpatched code) reaches into the open room beyond the opening and meets it."""
+    pre_clr, _ = _via_confined_goal(use_pre_132_near_thresh=True)
+    assert pre_clr < VIA_NEAR_CLEARANCE_M - 1e-6, (
+        f"test setup sanity: expected the pre-#132 near_thresh to fall short of the "
+        f"{VIA_NEAR_CLEARANCE_M} m target in this confined geometry, got {pre_clr:.3f} m"
+    )
+
+    post_clr, _ = _via_confined_goal(use_pre_132_near_thresh=False)
+    assert post_clr >= VIA_NEAR_CLEARANCE_M - 1e-6, (
+        f"VIA_NEAR clearance {post_clr:.3f} m in the confined geometry still short of "
+        f"the {VIA_NEAR_CLEARANCE_M} m target after the #132 fix"
+    )

@@ -86,15 +86,21 @@ def test_drive_if_trajectory_not_truncated_by_build_draining():
     # It must actually reach the far terminal (table at +4,0), well outside any spawn-local
     # draining radius — proof the whole route was driven, not just the near cluster.
     # It must cross the whole 8 m route to the far side. The GOTO goal is projected to a
-    # free cell off the table's (1 m) AABB and the follower stops a step short, so the
-    # closest approach sits ~1-1.6 m from the centroid (issue #132: the terminal standoff
-    # now correctly accounts for the costmap's own inflation radius on top of the anchor's
-    # half-diagonal, so the stood-off goal sits a bit farther out than before the fix);
-    # assert the vehicle got to the far neighbourhood (not that it hit the exact centroid)
-    # — proof the whole route was driven.
+    # free cell off the table's (1 m) AABB and the follower stops a step short. Issue #132:
+    # the terminal standoff now correctly accounts for the costmap's own inflation radius
+    # on top of the anchor's half-diagonal, so the stood-off goal (and the closest driven
+    # approach) sits measurably farther out than the pre-#132 accounting gave (~1.16 m) --
+    # a wide "<= 1.7" upper-bound-only assertion would pass unchanged if #132 were reverted,
+    # so this pins a band that EXCLUDES the old, short figure as well as bounding the new
+    # one: proof the whole route was driven (not spuriously truncated) AND that the standoff
+    # fix is actually in effect, not just "close enough".
     term = np.array([4.0, 0.0])
     min_term = float(np.min(np.hypot(driven[:, 0] - term[0], driven[:, 1] - term[1])))
-    assert min_term <= 1.7, f"driven trajectory never reached the terminal (min {min_term:.2f} m)"
+    assert 1.4 <= min_term <= 1.7, (
+        f"driven trajectory closest approach {min_term:.3f} m outside the expected "
+        "post-#132 band [1.4, 1.7] m (either truncated short of the terminal, or the "
+        "standoff accounting regressed to its pre-#132 ~1.16 m figure)"
+    )
 
 
 def test_drive_if_trajectory_progresses_with_moving_pose():
@@ -1464,13 +1470,22 @@ def test_drive_if_trajectory_stops_short_of_withheld_provisional_terminal():
 
     lamp_xy = np.array([6.0, 0.0])
     # Default: the provisional terminal commits, so the driven path reaches near the lamp.
-    # (issue #132: the terminal standoff now correctly adds the costmap's inflation radius
+    # Issue #132: the terminal standoff now correctly adds the costmap's inflation radius
     # to the push target, so the committed goal -- and the closest driven approach -- sits
-    # a bit farther from the small lamp's centroid than before the fix, still comfortably
-    # inside the rubric's arrival tolerance.)
-    assert np.min(np.linalg.norm(driven_off[:, :2] - lamp_xy, axis=1)) < 1.3
+    # measurably farther from the small lamp's centroid (~1.13 m) than the pre-#132 figure
+    # (~0.73 m), still comfortably inside the rubric's arrival tolerance. A "< 1.3" upper
+    # bound alone would still pass if #132 were reverted, so pin a band that EXCLUDES the
+    # old, short figure too: proof the provisional terminal actually committed AND that the
+    # #132 standoff fix is in effect.
+    min_off = np.min(np.linalg.norm(driven_off[:, :2] - lamp_xy, axis=1))
+    assert 0.95 <= min_off < 1.3, (
+        f"driven (default) closest approach to the lamp {min_off:.3f} m outside the "
+        "expected post-#132 band [0.95, 1.3) m (either the provisional terminal never "
+        "committed, or the standoff accounting regressed to its pre-#132 ~0.73 m figure)"
+    )
     # Gated: the terminal is withheld, so the driven path stops at leg 0 (the table) and
-    # never approaches the lamp.
+    # never approaches the lamp -- unaffected by the #132 push-distance change, so a plain
+    # bound (well clear of either the pre- or post-#132 committed-terminal figures) suffices.
     assert np.min(np.linalg.norm(driven_on[:, :2] - lamp_xy, axis=1)) > 1.3
 
 
