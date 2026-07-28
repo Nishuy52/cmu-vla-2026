@@ -1943,3 +1943,90 @@ then #91's recall residual (`candle holder` / `wall decal` are in the caption an
 still never detected) and the #110 sweep — how many of the 75 questions reference
 a class absent from their scene's GT, which bounds what any offline number means.
 A live run is the missing evidence for everything merged today.
+
+## 2026-07-28 — #126: stand off the terminal GOTO waypoint
+
+**Mechanism confirmed** (not just theorized): `InstructionHead._goto_point`
+projected a GOTO leg's goal to the anchor centroid's nearest-REACHABLE cell
+(`_goto_point_raw`), which for any real (obstacle-stamped) anchor is always a
+point touching the object's own inflation boundary — measured clearance ~0.1 m
+in every case checked, against the ~0.5 m the stock local planner needs (LOG
+session 17). `_via_point` (VIA_NEAR) already carries an analogous fix
+(`VIA_NEAR_CLEARANCE_M`); GOTO never did. Cross-checked against
+`reports/cluster_verify/{699817,699818}`: all 4 runs that wedge past the
+rubric's terminal tolerance (arabic_room 2.43, hotel_room_2 2.34,
+home_building_1 2.21, home_building_2 2.21) have a `GOTO`-kind terminal leg
+("stop at X" / "go to X"), never a `VIA_NEAR` one.
+
+**Fix:** `InstructionHead._goto_point` now pushes the raw goal radially
+outward from the anchor (`_standoff_push`, along the SAME direction
+`_goto_point_raw` already chose, not a fresh max-clearance ring search — that
+alternative was tried first and regressed 2 offline legs by picking a
+different side of the anchor than the rubric's own reference-goal
+computation expects) until it clears `VIA_NEAR_CLEARANCE_M`, bounded to a
+local nudge so a disconnected pocket can't snap it somewhere far away.
+Scoped to the TERMINAL leg only (`is_terminal` threaded through
+`_ground_legs`/`_ground_one`): a non-terminal GOTO leg is a breadcrumb the
+follower threads through, never a point the vehicle stops and holds at, so it
+was never exposed to this failure mode — standing it off too cost 2 more
+offline legs for zero live benefit (issue #115's "head and battery compute
+leg goals by different methods" is exactly why: the battery's own
+independent reference-goal push and the head's standoff don't have to agree
+pointwise, only both land within tolerance).
+
+**Verification:** `pytest -m ""` (fast tier, `not slow`) = 1578 passed, 76
+skipped, 0 failed (3 pre-existing collection errors in
+`tests/parsing/test_regex_full_set.py` are this worktree missing
+`upstream/`, unrelated). Offline battery re-run
+(`reports/gt_battery_126check/`, `--groundtruth data/vla3d/Unity`) topline
+**unchanged**: rubric 0.744, numerical 15/15, object_reference 12/12
+scoreable at IoU 1.000 — a full per-question diff against a same-environment
+baseline re-run (`reports/gt_battery_126_baseline_recheck/`) confirms zero
+`rubric_score`/`n_legs_reached_in_order` deltas anywhere; only benign
+diagnostic drift (min-dist-to-goal, Fréchet, driven pose count) on legs
+whose terminal goal moved.
+
+**Next step:** a live run is still the only way to confirm the standoff
+actually clears the real planner's rejection (the offline "rubric" scorer
+uses a v1 kinematic follower with no local-planner deviation modelling, so
+it cannot itself detect or credit this fix — see the battery report's own
+"IF headline" note). Also worth folding into #115: the standoff distance
+(`VIA_NEAR_CLEARANCE_M` + half the anchor's footprint diagonal) is not
+cross-checked against the battery's independent `_RUBRIC_GOAL_CLEARANCE_M`
+(0.4 m, plain edge push) — the two now agree in spirit but not in algorithm.
+
+**Correction (same day, independent verifier catch):** the first commit had
+a real defect — `_standoff_push`'s push distance (`near_thresh_m` = half the
+anchor's footprint diagonal + `VIA_NEAR_CLEARANCE_M`) was never clamped
+against `ARRIVAL_TOL_M`. For any terminal anchor with footprint diagonal
+> ~2.59 m (a bed, a large sofa, a dining table — exactly what these
+questions target), the push landed OUTSIDE the rubric's terminal arrival
+tolerance: trading the short-of-goal wedge for an unrecoverable
+tolerance-miss, which the brief explicitly named as still-disqualifying.
+Reproduced against the committed (pre-correction) code with a 2.5 m x 1.8 m
+"bed" anchor: goal landed 1.9903 m from centroid vs. `ARRIVAL_TOL_M`
+1.7463 m. The 3 original unit tests never exercised this path — all three
+used compact 0.4 m x 0.4 m anchors.
+
+Fixed by clamping the push distance to `ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M`
+(new constant, 0.15 m margin so the goal never sits exactly on the tolerance
+boundary) BEFORE anything else in `_standoff_push`; when the raw goal is
+already at/beyond that bound there's no room to push at all and `raw` is
+returned untouched (prefer a scoreable short-of-goal wedge over an
+unscoreable tolerance miss, per the coordinator's explicit guidance). Added
+`test_goto_standoff_stays_within_arrival_tolerance_for_a_large_anchor`
+(2.5x1.8 m anchor) — confirmed it FAILS against the pre-correction code
+(reproduces the 1.9903 m violation) and passes against the corrected code
+(clamped to 1.5963 m, clearance still improves 0.1 -> 0.3 m). Kept
+everything else the verifier confirmed sound: terminal-only `is_terminal`
+scoping, the radial-push-along-chosen-direction approach (not the ring
+search, which regressed 2 offline legs), no new tunables beyond the one
+margin constant.
+
+Re-verified: `pytest -m ""` = 1579 passed (one more than before — the new
+test), 76 skipped, 0 failed. Offline battery re-run
+(`reports/gt_battery_126check/`) topline unchanged: rubric 0.744, numerical
+15/15, object_reference 12/12 @ IoU 1.000. Full per-question IF diff against
+`reports/gt_battery_126_baseline_recheck/`: all 30 IF questions'
+`rubric_score`/`n_legs_reached_in_order` identical, zero score-affecting
+deltas.

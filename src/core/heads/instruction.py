@@ -79,6 +79,12 @@ ARRIVAL_TOL_M: float = NOMINAL_ARRIVAL_TOL_M
 #: VIA_NEAR "legs=0/N" rows). Kept below ARRIVAL_TOL_M so a compact anchor's via lands
 #: inside the credited band while still clearing the footprint.
 VIA_NEAR_CLEARANCE_M: float = 0.45
+#: Issue #126 — margin (m) the terminal-leg standoff (``InstructionHead._standoff_push``)
+#: keeps between the pushed goal and ARRIVAL_TOL_M. Landing exactly ON the tolerance
+#: boundary is fragile (float/grid-quantization noise can tip a "just reached" leg over
+#: to "just missed"), so the push is capped at ARRIVAL_TOL_M minus this margin, not at
+#: ARRIVAL_TOL_M itself.
+STANDOFF_ARRIVAL_MARGIN_M: float = 0.15
 MIN_GROUND_OBS: int = 3  # per architecture: grounded == confirmed with >= 3 obs
 
 # Issue #33 — route-prefix commitment floor: a leg backed by only a SINGLE observation
@@ -379,8 +385,11 @@ class InstructionHead:
         prev_xy: tuple[float, float] | None = None
         prev_kind: LegKind | None = None
         prev_gate: tuple[tuple[float, float], tuple[float, float]] | None = None
-        for leg in self.plan.route:
-            gl = self._ground_one(leg, scene, prev_xy, prev_kind, prev_gate)
+        n_legs = len(self.plan.route)
+        for i, leg in enumerate(self.plan.route):
+            gl = self._ground_one(
+                leg, scene, prev_xy, prev_kind, prev_gate, is_terminal=(i == n_legs - 1)
+            )
             legs.append(gl)
             if gl.geom is not None:
                 g = gl.geom
@@ -397,6 +406,7 @@ class InstructionHead:
         self, leg: RouteLeg, scene, prev_xy: tuple[float, float] | None = None,
         prev_kind: LegKind | None = None,
         prev_gate: tuple[tuple[float, float], tuple[float, float]] | None = None,
+        is_terminal: bool = False,
     ) -> _GroundedLeg:
         nouns = tuple(a.noun for a in leg.anchors)
         if scene is None:
@@ -422,6 +432,7 @@ class InstructionHead:
             geom = self._goto_point(
                 recs[0],
                 prev_gate=prev_gate if prev_kind is LegKind.CORRIDOR_BETWEEN else None,
+                is_terminal=is_terminal,
             )
         runner_up = self._resolve_anchor(leg.anchors[0], scene, prev_xy)[1]
         min_n_obs = min(r.n_obs for r in recs)
@@ -622,6 +633,126 @@ class InstructionHead:
         return (ranked[0], ranked[1] if len(ranked) > 1 else None)
 
     def _goto_point(
+        self, rec,
+        prev_gate: tuple[tuple[float, float], tuple[float, float]] | None = None,
+        is_terminal: bool = False,
+    ) -> tuple[float, float]:
+        """GOTO leg goal: the anchor projection, pulled off the anchor by a standoff
+        clearance when it would otherwise land too close for the stock local planner
+        to accept (issue #126).
+
+        ``_goto_point_raw`` places the goal AT (or nearest-reachable to) the anchor
+        centroid, which is correct for scoring (closer to the centroid is always
+        better within ``ARRIVAL_TOL_M``) but can land within the planner's obstacle
+        clearance requirement for a compact/close anchor — the planner then refuses
+        the final approach and issues a zero-``cmd_vel`` stop. That matters ONLY for
+        the TERMINAL leg: it's the one goal the FSM republishes and the vehicle
+        actually settles/holds at as the IF "answer" (``terminal_waypoint`` docstring
+        -- "the answer IS the drive"), which is exactly where 15/15 live runs wedge,
+        stationary for the trajectory tail. A non-terminal GOTO leg is a breadcrumb
+        the follower threads through en route to the NEXT leg, never a point the
+        vehicle stops and holds at, so it was never exposed to this failure mode --
+        standing it off too would only add scoring-geometry drift no live run
+        exhibits. Only apply the standoff when the raw goal's own clearance is below
+        the planner's floor (``VIA_NEAR_CLEARANCE_M``) — an already-clear raw goal is
+        left untouched, so this never moves a goal that didn't need moving.
+
+        Push RADIALLY OUTWARD from the anchor along ``raw``'s own direction
+        (``_standoff_push``), not a fresh max-clearance ring search (the mechanism
+        ``_via_point`` uses for VIA_NEAR): ``_goto_point_raw`` already picked the
+        reachable/approach side of the anchor, and a ring search free to land on
+        ANY max-clearance cell around the anchor can jump to a different side of a
+        multi-sided object, moving the goal much further from where the vehicle
+        would actually arrive than the clearance fix requires. Reusing that
+        already-chosen direction keeps the standoff to the minimum deviation that
+        clears the floor. ``_standoff_push`` itself clamps the push distance so the
+        result never leaves ``ARRIVAL_TOL_M`` of the anchor centroid -- for a large
+        anchor (a bed, a sofa) the clearance floor and the arrival tolerance can
+        genuinely conflict, and trading a short-of-goal wedge for an
+        outside-tolerance miss is not a fix (both are disqualifying, and the
+        tolerance miss is unrecoverable while the wedge at least banks partial
+        credit)."""
+        raw = self._goto_point_raw(rec, prev_gate)
+        cm = self._costmap
+        if not is_terminal or cm is None or self._clearance_m(raw) >= VIA_NEAR_CLEARANCE_M:
+            return raw
+        c = TB.P._as3(rec.centroid)
+        anchor_xy = (float(c[0]), float(c[1]))
+        return self._standoff_push(anchor_xy, raw, self._near_thresh(rec))
+
+    def _standoff_push(
+        self, anchor_xy: tuple[float, float], raw: tuple[float, float], near_thresh_m: float,
+    ) -> tuple[float, float]:
+        """Move ``raw`` out along the anchor->raw direction, nudged onto the nearest
+        PASSABLE cell, capped so the result never leaves ``ARRIVAL_TOL_M`` (less
+        ``STANDOFF_ARRIVAL_MARGIN_M``) of the anchor centroid.
+
+        ``near_thresh_m`` (the VIA_NEAR-style footprint+clearance target) can EXCEED
+        the arrival tolerance for a large anchor -- a bed, a sofa, a dining table --
+        where clearing the planner's obstacle floor and staying inside the rubric's
+        scored band genuinely conflict. Trading a short-of-goal wedge for an
+        outside-tolerance miss is not a fix (issue #126 verification), so the push
+        distance is clamped to ``max_dist`` FIRST, before anything else: the goal
+        may end up under-clearing the planner's floor for a large enough anchor, but
+        it never leaves the credited band. If ``raw`` itself is already at/beyond
+        that bound (an anchor so large its raw goal already skirts the tolerance),
+        there is no room left to push at all -- ``raw`` is returned untouched, on
+        the same "don't make it worse" principle.
+
+        Deliberately a bounded LOCAL nudge, not ``nearest_reachable_point``'s full
+        connectivity BFS: if the direct radial candidate sits in a pocket the BFS
+        has to route far around (a wall pinch, a disconnected alcove), that BFS
+        happily returns some distant reachable cell that clears the ring test but
+        can be a metre-plus from the anchor in a direction nothing to do with the
+        approach -- worse than the wedge this exists to fix. So the push is
+        accepted only when: the nudge onto a passable cell stayed local (within
+        ``near_thresh_m`` of where we aimed), the FINAL nudged point is still within
+        ``max_dist`` of the anchor (the local nudge itself could in principle push
+        past the clamp even though the pre-nudge candidate didn't), and the result
+        is still reachable from the current pose (``_goto_point_raw``'s own
+        guarantee); anything else falls back to ``raw`` rather than risk a wild jump
+        or a tolerance miss.
+
+        Degenerate direction (``raw`` coincides with the anchor, e.g. a floor-level
+        anchor with no footprint yet) falls back to ``raw`` unchanged rather than
+        picking an arbitrary direction."""
+        dx, dy = raw[0] - anchor_xy[0], raw[1] - anchor_xy[1]
+        dist = math.hypot(dx, dy)
+        if dist < 1e-6:
+            return raw
+        max_dist = ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M
+        if dist >= max_dist:
+            return raw  # raw already at/beyond the clamp -- no room to push further
+        ux, uy = dx / dist, dy / dist
+        target_dist = min(max(dist, near_thresh_m), max_dist)
+        candidate = (anchor_xy[0] + ux * target_dist, anchor_xy[1] + uy * target_dist)
+        projected = self._project_free(candidate)
+        if math.hypot(projected[0] - candidate[0], projected[1] - candidate[1]) > near_thresh_m:
+            return raw
+        if math.hypot(projected[0] - anchor_xy[0], projected[1] - anchor_xy[1]) > max_dist:
+            return raw
+        cm = self._costmap
+        seen = cm.reachable_mask(self._pose)
+        if seen is None:
+            return raw
+        r, c = self.grid.world_to_cell(*projected)
+        if not (0 <= r < seen.shape[0] and 0 <= c < seen.shape[1] and seen[r, c]):
+            return raw
+        return projected
+
+    def _clearance_m(self, xy: tuple[float, float]) -> float:
+        """Distance (m) from ``xy`` to the nearest blocked cell, via the same
+        clearance field ``free_space_via_point`` uses to rank via candidates (IF-F7).
+        Returns 0.0 (i.e. "not clear") for a point outside the costmap's grid."""
+        cm = self._costmap
+        field = _planner._clearance_field(cm)
+        r, c = self.grid.world_to_cell(*xy)
+        h, w = field.shape
+        if not (0 <= r < h and 0 <= c < w):
+            return 0.0
+        return float(field[r, c]) * self.grid.cell_m
+
+    def _goto_point_raw(
         self, rec,
         prev_gate: tuple[tuple[float, float], tuple[float, float]] | None = None,
     ) -> tuple[float, float]:
