@@ -2030,3 +2030,56 @@ test), 76 skipped, 0 failed. Offline battery re-run
 `reports/gt_battery_126_baseline_recheck/`: all 30 IF questions'
 `rubric_score`/`n_legs_reached_in_order` identical, zero score-affecting
 deltas.
+
+## 2026-07-28 — issue #91: detector-vocab coverage audit for relational disambiguators
+
+Audit first: built the noun set actually used across all 75 training questions
+(`upstream/CMU-VLN-Challenge-2026/questions/questions.json`, both target nouns and
+nested disambiguator anchors) and diffed it against `core/parsing/vocab.py`'s
+`SINGLE_NOUNS`/`PHRASES` (the set `core.heads.factory._STANDING_VOCAB_NOUNS` derives
+from). Result: zero missing nouns — every one of the 75 questions' nouns, including
+`tv`, `window`, `candle`/`candle holder`/`pyramid candle holder`, `jar`, and `map wall
+decal`, already resolves through the parser. Confirmed end-to-end with the real regex
+parser + `_plan_nouns` (issue #95's disambiguator recursion) on the exact evidence
+sentences: all reach the question-noun tier, which `build_gdino_prompt` never drops for
+budget.
+
+The real, still-open gap this task's own token-budget constraint (#105) exposes is
+in the *standing-vocab* tier: it is walked in plain alphabetical order, so a token-
+budget cut always amputates the same alphabetic span regardless of scene/question —
+and, measured with the dependency-free heuristic estimator (no real tokenizer in this
+venv), that cut is far more aggressive (drops 47/116 nouns vs. the real tokenizer's
+measured 12/116), sweeping up `pyramid candle holder`/`wall decal` along with the
+already-known `tv`/`window`/... tail. Added `core.perception.vocab.
+DISAMBIGUATOR_PRIORITY_NOUNS` + `prioritize_vocab_nouns` (pure reorder, never a filter)
+and wired it into `refresh_prompt` (detector.py) ahead of the plain alphabetical vocab
+order, still behind `full_only_nouns`. Deliberately narrow (`candle holder`, `pyramid
+candle holder`, `jar`, `map wall decal`, `wall decal` only) — `tv`/`window`/the rest of
+the measured overflow tail were deliberately left out: they're already protected via the
+question-noun tier for their own question (locked in by the existing #105 test), and
+promoting the full tail measurably evicted high-frequency nouns (`sofa`, `stool`) that
+matter more broadly. Verified: before/after diff over the live standing vocab shows only
+one low-value collateral eviction (`sushi`, a single-question anchor) and zero eviction
+of any high-frequency target/anchor noun.
+
+New tests: `tests/perception/test_vocab.py` (prioritize_vocab_nouns is a pure stable
+partition, never invents/drops a noun) and `tests/perception/test_detector.py`
+(disambiguator nouns reach both GDINO caption passes for the real evidence questions;
+the standing-vocab reorder doesn't evict a "chair"-class noun; full_only_nouns still
+outranks the reprioritised vocab tier). Fast tier: `pytest` from `src/` = 1661 passed, 32
+skipped (env — no `transformers`/torch/ROS), 56 deselected (slow tier), 0 failed.
+
+Offline battery (`--groundtruth data/vla3d/Unity`, all 75 questions): topline unchanged
+— numerical TRUE 15/15, object_reference 12/12 @ IoU 1.000, IF rubric 0.744 — and the
+generated report is BYTE-IDENTICAL to a same-commit run with this change reverted
+(diffed both `gt_battery_report.md` and `gt_battery_results.json`; only the run
+timestamp/output-path/dirty-digest metadata differ). Expected and consistent with the
+task's own note: the battery uses GT-perfect perception, so detector vocabulary is
+inert there.
+
+What remains unproven without a live run: whether GroundingDINO itself actually emits
+`candle`/`jar`/`map wall decal`-class detections once the caption reaches it correctly
+— the caption composition and prioritisation are now verified in code, but the model's
+own recall on rare/compound classes (and the caption-dilution effect #42 already
+documented for crowded captions) can only be confirmed against a live run's
+`raw_detections.jsonl`.

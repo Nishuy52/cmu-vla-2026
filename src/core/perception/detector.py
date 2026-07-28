@@ -23,6 +23,8 @@ from typing import Callable, Protocol, Sequence
 
 import numpy as np
 
+from core.perception.vocab import prioritize_vocab_nouns
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -672,6 +674,24 @@ def refresh_prompt(
     — that function's own de-dup (question nouns win ties) and budget-in-order behaviour
     do the rest; nothing about :func:`build_gdino_prompt` itself needed to change.
 
+    Issue #91: within the ``vocab_nouns`` tier itself, :func:`core.perception.vocab.
+    prioritize_vocab_nouns` is applied before it reaches :func:`build_gdino_prompt` —
+    the standing vocab is a plain alphabetical list (``core.heads.factory.
+    _STANDING_VOCAB_NOUNS``), so a token-budget cut always amputates the SAME
+    alphabetic span regardless of which scene or question is live. A narrow,
+    evidence-named set of relational-disambiguator classes (:data:`core.perception.
+    vocab.DISAMBIGUATOR_PRIORITY_NOUNS` — see that constant's docstring for why it is
+    narrow and which classes it deliberately leaves out) is pulled to the front of the
+    vocab tier (still behind ``full_only_nouns``, per the priority order above), so a
+    degraded budget (e.g. the real tokenizer unavailable, falling back to
+    :func:`_heuristic_token_estimate`'s far more pessimistic count) does not always cut
+    the exact same classes. This is a pure reorder — every vocab noun the caller passed
+    is still eligible for the caption, exactly once; nothing is filtered or invented.
+    Nouns that are the CURRENT question's own target/anchor already reach
+    ``question_nouns`` (never dropped) via :func:`core.heads.explore_step._plan_nouns`;
+    this only helps the standing-vocab tier, i.e. scene-index breadth for nouns the
+    live question does not itself mention.
+
     Thread-safety: this performs exactly one attribute assignment (``detector.prompt =
     ...``), which is atomic under the GIL — safe to call from whichever thread latches the
     plan (the adapter's 5 Hz tick timer) even though a different thread's subscription
@@ -683,7 +703,9 @@ def refresh_prompt(
     """
     if detector is None or not hasattr(detector, "prompt"):
         return None
-    prompt = build_gdino_prompt(question_nouns, list(full_only_nouns) + list(vocab_nouns))
+    prompt = build_gdino_prompt(
+        question_nouns, list(full_only_nouns) + prioritize_vocab_nouns(vocab_nouns)
+    )
     detector.prompt = prompt
     if hasattr(detector, "question_prompt"):
         detector.question_prompt = build_gdino_prompt(question_nouns, ())

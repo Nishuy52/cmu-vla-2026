@@ -378,6 +378,110 @@ def test_build_gdino_prompt_no_drop_when_vocab_fits_budget():
     assert prompt == "sofa . window . potted plant ."
 
 
+# ---------------------------------- disambiguator vocab prioritisation (issue #91) ----
+
+
+#: Issue #91: the training corpus's own noun phrases for questions whose disambiguator
+#: reads zero live-detection hits (VERIFIED EVIDENCE in the #91 task) -- the exact
+#: sentences are "...closest to the pyramid candle holder" (livingroom_1),
+#: "...near the jar" (japanese_room), "...closest to the map wall decal" (office_1).
+_91_DISAMBIGUATOR_QUESTIONS = (
+    (
+        "Go to the potted plant closest to the pyramid candle holder and stop at the "
+        "vase between the TV and the door."
+    ),
+    "Go near the small table with a vase on it and then to the flowers near the jar.",
+    "How many computer monitors are on the table closest to the map wall decal?",
+)
+
+
+def test_refresh_prompt_disambiguator_nouns_reach_the_short_caption():
+    # Issue #91 acceptance: the caption for a question includes that question's own
+    # disambiguator nouns (not just its primary target). Exercises the real regex
+    # parser + _plan_nouns recursion (#95) end-to-end, not a hand-built noun list, so a
+    # regression in either upstream piece would show up here too.
+    from core.heads.explore_step import _plan_nouns
+    from core.parsing.regex_tier import parse_regex
+
+    expectations = {
+        _91_DISAMBIGUATOR_QUESTIONS[0]: "pyramid candle holder",
+        _91_DISAMBIGUATOR_QUESTIONS[1]: "jar",
+        _91_DISAMBIGUATOR_QUESTIONS[2]: "map wall decal",
+    }
+    for question, disambiguator in expectations.items():
+        plan = parse_regex(question)
+        question_nouns = _plan_nouns(plan)
+        assert disambiguator in question_nouns, (question, question_nouns)
+
+        det = FakeDetector()
+        refresh_prompt(det, question_nouns, _standing_vocab_nouns())
+        # Short (question-only) caption -- the pass #42 calibrated for actual recall of
+        # rare/small classes, never diluted by the ~100-phrase standing vocab.
+        assert disambiguator in _kept_phrases(det.question_prompt)
+        # Full caption -- question nouns are never dropped for vocab nouns, so it must
+        # survive there too even though the vocab pass alone overflows the budget.
+        assert disambiguator in _kept_phrases(det.prompt)
+
+
+def test_refresh_prompt_reprioritizes_vocab_tier_disambiguators_to_front():
+    # Issue #91: within the vocab tier itself (i.e. when a class is NOT the current
+    # question's own noun), prioritize_vocab_nouns pulls DISAMBIGUATOR_PRIORITY_NOUNS
+    # ahead of the plain alphabetical standing-vocab order before the budget cut.
+    from core.perception.vocab import DISAMBIGUATOR_PRIORITY_NOUNS
+
+    det = FakeDetector()
+    refresh_prompt(det, (), _standing_vocab_nouns())
+    kept_phrases = _kept_phrases(det.prompt)
+    for noun in DISAMBIGUATOR_PRIORITY_NOUNS:
+        assert noun in kept_phrases, (noun, "evicted from the vocab-only full caption")
+
+
+def test_refresh_prompt_disambiguator_priority_does_not_evict_high_value_standing_nouns():
+    # Issue #91 explicit anti-regression: pulling the disambiguator-priority nouns
+    # forward must not knock a common target/anchor noun (chair, sofa, table, potted
+    # plant, pillow, vase, cabinet, bed, window, tv -- all used as the PRIMARY target or
+    # anchor of multiple training questions) out of the vocab-only full caption, under
+    # the SAME (default heuristic, worst-case) estimator this repo's test venv uses.
+    high_value_nouns = {
+        "chair", "sofa", "table", "potted plant", "pillow", "vase", "cabinet", "bed",
+        "window", "tv", "picture", "lamp", "bowl",
+    }
+    dropped_before: list[str] = []
+    build_gdino_prompt((), _standing_vocab_nouns(), dropped_out=dropped_before)
+
+    det = FakeDetector()
+    refresh_prompt(det, (), _standing_vocab_nouns())
+    kept_after = _kept_phrases(det.prompt)
+
+    newly_evicted = {n for n in high_value_nouns if n in dropped_before} - set()
+    # (sanity: at least confirms the fixture is meaningful -- some of these nouns
+    # already get dropped pre-fix under the heuristic estimator; the real assertion
+    # below is that the fix does not make that WORSE for any of them.)
+    for noun in high_value_nouns:
+        was_kept_before = noun not in dropped_before
+        if was_kept_before:
+            assert noun in kept_after, (
+                noun, "was in the full caption before reprioritisation, evicted after"
+            )
+
+
+def test_refresh_prompt_full_only_nouns_still_outrank_reprioritised_vocab_tier():
+    # full_only_nouns (issue #108's avoid-anchor breadth) must still sit ahead of the
+    # reprioritised vocab tier in the rendered caption -- reprioritisation only reorders
+    # WITHIN the vocab tier; it must never let a vocab noun (even a priority one)
+    # outrank a full_only noun.
+    from core.perception.vocab import DISAMBIGUATOR_PRIORITY_NOUNS
+
+    priority_noun = DISAMBIGUATOR_PRIORITY_NOUNS[0]
+    det = FakeDetector()
+    refresh_prompt(
+        det, (), [priority_noun, "ball"], full_only_nouns=["avoid target noun"]
+    )
+    phrases = det.prompt.removesuffix(" .").split(" . ")
+    assert phrases[0] == "avoid target noun"
+    assert priority_noun in phrases[1:]
+
+
 def test_build_gdino_prompt_custom_token_estimator_is_honoured():
     # Injecting an estimator that treats every rendered candidate as huge should drop
     # every vocab noun (still keeping question nouns) -- proves the seam is real, not
