@@ -50,6 +50,32 @@ GATE_MIN_OBS: int = 2     # once established, count only instances with n_obs >=
 # (in addition to count stability) before the head reports a firing winner_margin.
 COVERAGE_MIN_FRAC: float = 0.5
 
+# (#109) Release fraction for the #93 dropped-disambiguator hold. `_disambiguator_unresolved`
+# (below) withholds `stable` indefinitely while the nested disambiguator class hasn't been
+# detected -- correct when the class simply hasn't been *found yet* (more ticks help), wrong
+# when the class genuinely does not exist in the scene (more ticks buy nothing: `answer()`
+# still publishes the same widened count at `past_explore_budget`, so the hold only spends
+# NUMERICAL's soft explore budget, `core.interfaces.EXPLORE_BUDGET_S[QType.NUMERICAL]`
+# (210 s), for zero accuracy gain -- see issue #109).
+#
+# The trade this constant names: releasing early answers on incomplete search coverage
+# (the exact risk #93 was filed to close); releasing at 1.0 (never early) wastes the whole
+# 210 s explore window whenever the class is absent, which is the status quo #109 reports.
+# 0.85 reuses `core.heads.instruction.PROVISIONAL_COMMIT_FRAC` -- the codebase's existing
+# convention for "how much of the relevant budget must elapse before treating persistent
+# absence as signal rather than noise" for this exact family of drop-and-guess gates (see
+# instruction.py's H4c gate). Unlike PROVISIONAL_COMMIT_FRAC (verified against issue #99 to
+# land on the SAME tick as `forced_assembly`, i.e. no-op there), this constant is scaled
+# against NUMERICAL's own 210 s soft explore budget, not the 600 s whole-question budget:
+# 0.85 * 210 s = 178.5 s, a real 31.5 s (~15%) short of the 210 s hard cutoff where
+# `past_explore_budget` forces VERIFY regardless. So this DOES buy back exploration time in
+# the terminal case, unlike the #99 finding for the IF head.
+#
+# Caveat (generalization protocol): 0.85 is carried over from an existing, independently-
+# reasoned constant, not fit to any sample from this issue's own evidence -- flagged as
+# thin evidence should it ever need reconsideration for NUMERICAL specifically.
+DISAMBIGUATOR_RELEASE_FRAC: float = 0.85
+
 
 @dataclass
 class NumericalHead:
@@ -69,6 +95,15 @@ class NumericalHead:
     #: FSM/factory owns wiring a real coverage signal here (see module note); the head
     #: only defines and consumes the seam.
     coverage_frac: Callable[[], float] | None = None
+    #: (#109) Optional probe: fraction (0..1, expected clamped by the caller) of THIS head's
+    #: own soft NUMERICAL explore budget (``EXPLORE_BUDGET_S[QType.NUMERICAL]``, 210 s) that
+    #: has elapsed. Distinct from ``coverage_frac`` above (a SPATIAL map-coverage seam that
+    #: is not wired anywhere in production today): this is the TIME proxy the factory
+    #: derives from the already-wired whole-question ``budget_frac`` closure (see
+    #: ``core.heads.factory``). None (default) preserves the pre-#109 behaviour: the
+    #: dropped-disambiguator hold never releases early and rides out to
+    #: ``past_explore_budget``. See ``DISAMBIGUATOR_RELEASE_FRAC``.
+    explore_progress: Callable[[], float] | None = None
 
     count: int | None = None
     contrib_min_obs: int = 0
@@ -159,12 +194,24 @@ class NumericalHead:
         verdict costs nothing but exploration time (answer() still always publishes the
         current count, so the always-answer guarantee is untouched) and gives perception
         more ticks to find the missing class before commitment.
+
+        (#109) That hold has no escape hatch when the class genuinely is not in the
+        scene: waiting then costs the WHOLE remaining explore window for no accuracy
+        gain. If `explore_progress` is injected and has crossed
+        `DISAMBIGUATOR_RELEASE_FRAC`, we've plausibly searched enough that "the class
+        just isn't here" is the better inference, so the hold releases and `stable` can
+        fire on the current (widened) count same as any other stable run. With no probe
+        injected (default), behaviour is unchanged: the hold never releases early.
         """
         held = self._run_len >= self.stable_ticks and self._run_count is not None
         if held and self.coverage_frac is not None:
             held = self.coverage_frac() >= COVERAGE_MIN_FRAC
         if held and self._disambiguator_unresolved:
-            held = False
+            released = (
+                self.explore_progress is not None
+                and self.explore_progress() >= DISAMBIGUATOR_RELEASE_FRAC
+            )
+            held = released
         margin = STABLE_MARGIN if held else 0.0
         return StabilitySignal(
             winner_margin=margin,

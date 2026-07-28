@@ -35,7 +35,17 @@ from typing import Callable
 
 from core.fsm.controller import WorldView
 from core.fsm.floors import PartialResults
-from core.interfaces import IntAnswer, MarkerBox, QType, Question, RobotIO, SceneIndex, WaypointCmd
+from core.interfaces import (
+    EXPLORE_BUDGET_S,
+    IntAnswer,
+    MarkerBox,
+    QUESTION_BUDGET_S,
+    QType,
+    Question,
+    RobotIO,
+    SceneIndex,
+    WaypointCmd,
+)
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.llm.timeout import DEFAULT_CALL_TIMEOUT_S, wrap_call_timeout
 from core.parsing.vocab import PHRASES, SINGLE_NOUNS
@@ -65,6 +75,30 @@ from core.heads.object_ref import LlmVerifyFn, ObjectRefHead, VerifierFn
 #: exact nouns this one question mentioned (read-only reuse: core/parsing/vocab.py is
 #: out of scope for this fix; nothing here mutates it).
 _STANDING_VOCAB_NOUNS: tuple[str, ...] = tuple(sorted(set(SINGLE_NOUNS) | set(PHRASES.values())))
+
+
+def _numerical_explore_progress(
+    budget_frac: Callable[[], float] | None,
+) -> Callable[[], float] | None:
+    """(#109) Derive NumericalHead's `explore_progress` seam from the already-wired
+    whole-question `budget_frac` (elapsed / QUESTION_BUDGET_S, the SAME closure the live
+    adapter / gt_battery wire for the IF head's H4c gate -- see core.heads.instruction).
+
+    NUMERICAL's own soft explore budget (`EXPLORE_BUDGET_S[QType.NUMERICAL]`, 210 s) is
+    much shorter than the 600 s whole-question window `budget_frac` is scaled to, so this
+    rescales: elapsed = budget_frac() * QUESTION_BUDGET_S; progress = elapsed / 210 s,
+    clamped to [0, 1]. None in -> None out (no signal wired -> old indefinite-hold
+    behaviour, matching every other optional seam in this module).
+    """
+    if budget_frac is None:
+        return None
+    explore_budget_s = EXPLORE_BUDGET_S[QType.NUMERICAL]
+
+    def _progress() -> float:
+        elapsed = budget_frac() * QUESTION_BUDGET_S
+        return max(0.0, min(1.0, elapsed / explore_budget_s))
+
+    return _progress
 
 
 @dataclass
@@ -121,7 +155,15 @@ class HeadState:
             full_only_nouns=_plan_avoid_nouns(plan),
         )
         if plan.qtype is QType.NUMERICAL:
-            self.numerical = NumericalHead(plan=plan, thresholds=self.thresholds)
+            self.numerical = NumericalHead(
+                plan=plan,
+                thresholds=self.thresholds,
+                # (#109) release hatch for the #93 dropped-disambiguator hold: derive
+                # NUMERICAL's own soft-explore-budget-relative elapsed fraction from the
+                # already-wired whole-question budget_frac (None-safe -- see
+                # _numerical_explore_progress).
+                explore_progress=_numerical_explore_progress(self.budget_frac),
+            )
         elif plan.qtype is QType.OBJECT_REFERENCE:
             self.object_ref = ObjectRefHead(
                 plan=plan,

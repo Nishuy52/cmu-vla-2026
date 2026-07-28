@@ -1,7 +1,7 @@
 """NumericalHead: count correctness, cross-tick stability run, StabilitySignal semantics."""
 from __future__ import annotations
 
-from core.heads.numerical import STABLE_TICKS, NumericalHead
+from core.heads.numerical import DISAMBIGUATOR_RELEASE_FRAC, STABLE_TICKS, NumericalHead
 from core.interfaces import IntAnswer
 from core.plan_schema import Anchor, Clause, Plan, Pred
 from tests.heads._helpers import inst, near_clause, numerical_plan, scene
@@ -197,6 +197,80 @@ def test_disambiguator_resolving_mid_run_lets_stability_recover():
     head = NumericalHead(plan=_chairs_near_table_with_vase_plan())
     _advance(head, sc_no_vase, STABLE_TICKS * 2)
     assert head.signal().stable is False
+    _advance(head, sc_with_vase, STABLE_TICKS)
+    assert head.count == 2
+    assert head.signal().stable is True
+
+
+# --------------------------------------------------------------------- #109: the #93 hold
+# has no escape hatch when the disambiguator class genuinely does not exist in the scene --
+# it rides out to the FSM's hard per-type explore-budget cutoff for zero accuracy gain.
+# `explore_progress` (a fraction of NUMERICAL's own soft explore budget elapsed) lets the
+# hold release once search has plausibly covered enough ground, at `DISAMBIGUATOR_RELEASE_FRAC`.
+
+
+def test_disambiguator_absent_class_releases_at_coverage_threshold():
+    # Class genuinely absent (vase never appears): once explore_progress crosses
+    # DISAMBIGUATOR_RELEASE_FRAC, the hold releases and the widened count is reported
+    # stable -- instead of withholding all the way to budget exhaustion.
+    sc = _two_tables_two_chairs_each(with_vase=False)
+    head = NumericalHead(
+        plan=_chairs_near_table_with_vase_plan(),
+        explore_progress=lambda: DISAMBIGUATOR_RELEASE_FRAC,
+    )
+    _advance(head, sc, STABLE_TICKS * 5)
+    assert head.count == 4  # still the widened, unverified census
+    assert head.signal().stable is True
+    assert head.signal().winner_margin >= 0.25
+
+
+def test_disambiguator_absent_class_still_holds_below_release_threshold():
+    # Same absent-class scene, but explore_progress reports LOW coverage (search has
+    # barely started) -- the hold must still apply exactly as it did before #109: no
+    # early release on thin evidence.
+    sc = _two_tables_two_chairs_each(with_vase=False)
+    head = NumericalHead(
+        plan=_chairs_near_table_with_vase_plan(),
+        explore_progress=lambda: DISAMBIGUATOR_RELEASE_FRAC - 0.5,
+    )
+    _advance(head, sc, STABLE_TICKS * 5)
+    assert head.count == 4
+    assert head.signal().stable is False
+    assert head.signal().winner_margin == 0.0
+
+
+def test_disambiguator_present_but_unseen_still_holds_before_release_ticks():
+    # The class hasn't been detected yet (early in the run) -- even with a progress probe
+    # wired, the gate must still hold UNTIL explore_progress actually crosses the release
+    # threshold. Release is a function of elapsed search, not an immediate bypass the
+    # moment a probe exists (mirrors #93's original "still not yet seen, keep waiting").
+    sc_no_vase = _two_tables_two_chairs_each(with_vase=False)
+    calls = {"n": 0}
+
+    def rising_progress() -> float:
+        # Below threshold for the early ticks, at/above it only afterward.
+        calls["n"] += 1
+        return 0.0 if calls["n"] <= STABLE_TICKS else DISAMBIGUATOR_RELEASE_FRAC
+
+    head = NumericalHead(
+        plan=_chairs_near_table_with_vase_plan(), explore_progress=rising_progress
+    )
+    _advance(head, sc_no_vase, STABLE_TICKS)  # progress still below threshold throughout
+    assert head.signal().stable is False
+
+
+def test_disambiguator_release_does_not_override_a_correctly_narrowed_count():
+    # Once the class IS actually found mid-run, the count narrows for real (2, not 4) --
+    # a high explore_progress must not somehow re-widen or otherwise disturb a properly
+    # resolved disambiguator; stability fires on the correct narrowed count as always.
+    sc_no_vase = _two_tables_two_chairs_each(with_vase=False)
+    sc_with_vase = _two_tables_two_chairs_each(with_vase=True)
+    head = NumericalHead(
+        plan=_chairs_near_table_with_vase_plan(),
+        explore_progress=lambda: DISAMBIGUATOR_RELEASE_FRAC,
+    )
+    _advance(head, sc_no_vase, STABLE_TICKS)
+    assert head.signal().stable is True  # released on the widened count while absent
     _advance(head, sc_with_vase, STABLE_TICKS)
     assert head.count == 2
     assert head.signal().stable is True
