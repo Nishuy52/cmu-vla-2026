@@ -167,13 +167,20 @@ def bridged_agree(question_noun: str, annotation_class: str) -> bool:
 #: promoting the FULL overflow-tail set measurably evicts high-frequency nouns
 #: (``sofa``, ``stool``) that are worse to lose than the narrow gain — verified by
 #: re-running ``build_gdino_prompt`` before/after over the live standing vocab (see
-#: the #91 task notes). This narrower set costs at most one low-value collateral
-#: eviction (``sushi``, a single-question anchor) to protect classes that: (a) are NOT
-#: in the measured overflow tail (so a real tokenizer already keeps them — this only
-#: matters for a heuristic-fallback/degraded deploy), and (b) still read zero live
-#: despite that, so guaranteeing them the front of whatever tier they land in is the
-#: only thing left available from ``vocab.py``/``detector.py`` alone — the zero-hit
-#: cause beyond this is not provable offline (see the #91 task report).
+#: the #91 task notes). This narrower set was ORIGINALLY believed to cost at most one
+#: low-value collateral eviction (``sushi``); a later independent re-measurement of
+#: this exact set against the live 116-noun standing vocab under the heuristic
+#: estimator found that claim wrong — a plain whole-list reorder of this set instead
+#: evicted ``microwave``, ``mirror`` and ``monitor`` (none of them in the measured
+#: overflow tail, and ``monitor``/``mirror`` are high-frequency/anchor classes, a much
+#: worse trade). The fix is in :func:`core.perception.detector._eviction_safe_vocab_order`
+#: (used by :func:`core.perception.detector.refresh_prompt` instead of applying this
+#: reorder to the whole vocab list directly): it reorders only the tail that ALREADY
+#: doesn't survive the token-budget cut, so a survivor can never be displaced — see
+#: that function's docstring for the measured budget arithmetic (under the heuristic
+#: estimator, current vocab, neither disambiguator noun actually fits the leftover
+#: headroom, so today this set protects the classes below without rescuing anything
+#: OR evicting anything else; it takes effect the moment either changes).
 #:
 #: This protects the *standing-vocab* tier only: scene-index breadth for a noun that
 #: ISN'T the live question (a different question in the same scene, or the

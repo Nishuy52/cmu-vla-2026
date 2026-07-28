@@ -424,16 +424,43 @@ def test_refresh_prompt_disambiguator_nouns_reach_the_short_caption():
 
 
 def test_refresh_prompt_reprioritizes_vocab_tier_disambiguators_to_front():
-    # Issue #91: within the vocab tier itself (i.e. when a class is NOT the current
-    # question's own noun), prioritize_vocab_nouns pulls DISAMBIGUATOR_PRIORITY_NOUNS
-    # ahead of the plain alphabetical standing-vocab order before the budget cut.
+    # Issue #91 follow-up: reprioritisation now only reorders the TAIL that already
+    # doesn't survive the token-budget cut (core.perception.detector.
+    # _eviction_safe_vocab_order), instead of the whole vocab list, so it can never
+    # evict a survivor (see
+    # test_refresh_prompt_disambiguator_priority_never_evicts_any_prior_survivor).
+    # Disambiguator nouns that never needed rescuing (already outside the dropped
+    # tail) must still reach the caption unconditionally, same as before.
     from core.perception.vocab import DISAMBIGUATOR_PRIORITY_NOUNS
 
+    vocab = _standing_vocab_nouns()
+    dropped_before: list[str] = []
+    build_gdino_prompt((), vocab, dropped_out=dropped_before)
+    dropped_before_set = set(dropped_before)
+
     det = FakeDetector()
-    refresh_prompt(det, (), _standing_vocab_nouns())
+    refresh_prompt(det, (), vocab)
     kept_phrases = _kept_phrases(det.prompt)
+
     for noun in DISAMBIGUATOR_PRIORITY_NOUNS:
-        assert noun in kept_phrases, (noun, "evicted from the vocab-only full caption")
+        if noun in vocab and noun not in dropped_before_set:
+            assert noun in kept_phrases, (noun, "evicted from the vocab-only full caption")
+
+    # The overflow-tail disambiguators (already in the dropped tail before any
+    # reorder) DO get pulled to the very front of that tail -- the reorder still
+    # happens -- but under the current heuristic-estimator headroom (3 tokens; the
+    # cheapest of them, "wall decal", costs 4 to add) neither is actually cheap
+    # enough to be rescued into the caption. That is the honest, reported
+    # budget-arithmetic trade-off documented on
+    # core.perception.detector._eviction_safe_vocab_order: eviction-safety costs the
+    # #91 promotion its practical effect against THIS estimator/vocab pairing rather
+    # than costing high-value nouns (microwave/mirror/monitor) their spot.
+    overflow_disambiguators = [n for n in DISAMBIGUATOR_PRIORITY_NOUNS if n in dropped_before_set]
+    assert overflow_disambiguators, "fixture drift: expected >=1 disambiguator noun in the dropped tail"
+    for noun in overflow_disambiguators:
+        assert noun not in kept_phrases, (
+            noun, "unexpectedly rescued into the caption -- update this test's comment"
+        )
 
 
 def test_refresh_prompt_disambiguator_priority_does_not_evict_high_value_standing_nouns():
@@ -463,6 +490,39 @@ def test_refresh_prompt_disambiguator_priority_does_not_evict_high_value_standin
             assert noun in kept_after, (
                 noun, "was in the full caption before reprioritisation, evicted after"
             )
+
+
+def test_refresh_prompt_disambiguator_priority_never_evicts_any_prior_survivor():
+    # Issue #91 correctness follow-up: an independent re-measurement found the
+    # committed whole-list reorder (core.perception.vocab.prioritize_vocab_nouns
+    # applied directly to the full standing vocab) evicts THREE nouns under the
+    # heuristic estimator that were not evicted before -- microwave, mirror, monitor
+    # -- none named in the #91 overflow-tail evidence, and monitor/mirror are
+    # high-frequency/anchor classes (issue #94, #132) worse to lose than the
+    # disambiguator gain. This pins the general invariant (not just those three
+    # names): reprioritisation must NEVER evict a noun that survived the SAME
+    # token-budget cut before it was reordered. Must FAIL against the direct
+    # ``prioritize_vocab_nouns(vocab_nouns)`` reorder and pass once refresh_prompt
+    # instead reorders only the already-dropped tail
+    # (core.perception.detector._eviction_safe_vocab_order).
+    vocab = _standing_vocab_nouns()
+
+    dropped_before: list[str] = []
+    build_gdino_prompt((), vocab, dropped_out=dropped_before)
+    survived_before = {n for n in vocab if n not in set(dropped_before)}
+
+    det = FakeDetector()
+    refresh_prompt(det, (), vocab)
+    kept_after = set(det.prompt.removesuffix(" .").split(" . "))
+
+    newly_evicted = {n for n in survived_before if n not in kept_after}
+    assert not newly_evicted, (
+        "reprioritisation evicted noun(s) that survived the budget cut before it: "
+        f"{sorted(newly_evicted)}"
+    )
+    # sanity: the three nouns the independent re-measurement actually named must be
+    # among the confirmed survivors (i.e. the fixture is meaningful, not vacuous).
+    assert {"microwave", "mirror", "monitor"} <= survived_before
 
 
 def test_refresh_prompt_full_only_nouns_still_outrank_reprioritised_vocab_tier():
