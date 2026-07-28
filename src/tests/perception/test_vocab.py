@@ -15,6 +15,7 @@ from core.perception.vocab import (
     COLOUR_CROSS_HUE,
     COLOUR_NEUTRAL,
     COLOUR_SCHEME,
+    DISAMBIGUATOR_PRIORITY_NOUNS,
     STRUCTURAL_EXACT,
     STRUCTURAL_HEADS,
     bridge_synonyms,
@@ -23,6 +24,7 @@ from core.perception.vocab import (
     colour_synonyms,
     head_noun,
     is_structural_class,
+    prioritize_vocab_nouns,
 )
 
 
@@ -344,3 +346,52 @@ def test_structural_heads_and_exact_sets_are_normalised_singular_lowercase():
         assert not h.endswith("s")
     for e in STRUCTURAL_EXACT:
         assert e == e.lower()
+
+# ------------------------------------------- disambiguator vocab priority (issue #91)
+
+
+def test_prioritize_vocab_nouns_is_pure_reorder_never_a_filter():
+    # Every noun handed in must still be present afterward, exactly once -- this is a
+    # reorder, never a filter (see the function's docstring guarantee).
+    nouns = ["ball", "candle holder", "chair", "jar", "table", "pyramid candle holder"]
+    result = prioritize_vocab_nouns(nouns)
+    assert sorted(result) == sorted(nouns)
+    assert len(result) == len(nouns)
+
+
+def test_prioritize_vocab_nouns_pulls_priority_set_to_front():
+    nouns = ["ball", "candle holder", "chair", "jar", "table", "pyramid candle holder"]
+    result = prioritize_vocab_nouns(nouns)
+    priority_prefix_len = len(DISAMBIGUATOR_PRIORITY_NOUNS)
+    front = set(result[: sum(1 for n in nouns if n in DISAMBIGUATOR_PRIORITY_NOUNS)])
+    assert front == {"candle holder", "jar", "pyramid candle holder"}
+
+
+def test_prioritize_vocab_nouns_preserves_relative_order_within_each_tier():
+    # Both the priority tier and the "rest" tier keep the caller's given order among
+    # their own members (stable partition, not a re-sort).
+    nouns = ["pyramid candle holder", "ball", "jar", "candle holder", "chair", "wall decal"]
+    result = prioritize_vocab_nouns(nouns)
+    priority_seen = [n for n in result if n in DISAMBIGUATOR_PRIORITY_NOUNS]
+    assert priority_seen == ["pyramid candle holder", "jar", "candle holder", "wall decal"]
+    rest_seen = [n for n in result if n not in DISAMBIGUATOR_PRIORITY_NOUNS]
+    assert rest_seen == ["ball", "chair"]
+
+
+def test_prioritize_vocab_nouns_never_invents_a_noun_not_given():
+    # A priority noun absent from the input must not appear in the output.
+    nouns = ["ball", "chair"]
+    result = prioritize_vocab_nouns(nouns)
+    assert "jar" not in result
+    assert set(result) == {"ball", "chair"}
+
+
+def test_prioritize_vocab_nouns_empty_input():
+    assert prioritize_vocab_nouns([]) == []
+
+
+def test_prioritize_vocab_nouns_all_priority_or_none():
+    only_priority = list(DISAMBIGUATOR_PRIORITY_NOUNS)
+    assert prioritize_vocab_nouns(only_priority) == only_priority
+    no_priority = ["ball", "chair", "table"]
+    assert prioritize_vocab_nouns(no_priority) == no_priority

@@ -30,6 +30,7 @@ from core.perception.tiling import (
     tile_pixel_to_camera_ray,
     wrap_pi,
 )
+from core.perception.vocab import prioritize_vocab_nouns
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -801,6 +802,78 @@ def build_gdino_prompt(
     return render(kept)
 
 
+def _eviction_safe_vocab_order(
+    question_nouns: Sequence[str],
+    full_only_nouns: Sequence[str],
+    vocab_nouns: Sequence[str],
+    *,
+    max_tokens: int = DEFAULT_GDINO_MAX_TEXT_TOKENS,
+    token_estimator: Callable[[str], int] = _default_token_estimate,
+) -> list[str]:
+    """Reorder ``vocab_nouns`` so disambiguator promotion can never evict a survivor.
+
+    Issue #91 follow-up: the original fix (:func:`core.perception.vocab.
+    prioritize_vocab_nouns` applied to the WHOLE standing-vocab list) reordered every
+    noun, not just the already-dropped tail -- so pulling :data:`core.perception.vocab.
+    DISAMBIGUATOR_PRIORITY_NOUNS` to the front could, and measurably did, push nouns
+    that used to survive the token-budget cut (:func:`build_gdino_prompt`) past it
+    instead. Verified against the live 116-noun standing vocab under the heuristic
+    estimator (the deployed fallback when ``transformers`` is unavailable): the plain
+    whole-list reorder evicts ``microwave``, ``mirror`` and ``monitor`` -- none of
+    which are in the #91 evidence's overflow tail -- to make room, which is a worse
+    trade than the one #91 was fixing (``monitor`` alone is issue #94's single
+    highest-frequency detected class; ``mirror`` is an arabic_room terminal-leg anchor).
+
+    This fixes that by computing the SAME budget cut :func:`build_gdino_prompt` would
+    apply to the unreordered ``vocab_nouns`` first (a dry run), splitting the result
+    into the nouns that already survive it and the tail that doesn't, and reordering
+    ONLY the tail (:func:`core.perception.vocab.prioritize_vocab_nouns`) before
+    re-appending it after the untouched survivors. Every survivor keeps its exact
+    pre-reorder cumulative token position, so the real budget cut (run again on this
+    returned order, downstream in :func:`refresh_prompt`) reproduces the identical
+    survivor set -- reordering the tail can rescue a disambiguator noun into the
+    leftover headroom past the survivors, but it can never cost a survivor its spot,
+    because nothing about the survivors' order or count changed.
+
+    Reserving budget rather than reordering the survivors was chosen over an explicit
+    hand-maintained "protected noun" allowlist (the other option on the table):
+    protecting *every* current survivor is strictly safer than protecting a
+    hand-picked subset (a future standing-vocab edit can't quietly reintroduce this
+    same bug for some OTHER noun the allowlist didn't anticipate), and it needs no
+    maintenance as the standing vocab or budget changes -- the dry run recomputes the
+    survivor/tail split from whatever the caller passes, every time.
+
+    Measured budget arithmetic (heuristic estimator, current 116-noun standing vocab,
+    no question/full-only nouns latched): the unreordered vocab already sits at 253
+    heuristic tokens against the 256 budget -- 3 tokens of headroom. The cheapest
+    dropped disambiguator noun (``wall decal``) costs 4 incremental tokens once
+    rendered into the caption (its own wordpieces plus the ``" . "`` separator); the
+    other overflowing one (``pyramid candle holder``) costs 7. Neither fits in 3
+    tokens of headroom, so under this estimator NEITHER is actually rescued by this
+    fix -- the tail reorder still happens (harmless), but the dry-run survivor
+    prefix consumes the entire budget before either gets a turn. This is a real,
+    reported finding, not a bug in this function: the #91 promotion's gain was
+    entirely paid for by the microwave/mirror/monitor eviction it is this function's
+    job to prevent, and there is no free lunch of spare heuristic-estimator budget to
+    grant it instead. The real ``bert-base-uncased`` tokenizer (the deployed
+    environment's actual path once ``transformers`` is installed) counts differently
+    and may have different headroom; this fix does not assume either way; it is safe
+    under whichever estimator ``build_gdino_prompt`` is actually called with.
+    """
+    baseline_dropped: list[str] = []
+    build_gdino_prompt(
+        question_nouns,
+        list(full_only_nouns) + list(vocab_nouns),
+        max_tokens=max_tokens,
+        token_estimator=token_estimator,
+        dropped_out=baseline_dropped,
+    )
+    dropped_set = set(baseline_dropped)
+    survived = [n for n in vocab_nouns if n not in dropped_set]
+    tail = [n for n in vocab_nouns if n in dropped_set]
+    return survived + prioritize_vocab_nouns(tail)
+
+
 def refresh_prompt(
     detector: object | None,
     question_nouns: Sequence[str],
@@ -854,6 +927,28 @@ def refresh_prompt(
     — that function's own de-dup (question nouns win ties) and budget-in-order behaviour
     do the rest; nothing about :func:`build_gdino_prompt` itself needed to change.
 
+    Issue #91: within the ``vocab_nouns`` tier itself, :func:`_eviction_safe_vocab_order`
+    reorders it before it reaches :func:`build_gdino_prompt` — the standing vocab is a
+    plain alphabetical list (``core.heads.factory._STANDING_VOCAB_NOUNS``), so a
+    token-budget cut always amputates the SAME alphabetic span regardless of which
+    scene or question is live. A narrow, evidence-named set of relational-disambiguator
+    classes (:data:`core.perception.vocab.DISAMBIGUATOR_PRIORITY_NOUNS` — see that
+    constant's docstring for why it is narrow and which classes it deliberately leaves
+    out) is pulled toward the front of whatever's LEFT of the vocab tier after the
+    token-budget cut it would otherwise take, so a degraded budget (e.g. the real
+    tokenizer unavailable, falling back to :func:`_heuristic_token_estimate`'s far more
+    pessimistic count) has a chance to cut a different span without ever cutting a span
+    that used to survive. :func:`_eviction_safe_vocab_order` is a pure reorder — every
+    vocab noun the caller passed is still eligible for the caption, exactly once;
+    nothing is filtered or invented — but unlike a whole-list reorder (the original,
+    reverted #91 approach — see that function's docstring for the measured regression),
+    it never moves a noun that already survives the budget cut out of its surviving
+    position, so promoting a disambiguator noun can only ever spend LEFTOVER headroom,
+    never a survivor's own spot. Nouns that are the CURRENT question's own target/anchor
+    already reach ``question_nouns`` (never dropped) via
+    :func:`core.heads.explore_step._plan_nouns`; this only helps the standing-vocab
+    tier, i.e. scene-index breadth for nouns the live question does not itself mention.
+
     Thread-safety: this performs exactly one attribute assignment (``detector.prompt =
     ...``), which is atomic under the GIL — safe to call from whichever thread latches the
     plan (the adapter's 5 Hz tick timer) even though a different thread's subscription
@@ -865,7 +960,11 @@ def refresh_prompt(
     """
     if detector is None or not hasattr(detector, "prompt"):
         return None
-    prompt = build_gdino_prompt(question_nouns, list(full_only_nouns) + list(vocab_nouns))
+    prompt = build_gdino_prompt(
+        question_nouns,
+        list(full_only_nouns)
+        + _eviction_safe_vocab_order(question_nouns, full_only_nouns, vocab_nouns),
+    )
     detector.prompt = prompt
     if hasattr(detector, "question_prompt"):
         detector.question_prompt = build_gdino_prompt(question_nouns, ())

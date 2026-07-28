@@ -29,6 +29,7 @@ than none.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Sequence
 
 from core.parsing.vocab import NOUN_ALIASES
 
@@ -148,6 +149,72 @@ def bridged_agree(question_noun: str, annotation_class: str) -> bool:
 
 
 # -------------------------------------------------------------------- head noun
+
+#: Issue #91: nouns confirmed to serve as **relational disambiguators** in the training
+#: corpus (75 questions, ``upstream/CMU-VLN-Challenge-2026/questions/questions.json``) —
+#: the anchor a clause resolves *against* (``"...closest to the pyramid candle holder"``,
+#: ``"...near the jar"``, ``"...closest to the map wall decal"``) — that the #91 live-run
+#: evidence names as reading ZERO hits across every scene, every run, regardless of
+#: token budget (unlike the #105 alphabetic-overflow tail, e.g. ``tv``/``window``, which
+#: is a *different*, already-covered failure mode — see below).
+#:
+#: Deliberately narrow, and deliberately excludes ``tv``/``window``/``wall lamp`` and the
+#: rest of the #105-measured real-tokenizer overflow tail, even though they are also
+#: named in the #91 evidence, for two reasons: (1) they are already protected when they
+#: are the CURRENT question's own noun — :func:`core.heads.explore_step._plan_nouns`
+#: places them in the question-noun tier, never dropped (locked in by
+#: ``test_build_gdino_prompt_question_anchor_nouns_survive_full_vocab_truncation``); (2)
+#: promoting the FULL overflow-tail set measurably evicts high-frequency nouns
+#: (``sofa``, ``stool``) that are worse to lose than the narrow gain — verified by
+#: re-running ``build_gdino_prompt`` before/after over the live standing vocab (see
+#: the #91 task notes). This narrower set was ORIGINALLY believed to cost at most one
+#: low-value collateral eviction (``sushi``); a later independent re-measurement of
+#: this exact set against the live 116-noun standing vocab under the heuristic
+#: estimator found that claim wrong — a plain whole-list reorder of this set instead
+#: evicted ``microwave``, ``mirror`` and ``monitor`` (none of them in the measured
+#: overflow tail, and ``monitor``/``mirror`` are high-frequency/anchor classes, a much
+#: worse trade). The fix is in :func:`core.perception.detector._eviction_safe_vocab_order`
+#: (used by :func:`core.perception.detector.refresh_prompt` instead of applying this
+#: reorder to the whole vocab list directly): it reorders only the tail that ALREADY
+#: doesn't survive the token-budget cut, so a survivor can never be displaced — see
+#: that function's docstring for the measured budget arithmetic (under the heuristic
+#: estimator, current vocab, neither disambiguator noun actually fits the leftover
+#: headroom, so today this set protects the classes below without rescuing anything
+#: OR evicting anything else; it takes effect the moment either changes).
+#:
+#: This protects the *standing-vocab* tier only: scene-index breadth for a noun that
+#: ISN'T the live question (a different question in the same scene, or the
+#: :func:`core.perception.detector._heuristic_token_estimate` fallback, which — measured
+#: — drops far more of the standing vocab than the real tokenizer does).
+DISAMBIGUATOR_PRIORITY_NOUNS: tuple[str, ...] = (
+    "candle holder", "pyramid candle holder", "jar", "map wall decal", "wall decal",
+)
+
+
+def prioritize_vocab_nouns(vocab_nouns: Sequence[str]) -> list[str]:
+    """Stable-partition ``vocab_nouns``: :data:`DISAMBIGUATOR_PRIORITY_NOUNS` members
+    first (in their given relative order), everything else after (also in its given
+    relative order).
+
+    Pure reordering, never a filter — every noun ``vocab_nouns`` contains is still
+    present afterward, exactly once, so this never changes WHICH nouns are eligible for
+    the caption, only which end of a token-budget cut (:func:`core.perception.detector.
+    build_gdino_prompt`) they sit closest to. Nouns not present in ``vocab_nouns`` are
+    never invented into the output (this only reorders what it is given).
+
+    Membership is checked case-sensitively against ``DISAMBIGUATOR_PRIORITY_NOUNS``'s own
+    canonical (lowercase) spellings; callers already pass canonicalised nouns (the
+    standing vocab and plan nouns are both lowercase), so this deliberately does not
+    re-normalise — the same discipline as :func:`bridge_synonyms`, which normalises
+    explicitly rather than have every caller guess whether it already has.
+    """
+    priority_set = set(DISAMBIGUATOR_PRIORITY_NOUNS)
+    priority: list[str] = []
+    rest: list[str] = []
+    for noun in vocab_nouns:
+        (priority if noun in priority_set else rest).append(noun)
+    return priority + rest
+
 
 def head_noun(noun: str) -> str:
     """Last whitespace-delimited token of a (normalised) multi-word noun.
@@ -333,6 +400,8 @@ __all__ = [
     "VOCAB_BRIDGE",
     "bridge_synonyms",
     "bridged_agree",
+    "DISAMBIGUATOR_PRIORITY_NOUNS",
+    "prioritize_vocab_nouns",
     "head_noun",
     "COLOUR_SCHEME",
     "COLOUR_BRIDGE",
