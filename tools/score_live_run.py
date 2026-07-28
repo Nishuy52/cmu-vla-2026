@@ -550,6 +550,7 @@ def score_run(
     questions_index: dict[str, dict[str, list[str]]],
     answers: dict | None,
     offline_index: dict[tuple[str, str, str], dict],
+    offline_results_path: Path,
 ) -> dict:
     qtype = QDIR_TO_QTYPE[qdir]
     bag_dir = run_dir / "bag"
@@ -571,6 +572,7 @@ def score_run(
         row["headline_live"] = None
         row["note"] = "no question text found (bag empty and no run.log)"
         row["offline"] = None
+        row["offline_baseline_source"] = None
         row["headline_offline"] = None
         row["delta"] = None
         return row
@@ -583,6 +585,7 @@ def score_run(
         row["headline_live"] = None
         row["note"] = f"GT scene folder not found under {groundtruth_root}"
         row["offline"] = None
+        row["offline_baseline_source"] = None
         row["headline_offline"] = None
         row["delta"] = None
         return row
@@ -611,6 +614,20 @@ def score_run(
 
     offline_row = offline_index.get((scene, qtype, text))
     row["offline"] = offline_row
+    # (#139) `offline` is NOT recomputed from this run's own bag — it is looked
+    # up, by (scene, qtype, question) alone, from a FIXED baseline file that
+    # never changes between invocations. Two live captures of the identical
+    # question will therefore always show the identical `offline` value, no
+    # matter how differently the live run itself was driven; that is expected
+    # (the offline battery is a separate simulated-follower pipeline, not a
+    # replay of this bag) but reads as authoritative unless its provenance is
+    # explicit, so every row that carries an offline value also records
+    # exactly which fixed file it came from.
+    row["offline_baseline_source"] = (
+        str(offline_results_path.relative_to(_REPO))
+        if offline_row is not None and offline_results_path.is_relative_to(_REPO)
+        else (str(offline_results_path) if offline_row is not None else None)
+    )
     headline_offline = _offline_headline(qtype, offline_row)
     row["headline_offline"] = headline_offline
     if row["headline_live"] is not None and headline_offline is not None:
@@ -632,10 +649,18 @@ def _fmt(v: Any) -> str:
     return str(v)
 
 
-def write_report(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
+def write_report(
+    rows: list[dict], out_dir: Path, *, offline_results_path: Path
+) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / "scores.md"
     json_path = out_dir / "scores.json"
+
+    offline_source_str = (
+        str(offline_results_path.relative_to(_REPO))
+        if offline_results_path.is_relative_to(_REPO)
+        else str(offline_results_path)
+    )
 
     lines = [
         f"# Live baseline scores ({date.today().isoformat()})",
@@ -645,6 +670,13 @@ def write_report(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
         "box, instruction_following = rubric-proxy score (same scorers as the offline "
         "`gt_battery`; see module docstring). `delta` = live - offline on the same "
         "headline metric for the same question.",
+        "",
+        f"**Offline column provenance (#139):** `Offline`/`offline` is NOT recomputed "
+        f"from each run's own bag — it is a fixed baseline snapshot read from "
+        f"`{offline_source_str}` and looked up by (scene, qtype, question) only. It is "
+        "identical across different live captures of the same question by design "
+        "(the offline battery is a separate simulated-follower pipeline); it is not "
+        "evidence that a change to the live driving/scoring had no effect.",
         "",
         "| Scene | Type | Live | Offline | Delta | Capture issues | Note | Question |",
         "|---|---|---|---|---|---|---|---|",
@@ -671,6 +703,7 @@ def write_report(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
     payload = {
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "n_runs": len(rows),
+        "offline_baseline_source": offline_source_str,
         "rows": rows,
     }
     json_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
@@ -698,9 +731,20 @@ def _merge_key(r: dict) -> tuple[str, str, str]:
     that row, while every other already-scored row is left untouched.
     Every branch returns a plain ``str`` tuple so ``sorted(merged)`` below
     always compares like types.
+
+    The question component is run through :func:`_squash` (#106) — the
+    same whitespace/case-insensitive normalisation ``_match_question``
+    already applies when matching a bag's captured question text against
+    ``questions.json``. Without it, the merge key was STRICTER than the
+    matcher that produced the value: two captures of the identical
+    question differing only in case or incidental whitespace (a launcher
+    change, a re-encode, a different adapter build) hashed to two
+    different keys and silently duplicated the row instead of replacing
+    it on re-score.
     """
-    question = r.get("question") or f"<no-question:{r.get('run_dir', '')}>"
-    return (r["scene"], r["qdir"], question)
+    question = r.get("question")
+    key_question = _squash(question) if question else f"<no-question:{r.get('run_dir', '')}>"
+    return (r["scene"], r["qdir"], key_question)
 
 
 def _merge_with_existing(out_dir: Path, new_rows: list[dict]) -> list[dict]:
@@ -781,7 +825,8 @@ def main(argv: list[str] | None = None) -> int:
     questions_dir = Path(args.questions_dir)
     questions_index = _load_questions_index(Path(args.questions))
     answers = GB._load_answers(args.answers)
-    offline_index = _load_offline_index(Path(args.offline_results))
+    offline_results_path = Path(args.offline_results)
+    offline_index = _load_offline_index(offline_results_path)
 
     rows: list[dict] = []
     for scene, qdir, run_dir in runs:
@@ -789,6 +834,7 @@ def main(argv: list[str] | None = None) -> int:
             scene, qdir, run_dir,
             groundtruth_root=groundtruth_root, questions_dir=questions_dir,
             questions_index=questions_index, answers=answers, offline_index=offline_index,
+            offline_results_path=offline_results_path,
         )
         rows.append(row)
         print(
@@ -798,7 +844,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     rows = _merge_with_existing(out_dir, rows)
-    md_path, json_path = write_report(rows, out_dir)
+    md_path, json_path = write_report(rows, out_dir, offline_results_path=offline_results_path)
     print(f"wrote {md_path}")
     print(f"wrote {json_path}")
     return 0
