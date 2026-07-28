@@ -2083,3 +2083,113 @@ What remains unproven without a live run: whether GroundingDINO itself actually 
 own recall on rare/compound classes (and the caption-dilution effect #42 already
 documented for crowded captions) can only be confirmed against a live run's
 `raw_detections.jsonl`.
+
+## 2026-07-28 — issue sweep: 42 open issues triaged, verified, fixed, closed
+
+**User directive mid-session: correctness over moving the measurement.** Pure
+measurement problems get closed cheaply, not studied; effort goes to genuine
+correctness defects. Saved to memory as user-taught rule 11.
+
+**Outcome: 32 of the 42 open issues resolved. 16 open at close, 6 of which are
+new issues filed from findings made during the sweep.** Full gate on the final
+tree: `pytest -m ""` = **1409 passed, 17 skipped, 0 failed**. main is 39 commits
+ahead of 5d355ea.
+
+**Method.** Every open issue was dumped to JSON (body + all comments) and triaged
+by three read-only passes against current `main`, bucketed CLOSE-NOW /
+FIX-OFFLINE / NEEDS-LIVE / INVALID. Nothing was closed on triage evidence alone —
+a separate read-only close gate re-checked each cited file:line and drafted the
+closing comment. Nothing merged without a fresh-context merge gate.
+
+**The gates paid for themselves repeatedly.** Of 5 issues triage marked
+CLOSE-NOW, the close gate returned 4 KEEP-OPEN. Merge gates caught: #127's fix
+leaving the original defect fully live in `cluster_verify_run.sbatch` (the
+more-used single-question path); #121 confidently emitting `aqua`/`pink` for
+pale/beige objects, a case its author never found; #132's widened test bounds
+that no longer excluded the buggy code (proved by reverting the fix and watching
+them still pass); a #135 test count self-reported as 142 that was actually 352;
+and a #116 count reported as 332 that was 330. One implementer correctly pushed
+back on a gate finding — the #127 stale-sentinel collision was not reproducible,
+since `SLOT` embeds the loop index.
+
+**Merged to main:** #91 (vocab reorder made eviction-safe), #106 + #139 (scorer
+merge-key and offline provenance), #109 (numerical disambiguator release), #110
+(livingroom_1 TV label correction), #112 (associate() order-independence), #116
+(tie-break determinism), #121 (colour with out-of-gamut abstention), #124 (frame
+identity), #127 (endpoint-missing runs marked degraded and excluded from
+scoring), #129 (structural classes leave the census, stay anchors), #131 + #134
+(same-label NMS, both detector paths), #132 (clearance accounting), #135 + #136
+(dangling seam constant).
+
+**#124 is the headline.** `_fit_scene_if_frame` accepted any rigid fit whose
+residual cleared 1.0 m — and nonsense fits did (arabic_room theta -154.1 deg
+|t| 4.97 m; home_building_1 +102.0 deg |t| 10.66 m), because a residual gate
+cannot detect a wrong-but-self-consistent fit. Under those frames 0% of driven
+odom lands on the GT floor; under identity, 100%. Identity now resolves first by
+id-matching `object_list.txt` (deltas 0.0029-0.0453 m across all 15 scenes).
+Independently reproduced: the 4 IF questions in arabic_room and home_building_1
+move 0.5/0/0/0 -> 1/1/1/1, so the 30-question offline IF mean moves
+**0.744 -> ~0.861**. The committed `reports/gt_battery_*` artifacts still carry
+pre-fix numbers; a full 15-scene re-run is needed before 0.861 is quoted as
+measured rather than derived.
+
+**Closed as refuted or negative results, not merged:** #128 (widening the
+association gate regresses recall 1.8pp and raises duplication — the gates act in
+series and the extent veto absorbs what the distance gate admits), #137
+(point-overlap merging is inert; same-class duplicates do not share points), #138
+(every box-geometry correction regressed, and the earlier gated variant was
+deleted rather than superseded by the later commit), #99 (inert by arithmetic:
+`FORCED_ASSEMBLY_S/QUESTION_BUDGET_S = 510/600 = 0.85` exactly equals
+`PROVISIONAL_COMMIT_FRAC`, and it gated on `tie_break_group_size`, which #141
+established is not a measure of ambiguity).
+
+**An emergent defect no single lane could have found.** Merging #110 broke
+`test_instance_id_invariance`: making livingroom_1's TV resolvable let the BETWEEN
+clause restrict 4 vases to 2, after which the battery picked a different vase
+under id renumbering — the #113 defect returning. My first diagnosis (a #116
+quantised-position collision) was wrong: the survivors are not tied, their BETWEEN
+margins are 0.753 vs 0.471. The real cause was one layer deeper, in shared
+geometry — `_tier_priority_order`'s bare-noun exemption, meant only to skip
+tier-grouping bias (#21/#51), returned pure `instance_id` order and discarded the
+`hard_clauses` score ordering (#71/#73) as well. #110 was reverted to keep main
+green, the ordering defect fixed, and the two re-landed together. #116's
+"theoretical, never observed" degenerate case is no longer theoretical.
+
+**New issues filed from findings:** #143 (large-anchor standoff arithmetic, with a
+follow-up establishing the clamp measures from the anchor centroid while the
+rubric measures from the leg's goal point, so the limit is likely self-inflicted),
+#144 (GT labels contradicting their own geometry — 6 candidates beyond #110),
+#145 (GDINO vocab saturated at 253/256 tokens; 47 of 116 nouns never reach the
+detector, so no disambiguator fits without evicting a survivor), #146 (`cvsweep`
+and `gt_leg_ceiling` bypass #124's fix entirely), #147 (colour abstention's 0.5
+fraction still admits a confident wrong colour at a 49/51 split), #148
+(`_standoff_push`'s clamp re-validation is ULP-fragile and silently falls back to
+the unpushed goal, losing ~0.3 m of clearance).
+
+**Kept open against a close recommendation, reasons posted:** #77, #82 (the cited
+evidence proves the API tier works; this issue is about the local tier, never
+re-tested standalone), #86 (a recovery ladder is not a fix and the wedge is still
+recurring), #100, #103 (the evidence refutes an incidental claim, not the filed
+defect), #91 (prompt half fixed, detector-recall half untouched), #104 (unblocked
+by #124, and the frame suspicion is refuted for office_1 whose identity delta is
+0.0029 m — what remains is genuine mis-localisation).
+
+**Process failures this session:**
+- My `pkill` pattern never matched. `-m ""` renders in `ps` as `pytest -m  -q`
+  with two spaces; the single-space pattern killed nothing, so 25 full-tier runs
+  I twice reported as killed kept running and held the box at load 36. Agents
+  were told their runs were dead when they were not.
+- I held the push for a full-tier gate that was worthless: it started before four
+  subsequent merges and the working tree changed underneath it mid-run. Caught
+  before pushing, but only just. The gate above was re-run against the final tree.
+- I closed #121 in the same command batch as its merge, before knowing the merge
+  had succeeded. It hit a conflict; the close was premature.
+- Ten agents ended turns waiting on their own background test runs and had to be
+  taken over one at a time. Root cause: briefs that permitted a full-tier run on a
+  contended host. Later briefs mandated narrow foreground subsets.
+
+**Next step:** re-run the full 15-scene battery so #124's 0.861 is measured rather
+than derived, and update the committed `reports/gt_battery_*` artifacts. Then
+#146 (the two tools still using the spurious frame) before any figure from them is
+trusted. A live run remains the missing evidence for #77, #82, #85, #103, #115,
+#118, #132 and #143.
