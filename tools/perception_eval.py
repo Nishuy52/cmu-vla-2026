@@ -22,6 +22,12 @@ Metrics (per scene, plus a pooled row across every scene passed in one invocatio
    scene-wide extremum on that axis, next to the same statistic computed over the GT
    boxes (the "how many objects are genuinely against a wall" baseline).
 5. **per-class table** -- live count vs GT count, sorted by over-production ratio.
+6. **mean best IoU** (+ counts at >=0.25 / >=0.50) -- per GT object, the best 3D IoU
+   over its same-label instances. **This is the metric to ADOPT changes on**;
+   1-5 are diagnostic. Unlike ``recall`` (permissive centroid tolerance) it is
+   sensitive to box QUALITY, and it is what object_reference is actually scored on.
+   Issue #133 is the cautionary case: recall and duplication both said a fusion
+   change was a regression, this said it was an improvement, and this was right.
 
 CLI::
 
@@ -89,6 +95,19 @@ def load_gt(scene_name: str, unity_dir: str | Path = DEFAULT_UNITY_DIR) -> list:
 
 
 # --------------------------------------------------------------------------- geometry helpers
+
+
+def _iou3d(alo: np.ndarray, ahi: np.ndarray, blo: np.ndarray, bhi: np.ndarray) -> float:
+    """Axis-aligned 3D intersection-over-union of two boxes."""
+    lo = np.maximum(alo, blo)
+    hi = np.minimum(ahi, bhi)
+    inter = float(np.prod(np.clip(hi - lo, 0.0, None)))
+    if inter <= 0.0:
+        return 0.0
+    va = float(np.prod(np.clip(ahi - alo, 0.0, None)))
+    vb = float(np.prod(np.clip(bhi - blo, 0.0, None)))
+    union = va + vb - inter
+    return inter / union if union > 0.0 else 0.0
 
 
 def _diag(lo: np.ndarray, hi: np.ndarray) -> float:
@@ -179,6 +198,9 @@ class SceneMetrics:
     inflation: float
     shell_live: float
     shell_gt: float
+    mean_best_iou: float = float("nan")
+    iou_at_25: int = 0
+    iou_at_50: int = 0
     per_class: list[ClassRow] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -192,6 +214,9 @@ class SceneMetrics:
             "inflation": self.inflation,
             "shell_live": self.shell_live,
             "shell_gt": self.shell_gt,
+            "mean_best_iou": self.mean_best_iou,
+            "iou_at_25": self.iou_at_25,
+            "iou_at_50": self.iou_at_50,
             "per_class": [
                 {"label": r.label, "live": r.live, "gt": r.gt, "ratio": r.ratio}
                 for r in sorted(self.per_class, key=lambda r: r.ratio, reverse=True)
@@ -221,6 +246,29 @@ def compute_metrics(scene_name: str, live: list[dict], gt: list) -> SceneMetrics
         ratios.append(inst_diag / gt_diag)
     inflation = float(np.median(ratios)) if ratios else float("nan")
 
+    # Best 3D IoU per GT object over its same-label instances. Unlike recall (which
+    # uses a permissive centroid tolerance) this is sensitive to BOX QUALITY, and it
+    # is what object_reference is actually scored on -- see the retraction on #133,
+    # where recall/duplication pointed one way and this pointed the other. Diagnose
+    # with the proxies; adopt on this.
+    best_ious: list[float] = []
+    for g in gt:
+        cands = [
+            _iou3d(
+                np.asarray(inst["aabb_min"], dtype=float),
+                np.asarray(inst["aabb_max"], dtype=float),
+                g.aabb_min,
+                g.aabb_max,
+            )
+            for inst in live
+            if inst["label"] == g.label
+        ]
+        if cands:
+            best_ious.append(max(cands))
+    mean_best_iou = float(np.mean(best_ious)) if best_ious else float("nan")
+    iou_at_25 = int(sum(1 for v in best_ious if v >= 0.25))
+    iou_at_50 = int(sum(1 for v in best_ious if v >= 0.50))
+
     live_lo = np.array([i["aabb_min"] for i in live], dtype=float) if live else np.zeros((0, 3))
     live_hi = np.array([i["aabb_max"] for i in live], dtype=float) if live else np.zeros((0, 3))
     gt_lo = np.array([g.aabb_min for g in gt], dtype=float) if gt else np.zeros((0, 3))
@@ -247,6 +295,9 @@ def compute_metrics(scene_name: str, live: list[dict], gt: list) -> SceneMetrics
         inflation=inflation,
         shell_live=shell_live,
         shell_gt=shell_gt,
+        mean_best_iou=mean_best_iou,
+        iou_at_25=iou_at_25,
+        iou_at_50=iou_at_50,
         per_class=per_class,
     )
 
@@ -278,6 +329,13 @@ def pool_metrics(scenes: list[SceneMetrics]) -> SceneMetrics:
             acc[1] += row.gt
     per_class = [ClassRow(label=lab, live=v[0], gt=v[1]) for lab, v in by_label.items()]
 
+    _iou_scenes = [x for x in scenes if not np.isnan(x.mean_best_iou)]
+    _w = sum(x.n_gt for x in _iou_scenes)
+    pooled_iou = (
+        sum(x.mean_best_iou * x.n_gt for x in _iou_scenes) / _w
+        if _w else float("nan")
+    )
+
     return SceneMetrics(
         scene="POOLED",
         n_gt=n_gt,
@@ -288,6 +346,9 @@ def pool_metrics(scenes: list[SceneMetrics]) -> SceneMetrics:
         inflation=inflation,
         shell_live=shell_live,
         shell_gt=shell_gt,
+        mean_best_iou=pooled_iou,
+        iou_at_25=sum(x.iou_at_25 for x in scenes),
+        iou_at_50=sum(x.iou_at_50 for x in scenes),
         per_class=per_class,
     )
 
@@ -307,6 +368,7 @@ def print_headline_table(rows: list[SceneMetrics], out=sys.stdout) -> None:
     hdr = (
         f"{'scene':<20}{'GT':>5}{'live':>6}{'found':>7}{'recall':>9}"
         f"{'dup x':>8}{'inflate':>9}{'shell live':>12}{'shell GT':>10}"
+        f"{'mean IoU':>10}{'IoU>=.25':>10}{'IoU>=.5':>9}"
     )
     print(hdr, file=out)
     print("-" * len(hdr), file=out)
@@ -314,7 +376,8 @@ def print_headline_table(rows: list[SceneMetrics], out=sys.stdout) -> None:
         print(
             f"{r.scene:<20}{r.n_gt:>5}{r.n_live:>6}{r.n_found:>7}"
             f"{_fmt_pct(r.recall):>9}{_fmt_f(r.duplication_factor):>8}"
-            f"{_fmt_f(r.inflation):>9}{_fmt_pct(r.shell_live):>12}{_fmt_pct(r.shell_gt):>10}",
+            f"{_fmt_f(r.inflation):>9}{_fmt_pct(r.shell_live):>12}{_fmt_pct(r.shell_gt):>10}"
+            f"{_fmt_f(r.mean_best_iou):>10}{r.iou_at_25:>10}{r.iou_at_50:>9}",
             file=out,
         )
 
