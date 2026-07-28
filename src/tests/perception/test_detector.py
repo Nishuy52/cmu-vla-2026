@@ -45,7 +45,10 @@ from core.perception.detector import (
     _norm_cxcywh_to_tile_xyxy,
     build_gdino_prompt,
     refresh_prompt,
+    CROSS_TILE_NMS_IOU_THRESHOLD,
+    suppress_cross_tile_duplicates,
 )
+from core.perception.tiling import DEFAULT_TILE_HFOV, DEFAULT_TILE_VFOV
 
 
 class _FakeClock:
@@ -1318,3 +1321,130 @@ def test_dump_raw_detections_empty_records_still_writes_record(monkeypatch, tmp_
     record = json.loads(out.read_text().strip())
     assert record["total_detections"] == 0
     assert record["by_class"] == {}
+
+
+# --------------------------------------------------------------------------- issue #131: cross-tile NMS
+
+
+def test_suppress_cross_tile_duplicates_empty_input():
+    assert suppress_cross_tile_duplicates([]) == []
+    assert suppress_cross_tile_duplicates([[], [], [], []]) == [[], [], [], []]
+
+
+def test_suppress_cross_tile_duplicates_single_detection_is_a_noop():
+    det = Detection(tile_id=0, bbox_xyxy=(10, 10, 50, 50), label="chair", score=0.4)
+    out = suppress_cross_tile_duplicates([[det], [], [], []])
+    assert out == [[det], [], [], []]
+
+
+def test_same_tile_duplicate_boxes_collapse_to_the_higher_score():
+    """The dominant real-world case (#131 evidence): the question pass and the
+    (cadenced) vocab pass both fire on the same tile and both find the same physical
+    object, producing two near-identical boxes in ONE tile. The union must keep only
+    the higher-scoring one."""
+    strong = Detection(tile_id=0, bbox_xyxy=(100.0, 200.0, 180.0, 300.0), label="chair", score=0.55)
+    weak = Detection(tile_id=0, bbox_xyxy=(102.0, 198.0, 178.0, 302.0), label="chair", score=0.31)
+    out = suppress_cross_tile_duplicates([[strong, weak], [], [], []])
+    assert out == [[strong], [], [], []]
+
+
+def test_cross_tile_duplicate_boxes_collapse_in_the_shared_angular_frame():
+    """A duplicate spanning two neighbouring tiles' overlap band must be recognised as
+    one object even though the two boxes live in different tiles' pixel spaces (and
+    are nowhere near each other as raw pixel coordinates). Uses an explicit hfov wider
+    than each tile's angular spacing (:data:`DEFAULT_TILE_HFOV` gives the shipped
+    tiling zero nominal overlap — see the module's #131 comment) so the seam-overlap
+    band this suppression exists for is actually present, exercising the cross-tile
+    path rather than degenerating to same-tile behaviour."""
+    hfov = np.deg2rad(100.0)
+    strong = Detection(tile_id=0, bbox_xyxy=(0.0, 270.0, 20.0, 370.0), label="chair", score=0.9)
+    weak = Detection(tile_id=1, bbox_xyxy=(455.0, 270.0, 470.0, 370.0), label="chair", score=0.6)
+    out = suppress_cross_tile_duplicates(
+        [[strong], [weak], [], []], n_tiles=4, hfov=hfov, vfov=DEFAULT_TILE_VFOV,
+    )
+    assert out == [[strong], [], [], []]
+
+
+def test_distinct_bearings_both_survive():
+    """Two same-label boxes at clearly different bearings (e.g. two separate chairs
+    across the room) must NOT be merged — this is the false-suppression risk the
+    issue explicitly calls out (a near object and a far object along a similar
+    bearing must not collide with a near-object-vs-near-object duplicate)."""
+    left = Detection(tile_id=0, bbox_xyxy=(10.0, 300.0, 60.0, 400.0), label="chair", score=0.5)
+    right = Detection(tile_id=0, bbox_xyxy=(400.0, 300.0, 460.0, 400.0), label="chair", score=0.45)
+    out = suppress_cross_tile_duplicates([[left, right], [], [], []])
+    assert out == [[left, right], [], [], []]
+
+
+def test_different_labels_never_compete_even_at_identical_boxes():
+    a = Detection(tile_id=0, bbox_xyxy=(100.0, 200.0, 180.0, 300.0), label="chair", score=0.5)
+    b = Detection(tile_id=0, bbox_xyxy=(100.0, 200.0, 180.0, 300.0), label="table", score=0.9)
+    out = suppress_cross_tile_duplicates([[a, b], [], [], []])
+    assert out == [[a, b], [], [], []]
+
+
+def test_near_far_objects_at_the_same_bearing_are_not_conflated():
+    """The issue's headline risk: a near object and a far object at (almost) the same
+    bearing subtend very different angular extents, so real depth-distinct instances
+    must survive even when centred on the same ray. A far/small box entirely nested
+    inside a near/large box's angular extent stays below the geometry-derived 0.75
+    threshold once the size difference is large enough (see the threshold's
+    docstring: ~1.3x depth ratio already caps IoU near 0.6)."""
+    near = Detection(tile_id=0, bbox_xyxy=(150.0, 150.0, 350.0, 450.0), label="chair", score=0.6)
+    far = Detection(tile_id=0, bbox_xyxy=(230.0, 270.0, 270.0, 330.0), label="chair", score=0.4)
+    out = suppress_cross_tile_duplicates([[near, far], [], [], []])
+    assert out == [[near, far], [], [], []]
+
+
+def test_three_way_duplicate_cluster_keeps_only_the_top_score():
+    a = Detection(tile_id=0, bbox_xyxy=(100.0, 200.0, 180.0, 300.0), label="lamp", score=0.3)
+    b = Detection(tile_id=0, bbox_xyxy=(101.0, 199.0, 179.0, 301.0), label="lamp", score=0.5)
+    c = Detection(tile_id=0, bbox_xyxy=(99.0, 201.0, 181.0, 299.0), label="lamp", score=0.2)
+    out = suppress_cross_tile_duplicates([[a, b, c], [], [], []])
+    assert out == [[b], [], [], []]
+
+
+def test_threshold_is_configurable_and_defaults_to_the_module_constant():
+    strong = Detection(tile_id=0, bbox_xyxy=(100.0, 200.0, 180.0, 300.0), label="chair", score=0.55)
+    weak = Detection(tile_id=0, bbox_xyxy=(140.0, 240.0, 220.0, 340.0), label="chair", score=0.3)
+    # Overlapping but not near-identical: below the default (conservative) threshold,
+    # both survive; a much lower threshold suppresses the weaker one.
+    default_out = suppress_cross_tile_duplicates([[strong, weak], [], [], []])
+    assert default_out == [[strong, weak], [], [], []]
+    loose_out = suppress_cross_tile_duplicates(
+        [[strong, weak], [], [], []], iou_threshold=0.1,
+    )
+    assert loose_out == [[strong], [], [], []]
+    assert CROSS_TILE_NMS_IOU_THRESHOLD == 0.75
+
+
+def test_groundingdino_call_dedupes_before_returning(monkeypatch):
+    """End-to-end wiring check: :meth:`GroundingDinoDetector.__call__` runs the
+    question pass then hands the merged union through
+    :func:`suppress_cross_tile_duplicates` before returning it — a duplicate from the
+    question pass must not reach the caller twice."""
+    det = GroundingDinoDetector(question_nouns=["chair"])
+
+    class _FakeModel:
+        pass
+
+    det._model = _FakeModel()
+    det._resolved_device = "cpu"
+    det._resolved_half = False
+
+    def fake_dispatch_pass(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        strong = Detection(tile_id=0, bbox_xyxy=(100.0, 200.0, 180.0, 300.0), label="chair", score=0.55)
+        weak = Detection(tile_id=0, bbox_xyxy=(102.0, 198.0, 178.0, 302.0), label="chair", score=0.31)
+        return [[strong, weak], [], [], []]
+
+    class _FakeTorch:
+        float32 = "float32"
+
+    monkeypatch.setattr(det, "_dispatch_pass", fake_dispatch_pass)
+    monkeypatch.setattr(det, "_lazy_import", lambda: (_FakeTorch, None, None))
+    monkeypatch.setattr(det, "_ensure_model", lambda torch, load_model_fn: det._model)
+
+    tiles = [np.zeros((4, 4, 3), dtype=np.uint8) for _ in range(4)]
+    out = det(tiles)
+    assert sum(len(t) for t in out) == 1
+    assert out[0][0].score == 0.55

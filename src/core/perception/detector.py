@@ -23,6 +23,14 @@ from typing import Callable, Protocol, Sequence
 
 import numpy as np
 
+from core.perception.tiling import (
+    DEFAULT_N_TILES,
+    DEFAULT_TILE_HFOV,
+    DEFAULT_TILE_VFOV,
+    tile_pixel_to_camera_ray,
+    wrap_pi,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -63,6 +71,180 @@ class DetectorProtocol(Protocol):
     """Structural type for anything usable as a :data:`DetectorFn`."""
 
     def __call__(self, tiles: Sequence[np.ndarray]) -> list[list[Detection]]: ...
+
+
+# --------------------------------------------------------------------------- cross-tile NMS
+
+# Issue #131: the question pass and the (cadenced) vocab pass are unioned per tick with
+# no dedupe (see the ``merged[i].extend(dets)`` sites in
+# :meth:`GroundingDinoDetector.__call__`). tiling.py's module docstring and
+# ``tiling.DEFAULT_SEAM_OVERLAP`` describe the 4 gnomonic tiles as overlapping ~10 deg by
+# construction, but at the actual shipped defaults (``DEFAULT_TILE_HFOV`` 90 deg,
+# ``DEFAULT_N_TILES`` 4 -> 90 deg spacing) the nominal per-tile overlap is exactly zero
+# (verified: two boxes at each tile's own edge pixel map to touching, non-overlapping
+# angular ranges) — ``DEFAULT_SEAM_OVERLAP`` is presently unused/aspirational, a
+# pre-existing inconsistency out of scope here (flagged separately). What the banked
+# data actually shows duplicating is mostly the SAME tile: the question pass and the
+# vocab pass both re-detect one physical object and each contributes its own box. That
+# still produces the same downstream harm — measured at 37.5 accepted detections per
+# surviving tracked instance across the banked live slots (see the #131 issue body),
+# with per-keyframe worst cases like 18-23 proposals of one label in a scene that has a
+# handful of that object at most. Each redundant box is then lifted independently by
+# ``fusion.fuse_detection()``, so the object ends up with several different
+# centroids/AABBs — which is what defeats the association gate (#128) and the extent
+# veto (#130) downstream. This suppresses same-label duplicates *before* fusion ever
+# sees them, comparing boxes in a shared angular frame (rather than tile pixel space) so
+# the same mechanism also catches a genuine cross-seam duplicate if the tiling geometry
+# is ever widened to actually overlap (``hfov`` is a parameter here for exactly that).
+#
+# Angular IoU threshold: 0.75. Geometric reasoning, not a fit to these 15 scenes
+# (docs/calibration.md "Generalization protocol" forbids the latter) —
+#   * A true duplicate is the SAME physical point cluster detected twice (two passes in
+#     one tile, or — geometry permitting — two overlapping tiles) through gnomonic
+#     reprojections that agree to within sub-degree residual reprojection error
+#     (``tile_pixel_to_camera_ray`` is an exact analytic inverse of the forward
+#     projection used to build the tiles), so a genuine duplicate's angular box matches
+#     itself almost exactly: empirically a 0.9-1.0 IoU spike in the banked data's
+#     same-label box-pair histogram (see the A/B below), comfortably clear of 0.75.
+#   * A pair of genuinely distinct same-label objects at different depths along a
+#     similar bearing (the chair-in-front-of-a-sofa case the issue calls out) differs in
+#     *apparent angular size*, not just position: angular width/height both scale
+#     ~1/depth, so a box for an object at 1.3x the depth of another already has ~1.3x
+#     smaller angular extent in EACH axis, i.e. ~1/1.3^2 =~ 0.59 IoU even if their
+#     centres coincide exactly (the closest case for two distinct objects) — a wide
+#     margin below 0.75. Depth differences smaller than that (near-tangent objects that
+#     really do almost coincide angularly) are exactly the case fusion's own depth
+#     disambiguation (frustum/point-cluster split) exists to handle post-hoc, not this
+#     seam.
+#   * 0.75 therefore sits in the gap between "true duplicate" (>0.85) and "smallest
+#     depth-distinguishable pair" (<0.6): conservative by construction, erring toward
+#     under-suppressing (letting fusion/association see a residual duplicate, which they
+#     already tolerate) rather than over-suppressing (destroying a real second instance,
+#     which nothing downstream can recover).
+CROSS_TILE_NMS_IOU_THRESHOLD: float = 0.75
+
+
+def _detection_angular_box(
+    tile_id: int,
+    bbox_xyxy: tuple[float, float, float, float],
+    n_tiles: int,
+    hfov: float,
+    vfov: float,
+) -> tuple[float, float, float, float]:
+    """A detection's pixel bbox -> an angular ``(az_min, az_max, el_min, el_max)`` box.
+
+    Projects all 4 corners (not just 2) through :func:`tile_pixel_to_camera_ray`: azimuth
+    is monotonic in the pixel column alone, but elevation depends on both column and row
+    in the gnomonic inverse, so the row extremes alone are not guaranteed to bound it.
+    Azimuths are unwrapped relative to the first corner (via the signed shortest
+    difference) so a box that straddles the +-pi seam still yields a proper ``min <
+    max`` interval instead of a spuriously huge one.
+    """
+    x0, y0, x1, y1 = bbox_xyxy
+    corners = ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
+    ref_az: float | None = None
+    azs: list[float] = []
+    els: list[float] = []
+    for u, v in corners:
+        az, el = tile_pixel_to_camera_ray(tile_id, u, v, n_tiles, hfov, vfov)
+        if ref_az is None:
+            ref_az = az
+        else:
+            az = ref_az + float(wrap_pi(az - ref_az))
+        azs.append(az)
+        els.append(el)
+    return min(azs), max(azs), min(els), max(els)
+
+
+def _angular_box_iou(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float],
+) -> float:
+    """IoU of two ``(az_min, az_max, el_min, el_max)`` angular boxes.
+
+    Treats ``(azimuth, elevation)`` as a flat 2D plane (the same small-angle
+    approximation ``fusion.py``'s own angular gating already relies on) and handles the
+    azimuth wraparound by shifting ``b`` by whichever multiple of 2*pi brings its centre
+    closest to ``a``'s centre before intersecting — valid because both boxes are always
+    far narrower than 2*pi (at most one tile's ``hfov``, 90 deg).
+    """
+    a_az0, a_az1, a_el0, a_el1 = a
+    b_az0, b_az1, b_el0, b_el1 = b
+    a_center = 0.5 * (a_az0 + a_az1)
+    b_center = 0.5 * (b_az0 + b_az1)
+    shift = round((a_center - b_center) / (2.0 * np.pi)) * 2.0 * np.pi
+    b_az0 += shift
+    b_az1 += shift
+    inter_az = max(0.0, min(a_az1, b_az1) - max(a_az0, b_az0))
+    inter_el = max(0.0, min(a_el1, b_el1) - max(a_el0, b_el0))
+    inter = inter_az * inter_el
+    area_a = (a_az1 - a_az0) * (a_el1 - a_el0)
+    area_b = (b_az1 - b_az0) * (b_el1 - b_el0)
+    union = area_a + area_b - inter
+    if union <= 0.0:
+        return 0.0
+    return inter / union
+
+
+def suppress_cross_tile_duplicates(
+    detections_by_tile: Sequence[Sequence[Detection]],
+    *,
+    n_tiles: int | None = None,
+    hfov: float = DEFAULT_TILE_HFOV,
+    vfov: float = DEFAULT_TILE_VFOV,
+    iou_threshold: float = CROSS_TILE_NMS_IOU_THRESHOLD,
+) -> list[list[Detection]]:
+    """Class-wise NMS over one tick's detections, in a shared angular frame (#131).
+
+    ``detections_by_tile`` is the per-tile structure the detector seam already uses
+    (``detections_by_tile[tile_id]`` -> that tile's :class:`Detection` list, e.g. the
+    ``merged`` union of the question + vocab passes). Boxes are compared in
+    ``(azimuth, elevation)`` space (via :func:`_detection_angular_box`) rather than tile
+    pixel space, so a duplicate spanning two neighbouring (differently-projected) tiles
+    is still recognised as one object. Only same-``label`` boxes ever compete; the
+    highest-``score`` box in each cluster survives, its tile assignment unchanged.
+    Returns a same-shape ``list[list[Detection]]`` (one list per input tile) containing
+    only the surviving detections, in their original per-tile order.
+    """
+    resolved_n_tiles = n_tiles if n_tiles is not None else (len(detections_by_tile) or DEFAULT_N_TILES)
+    # (tile_id, index-within-tile, Detection) so survivors can be re-bucketed by tile
+    # afterward without disturbing each tile's original relative order.
+    flat: list[tuple[int, int, Detection]] = []
+    for tile_id, dets in enumerate(detections_by_tile):
+        for idx, det in enumerate(dets):
+            flat.append((tile_id, idx, det))
+    if len(flat) <= 1:
+        return [list(dets) for dets in detections_by_tile]
+
+    boxes = [
+        _detection_angular_box(tile_id, det.bbox_xyxy, resolved_n_tiles, hfov, vfov)
+        for tile_id, _idx, det in flat
+    ]
+    by_label: dict[str, list[int]] = {}
+    for i, (_tile_id, _idx, det) in enumerate(flat):
+        by_label.setdefault(det.label, []).append(i)
+
+    keep = [False] * len(flat)
+    for indices in by_label.values():
+        # Highest score first — the box kept for a duplicate cluster is always its
+        # best-scored member.
+        ordered = sorted(indices, key=lambda i: flat[i][2].score, reverse=True)
+        suppressed = [False] * len(ordered)
+        for a_pos, i in enumerate(ordered):
+            if suppressed[a_pos]:
+                continue
+            keep[i] = True
+            for b_pos in range(a_pos + 1, len(ordered)):
+                if suppressed[b_pos]:
+                    continue
+                j = ordered[b_pos]
+                if _angular_box_iou(boxes[i], boxes[j]) >= iou_threshold:
+                    suppressed[b_pos] = True
+
+    survivors: list[list[Detection]] = [[] for _ in detections_by_tile]
+    for i, (tile_id, _idx, det) in enumerate(flat):
+        if keep[i]:
+            survivors[tile_id].append(det)
+    return survivors
 
 
 # --------------------------------------------------------------------------- fake detector
@@ -756,9 +938,11 @@ class GroundingDinoDetector:
     zero detections at any threshold. The full caption keeps running too, but only every
     ``vocab_pass_cadence``-th tick (it feeds scene-index breadth — other-object/anchor
     instances — not target recall, so it doesn't need every-tick cadence). Per-tile
-    detections from both passes that ran this tick are unioned (no dedupe: downstream
-    fusion/association already tolerates overlapping detections). A tick where only the
-    question pass runs costs one forward pass, not two.
+    detections from both passes that ran this tick are unioned, then deduplicated
+    class-wise across ALL tiles by :func:`suppress_cross_tile_duplicates` (issue #131) —
+    the tile seam overlap and the union of two passes both produce same-object repeats
+    that used to reach fusion/association untouched. A tick where only the question pass
+    runs costs one forward pass, not two.
 
     Deploy-time knobs (env var, all optional — see the ``ENV_GDINO_*`` constants above):
     ``GDINO_MODEL_ID``, ``GDINO_PRECISION`` (``fp16``/``fp32``/``auto``), ``GDINO_DEVICE``
@@ -1047,8 +1231,7 @@ class GroundingDinoDetector:
             for i, dets in enumerate(per_tile):
                 merged[i].extend(dets)
         # Full question+vocab pass (only every ``vocab_pass_cadence``-th tick) — union
-        # its detections into the same per-tile lists; no dedupe, downstream fusion
-        # already tolerates overlapping detections.
+        # its detections into the same per-tile lists.
         if run_vocab:
             per_tile = self._dispatch_pass(
                 torch, model, predict_fn, tiles, device, dtype,
@@ -1056,7 +1239,11 @@ class GroundingDinoDetector:
             )
             for i, dets in enumerate(per_tile):
                 merged[i].extend(dets)
-        return merged
+        # Issue #131: dedupe the union in a shared angular frame before returning it —
+        # see :func:`suppress_cross_tile_duplicates`'s module docstring for the geometry
+        # behind the threshold and why the old "no dedupe, fusion tolerates it" design
+        # note above no longer holds.
+        return suppress_cross_tile_duplicates(merged, n_tiles=len(tiles))
 
     def run_caption_pass(
         self,
