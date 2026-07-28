@@ -100,8 +100,15 @@ def dump_instance_index(
 
     try:
         instances = index.all_instances()
+        # Issue #129: `by_class` is a literal class CENSUS (a count per label), so it
+        # excludes structural classes (floor/ceiling/wall/window/door/door frame/column
+        # -- see core.perception.vocab.is_structural_class) the same way
+        # BasicSceneIndex.countable_instances() does. The full `instances` list below
+        # is left untouched -- every structural instance (including window, needed as
+        # a relation anchor) still appears there with its position/AABB, so an
+        # offline consumer that wants structural geometry (not a count) still has it.
         by_class: dict[str, int] = {}
-        for rec in instances:
+        for rec in index.countable_instances():
             by_class[rec.label] = by_class.get(rec.label, 0) + 1
         ordered = sorted(instances, key=lambda r: r.instance_id)
         record: dict = {
@@ -332,6 +339,34 @@ class BasicSceneIndex:
     def all_instances(self):
         with self._lock:
             return list(self._instances)
+
+    def countable_instances(self):
+        """``all_instances()`` minus structural classes (issue #129).
+
+        The separate structural channel the census needs: floor/ceiling/wall/window/
+        door/door frame/column (:func:`core.perception.vocab.is_structural_class`)
+        are proposed and tracked like any other class, but GT annotates exactly one
+        of each per scene while the detector re-proposes dozens of fragments of the
+        same physical shell surface -- inflating any "how many X" enumeration or
+        class census with instances nobody asks to count (docs/question_analysis.md:
+        no training question counts a structural class).
+
+        Deliberately NOT wired into :meth:`by_label`/:meth:`by_label_tiered`/
+        :meth:`all_instances` -- those remain the anchor/target lookup surface every
+        relation clause depends on (``"the sofa below a WINDOW"`` needs `window`,
+        itself structural, to keep resolving exactly as before). This method is
+        additive: only a caller that explicitly wants the countable/census view (this
+        module's own :func:`dump_instance_index`) uses it; every existing consumer of
+        the three methods above is completely unaffected by this method's existence.
+        """
+        # Deferred import: perception.vocab imports normalize_label from this module,
+        # so we consult it at call time to avoid a module-load cycle (matching the
+        # existing by_label_tiered import style).
+        from core.perception.vocab import is_structural_class
+
+        with self._lock:
+            snapshot = list(self._instances)
+        return [rec for rec in snapshot if not is_structural_class(rec.label)]
 
     def remove(self, instance_id: int) -> bool:
         """Drop an instance by id; return True if one was removed.

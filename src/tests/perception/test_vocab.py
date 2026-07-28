@@ -15,11 +15,14 @@ from core.perception.vocab import (
     COLOUR_CROSS_HUE,
     COLOUR_NEUTRAL,
     COLOUR_SCHEME,
+    STRUCTURAL_EXACT,
+    STRUCTURAL_HEADS,
     bridge_synonyms,
     bridged_agree,
     colour_cross_hue,
     colour_synonyms,
     head_noun,
+    is_structural_class,
 )
 
 
@@ -261,3 +264,83 @@ def test_light_luma_boundary_inclusive():
     # (220,220,219)=219.886 (just below) rejects
     assert _attrs_match(_rec_bins("wall", [ColorBin("gray", (220, 220, 220), 1.0)]), ["white"])
     assert not _attrs_match(_rec_bins("wall", [ColorBin("gray", (220, 220, 219), 1.0)]), ["white"])
+
+
+# ------------------------------------------------------- structural classification (#129)
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["floor", "ceiling", "wall", "window", "door", "column", "door frame"],
+)
+def test_is_structural_class_true_for_room_shell_and_openings(label):
+    assert is_structural_class(label)
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "sofa", "chair", "table", "couch", "bed", "lamp", "curtain", "blinds",
+        "picture frame", "carpet", "rug",
+    ],
+)
+def test_is_structural_class_false_for_furniture_and_portables(label):
+    assert not is_structural_class(label)
+
+
+def test_is_structural_class_generalises_via_head_noun_not_substring():
+    # A compound that CONTAINS a structural word but denotes a portable object is
+    # correctly excluded -- substring matching would wrongly flag this.
+    assert not is_structural_class("floor lamp")
+    assert not is_structural_class("wall clock")
+    assert not is_structural_class("window seat")
+    # A structural word carrying its own modifier still generalises through the
+    # head-noun match, without being individually enumerated.
+    assert is_structural_class("bay window")
+    assert is_structural_class("sliding door")
+    assert is_structural_class("load-bearing wall")
+    assert is_structural_class("stone column")
+
+
+def test_is_structural_class_door_frame_is_a_named_exception_not_every_frame():
+    # "door frame"'s head noun ("frame") is otherwise a portable-object word --
+    # folding on the head alone would wrongly pull every "* frame" into structural.
+    assert is_structural_class("door frame")
+    assert not is_structural_class("picture frame")
+    assert not is_structural_class("photo frame")
+
+
+def test_is_structural_class_never_seen_class_predictions():
+    # Classes never seen in this project's scenes, per the classification rule's own
+    # stated justification (core.perception.vocab module docstring, issue #129).
+    assert is_structural_class("column")  # room-shell support member
+    assert is_structural_class("stone column")  # modified variant, same head noun
+    # "pillar" is a DIFFERENT head noun from "column" and is NOT in the strict head
+    # set -- the rule is deliberately conservative and does not guess that these are
+    # the same class without data verification, even though a human reader would
+    # treat them as synonyms.
+    assert not is_structural_class("pillar")
+    # Portable window dressing: hangs on a rod, independently countable and
+    # removable without altering the room's shell -- exactly the class of mistake
+    # the issue warns against (it originally lumped `window` in with `floor`).
+    assert not is_structural_class("curtain")
+    assert not is_structural_class("blinds")
+
+
+def test_is_structural_class_handles_plurals_and_case():
+    assert is_structural_class("Windows")
+    assert is_structural_class("Doors")
+    assert is_structural_class("FLOOR")
+
+
+def test_is_structural_class_empty_and_blank_are_false():
+    assert not is_structural_class("")
+    assert not is_structural_class("   ")
+
+
+def test_structural_heads_and_exact_sets_are_normalised_singular_lowercase():
+    for h in STRUCTURAL_HEADS:
+        assert h == h.lower()
+        assert not h.endswith("s")
+    for e in STRUCTURAL_EXACT:
+        assert e == e.lower()

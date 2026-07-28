@@ -490,3 +490,95 @@ def test_non_conforming_index_lacks_the_attribute_toolbox_depends_on():
     idx = _NonConformingFakeIndex()
     assert not isinstance(idx, SceneIndex)
     assert not hasattr(idx, "by_label_tiered")
+
+
+# --------------------------------------------------------------------------- #129:
+# structural classes excluded from the census, kept for anchor/target resolution
+
+
+def test_countable_instances_excludes_structural_classes():
+    idx = BasicSceneIndex(
+        [
+            _rec(1, "floor", [0, 0, 0], [1, 1, 0.05]),
+            _rec(2, "floor", [3, 3, 0], [4, 4, 0.05]),
+            _rec(3, "window", [0, 0, 1], [1, 0.1, 2]),
+            _rec(4, "sofa", [2, 2, 0], [3, 3, 1]),
+        ]
+    )
+    countable = idx.countable_instances()
+    assert {r.label for r in countable} == {"sofa"}
+    assert len(countable) == 1
+
+
+def test_countable_instances_leaves_non_structural_counts_unchanged():
+    idx = BasicSceneIndex(
+        [
+            _rec(1, "floor", [0, 0, 0], [1, 1, 0.05]),
+            _rec(2, "chair", [0, 0, 0], [1, 1, 1]),
+            _rec(3, "chair", [2, 2, 0], [3, 3, 1]),
+            _rec(4, "table", [4, 4, 0], [5, 5, 1]),
+        ]
+    )
+    countable = idx.countable_instances()
+    by_label: dict[str, int] = {}
+    for r in countable:
+        by_label[r.label] = by_label.get(r.label, 0) + 1
+    assert by_label == {"chair": 2, "table": 1}
+
+
+def test_all_instances_is_unaffected_by_structural_classification():
+    # all_instances() -- the surface every existing anchor/target/census caller
+    # already uses -- must be byte-for-byte unchanged: still returns EVERY instance,
+    # structural or not.
+    idx = BasicSceneIndex(
+        [
+            _rec(1, "floor", [0, 0, 0], [1, 1, 0.05]),
+            _rec(2, "window", [0, 0, 1], [1, 0.1, 2]),
+            _rec(3, "sofa", [2, 2, 0], [3, 3, 1]),
+        ]
+    )
+    assert {r.label for r in idx.all_instances()} == {"floor", "window", "sofa"}
+    assert len(idx.all_instances()) == 3
+
+
+def test_by_label_still_resolves_structural_anchors_unchanged():
+    # The gate that matters most (#129 acceptance): a `window` anchor must keep
+    # resolving through the exact same by_label/by_label_tiered surface as before --
+    # this method is deliberately NOT touched by the structural classifier.
+    idx = BasicSceneIndex(
+        [
+            _rec(1, "window", [0, 0, 1], [1, 0.1, 2]),
+            _rec(2, "window", [5, 0, 1], [6, 0.1, 2]),
+            _rec(3, "floor", [0, 0, 0], [6, 6, 0.05]),
+        ]
+    )
+    windows = idx.by_label("window")
+    assert len(windows) == 2
+    assert {r.instance_id for r in windows} == {1, 2}
+    tiered = idx.by_label_tiered("window")
+    assert len(tiered) == 2
+    assert all(tier == MatchTier.EXACT for _, tier in tiered)
+    floors = idx.by_label("floor")
+    assert len(floors) == 1
+
+
+def test_dump_instance_index_by_class_excludes_structural(monkeypatch, tmp_path):
+    # Issue #129: the class CENSUS (`by_class`) drops structural classes; the full
+    # `instances` list stays untouched (a structural instance's geometry is still
+    # there for an offline consumer that wants it, e.g. as a relation anchor).
+    out = tmp_path / "instances.jsonl"
+    monkeypatch.setenv(ENV_INSTANCE_DUMP_PATH, str(out))
+    idx = BasicSceneIndex(
+        [
+            _rec(1, "floor", [0, 0, 0], [1, 1, 0.05], n_obs=3, score=0.9),
+            _rec(2, "floor", [3, 3, 0], [4, 4, 0.05], n_obs=3, score=0.9),
+            _rec(3, "window", [0, 0, 1], [1, 0.1, 2], n_obs=3, score=0.9),
+            _rec(4, "sofa", [2, 2, 0], [3, 3, 1], n_obs=3, score=0.9),
+        ]
+    )
+    dump_instance_index(idx, tag="answer_time")
+    rec = json.loads(out.read_text().strip())
+    assert rec["by_class"] == {"sofa": 1}
+    assert rec["total_instances"] == 4  # total_instances is unaffected
+    assert {i["label"] for i in rec["instances"]} == {"floor", "window", "sofa"}
+    assert len(rec["instances"]) == 4  # the full instances list is unaffected

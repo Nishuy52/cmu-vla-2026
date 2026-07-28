@@ -46,6 +46,7 @@ import numpy as np
 import tools  # noqa: F401 -- inserts <repo>/src onto sys.path
 
 from core.groundtruth.loader import load_scene
+from core.perception.vocab import is_structural_class
 
 DEFAULT_UNITY_DIR = Path("data/vla3d/Unity")
 SHELL_TOL_M = 0.05  # face-to-scene-extremum tolerance for "on the shell"
@@ -199,8 +200,19 @@ class SceneMetrics:
         }
 
 
-def compute_metrics(scene_name: str, live: list[dict], gt: list) -> SceneMetrics:
-    """Compute every metric in the module docstring for one scene's (live, gt) pair."""
+def compute_metrics(
+    scene_name: str, live: list[dict], gt: list, *, exclude_structural: bool = False
+) -> SceneMetrics:
+    """Compute every metric in the module docstring for one scene's (live, gt) pair.
+
+    ``exclude_structural`` (issue #129, default off -- existing callers/behaviour
+    unchanged): when set, drops structural classes (floor/ceiling/wall/window/door/
+    door frame/column; see ``core.perception.vocab.is_structural_class``) from the
+    ``per_class`` table only. Every other metric (recall, duplication_factor,
+    inflation, shell fractions, n_gt/n_live/n_found) is computed over the full
+    population exactly as before -- this flag narrows only the class CENSUS table,
+    matching the fact that no training question ever counts a structural class.
+    """
     n_gt = len(gt)
     n_live = len(live)
 
@@ -235,6 +247,8 @@ def compute_metrics(scene_name: str, live: list[dict], gt: list) -> SceneMetrics
     for g in gt:
         gt_by_label[g.label] = gt_by_label.get(g.label, 0) + 1
     labels = set(live_by_label) | set(gt_by_label)
+    if exclude_structural:
+        labels = {lab for lab in labels if not is_structural_class(lab)}
     per_class = [ClassRow(label=lab, live=live_by_label.get(lab, 0), gt=gt_by_label.get(lab, 0)) for lab in labels]
 
     return SceneMetrics(
@@ -332,11 +346,13 @@ def print_per_class_table(metrics: SceneMetrics, out=sys.stdout, limit: int = 20
 # --------------------------------------------------------------------------- CLI
 
 
-def _eval_one(index_path: str, scene_name: str, unity_dir: str) -> SceneMetrics:
+def _eval_one(
+    index_path: str, scene_name: str, unity_dir: str, *, exclude_structural: bool = False
+) -> SceneMetrics:
     snap = load_snapshot(index_path)
     live = snap.get("instances", [])
     gt = load_gt(scene_name, unity_dir)
-    return compute_metrics(scene_name, live, gt)
+    return compute_metrics(scene_name, live, gt, exclude_structural=exclude_structural)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -355,14 +371,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--unity-dir", default=str(DEFAULT_UNITY_DIR), help="VLA-3D Unity scenes root")
     ap.add_argument("--out", default=None, help="JSON output path (default: <first index>.eval.json)")
+    ap.add_argument(
+        "--exclude-structural", action="store_true",
+        help="drop structural classes (floor/ceiling/wall/window/door/door frame/"
+        "column, issue #129) from the per-class census table only; every other "
+        "metric is unaffected",
+    )
     args = ap.parse_args(argv)
 
     if args.compare:
         if len(args.scene) != 1:
             ap.error("--compare requires exactly one --scene")
         a_path, b_path = args.compare
-        a = _eval_one(a_path, args.scene[0], args.unity_dir)
-        b = _eval_one(b_path, args.scene[0], args.unity_dir)
+        a = _eval_one(a_path, args.scene[0], args.unity_dir, exclude_structural=args.exclude_structural)
+        b = _eval_one(b_path, args.scene[0], args.unity_dir, exclude_structural=args.exclude_structural)
         a.scene, b.scene = f"A ({Path(a_path).name})", f"B ({Path(b_path).name})"
         print_headline_table([a, b])
         print_per_class_table(a)
@@ -376,7 +398,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args.index or len(args.index) != len(args.scene):
         ap.error("--index and --scene must be given the same number of times (or use --compare)")
 
-    per_scene = [_eval_one(idx, sc, args.unity_dir) for idx, sc in zip(args.index, args.scene)]
+    per_scene = [
+        _eval_one(idx, sc, args.unity_dir, exclude_structural=args.exclude_structural)
+        for idx, sc in zip(args.index, args.scene)
+    ]
     rows = list(per_scene)
     if len(per_scene) > 1:
         rows.append(pool_metrics(per_scene))
