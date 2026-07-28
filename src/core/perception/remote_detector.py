@@ -44,6 +44,7 @@ from .detector import (
     GDINO_BACKOFF_BASE_S,
     GDINO_BACKOFF_CAP_S,
     GDINO_BACKOFF_DEGRADE_N,
+    suppress_cross_tile_duplicates,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -228,7 +229,12 @@ class RemoteDetector:
             self._record_failure(exc)
             return [[] for _ in tiles]
         self._reset_failures()
-        return merged
+        # Issue #131 (ported for path consistency, #134): dedupe the question+vocab union
+        # in a shared angular frame before returning it, exactly as
+        # GroundingDinoDetector.__call__ does — same helper, same threshold source, same
+        # n_tiles=len(tiles) semantics (this path has no separate tile-count source; the
+        # request tiles list IS the tile count here too).
+        return suppress_cross_tile_duplicates(merged, n_tiles=len(tiles))
 
 
 __all__ = [
