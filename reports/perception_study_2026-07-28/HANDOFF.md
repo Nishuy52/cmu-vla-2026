@@ -41,14 +41,29 @@ materially, that is unexplained and worth chasing rather than celebrating.**
 | — | prior extents replacing observed extents | regression on both scenes |
 | #121 | camera-derived colour recovers GT names | office_1: **0 of 2** non-majority colours; loses to "always gray". Discriminating test on japanese_room still UNRUN |
 
-## The one open correctness gap
+## Colour (#121) — RESOLVED as unvalidated, not refuted
 
-**Colour (#121) is on `main` validated only on office_1**, where it recovered 0 of 2
-non-majority colours (both `black` -> `gray`). GT's `black` is literally RGB (0,0,0)
-with zero variance across 828 slots — an annotation convention, not an observable, so
-it may be unrecoverable from pixels by construction. The discriminating scene is
-`japanese_room` (GT majority only 32%, vs office_1's 64%); its replay has failed
-twice on the throttled GPU.
+The japanese_room replay finally ran. Result: colour **cannot be validated at
+current recall**, and has never once correctly named a non-majority colour.
+
+| scene | GT matched w/ colour | answered | correct | non-majority matched | correct |
+|---|---|---|---|---|---|
+| office_1 (64% gray) | 15 | 12 | 9 | 2 | **0** |
+| japanese_room (32% brown) | **3** | **0** (all abstained) | 0 | 1 | **0** |
+
+Pooled **0 of 3** non-majority objects named. office_1's 75%-of-answered loses to
+the trivial "always answer the majority colour" predictor (87% on the same set).
+
+japanese_room matched only 3 of its 63 GT objects (37 instances from 132 keyframes) —
+a **recall** failure, not a colour failure. Colour's validation is therefore
+downstream of the coverage problem, and cannot proceed until instance matching
+improves.
+
+**Verdict: keep the code (it abstains rather than guessing, battery unmoved, the 13
+non-colour questions unaffected) but do NOT count it as fixing the two colour
+questions.** The loft one is probably unfixable via pixel colour at all: GT's `black`
+is literally RGB (0,0,0) with zero variance across 828 slots — an annotation
+convention, not an observable.
 
 Score it with the majority baseline AND the non-majority slice — a colour system that
 cannot beat "always answer the majority colour" has not been shown to work.
