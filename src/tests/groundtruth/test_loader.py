@@ -9,6 +9,7 @@ import pytest
 
 from core.groundtruth.loader import load_scene, obb_to_aabb, parse_object_csv
 from core.interfaces import InstanceRecord
+from core.perception.scene_index import BasicSceneIndex
 
 from tests.groundtruth.conftest import (
     FULL_UNITY_ROOT,
@@ -369,3 +370,49 @@ def test_aliases_and_color_bins_always_stay_in_lock_step(tmp_path):
     recs = parse_object_csv(path)
     for rec in recs:
         assert tuple(b.name for b in rec.color_bins) == rec.aliases
+
+
+# --------------------------------------------------------------------------- #110 scene-scoped label correction
+
+
+def test_scene_label_correction_tv_resolves_mislabelled_panel_only(tmp_path):
+    """Issue #110: livingroom_1 object 91 is annotated ``raw_label == "tv remote"``
+    but its OBB (1.697 x 0.019 x 0.976 m, centre z=1.385m) is a wall-mounted TV
+    panel, not a remote. The scene-scoped correction must resolve a "tv" query to
+    THAT object only, while object 72 — genuinely a remote, same raw_label, same
+    scene — keeps resolving under "tv remote" and must NOT come back for "tv"."""
+    scene_dir = tmp_path / "livingroom_1"
+    scene_dir.mkdir()
+    rows = [
+        _base_row(
+            object_id="72", raw_label="tv remote",
+            object_bbox_cx="-0.2126", object_bbox_cy="-2.3795", object_bbox_cz="0.2802",
+            object_bbox_xlength="0.2039", object_bbox_ylength="0.0511",
+            object_bbox_zlength="0.0193",
+        ),
+        _base_row(
+            object_id="91", raw_label="tv remote",
+            object_bbox_cx="2.1030", object_bbox_cy="-2.5280", object_bbox_cz="1.3849",
+            object_bbox_xlength="1.6971", object_bbox_ylength="0.0193",
+            object_bbox_zlength="0.9764",
+        ),
+    ]
+    path = _write_object_csv(scene_dir, rows)
+    # _write_object_csv always names the file "synthetic_object_result.csv"; the
+    # loader matches by suffix regardless of scene-name prefix, so this still loads.
+    assert path.name.endswith("_object_result.csv")
+
+    scene = load_scene(scene_dir)
+    assert scene.scene_name == "livingroom_1"  # the correction table key
+    by_id = {r.instance_id: r for r in scene.instances}
+    assert by_id[91].label == "tv remote"  # raw_label is NEVER overwritten
+    assert by_id[72].label == "tv remote"
+    assert by_id[91].aliases == ("tv",)
+    assert by_id[72].aliases == ()  # untouched: correction is (scene, object_id)-scoped
+
+    idx = BasicSceneIndex(scene.instances)
+    tv_hits = {r.instance_id for r in idx.by_label("tv")}
+    assert tv_hits == {91}, "tv must resolve to the mislabelled panel, and ONLY it"
+
+    remote_hits = {r.instance_id for r in idx.by_label("tv remote")}
+    assert remote_hits == {72, 91}, "both objects keep resolving under their real raw_label"
