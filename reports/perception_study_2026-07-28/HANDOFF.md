@@ -39,7 +39,7 @@ materially, that is unexplained and worth chasing rather than celebrating.**
 | #128 | widening the association gate merges fragments | recall 17.0->15.2%, duplication 5.58->6.18, IoU 0.107->0.093. Gates are in SERIES |
 | #138 | depth-completion of the shell-biased centroid | bias confirmed (+0.19 m, 86-92% of detections) but gated correction = wash, ungated = regression on both scenes |
 | — | prior extents replacing observed extents | regression on both scenes |
-| #121 | camera-derived colour recovers GT names | office_1: **0 of 2** non-majority colours; loses to "always gray". Discriminating test on japanese_room still UNRUN |
+| #121 | camera-derived colour recovers GT names | **unvalidated, not refuted** — 0 of 3 non-majority colours across two scenes; blocked by recall, see below |
 
 ## Colour (#121) — RESOLVED as unvalidated, not refuted
 
@@ -65,8 +65,9 @@ questions.** The loft one is probably unfixable via pixel colour at all: GT's `b
 is literally RGB (0,0,0) with zero variance across 828 slots — an annotation
 convention, not an observable.
 
-Score it with the majority baseline AND the non-majority slice — a colour system that
-cannot beat "always answer the majority colour" has not been shown to work.
+Re-validate with the majority baseline AND the non-majority slice — raw accuracy is
+not a signal, since a majority prior scores well while answering zero colour
+questions correctly.
 
 **Do NOT bridge `black`<->`gray` to make loft pass.** `vocab.py`'s COLOUR_BRIDGE
 comment explains why that was rejected; it would mis-answer "black X" on every grey
