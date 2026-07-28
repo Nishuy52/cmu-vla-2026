@@ -60,7 +60,16 @@ fi
 shopt -s nullglob
 run_dirs=()
 for bag in "$OUT"/captures/*/*/bag "$OUT"/captures/*/*/*/bag; do
-  [ -d "$bag" ] && run_dirs+=("$(dirname "$bag")")
+  [ -d "$bag" ] || continue
+  rd="$(dirname "$bag")"
+  # #127: cluster_verify_batch.sbatch drops a DEGRADED sentinel next to the bag
+  # when the sim endpoint (:10000) never came up for that slot — such a run
+  # must never enter the scored aggregate even though a bag exists.
+  if [ -f "$rd/DEGRADED" ]; then
+    echo "== skipping $rd — marked DEGRADED (sim endpoint never came up, #127)"
+    continue
+  fi
+  run_dirs+=("$rd")
 done
 if [ ${#run_dirs[@]} -eq 0 ]; then
   echo "== no ros bag captured (older run, or recorder failed — see the *_bag*.log)"
