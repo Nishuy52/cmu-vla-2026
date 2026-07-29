@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from core.heads.instruction import InstructionHead
 from core.interfaces import OdomState, WaypointCmd
 from core.mocks.synthetic_scene import Room, SyntheticScene
@@ -239,3 +241,61 @@ def test_goto_standoff_stays_within_arrival_tolerance_for_a_large_anchor():
         f"standoff goal at {d:.3f} m from centroid is outside the (margined) "
         f"arrival tolerance"
     )
+
+
+# --------------------------------------------------------------------------- #148
+# ``_standoff_push``'s post-clamp re-validation reconstructs the clamped candidate as
+# ``anchor + unit_vector * max_dist`` and re-measures its distance back to the anchor.
+# That round trip (divide by ``dist`` to unitize, multiply by ``max_dist``) is not exact
+# -- for roughly half of all push directions it lands a few ULPs (~1e-16 m) OVER
+# max_dist, and a bare ``> max_dist`` comparison used to treat that as "candidate
+# escaped the clamp" and silently discard it for the un-pushed ``raw`` point, losing
+# real clearance for a purely float-noise reason (never a genuine overshoot).
+
+
+def test_standoff_push_accepts_a_clamped_candidate_within_ulp_of_max_dist():
+    """issue #148 regression: a push direction whose clamped-candidate reconstruction
+    lands a few ULPs over ``max_dist`` (found by scanning directions for the float
+    round-trip's worst case) must still be ACCEPTED -- not silently discarded for
+    ``raw``, which would lose ~0.6 m of the intended standoff for no correctness
+    reason. Pins the exact previously-lost clearance: pre-fix this direction fell
+    back to ``raw`` (1.0 m from the anchor); post-fix it reaches the full clamp
+    (``max_dist``, ~1.596 m)."""
+    from core.heads.instruction import ARRIVAL_TOL_M, STANDOFF_ARRIVAL_MARGIN_M
+
+    sc = SyntheticScene(0)
+    sc.rooms = [Room(0.0, 0.0, 20.0, 20.0)]
+    sc.place_box("sofa", 2.0, 2.0, 0.4, 0.4, 0.5)  # unrelated anchor, just to get a
+    # real costmap/pose built through the normal drive path
+    idx = BasicSceneIndex(sc.instances())
+    head = InstructionHead(plan=instruction_plan([_goto("sofa")]))
+    io = _IO(sc, start=(1.0, 1.0))
+    for _ in range(8):
+        head.advance(io, idx)
+        io.advance_time(1.0)
+        if head._follower is not None and head._follower.path:
+            break
+    assert head._costmap is not None
+
+    max_dist = ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M
+    near_thresh_m = 2.55  # large-anchor style: exceeds max_dist, forces the clamp branch
+    anchor_xy = (10.0, 10.0)  # open floor far from the sofa -- no obstacle involved
+    # This direction was found by scanning angles for the worst case of the unit-vector
+    # divide/multiply round trip: reconstructing anchor + unit(ang) * max_dist lands
+    # ~2.22e-16 m over max_dist, which a bare ``> max_dist`` rejects.
+    ang = 0.48795732625372834
+    raw = (anchor_xy[0] + math.cos(ang), anchor_xy[1] + math.sin(ang))  # dist == 1.0
+
+    result = head._standoff_push(anchor_xy, raw, near_thresh_m)
+
+    assert result != raw, (
+        "clamped candidate was discarded for raw -- the ULP-fragile re-validation "
+        "regressed"
+    )
+    d = math.hypot(result[0] - anchor_xy[0], result[1] - anchor_xy[1])
+    assert d == pytest.approx(max_dist, abs=1e-6), (
+        f"standoff push landed at {d:.6f} m, expected the full clamp ({max_dist:.6f} m)"
+    )
+    # The previously-lost clearance: pushing to the clamp instead of falling back to
+    # raw's 1.0 m recovers ~0.6 m of standoff distance.
+    assert d - 1.0 > 0.5
