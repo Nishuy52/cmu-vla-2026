@@ -874,6 +874,70 @@ def _eviction_safe_vocab_order(
     return survived + prioritize_vocab_nouns(tail)
 
 
+#: Issue #145: the composed GDINO prompt was logged nowhere -- not in job stdout, not
+#: in any debug artifact -- so a live sweep could not tell "the noun was never queried
+#: because the prompt hit the 256-token cap" (this issue) apart from "the noun was
+#: queried and the detector missed it" (#91) or "the noun was detected under a merged
+#: label" (#154). Path to append JSONL prompt-diagnostic records to. Unset (default) ->
+#: :func:`dump_prompt_diagnostics` is a no-op (single ``os.environ.get``, no I/O),
+#: matching every other opt-in debug dump in this codebase (``core.perception.
+#: scene_index.dump_instance_index``'s ``VLA_INSTANCE_DUMP_PATH``, ``core.heads.factory.
+#: dump_plan``'s ``VLA_PLAN_DUMP_PATH``).
+ENV_PROMPT_DUMP_PATH: str = "VLA_PROMPT_DUMP_PATH"
+
+
+def dump_prompt_diagnostics(
+    *,
+    tag: str,
+    question_prompt: str,
+    vocab_prompt: str,
+    dropped_vocab_nouns: Sequence[str],
+) -> None:
+    """Append one JSONL record of the composed GDINO prompt(s) + what got dropped, if
+    :data:`ENV_PROMPT_DUMP_PATH` is set. No-op (no I/O at all) when unset.
+
+    Called once per :func:`refresh_prompt` invocation -- i.e. once at boot priming
+    (``tag="boot_prime"``, empty question) and once per question the moment it latches
+    (``tag="question_latch"``, see :meth:`core.heads.factory.HeadState.bind`) -- never
+    per keyframe, so this is not a hot-path cost (:func:`refresh_prompt` itself already
+    documents that same non-hot-path guarantee for :func:`_eviction_safe_vocab_order`).
+
+    Record shape: ``wall_time``, ``tag``, ``question_prompt`` (the short question-noun-
+    only caption, or ``""`` if the detector has no such tier), ``vocab_prompt`` (the
+    full question+vocab caption actually assigned to ``detector.prompt``),
+    ``dropped_vocab_nouns`` (the exact tail :func:`build_gdino_prompt` cut to stay
+    within the token budget, in drop order -- empty when nothing was dropped) and
+    ``n_dropped_vocab_nouns``. This is deliberately the whole answer to "was a given
+    noun ever asked for": a noun in ``dropped_vocab_nouns`` was never queried (this
+    issue's mechanism); a noun that appears in neither prompt string was never in the
+    vocabulary to begin with; anything else was queried, so its absence from a
+    detection log is a detector-recall or merged-label question (#91/#154), not this
+    one.
+
+    Any failure (bad path, unwritable dir, etc.) is swallowed -- diagnostics must never
+    break the run they are observing, matching ``dump_instance_index``/``dump_plan``.
+    """
+    path = os.environ.get(ENV_PROMPT_DUMP_PATH)
+    if not path:
+        return
+    try:
+        record = {
+            "wall_time": time.time(),
+            "tag": tag,
+            "question_prompt": question_prompt,
+            "vocab_prompt": vocab_prompt,
+            "dropped_vocab_nouns": list(dropped_vocab_nouns),
+            "n_dropped_vocab_nouns": len(dropped_vocab_nouns),
+        }
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "a") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except Exception:  # noqa: BLE001 - diagnostics must never break the run
+        pass
+
+
 def refresh_prompt(
     detector: object | None,
     question_nouns: Sequence[str],
@@ -960,14 +1024,24 @@ def refresh_prompt(
     """
     if detector is None or not hasattr(detector, "prompt"):
         return None
+    dropped: list[str] = []
     prompt = build_gdino_prompt(
         question_nouns,
         list(full_only_nouns)
         + _eviction_safe_vocab_order(question_nouns, full_only_nouns, vocab_nouns),
+        dropped_out=dropped,
     )
     detector.prompt = prompt
+    question_prompt = ""
     if hasattr(detector, "question_prompt"):
-        detector.question_prompt = build_gdino_prompt(question_nouns, ())
+        question_prompt = build_gdino_prompt(question_nouns, ())
+        detector.question_prompt = question_prompt
+    dump_prompt_diagnostics(
+        tag="question_latch" if question_nouns else "boot_prime",
+        question_prompt=question_prompt,
+        vocab_prompt=prompt,
+        dropped_vocab_nouns=dropped,
+    )
     return prompt
 
 

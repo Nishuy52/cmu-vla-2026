@@ -136,6 +136,11 @@ export VLA_RAW_DETECTION_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/raw_detections.jsonl
 #        core/heads/instruction.py:124 (VLA_LEG_RELAX_DUMP_PATH, IF questions only)
 export VLA_PLAN_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/resolved_plan.jsonl
 export VLA_LEG_RELAX_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/relaxation_audit.jsonl
+# issue #145: composed GDINO prompt(s) + token-budget-dropped vocab nouns, once per
+# question latch (plus once at boot priming) -- see core/perception/detector.py's
+# dump_prompt_diagnostics. Same #119 discipline: derived from VLA_EXPLORE_DEBUG_DIR,
+# never a standalone variable nothing in the repo sets.
+export VLA_PROMPT_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/prompt_diagnostics.jsonl
 # SoCLaaS primary tier is now core/llm/config.py's DEFAULT primary (permanent, not a
 # cluster-only override) — the key just needs to be present in the environment; the
 # ladder fills base_url/model/api_key_env itself. Key issued via soclaas-portal, lives
@@ -242,6 +247,7 @@ echo "== #82 parse tier"; grep -E "parsed: tier=|ladder" ~/verify_run_${J}_adapt
 echo "== #82 ollama serve tail"; tail -5 ~/verify_run_${J}_ollama.log
 echo "== #82/SoCLaaS LLM usage log (per-call tokens/tier/ok/error)"; tail -12 "$VLA_LLM_USAGE_LOG" 2>/dev/null || echo "no usage log (no LLM call logged — tier fell through before any api/local attempt)"
 echo "== #84 raw detections (proposed-vs-gated by class, last keyframe)"; tail -1 "$VLA_RAW_DETECTION_DUMP_PATH" 2>/dev/null | python3 -c "import json,sys; d=json.loads(sys.stdin.readline() or '{}'); print(json.dumps(d.get('by_class',{})))" 2>/dev/null || echo "no raw-detection dump"
+echo "== #145 composed GDINO prompt + dropped vocab nouns (question-latch record)"; grep -h '"tag": "question_latch"' "$VLA_PROMPT_DUMP_PATH" 2>/dev/null | tail -1 | python3 -c "import json,sys; d=json.loads(sys.stdin.readline() or '{}'); print('dropped:', d.get('n_dropped_vocab_nouns'), d.get('dropped_vocab_nouns'))" 2>/dev/null || echo "no prompt-diagnostic dump"
 echo "== #83 explore debug (last 3 records: pocket/free/reroot/status)"
 for f in "$VLA_EXPLORE_DEBUG_DIR"/explore_debug_*.jsonl; do
   [ -f "$f" ] || continue

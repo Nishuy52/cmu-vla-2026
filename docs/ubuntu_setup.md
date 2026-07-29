@@ -481,9 +481,10 @@ cadence stall; never set it for a live/eval run.
 | `VLA_RAW_DETECTION_DUMP_PATH` | unset (default: no-op); JSONL path for RAW pre-gate detections — label/score/bbox plus accepted-vs-gated reason (#84) |
 | `VLA_PLAN_DUMP_PATH` | unset (default: no-op); JSONL path for the resolved Plan at answer time (#102). Also requires a non-None plan |
 | `VLA_LEG_RELAX_DUMP_PATH` | unset (default: no-op); JSONL path for the per-leg resolver relaxation audit (#98). **Instruction-following questions only** — numerical/object-reference runs emit zero records |
+| `VLA_PROMPT_DUMP_PATH` | unset (default: no-op); JSONL path for the composed GDINO prompt(s) + token-budget-dropped vocab nouns, once per question latch plus once at boot priming (#145) |
 | `VLA_LLM_USAGE_LOG` | default `reports/soclaas_usage.jsonl`; per-call LLM usage (tier/model/tokens/latency/ok) |
 
-> **Set dump paths from a common debug dir, never as standalone variables.** All five
+> **Set dump paths from a common debug dir, never as standalone variables.** All six
 > dump paths above are derived from `VLA_EXPLORE_DEBUG_DIR` in the cluster sbatch
 > scripts. #119 is the cautionary case: `VLA_PLAN_DUMP_PATH` and
 > `VLA_LEG_RELAX_DUMP_PATH` were implemented but set by nothing in the repo, so they

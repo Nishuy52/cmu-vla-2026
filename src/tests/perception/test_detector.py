@@ -40,6 +40,8 @@ from core.perception.detector import (
     answer_min_obs,
     answer_min_score,
     dump_raw_detections,
+    dump_prompt_diagnostics,
+    ENV_PROMPT_DUMP_PATH,
     is_answer_eligible,
     GroundingDinoDetector,
     _norm_cxcywh_to_tile_xyxy,
@@ -1612,3 +1614,94 @@ def test_groundingdino_call_dedupes_before_returning(monkeypatch):
     out = det(tiles)
     assert sum(len(t) for t in out) == 1
     assert out[0][0].score == 0.55
+
+
+# --------------------------------------------------- prompt diagnostic dump (#145) ----
+
+
+def test_dump_prompt_diagnostics_is_noop_without_env_var(monkeypatch, tmp_path):
+    monkeypatch.delenv(ENV_PROMPT_DUMP_PATH, raising=False)
+    dump_prompt_diagnostics(
+        tag="question_latch",
+        question_prompt="sofa .",
+        vocab_prompt="sofa . window .",
+        dropped_vocab_nouns=["vase"],
+    )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_dump_prompt_diagnostics_writes_jsonl_record(monkeypatch, tmp_path):
+    out = tmp_path / "prompt.jsonl"
+    monkeypatch.setenv(ENV_PROMPT_DUMP_PATH, str(out))
+    dump_prompt_diagnostics(
+        tag="question_latch",
+        question_prompt="sofa .",
+        vocab_prompt="sofa . window .",
+        dropped_vocab_nouns=["vase", "tray"],
+    )
+    assert out.exists()
+    lines = out.read_text().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["tag"] == "question_latch"
+    assert record["question_prompt"] == "sofa ."
+    assert record["vocab_prompt"] == "sofa . window ."
+    assert record["dropped_vocab_nouns"] == ["vase", "tray"]
+    assert record["n_dropped_vocab_nouns"] == 2
+    assert "wall_time" in record
+
+
+def test_dump_prompt_diagnostics_appends_across_calls(monkeypatch, tmp_path):
+    out = tmp_path / "prompt.jsonl"
+    monkeypatch.setenv(ENV_PROMPT_DUMP_PATH, str(out))
+    dump_prompt_diagnostics(
+        tag="boot_prime", question_prompt="", vocab_prompt="sofa .", dropped_vocab_nouns=[]
+    )
+    dump_prompt_diagnostics(
+        tag="question_latch", question_prompt="sofa .", vocab_prompt="sofa .",
+        dropped_vocab_nouns=[],
+    )
+    assert len(out.read_text().strip().splitlines()) == 2
+
+
+def test_dump_prompt_diagnostics_never_raises_on_bad_path(monkeypatch):
+    monkeypatch.setenv(ENV_PROMPT_DUMP_PATH, "/dev/null/nonexistent/prompt.jsonl")
+    dump_prompt_diagnostics(
+        tag="question_latch", question_prompt="sofa .", vocab_prompt="sofa .",
+        dropped_vocab_nouns=[],
+    )  # must not raise
+
+
+def test_refresh_prompt_dumps_diagnostics_when_env_var_set(monkeypatch, tmp_path):
+    # Integration: refresh_prompt (the shared local+remote seam) fires the dump exactly
+    # once per call, reporting the SAME dropped-noun set build_gdino_prompt actually
+    # dropped -- the exact signal #145's evidence comment says was missing.
+    out = tmp_path / "prompt.jsonl"
+    monkeypatch.setenv(ENV_PROMPT_DUMP_PATH, str(out))
+    det = FakeDetector()
+    refresh_prompt(det, ["sofa"], _standing_vocab_nouns())
+    lines = out.read_text().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["tag"] == "question_latch"
+    assert "sofa" in record["vocab_prompt"]
+    assert record["n_dropped_vocab_nouns"] == len(record["dropped_vocab_nouns"])
+    assert record["n_dropped_vocab_nouns"] > 0
+    for noun in record["dropped_vocab_nouns"]:
+        assert noun not in record["vocab_prompt"].removesuffix(" .").split(" . ")
+
+
+def test_refresh_prompt_boot_prime_tag_when_no_question_nouns(monkeypatch, tmp_path):
+    out = tmp_path / "prompt.jsonl"
+    monkeypatch.setenv(ENV_PROMPT_DUMP_PATH, str(out))
+    det = FakeDetector()
+    refresh_prompt(det, (), _standing_vocab_nouns())
+    record = json.loads(out.read_text().strip().splitlines()[0])
+    assert record["tag"] == "boot_prime"
+
+
+def test_refresh_prompt_no_dump_io_without_env_var(monkeypatch, tmp_path):
+    monkeypatch.delenv(ENV_PROMPT_DUMP_PATH, raising=False)
+    det = FakeDetector()
+    refresh_prompt(det, ["sofa"], _standing_vocab_nouns())
+    assert list(tmp_path.iterdir()) == []
