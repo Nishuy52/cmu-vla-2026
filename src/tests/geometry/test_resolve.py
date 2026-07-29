@@ -773,3 +773,134 @@ def test_eval_clause_between_prefers_passing_pair():
     clause_fail = Clause(Pred.BETWEEN, [Anchor(noun="lamp"), Anchor(noun="lamp")])
     result_fail = T._eval_clause(a, clause_fail, idx, T.DEFAULT_THRESHOLDS)
     assert result_fail.passed is False
+
+
+# ------------------------------------------- issue #151: disambiguator anchor fallback
+#
+# office_1 repro shape: "the table closest to the decal" picks the geometrically
+# nearest table by raw distance, with no regard to whether the target class (monitor)
+# is actually on it. A phantom table can be closer to the decal than the real table
+# while carrying zero monitors.
+
+
+def _monitor_table_decal_spec(monitor_noun: str = "computer monitor") -> TargetSpec:
+    table_closest_to_decal = Anchor(
+        noun="table",
+        disambiguator=Clause(Pred.CLOSEST_TO, [Anchor(noun="map wall decal")]),
+    )
+    return _spec(monitor_noun, clauses=[Clause(Pred.ON, [table_closest_to_decal])])
+
+
+def _office1_shape_index(*, monitor_on_phantom: bool, include_monitor: bool) -> FakeIndex:
+    decal = rec(1, "map wall decal", (0.0, 0.0, 1.5), (0.1, 0.1, 0.5))
+    # table_phantom is CLOSER to the decal (dist 1m) than table_true (dist 5m), but
+    # by default carries no monitor -- mirrors office_1's real id=131 vs id=7.
+    table_phantom = rec(2, "table", (1.0, 0.0, 0.4), (1.5, 1.5, 0.8))
+    table_true = rec(3, "table", (5.0, 0.0, 0.4), (1.5, 1.5, 0.8))
+    recs = [decal, table_phantom, table_true]
+    if include_monitor:
+        host = table_phantom if monitor_on_phantom else table_true
+        hx, hy, _ = host.centroid
+        monitor = rec(4, "computer monitor", (float(hx), float(hy), 0.95), (0.3, 0.3, 0.3))
+        recs.append(monitor)
+    return FakeIndex(recs)
+
+
+def test_disambiguator_anchor_fallback_unchanged_when_top_anchor_passes():
+    # Top-ranked anchor (table_phantom, closest to the decal) DOES carry a monitor:
+    # the existing top-pick behaviour must be untouched, and the fallback audit step
+    # must never fire.
+    idx = _office1_shape_index(monitor_on_phantom=True, include_monitor=True)
+    res = T.counting(_monitor_table_decal_spec(), idx)
+    assert res.count == 1
+    assert res.ids == {4}
+    assert not any(a.step == "disambiguator_anchor_fallback" for a in res.audit)
+
+
+def test_disambiguator_anchor_fallback_fires_when_top_anchor_empty_but_class_exists():
+    # Top-ranked anchor (table_phantom) has NO monitor; the real monitor sits on the
+    # farther table_true. Condition 2 (monitor class has eligible instances) holds,
+    # so the fallback must walk to table_true and recover the count -- the office_1
+    # repro this task exists to fix (truth 6, was 0).
+    idx = _office1_shape_index(monitor_on_phantom=False, include_monitor=True)
+    res = T.counting(_monitor_table_decal_spec(), idx)
+    assert res.count == 1
+    assert res.ids == {4}
+    fallback_entries = [a for a in res.audit if a.step == "disambiguator_anchor_fallback"]
+    assert len(fallback_entries) == 1
+    assert "id=3" in fallback_entries[0].detail  # landed on table_true
+
+
+def test_disambiguator_anchor_fallback_stays_zero_with_no_eligible_targets():
+    # No monitor instance exists anywhere in the scene at all (condition 2 fails) --
+    # the fallback must NOT fire, and the count must stay the genuine zero. This is
+    # the guard against biasing away from a true-zero answer.
+    idx = _office1_shape_index(monitor_on_phantom=False, include_monitor=False)
+    res = T.counting(_monitor_table_decal_spec(), idx)
+    assert res.count == 0
+    assert res.ids == set()
+    assert not any(a.step == "disambiguator_anchor_fallback" for a in res.audit)
+
+
+# --------------------------------------- issue #151: sub-anchor selection order-invariance
+#
+# office_1's real defect: "the table closest to the map wall decal" resolves its OWN
+# disambiguator anchor ("map wall decal") via ``_resolve_anchor(...)[0]`` with no
+# tiebreak — plain instance-list position, an annotation/detection-order artifact
+# (#111's exact trap: "deterministic" is not "non-arbitrary"). office_1 has 3
+# duplicate/near-duplicate decal detections, so which one lands at index 0 (and
+# therefore which table "closest to the decal" resolves to, and therefore the final
+# monitor count) depends on the banked instance list's shuffle order.
+#
+# This fixture reproduces that shape with 3 decals, each nearest to a DIFFERENT one
+# of 3 tables, each table carrying a different monitor count. Every table carries at
+# least one monitor (0 would route through ``_disambiguator_anchor_fallback``,
+# exercised separately above) so this isolates the primary top-pick path in
+# ``_resolve_anchor``/``_apply_disambiguator``. decal_1's nearest table (table_1,
+# distance ~1.49 m) is strictly closer than decal_2's (table_2, ~1.70 m) and
+# decal_3's (table_3, ~1.94 m) -- the only physically-grounded winner is decal_1 ->
+# table_1 -> count 2, regardless of shuffle order.
+
+
+def _decal_duplicates_fixture() -> list:
+    decal_1 = rec(1, "map wall decal", (0.0, 0.0, 1.5), (0.1, 0.1, 0.5))
+    decal_2 = rec(2, "map wall decal", (10.0, 10.0, 1.5), (0.1, 0.1, 0.5))
+    decal_3 = rec(3, "map wall decal", (20.0, 20.0, 1.5), (0.1, 0.1, 0.5))
+    table_1 = rec(10, "table", (1.0, 0.0, 0.4), (1.5, 1.5, 0.8))  # dist to decal_1 ~1.49
+    table_2 = rec(11, "table", (11.3, 10.0, 0.4), (1.5, 1.5, 0.8))  # dist to decal_2 ~1.70
+    table_3 = rec(12, "table", (21.6, 20.0, 0.4), (1.5, 1.5, 0.8))  # dist to decal_3 ~1.94
+    monitors = [
+        rec(20, "computer monitor", (1.0, 0.0, 0.95), (0.3, 0.3, 0.3)),
+        rec(21, "computer monitor", (1.05, 0.05, 0.95), (0.3, 0.3, 0.3)),  # 2 on table_1
+        rec(22, "computer monitor", (11.3, 10.0, 0.95), (0.3, 0.3, 0.3)),  # 1 on table_2
+        rec(23, "computer monitor", (21.6, 20.0, 0.95), (0.3, 0.3, 0.3)),  # 1 on table_3
+    ]
+    return [decal_1, decal_2, decal_3, table_1, table_2, table_3, *monitors]
+
+
+def _decal_duplicates_spec() -> TargetSpec:
+    table_closest_to_decal = Anchor(
+        noun="table",
+        disambiguator=Clause(Pred.CLOSEST_TO, [Anchor(noun="map wall decal")]),
+    )
+    return _spec(
+        "computer monitor", clauses=[Clause(Pred.ON, [table_closest_to_decal])]
+    )
+
+
+def test_sub_anchor_selection_is_order_invariant_synthetic():
+    import random
+
+    records = _decal_duplicates_fixture()
+    spec = _decal_duplicates_spec()
+    rng = random.Random(151)
+    counts = set()
+    for _ in range(25):
+        shuffled = list(records)
+        rng.shuffle(shuffled)
+        idx = FakeIndex(shuffled)
+        res = T.counting(spec, idx)
+        counts.add(res.count)
+    # The only physically-grounded winner is table_1 (its nearest decal is strictly
+    # closest), which carries 2 monitors -- every shuffle must land on the same count.
+    assert counts == {2}, f"count varied across shuffles: {counts}"

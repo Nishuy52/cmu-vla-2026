@@ -809,6 +809,52 @@ def _resolve_anchor(
     return narrowed
 
 
+def _select_sub_anchor(
+    sub_anchor_recs: Sequence[InstanceRecord],
+    cands: Sequence[InstanceRecord],
+) -> InstanceRecord:
+    """Pick one instance from a resolved sub-anchor to serve as a disambiguator's
+    reference point, when the sub-anchor noun resolves to more than one instance.
+
+    A disambiguator's own anchor (e.g. "map wall decal" in "the table closest to
+    the map wall decal") can legitimately resolve to several duplicate/near-
+    duplicate detections when the fused map hasn't merged them into one track.
+    Picking ``sub_anchor_recs[0]`` is an annotation/detection-order artifact
+    (#151): plain list position carries no physical meaning, so the
+    disambiguator's answer — and everything downstream of it — ends up
+    depending on shuffle order of the banked instance list. #111 established
+    that merely making such a choice *deterministic* (e.g. sort by
+    ``instance_id`` alone) is not sufficient; the ranking must be grounded in
+    physical evidence, with identity used only as a final, never-reached-in-
+    practice tiebreak.
+
+    Ranking key, each field a fallback for the previous only on an EXACT tie
+    (never blended into one composite score):
+
+    1. ascending distance from the sub-anchor candidate to its nearest instance
+       in ``cands`` (the pool actually being disambiguated, e.g. the tables).
+       This is physical evidence: of several "decal" detections, the one that
+       is actually near a candidate table is the one "the table closest to the
+       decal" can plausibly be about — a duplicate/ghost detection off in an
+       unrelated part of the scene is not a real disambiguator for this query.
+    2. descending detector ``score`` (max confidence over its own
+       observations) — physical evidence of how likely the detection reflects
+       a real object at that pose, versus a low-confidence fusion split.
+    3. descending ``n_obs`` (distinct keyframe observations) — physical
+       evidence of how much of the traversal actually observed this instance;
+       more observations is a more robust centroid estimate.
+    4. ``instance_id`` ascending — reached only on an exact tie across 1-3,
+       which in practice never happens (#111); kept only so the function is
+       total and reproducible if it ever does.
+    """
+
+    def key(rec: InstanceRecord) -> tuple[float, float, int, int]:
+        nearest = min(_centroid_dist(rec, c) for c in cands)
+        return (nearest, -rec.score, -rec.n_obs, rec.instance_id)
+
+    return min(sub_anchor_recs, key=key)
+
+
 def _apply_disambiguator(
     disamb: Clause,
     cands: list[InstanceRecord],
@@ -831,10 +877,11 @@ def _apply_disambiguator(
                 f"'{disamb.anchors[0].noun}' not found",
             )
             return cands
+        sub_anchor = _select_sub_anchor(sub_anchor_recs, cands)
         ranked = (
-            closest_to(cands, sub_anchor_recs[0], th)
+            closest_to(cands, sub_anchor, th)
             if disamb.pred is Pred.CLOSEST_TO
-            else farthest_from(cands, sub_anchor_recs[0], th)
+            else farthest_from(cands, sub_anchor, th)
         )
         by_id = {c.instance_id: c for c in cands}
         return [by_id[ranked.order[0]]]
@@ -854,6 +901,129 @@ def _apply_disambiguator(
         )
         return cands
     return kept
+
+
+def _anchor_disambiguator_order(
+    anchor: Anchor,
+    index: SceneIndex,
+    th: Thresholds,
+    audit: list[Relaxation] | None,
+    _depth: int,
+) -> list[InstanceRecord] | None:
+    """The anchor's own closest_to/farthest_from disambiguator ranking, best-first.
+
+    Returns ``None`` when ``anchor`` carries no single-anchor superlative
+    disambiguator to rank (nothing to fall back through) — the anchor's own
+    noun/attribute pool is empty, its disambiguator's own anchor can't be
+    resolved, or the nesting-depth guard is reached.
+
+    #151: mirrors the candidate-pool construction ``_resolve_anchor`` /
+    ``_apply_disambiguator`` use to pick the top-ranked anchor, so
+    ``order[0]`` here is always the same instance those functions commit to.
+    Deliberately does not alter or call into either of them — this is a
+    read-only probe used by :func:`_disambiguator_anchor_fallback` to see
+    what the ranking looks like *beyond* the top pick; the committed
+    anchor-resolution path (`resolve()` / `_eval_clause`'s normal walk) is
+    untouched.
+    """
+    disamb = anchor.disambiguator
+    if disamb is None or disamb.pred not in _SUPERLATIVE_PREDS or _depth >= _MAX_ANCHOR_DEPTH:
+        return None
+    cands = _match_anchor_noun(index, anchor.noun)
+    if anchor.attributes:
+        _class_pool = cands
+        cands = [c for c in cands if _attrs_match(c, anchor.attributes, _class_pool, th)]
+    if not cands:
+        return None
+    sub_anchor_recs = _resolve_anchor(disamb.anchors[0], index, th, audit, _depth + 1)
+    if not sub_anchor_recs:
+        return None
+    sub_anchor = _select_sub_anchor(sub_anchor_recs, cands)
+    ranked = (
+        closest_to(cands, sub_anchor, th)
+        if disamb.pred is Pred.CLOSEST_TO
+        else farthest_from(cands, sub_anchor, th)
+    )
+    by_id = {c.instance_id: c for c in cands}
+    return [by_id[i] for i in ranked.order]
+
+
+def _disambiguator_anchor_fallback(
+    pool: Sequence[InstanceRecord],
+    hard_clauses: Sequence[Clause],
+    index: SceneIndex,
+    th: Thresholds,
+    audit: list[Relaxation],
+) -> tuple[set[int], list[InstanceRecord]] | None:
+    """#151: retry a strict count that a top-ranked disambiguator anchor emptied.
+
+    Precedent (#122, merged ``2e85b1f``): ``_eval_clause`` was picking the
+    highest-SCORING anchor result rather than any PASSING one, so a
+    failing-but-high-scoring anchor could mask a genuinely passing one. This
+    extends the same principle one level up, to disambiguator anchor
+    SELECTION: ``closest_to``/``farthest_from`` picks the single
+    nearest/farthest anchor purely by distance, with no regard to whether
+    that anchor actually supports the relation the question presupposes. A
+    phantom table can beat the real table on raw distance while carrying
+    none of the target class ("the table closest to the decal" picks a
+    monitor-free phantom over the real table 1.5 m further away).
+
+    Fires ONLY when both hold:
+
+    1. the top-ranked anchor's strict filter yields an empty count, AND
+    2. the target class (``pool``) has at least one answer-eligible instance.
+
+    Condition 2 is the load-bearing guard: it is what distinguishes "there
+    are no monitors" (leave the 0 alone) from "there are 8 monitors and none
+    sit on the anchor we chose" (the anchor choice is the more likely error).
+    Callers must only invoke this when ``pool`` is non-empty AND the initial
+    strict-filter count came out empty — this function does not re-check
+    those, it assumes them.
+
+    Known generalization risk: no question in the 15-scene training battery
+    has a true answer of 0, so this branch is never exercised by that
+    sample. Condition 2 (not sample evidence) is what makes the change
+    defensible on held-out data — without it this would systematically bias
+    away from ever answering zero.
+
+    Only single-anchor clauses (BETWEEN excluded) whose anchor carries a
+    closest_to/farthest_from disambiguator are retried; deeper nesting stays
+    on the existing top-pick behaviour. Returns ``(ids, survivors)`` for the
+    first alternate anchor (walked in ranking order) that yields a non-empty
+    result, or ``None`` if no clause has such an anchor or none of its
+    alternates help.
+    """
+    for ci, clause in enumerate(hard_clauses):
+        if len(clause.anchors) != 1:
+            continue
+        fn = _BINARY_PREDS.get(clause.pred)
+        if fn is None:
+            continue
+        order = _anchor_disambiguator_order(clause.anchors[0], index, th, audit, 0)
+        if order is None or len(order) < 2:
+            continue  # no superlative disambiguator here, or nothing to fall back to
+
+        other_clauses = [cl for j, cl in enumerate(hard_clauses) if j != ci]
+        for alt_anchor in order[1:]:
+            survivors = [
+                c
+                for c in pool
+                if _apply_negation(fn(c, alt_anchor, th), clause).passed
+                and all(_eval_clause(c, cl, index, th).passed for cl in other_clauses)
+            ]
+            if survivors:
+                ids = {r.instance_id for r in survivors}
+                _audit_add(
+                    audit,
+                    "disambiguator_anchor_fallback",
+                    f"anchor '{clause.anchors[0].noun}' top pick "
+                    f"(id={order[0].instance_id}) yielded empty "
+                    f"'{clause.pred.value}'; {len(pool)} eligible "
+                    f"'{pool[0].label}' target(s) exist, so fell back to "
+                    f"next-ranked anchor id={alt_anchor.instance_id}",
+                )
+                return ids, survivors
+    return None
 
 
 def _eval_clause(
@@ -1299,6 +1469,14 @@ def counting(
 
     survivors = _filter_and(pool, hard_clauses, index, th, audit)
     ids = {r.instance_id for r in survivors if r.n_obs >= min_obs}
+
+    if not ids and pool:
+        fallback = _disambiguator_anchor_fallback(pool, hard_clauses, index, th, audit)
+        if fallback is not None:
+            fb_survivors = [r for r in fallback[1] if r.n_obs >= min_obs]
+            if fb_survivors:
+                survivors = fb_survivors
+                ids = {r.instance_id for r in fb_survivors}
 
     explanations: list[str] = []
     if not ids:
