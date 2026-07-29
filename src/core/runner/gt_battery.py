@@ -1031,9 +1031,55 @@ _RUBRIC_GOAL_CLEARANCE_M: float = 0.4
 #: Bounded push distance (m): a local, geometric correction only (get the goal off
 #: the ONE object it's sitting on/inside), never an unbounded drift chasing some
 #: notion of "the right approach side" — if bounded pushing can't clear every
-#: overlapping footprint, the raw centroid stands (an honest near-miss beats a
-#: silently fabricated goal position).
+#: overlapping footprint, construction fails (issue #162: an honest, explicit
+#: failure beats a silently fabricated goal position — see :func:`_nearest_free_goal`).
 _RUBRIC_GOAL_MAX_PUSH_M: float = 2.5
+#: issue #162 — bounded search budget (iterations) for the free-goal push. Each
+#: iteration pushes off every currently-overlapping footprint once. Raised from the
+#: original fixed 4 (which had no convergence guarantee at all) because the cycle
+#: detection below now gives a genuine, correct early exit for the A<->B
+#: oscillation case — so the budget only needs to cover legitimately-converging
+#: multi-supporter chains, not double as an ad hoc oscillation timeout.
+_RUBRIC_GOAL_MAX_PUSH_ITERS: int = 12
+#: issue #162 — tiny outward nudge (m) applied on top of every push-to-edge, so the
+#: pushed point lands strictly OUTSIDE the clearance box it was just pushed off of,
+#: not exactly ON its boundary. The "is (x, y) inside this box" test everywhere in
+#: this module (:func:`_blocking_footprint`, and the loop's own overlap check) is
+#: inclusive of the boundary (``axmin <= x <= axmax``) by design — it has to be, so
+#: a point sitting exactly on a footprint's edge before any push still counts as
+#: needing one. But that means an UN-nudged push-to-edge is immediately
+#: re-detected as "still inside" by that same inclusive test on the very next
+#: check, even though nothing is actually wrong — sub-millimetre and physically
+#: meaningless, but indistinguishable from a genuine non-convergent oscillation
+#: without this nudge. 0.1 mm is far below sensor/annotation noise and the arrival
+#: tolerance this goal ultimately feeds.
+_RUBRIC_GOAL_PUSH_EPS_M: float = 1e-4
+
+
+def _blocking_footprint(
+    x: float, y: float, gt: GTScene, room_w: float, room_h: float
+) -> tuple[object, tuple[float, float, float, float]] | None:
+    """First floor-level, non-architectural instance footprint (expanded by
+    :data:`_RUBRIC_GOAL_CLEARANCE_M`) that ``(x, y)`` falls inside, or ``None`` if
+    the point is clear of every such footprint (issue #162).
+
+    Shared by :func:`_nearest_free_goal`'s push loop AND its post-condition check
+    so both use exactly the same "is this point free" test — the defect this
+    closes was precisely that the loop's own internal ``moved`` bookkeeping was
+    NOT an accurate proxy for that question (see the caller's docstring).
+    """
+    for rec in gt.instances:
+        if float(rec.aabb_min[2]) >= TERRAIN_SLAB_MAX_Z:
+            continue  # elevated overhang -- never blocked the floor
+        if _is_architectural_room_scale_aabb(rec.aabb_min, rec.aabb_max, room_w, room_h):
+            continue  # #53 territory -- not a real local footprint
+        axmin = float(rec.aabb_min[0]) - _RUBRIC_GOAL_CLEARANCE_M
+        aymin = float(rec.aabb_min[1]) - _RUBRIC_GOAL_CLEARANCE_M
+        axmax = float(rec.aabb_max[0]) + _RUBRIC_GOAL_CLEARANCE_M
+        aymax = float(rec.aabb_max[1]) + _RUBRIC_GOAL_CLEARANCE_M
+        if axmin <= x <= axmax and aymin <= y <= aymax:
+            return rec, (axmin, aymin, axmax, aymax)
+    return None
 
 
 def _nearest_free_goal(
@@ -1042,7 +1088,7 @@ def _nearest_free_goal(
     *,
     anchor_id: int | None = None,
     approach_xy: tuple[float, float] | None = None,
-) -> tuple[float, float]:
+) -> tuple[float, float] | None:
     """Push a raw anchor centroid off any floor-level obstacle footprint it falls
     inside (issue #61; issue #66 extends this to the anchor's OWN footprint).
 
@@ -1089,11 +1135,55 @@ def _nearest_free_goal(
     :func:`_synthetic_from_gt`, so not a real local footprint to push off of) and
     elevated instances (base z at/above the terrain slab, i.e. overhangs) never
     blocked the floor to begin with.
+
+    Issue #162: the earlier fixed 4-iteration push had no convergence guarantee
+    and no post-condition check on its result. Pushing off object A can land the
+    point inside object B, pushing off B can send it right back toward A, and the
+    old code just stopped after 4 rounds and returned whatever it held —
+    "moved = True" was set the instant a footprint was found to overlap, whether
+    or not the push that followed actually changed the point's position, so even
+    that flag was not a reliable convergence signal. Measured over 1028 IF-anchor
+    cases across all 15 GT scenes: 10.3% returned a point still inside a stamped
+    floor footprint (the non-convergent path), and a further 1.4% hit the
+    ``dist > _RUBRIC_GOAL_MAX_PUSH_M`` bail-out and returned the RAW, unpushed
+    centroid — itself always inside solid geometry whenever the push was needed at
+    all. Both are the exact "arrival-tolerance-unreachable by construction"
+    failure #66 already named for the raw-centroid case.
+
+    Fixed by returning ``None`` instead of a bad point whenever construction
+    genuinely fails, via two independent mechanisms:
+
+      1. **Cycle detection.** Each iteration's resulting ``(x, y)`` (rounded to
+         mm precision) is checked against every state visited so far; a repeat
+         means the push is oscillating between (at least) two footprints and can
+         never converge, so iterating further would only re-trace the same cycle.
+         Detected immediately rather than waited out.
+      2. **An authoritative post-condition** (:func:`_blocking_footprint`, the
+         SAME free/blocked test the push loop itself uses): after the loop ends —
+         by convergence, cycle detection, or exhausting the bounded iteration
+         budget — the final point is re-checked from scratch against every
+         footprint. A residual overlap (from non-convergence, from a mid-pass
+         push that happened to leave an EARLIER-checked footprint's box, or from
+         any other path through the loop) is a construction failure, full stop.
+
+    The distance cap (:data:`_RUBRIC_GOAL_MAX_PUSH_M`) keeps its original
+    "local, bounded correction only" role, but no longer falls back to the raw
+    centroid when tripped — a push this large is exactly the case the cap exists
+    to catch, and by issue #66's own principle the untouched centroid is already
+    an unreachable goal, so it is now a construction failure like any other
+    rather than a special-cased fallback value.
+
+    Returns ``None`` on construction failure (any of the above) so the caller can
+    treat this leg as unevaluable rather than silently scoring an unreachable
+    point (issue #162; mirrors the existing "anchor did not resolve" skip
+    convention in :func:`_if_rubric_geometry`, and the ``Gate.degenerate`` /
+    unevaluable convention issue #155 introduced for degenerate corridor gates).
     """
     x0, y0, x1, y1 = _gt_footprint_bounds(gt, 0.0)
     room_w, room_h = x1 - x0, y1 - y0
     x, y = xy
-    for _ in range(4):  # bounded: converges in one pass for the common single-supporter case
+    seen: set[tuple[float, float]] = {(round(x, 6), round(y, 6))}
+    for _ in range(_RUBRIC_GOAL_MAX_PUSH_ITERS):
         moved = False
         for rec in gt.instances:
             if float(rec.aabb_min[2]) >= TERRAIN_SLAB_MAX_Z:
@@ -1117,28 +1207,64 @@ def _nearest_free_goal(
                 cy = float(rec.aabb_min[1] + rec.aabb_max[1]) / 2.0
                 adx, ady = approach_xy[0] - cx, approach_xy[1] - cy
                 if abs(adx) >= abs(ady):
-                    x = axmax if adx >= 0 else axmin
+                    x = (
+                        axmax + _RUBRIC_GOAL_PUSH_EPS_M
+                        if adx >= 0
+                        else axmin - _RUBRIC_GOAL_PUSH_EPS_M
+                    )
                 else:
-                    y = aymax if ady >= 0 else aymin
+                    y = (
+                        aymax + _RUBRIC_GOAL_PUSH_EPS_M
+                        if ady >= 0
+                        else aymin - _RUBRIC_GOAL_PUSH_EPS_M
+                    )
             else:
                 # Push off an OTHER instance's footprint: nearest edge (issue #61).
                 d_left, d_right = x - axmin, axmax - x
                 d_bottom, d_top = y - aymin, aymax - y
                 m = min(d_left, d_right, d_bottom, d_top)
                 if m == d_left:
-                    x = axmin
+                    x = axmin - _RUBRIC_GOAL_PUSH_EPS_M
                 elif m == d_right:
-                    x = axmax
+                    x = axmax + _RUBRIC_GOAL_PUSH_EPS_M
                 elif m == d_bottom:
-                    y = aymin
+                    y = aymin - _RUBRIC_GOAL_PUSH_EPS_M
                 else:
-                    y = aymax
+                    y = aymax + _RUBRIC_GOAL_PUSH_EPS_M
             moved = True
         if not moved:
             break
+        # issue #162: cycle detection -- a repeated (quantised) state means the
+        # push is oscillating between footprints (A pushes toward B, B pushes back
+        # toward A) and will never settle; stop now rather than spend the rest of
+        # the bounded budget re-tracing the same cycle.
+        state = (round(x, 6), round(y, 6))
+        if state in seen:
+            return None
+        seen.add(state)
+    else:
+        # issue #162: bounded budget exhausted without the loop reporting
+        # convergence (``not moved``) or a detected cycle -- e.g. a long chain of
+        # distinct overlapping footprints. Still a construction failure, not a
+        # partial success to return anyway.
+        return None
+
+    # issue #162: authoritative post-condition. ``not moved`` above only means the
+    # LAST footprint checked in this final pass didn't overlap -- it does not by
+    # itself guarantee no OTHER footprint (one that pushed the point earlier in
+    # the very same pass, before a later push moved it again) still contains the
+    # final (x, y). Re-verify from scratch with the exact same test the loop uses.
+    if _blocking_footprint(x, y, gt, room_w, room_h) is not None:
+        return None
+
     dist = ((x - xy[0]) ** 2 + (y - xy[1]) ** 2) ** 0.5
     if dist > _RUBRIC_GOAL_MAX_PUSH_M:
-        return xy
+        # issue #162: a push this large is exactly the case this cap exists to
+        # catch -- a local, bounded correction should not chase an object this
+        # far. The old code fell back to the raw (still-inside-something)
+        # centroid here, which is precisely the defect this fix closes; it is now
+        # a construction failure like any other, not a fallback value.
+        return None
     return (x, y)
 
 
@@ -1309,6 +1435,7 @@ def _if_rubric_geometry(
     idx: BasicSceneIndex,
     *,
     start_xy: tuple[float, float] | None = None,
+    goal_construction_diag: list[str] | None = None,
 ) -> tuple[
     list[tuple[str, tuple[float, float]]],
     list[tuple[int, object]],
@@ -1337,6 +1464,16 @@ def _if_rubric_geometry(
         :func:`core.groundtruth.scoring.score_instruction_rubric`) and for any
         leg whose anchor did not resolve.
     Legs/avoids whose anchors don't resolve are skipped (an unscored, not a wrong, leg).
+
+    Issue #162: a GOTO/VIA_NEAR leg whose anchor DID resolve but for which
+    :func:`_nearest_free_goal` cannot construct a free arrival point (returns
+    ``None`` — the push didn't converge, or only converges outside the bounded
+    distance cap) is skipped the SAME way: an unscored, not a wrong, leg. The
+    goal would sit inside solid geometry; the rubric must not silently demand
+    arrival at a point the vehicle can never occupy. When
+    ``goal_construction_diag`` (optional) is given, one human-readable string is
+    appended to it per such skipped leg, so a caller can surface how many/which
+    legs this hit without it being invisible.
 
     ``start_xy`` (issue #66, optional): the point the route departs from — passed
     through to :func:`_nearest_free_goal` as the FIRST leg's approach reference, so
@@ -1517,6 +1654,36 @@ def _if_rubric_geometry(
                 (float(c[0]), float(c[1])), gt,
                 anchor_id=rec.instance_id, approach_xy=approach_xy,
             )
+            if goal_xy is None:
+                # issue #162: no free arrival point could be constructed for this
+                # anchor within the bounded push budget -- returning the raw
+                # centroid (or any other point still inside solid geometry) would
+                # make the leg unscoreable no matter how well the robot drives
+                # (issue #66's principle). Skip it the same way an anchor that
+                # fails to resolve is skipped: an unscored, not a wrong, leg.
+                if goal_construction_diag is not None:
+                    goal_construction_diag.append(
+                        f"leg {i}: anchor {rec.instance_id} ({rec.label!r}) -- no "
+                        "free goal constructible (issue #162); leg unscored"
+                    )
+                # issue #162 (rubric-goal-v3): do NOT leave ``approach_xy`` at
+                # whatever preceded this leg (e.g. ``start_xy``, possibly clear
+                # across the room) -- the DRIVEN trajectory this rubric scores is
+                # produced independently of this geometry pass and still actually
+                # approaches THIS anchor's real location before continuing on to
+                # the next leg, skip or no skip. Threading the far-away prior
+                # reference through instead measurably relocates the NEXT leg's
+                # pushed goal (``_nearest_free_goal`` picks the push side nearest
+                # ``approach_xy``) to a side of it the driven route never visits,
+                # turning one goal-construction failure into a second, unrelated
+                # leg's arrival failure. Carry the skipped anchor's own (raw,
+                # unpushed) centroid forward instead -- not a fabricated arrival
+                # point (never scored, never appended to ``leg_goals``), just the
+                # best available approximation of "where the route was, coming
+                # into the next leg," so a skipped leg does not perturb legs after
+                # it.
+                approach_xy = (float(c[0]), float(c[1]))
+                continue
             kind = "via_near" if leg.kind is LegKind.VIA_NEAR else "goto"
             leg_goals.append((kind, goal_xy))
             leg_instance_ids.append((rec.instance_id,))
@@ -1751,6 +1918,15 @@ class GTQuestionScore:
     #: from ``n_threading_violations`` rather than scored as a violation.
     n_threading_unevaluable: int | None = None
     n_avoid_violations: int | None = None
+    #: issue #162: GOTO/VIA_NEAR legs whose anchor resolved but for which
+    #: ``_nearest_free_goal`` could not construct a free arrival point within the
+    #: bounded push budget (oscillation, non-convergence, or a push that only
+    #: clears every footprint outside ``_RUBRIC_GOAL_MAX_PUSH_M``). Excluded from
+    #: ``n_legs`` (unscored, not wrong) — mirrors the existing unresolved-anchor
+    #: skip; kept as its own count so a goal-construction failure stays visible
+    #: instead of just shrinking ``n_legs`` silently. ``None`` when IF wasn't
+    #: scored at all for this row.
+    n_goal_construction_unevaluable: int | None = None
     driven_n_poses: int | None = None
     #: Per-leg rubric geometry + outcomes (meth-F7/F8). ``leg_goals`` is
     #: ``[[kind, [x, y]], ...]`` from :func:`_if_rubric_geometry`; ``leg_outcomes`` is
@@ -2106,9 +2282,14 @@ def score_scene(
             room_bounds=room_bounds, carved_cells=carved_cells,
             enable_withhold_gates=enable_withhold_gates,
         )
+        goal_construction_diag: list[str] = []
         leg_goals, corridor_gates, avoid_caps, leg_instance_ids, leg_instance_aabbs = (
-            _if_rubric_geometry(text, gt, idx, start_xy=spawn_xy)
+            _if_rubric_geometry(
+                text, gt, idx, start_xy=spawn_xy,
+                goal_construction_diag=goal_construction_diag,
+            )
         )
+        rec.n_goal_construction_unevaluable = len(goal_construction_diag)
         rub = S.score_instruction_rubric(
             driven,
             leg_goals,
@@ -2193,6 +2374,7 @@ def score_scene(
             filter(
                 None,
                 [rub.note] + rub.threading_details + rub.avoid_details
+                + goal_construction_diag
                 + [data_note, wall_note],
             )
         )
@@ -2459,6 +2641,23 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
     # trajectory; Frechet/coverage are secondary diagnostics only. Aligned vs unaligned
     # is retained for the diagnostic columns.
     inf_scored = [s for s in inf if s.rubric_score is not None]
+    # issue #162: a question every one of whose legs failed goal construction (or
+    # anchor resolution) has ZERO evaluable legs -- ``n_legs == 0`` -- and
+    # ``score_instruction_rubric`` reports ``rubric_score = 0.0`` / ``ordered_leg_
+    # credit = 0.0`` for that case by construction (``n_in_order / n_legs if
+    # n_legs else 0.0`` in ``core.groundtruth.scoring``). That 0.0 is not a scored
+    # failure -- there is nothing left to score -- so counting it in the rubric
+    # aggregate would depress ``if_rubric`` for a purely artifactual reason: the
+    # rubric would be penalising the battery for correctly REFUSING to fabricate a
+    # goal (issue #162), the exact opposite of what refusing to fabricate is for.
+    # Mirrors the precedent issue #155 set for degenerate corridor gates
+    # (``n_threading_unevaluable`` legs are excluded from the threading-violation
+    # count rather than scored as violations): here the whole QUESTION is excluded
+    # from the rubric aggregate rather than scored as a rubric failure. A question
+    # with at least one evaluable leg keeps counting normally, including any
+    # legitimate 0.0 it earns by that leg simply not being reached.
+    inf_rubric_eligible = [s for s in inf_scored if (s.n_legs or 0) > 0]
+    inf_zero_evaluable_legs = [s for s in inf_scored if (s.n_legs or 0) == 0]
     inf_aligned = [s for s in inf if s.frame_aligned]
     unaligned_scenes = sorted({s.scene for s in inf if s.frame_aligned is False})
     # meth-F11: partition the unaligned set into DATA-confirmed unfittable scenes (the GT
@@ -2498,14 +2697,28 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
         "instruction_following": {
             "n": len(inf),
             "n_scored": len(inf_scored),
-            # HEADLINE (rubric proxy over driven trajectory)
-            "mean_rubric_score": _mean([s.rubric_score for s in inf_scored]),
-            "mean_ordered_leg_credit": _mean([s.ordered_leg_credit for s in inf_scored]),
+            #: issue #162: questions excluded from the two rubric means below
+            #: because EVERY leg failed goal construction / anchor resolution
+            #: (``n_legs == 0``) -- nothing left to score, so not counted as a
+            #: rubric failure. See ``inf_rubric_eligible`` above.
+            "n_zero_evaluable_legs": len(inf_zero_evaluable_legs),
+            # HEADLINE (rubric proxy over driven trajectory) -- issue #162: means
+            # over ``inf_rubric_eligible``, NOT ``inf_scored``, so a question with
+            # zero evaluable legs doesn't silently count as a 0.0 rubric failure.
+            "mean_rubric_score": _mean([s.rubric_score for s in inf_rubric_eligible]),
+            "mean_ordered_leg_credit": _mean(
+                [s.ordered_leg_credit for s in inf_rubric_eligible]
+            ),
             "total_threading_violations": sum(
                 s.n_threading_violations or 0 for s in inf_scored
             ),
             "total_threading_unevaluable": sum(
                 s.n_threading_unevaluable or 0 for s in inf_scored
+            ),
+            #: issue #162: total GOTO/VIA_NEAR legs skipped because no free arrival
+            #: point could be constructed (see ``GTQuestionScore.n_goal_construction_unevaluable``).
+            "total_goal_construction_unevaluable": sum(
+                s.n_goal_construction_unevaluable or 0 for s in inf_scored
             ),
             "total_avoid_violations": sum(
                 s.n_avoid_violations or 0 for s in inf_scored
