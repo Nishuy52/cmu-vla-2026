@@ -85,6 +85,16 @@ VIA_NEAR_CLEARANCE_M: float = 0.45
 #: to "just missed"), so the push is capped at ARRIVAL_TOL_M minus this margin, not at
 #: ARRIVAL_TOL_M itself.
 STANDOFF_ARRIVAL_MARGIN_M: float = 0.15
+#: Issue #148 — tolerance (m) for ``_standoff_push``'s post-clamp re-validation against
+#: ``max_dist``. The clamped candidate is reconstructed as ``anchor + unit_vector *
+#: max_dist`` and then re-measured back to the anchor; that reconstruction is not exact
+#: (unit-vector division/multiplication round-trips a few ULPs), so a strict ``>
+#: max_dist`` bare comparison can reject a candidate that is legitimately AT the clamp,
+#: silently falling back to ``raw`` and losing up to ``STANDOFF_ARRIVAL_MARGIN_M``-scale
+#: clearance for no correctness reason. A few ULPs is ~1e-16 relative; 1e-9 (m) is many
+#: orders of magnitude looser than the float noise this exists to absorb while still
+#: being far tighter than any real overshoot worth rejecting.
+STANDOFF_CLAMP_EPS_M: float = 1e-9
 MIN_GROUND_OBS: int = 3  # per architecture: grounded == confirmed with >= 3 obs
 
 # Issue #33 — route-prefix commitment floor: a leg backed by only a SINGLE observation
@@ -757,7 +767,16 @@ class InstructionHead:
         projected = self._project_free(candidate)
         if math.hypot(projected[0] - candidate[0], projected[1] - candidate[1]) > near_thresh_m:
             return raw
-        if math.hypot(projected[0] - anchor_xy[0], projected[1] - anchor_xy[1]) > max_dist:
+        # Issue #148: compare with an epsilon, not a bare ``>`` — ``candidate`` (and thus
+        # ``projected`` when the nudge is a no-op) was built by dividing by ``dist`` and
+        # re-multiplying by ``max_dist``, which does not round-trip exactly. A clamped
+        # candidate that is genuinely AT max_dist can land a few ULPs over it, and a
+        # bare ``>`` here would silently discard it for ``raw`` — losing real clearance
+        # over float noise, not a real out-of-tolerance overshoot.
+        if (
+            math.hypot(projected[0] - anchor_xy[0], projected[1] - anchor_xy[1])
+            > max_dist + STANDOFF_CLAMP_EPS_M
+        ):
             return raw
         cm = self._costmap
         seen = cm.reachable_mask(self._pose)
