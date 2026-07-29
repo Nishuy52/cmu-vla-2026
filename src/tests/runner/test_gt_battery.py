@@ -1402,6 +1402,235 @@ def test_if_rubric_geometry_goto_goal_clears_own_anchor_footprint():
     assert gy < 0.0
 
 
+# --------------------------------------------------------------------------- issue #162
+
+
+@requires_full_unity
+def test_nearest_free_goal_home_building_2_coffee_table_bail_now_fails_explicitly():
+    """Issue #162 regression: home_building_2's "coffee table" (instance 70) is the
+    exact traced case from the issue -- pushing it off its own AABB plus the
+    surrounding "carpet" footprint needs a ~3.32 m push, over the 2.5 m
+    ``_RUBRIC_GOAL_MAX_PUSH_M`` cap. The OLD code bailed out and returned the raw,
+    unpushed centroid -- a point inside solid furniture, silently treated as a
+    valid rubric goal. The fix must report this as a construction failure
+    (``None``), never fall back to the raw centroid."""
+    gt = load_scene(str(FULL_UNITY_ROOT / "home_building_2"))
+    rec = next(r for r in gt.instances if r.label == "coffee table")
+    assert rec.instance_id == 70  # pins the exact traced instance
+    xy = (float(rec.centroid[0]), float(rec.centroid[1]))
+    result = GB._nearest_free_goal(xy, gt, anchor_id=rec.instance_id, approach_xy=None)
+    assert result is None
+    # And it must never silently equal the raw (unreachable) centroid either.
+    assert result != xy
+
+
+def test_nearest_free_goal_oscillating_footprints_returns_none():
+    """Issue #162 regression: a point that oscillates between two overlapping
+    footprints (pushing off A lands inside B; pushing off B lands back inside A)
+    must be reported as a construction failure, not silently returned after the
+    bounded iteration budget runs out. Geometry: a 1x1 "ottoman" at the origin and
+    an overlapping 1.6x1.6 "bookshelf" centred 1.7 m east of it -- with the 0.4 m
+    rubric clearance, their inflated boxes overlap by 0.4 m, and a point started
+    just inside the ottoman's east edge bounces between the two forever."""
+    gt = _synthetic_gt_scene(
+        [
+            ("ottoman", 0.0, 0.0, 0.0, 1.0, 1.0, 0.4),
+            ("bookshelf", 1.7, 0.0, 0.0, 1.6, 1.6, 0.4),
+            # A distant marker so the room isn't degenerately equal to either
+            # footprint (which would misclassify one as room-scale/architectural).
+            ("marker", 20.0, 20.0, 0.0, 0.4, 0.4, 0.5),
+        ],
+        scene_name="syn162osc",
+    )
+    result = GB._nearest_free_goal((0.3, 0.0), gt)
+    assert result is None
+
+
+def test_nearest_free_goal_normal_single_supporter_push_unchanged():
+    """Control (issue #162): a normal, single-supporter push -- the common case
+    the fix must NOT disturb -- still succeeds and returns a real, free point.
+    Mirrors ``test_nearest_free_goal_pushes_off_anchors_own_footprint`` (issue #66)
+    but asserts the point is explicitly non-``None`` and genuinely clear of every
+    footprint, pinning that the convergence/post-condition machinery added here
+    doesn't turn a legitimately-constructible goal into a false failure."""
+    gt = _synthetic_gt_scene(
+        [
+            ("bench", 0.0, 0.0, 0.0, 1.58, 0.66, 0.4),
+            ("stool", 20.0, 20.0, 0.0, 0.4, 0.4, 0.5),
+        ],
+        scene_name="syn162control",
+    )
+    result = GB._nearest_free_goal((0.0, 0.0), gt)
+    assert result is not None
+    x0, y0, x1, y1 = GB._gt_footprint_bounds(gt, 0.0)
+    assert GB._blocking_footprint(result[0], result[1], gt, x1 - x0, y1 - y0) is None
+
+
+def test_if_rubric_geometry_construction_failure_skips_leg_like_unresolved_anchor():
+    """Issue #162: a GOTO leg whose anchor resolves but whose goal cannot be
+    constructed (oscillating footprints) is dropped from ``leg_goals`` the exact
+    same way an anchor that fails to resolve already is -- an unscored, not a
+    wrong, leg -- and the failure is surfaced via ``goal_construction_diag``
+    rather than silently vanishing."""
+    from core.perception.scene_index import BasicSceneIndex
+
+    gt = _synthetic_gt_scene(
+        [
+            ("ottoman", 0.0, 0.0, 0.0, 1.0, 1.0, 0.4),
+            ("bookshelf", 1.7, 0.0, 0.0, 1.6, 1.6, 0.4),
+            # A distant marker so the room bounds aren't degenerately equal to the
+            # ottoman's own footprint (which would misclassify it as room-scale
+            # architectural (#53) and skip pushing off it entirely).
+            ("marker", 20.0, 20.0, 0.0, 0.4, 0.4, 0.5),
+        ],
+        scene_name="syn162rubric",
+    )
+    # The ottoman itself is the resolved GOTO anchor. Approaching from due east
+    # makes the directional own-footprint push (issue #66) go straight toward the
+    # bookshelf, triggering the same A<->B oscillation proven in isolation above.
+    idx = BasicSceneIndex(gt.instances)
+    diag: list[str] = []
+    leg_goals, _, _, leg_instance_ids, _ = GB._if_rubric_geometry(
+        "Go to the ottoman.", gt, idx,
+        start_xy=(10.0, 0.0), goal_construction_diag=diag,
+    )
+    assert leg_goals == []
+    assert leg_instance_ids == []
+    assert len(diag) == 1
+    assert "ottoman" in diag[0]
+
+
+def test_score_instruction_rubric_missed_constructible_leg_still_scores_as_before():
+    """Control (issue #162): this fix must not blanket-loosen scoring. A leg whose
+    goal IS constructible, which the robot simply never drives near, must still
+    score exactly as it always has -- not reached, zero ordered-leg credit."""
+    from core.groundtruth import scoring as S
+
+    leg_goals = [("goto", (5.0, 5.0))]
+    driven = np.array([[0.0, 0.0], [0.1, 0.1], [0.2, 0.2]], dtype=float)
+    rub = S.score_instruction_rubric(driven, leg_goals)
+    assert rub.n_legs == 1
+    assert rub.n_legs_reached_in_order == 0
+    assert rub.ordered_leg_credit == 0.0
+    assert rub.leg_outcomes[0].reached is False
+
+
+# ----------------------------------------------------------- issue #162 rubric v3 fix
+
+
+def test_aggregate_excludes_zero_evaluable_leg_question_from_if_rubric():
+    """Issue #162 (v3 correction): a question every one of whose legs failed goal
+    construction has ``n_legs == 0`` and ``rubric_score == 0.0`` by construction
+    (``core.groundtruth.scoring.score_instruction_rubric`` returns 0.0, not None,
+    when ``n_legs`` is 0). Counting that 0.0 in the ``if_rubric`` aggregate would
+    depress the battery for exactly the case #162 was fixed to handle honestly —
+    refusing to fabricate a goal must not itself read as a scored failure. Mirrors
+    the #155 precedent (``n_threading_unevaluable`` legs excluded from the
+    threading-violation count): here the whole QUESTION is excluded from the
+    rubric means, not scored as 0.0 or 1.0."""
+    from core.runner.gt_battery import GTQuestionScore, aggregate
+
+    rows = [
+        # Fully unscoreable: both legs failed goal construction. Must NOT drag
+        # the mean down to 0.0 for this row.
+        GTQuestionScore(
+            scene="a", qtype=QType.INSTRUCTION_FOLLOWING.value, question="q0",
+            rubric_score=0.0, ordered_leg_credit=0.0, n_legs=0,
+            n_legs_reached_in_order=0, n_goal_construction_unevaluable=2,
+        ),
+        # A normal, fully-scored perfect question.
+        GTQuestionScore(
+            scene="b", qtype=QType.INSTRUCTION_FOLLOWING.value, question="q1",
+            rubric_score=1.0, ordered_leg_credit=1.0, n_legs=2,
+            n_legs_reached_in_order=2, n_goal_construction_unevaluable=0,
+        ),
+        # A legitimately failed leg (goal WAS constructible, robot never arrived)
+        # -- must still count as a real 0.0, not be excluded.
+        GTQuestionScore(
+            scene="c", qtype=QType.INSTRUCTION_FOLLOWING.value, question="q2",
+            rubric_score=0.0, ordered_leg_credit=0.0, n_legs=1,
+            n_legs_reached_in_order=0, n_goal_construction_unevaluable=0,
+        ),
+    ]
+    agg = aggregate(rows)["instruction_following"]
+    assert agg["n_scored"] == 3
+    # only the genuinely-scored q1/q2 count toward the rubric means
+    assert agg["n_zero_evaluable_legs"] == 1
+    assert agg["mean_rubric_score"] == 0.5
+    assert agg["mean_ordered_leg_credit"] == 0.5
+
+
+def test_aggregate_if_rubric_none_when_all_questions_zero_evaluable_legs():
+    """Degenerate case: every IF question has zero evaluable legs -- the rubric
+    means must be ``None`` (no evaluable data), not ``0.0`` (a false failure
+    signal) and not silently omitted."""
+    from core.runner.gt_battery import GTQuestionScore, aggregate
+
+    rows = [
+        GTQuestionScore(
+            scene="a", qtype=QType.INSTRUCTION_FOLLOWING.value, question="q0",
+            rubric_score=0.0, ordered_leg_credit=0.0, n_legs=0,
+            n_legs_reached_in_order=0, n_goal_construction_unevaluable=1,
+        ),
+    ]
+    agg = aggregate(rows)["instruction_following"]
+    assert agg["n_scored"] == 1
+    assert agg["n_zero_evaluable_legs"] == 1
+    assert agg["mean_rubric_score"] is None
+    assert agg["mean_ordered_leg_credit"] is None
+
+
+def test_if_rubric_geometry_skipped_leg_carries_own_anchor_forward_not_stale_approach():
+    """Issue #162 (v3 correction): when a leg's goal fails to construct and is
+    skipped, the NEXT leg's push must not be biased by whatever approach
+    reference preceded the skipped leg (e.g. ``start_xy``, potentially clear
+    across the room) -- the driven trajectory this rubric scores still actually
+    passes by the skipped leg's own anchor before continuing on, skip or no
+    skip. The skipped leg's own (raw, never-scored) anchor centroid must be
+    carried forward as the next leg's approach reference instead.
+
+    Geometry: leg 0 ("ottoman") oscillates against an overlapping "bookshelf"
+    and fails construction (proven independently in
+    ``test_nearest_free_goal_oscillating_footprints_returns_none``). Leg 1
+    ("sofa") is pushed off its OWN footprint (issue #66) -- and that push's
+    AXIS depends entirely on which side ``approach_xy`` sits on relative to the
+    sofa's centroid: due east (the old, stale ``start_xy=(10, 0)``) pushes
+    along X; due south (the ottoman's own centroid at the origin) pushes along
+    Y. The two are unambiguously distinguishable outcomes, so this pins the
+    fix, not just "a value changed"."""
+    from core.perception.scene_index import BasicSceneIndex as _BSI
+
+    gt = _synthetic_gt_scene(
+        [
+            ("ottoman", 0.0, 0.0, 0.0, 1.0, 1.0, 0.4),
+            ("bookshelf", 1.7, 0.0, 0.0, 1.6, 1.6, 0.4),
+            # keeps the room bounds from degenerately equalling the ottoman's own
+            # footprint (which would misclassify it as room-scale architectural).
+            ("marker", 20.0, 20.0, 0.0, 0.4, 0.4, 0.5),
+            ("sofa", 0.0, 10.0, 0.0, 2.0, 1.0, 0.5),
+        ],
+        scene_name="syn162approach",
+    )
+    idx = _BSI(gt.instances)
+    diag: list[str] = []
+    leg_goals, _, _, leg_instance_ids, _ = GB._if_rubric_geometry(
+        "Go to the ottoman and stop at the sofa.", gt, idx,
+        start_xy=(10.0, 0.0), goal_construction_diag=diag,
+    )
+    # leg 0 (ottoman) skipped; only the sofa leg remains.
+    assert len(diag) == 1 and "ottoman" in diag[0]
+    assert len(leg_goals) == 1
+    kind, (gx, gy) = leg_goals[0]
+    assert kind == "goto"
+    # Pushed along Y (toward the skipped ottoman leg's own centroid, south of
+    # the sofa) -- NOT along X (toward the stale start_xy, east of the sofa).
+    # The stale-approach push would have landed near (1.4, 10.0); the fixed
+    # push lands near (0.0, 9.1).
+    assert gx == pytest.approx(0.0, abs=1e-2)
+    assert gy < 10.0
+    assert gy == pytest.approx(9.0999, abs=1e-3)
+
+
 # --------------------------------------------------------------------------- issue #81:
 # offline withhold-gate parity (budget_frac/forced_assembly hooks)
 
