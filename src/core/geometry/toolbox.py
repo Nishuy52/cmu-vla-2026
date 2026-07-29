@@ -23,6 +23,7 @@ import numpy as np
 from core.interfaces import InstanceRecord, MatchTier, SceneIndex
 from core.plan_schema import Anchor, AvoidSpec, Clause, Pred, TargetSpec
 from core.geometry import primitives as P
+from core.nav.costmap import VEHICLE_RADIUS_M as _VEHICLE_RADIUS_M
 from core.perception.vocab import COLOUR_NEUTRAL, colour_cross_hue, colour_synonyms
 
 
@@ -120,6 +121,16 @@ class Gate:
     p1: np.ndarray  # (2,) XY endpoint on anchor 2's face
     midpoint: np.ndarray  # (2,) XY gate midpoint (mandatory via-point)
     width: float  # gate length, metres
+    #: issue #155: True when the two anchors' AABB footprints already overlap in
+    #: the XY plane (:func:`core.geometry.primitives.footprints_overlap`) AND the
+    #: resulting ``width`` is narrower than the vehicle can physically fit through
+    #: (see :data:`MIN_PASSABLE_GATE_WIDTH_M`) — the anchors are flush/overlapping
+    #: furniture with no real navigable gap between them along the connecting
+    #: axis, so ``p0``/``p1``/``width`` are the true (degenerate) construction,
+    #: not a usable gate. Callers must treat a degenerate gate's threading
+    #: requirement as unevaluable rather than record a violation the robot could
+    #: never have avoided (see :func:`corridor_gate`).
+    degenerate: bool = False
 
 
 @dataclass(frozen=True)
@@ -1340,6 +1351,15 @@ def _empty_count_explanations(
 
 # --------------------------------------------------------------------------- corridor / avoid
 
+#: issue #155: minimum gate width (metres) the vehicle can physically fit through,
+#: derived from the SAME constant the planner already uses to decide a gap is
+#: sealed by its own body — ``core.nav.planner._pinch_costmap``'s docstring notes
+#: "a physical gap narrower than ``2 * vehicle_radius_m`` gets sealed end-to-end by
+#: the vehicle's own inflation margin from BOTH anchors" (`core/nav/planner.py`,
+#: `_pinch_costmap` docstring). Not a new tuned number — the vehicle's own footprint
+#: radius, doubled, exactly as the planner already treats it.
+MIN_PASSABLE_GATE_WIDTH_M: float = 2.0 * _VEHICLE_RADIUS_M
+
 
 def corridor_gate(
     b1: InstanceRecord, b2: InstanceRecord, index: SceneIndex | None = None
@@ -1358,6 +1378,23 @@ def corridor_gate(
     diagonally-offset anchor pair; the centroid axis stays well-defined (and
     consistent with the module's own "between" semantics) in both cases.
 
+    issue #155: "well-defined" is not the same as "usable". When the two anchors'
+    AABB footprints already overlap in the XY plane (adjacent/flush furniture with
+    no real floor gap between them — e.g. livingroom_1's sofa/round-table pair,
+    which overlap by 1.3 cm along their connecting axis), the centroid-axis
+    construction above still returns SOME p0/p1 (it is well-defined, per #69), but
+    those points land inside the shared overlap sliver: a sub-2-cm "gate" a metre
+    away from the room's actual navigable gap, not a physically passable opening.
+    No fallback construction recovers a real gate here — the objects are genuinely
+    touching, so there IS no navigable gap between these two anchors along this
+    axis to construct. Flagging ``Gate.degenerate`` (footprints overlap AND the
+    resulting width is under :data:`MIN_PASSABLE_GATE_WIDTH_M`, the vehicle's own
+    fit-through width) lets callers treat the leg's threading requirement as
+    unevaluable instead of recording a violation the robot could never have
+    avoided (`core.groundtruth.scoring.score_instruction_rubric`). A gate that is
+    merely narrow but has NO footprint overlap (a real, if tight, doorway) is left
+    untouched — narrow-but-real gates still score exactly as before.
+
     issue #63: when ``index`` is given, a genuine THIRD instance's footprint sitting
     at the raw midpoint (e.g. hotel_room_2's duplicate GT "bed frame" instance for
     the same physical bed as the "bed" anchor — a real obstruction, not either
@@ -1369,14 +1406,20 @@ def corridor_gate(
     ``gate.p1`` (the verified anchor-to-anchor line used by threading checks) are
     never nudged — only the mandatory via-point. Omit ``index`` (or pass one with no
     blocking third instance, or a gate whose block has no clear point within the
-    bounded search) to get the untouched exact midpoint.
+    bounded search) to get the untouched exact midpoint. A degenerate gate skips
+    this nudge entirely: sliding a via-point along an axis that never had a real
+    gap to begin with is meaningless.
     """
     pa, pb = P.centroid_axis_face_points_2d(
         b1.centroid, b1.aabb_min, b1.aabb_max, b2.centroid, b2.aabb_min, b2.aabb_max
     )
     mid = (pa + pb) / 2.0
     width = float(np.linalg.norm(pb - pa))
-    if index is not None:
+    degenerate = (
+        width < MIN_PASSABLE_GATE_WIDTH_M
+        and P.footprints_overlap(b1.aabb_min, b1.aabb_max, b2.aabb_min, b2.aabb_max)
+    )
+    if index is not None and not degenerate:
         exclude_ids = {b1.instance_id, b2.instance_id}
         others = [r for r in index.all_instances() if r.instance_id not in exclude_ids]
 
@@ -1384,7 +1427,7 @@ def corridor_gate(
             return any(P.point_in_footprint_2d(pt, r.aabb_min, r.aabb_max) for r in others)
 
         mid = P.usable_gate_point(pa, pb, mid, _blocked)
-    return Gate(pa, pb, mid, width)
+    return Gate(pa, pb, mid, width, degenerate=degenerate)
 
 
 def threading_check(trajectory: np.ndarray, gate: Gate) -> tuple[bool, str]:

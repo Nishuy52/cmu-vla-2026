@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from core.geometry import toolbox as T
 from core.geometry.toolbox import DEFAULT_THRESHOLDS as TH
@@ -42,6 +43,71 @@ def test_corridor_gate_nondegenerate_when_anchor_footprints_touch():
     g = T.corridor_gate(big, small)
     assert g.width > 0.01
     assert not np.allclose(g.p0, g.p1)
+
+
+# --------------------------------------------------------------------------- issue #155
+
+
+def test_corridor_gate_degenerate_when_anchors_overlap_livingroom_1():
+    """issue #155 regression: livingroom_1 leg 1's actual anchor geometry (sofa
+    instance 0, round table instance 60). The two AABBs overlap by 1.3 cm along
+    their connecting axis; the centroid-axis construction (issue #69) is still
+    well-defined but lands both exit points in that overlap sliver -- a
+    physically meaningless sub-2-cm "gate" a metre from the room's real gap.
+    ``corridor_gate`` must flag this ``degenerate`` rather than hand back a gate
+    that looks like a normal, verified doorway."""
+    sofa_min = np.array([-2.588, -3.704, 0.0])
+    sofa_max = np.array([-0.704, -0.636, 1.0])
+    table_min = np.array([-0.717, -2.833, 0.0])
+    table_max = np.array([0.084, -2.032, 1.0])
+    sofa_c = (sofa_min + sofa_max) / 2.0
+    table_c = (table_min + table_max) / 2.0
+    # rec() derives aabb_min/max as center +/- half(size), so passing the exact
+    # verified AABBs' own center + full extents reproduces them precisely.
+    sofa = rec(0, "sofa", sofa_c, sofa_max - sofa_min)
+    table = rec(60, "round table", table_c, table_max - table_min)
+    assert np.allclose(sofa.aabb_min, sofa_min) and np.allclose(sofa.aabb_max, sofa_max)
+    assert np.allclose(table.aabb_min, table_min) and np.allclose(table.aabb_max, table_max)
+
+    g = T.corridor_gate(sofa, table)
+    assert g.width == pytest.approx(0.01325, abs=1e-4)
+    assert g.degenerate is True
+
+
+def test_corridor_gate_not_degenerate_for_real_narrow_gap():
+    """Companion control: a genuinely narrow but REAL doorway (footprints do not
+    overlap -- there is real floor gap between the anchors) must NOT be flagged
+    degenerate, even though its width is well under the vehicle's fit-through
+    width. Only overlapping-footprint anchors are degenerate; a narrow-but-real
+    gate still has to be threaded (issue #155 done-criterion: no blanket
+    rubric relaxation)."""
+    b1 = rec(1, "cabinet", (-1.0, 0.0, 0.0), (1.0, 1.0, 1.0))  # x face at -0.5
+    b2 = rec(2, "shelf", (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))  # x face at 0.5
+    # face-to-face gap here is 1.0m > MIN_PASSABLE_GATE_WIDTH_M (0.8m); shrink it
+    # to a real-but-narrow 0.3m gap without ever letting the footprints overlap.
+    b2 = rec(2, "shelf", (0.65, 0.0, 0.0), (1.0, 1.0, 1.0))  # x face at 0.15
+    g = T.corridor_gate(b1, b2)
+    assert g.width == pytest.approx(0.65, abs=1e-9)
+    assert not T.P.footprints_overlap(b1.aabb_min, b1.aabb_max, b2.aabb_min, b2.aabb_max)
+    assert g.degenerate is False
+
+
+def test_corridor_gate_still_degenerate_below_min_passable_width_only_when_overlapping():
+    """A narrow gate below MIN_PASSABLE_GATE_WIDTH_M with NO footprint overlap stays
+    non-degenerate (must still be threaded); the same width WITH footprint overlap
+    is degenerate. Isolates width-alone from overlap-alone as the trigger."""
+    # No overlap, width 0.3m < MIN_PASSABLE_GATE_WIDTH_M (0.8m): real narrow doorway.
+    b1 = rec(1, "wallA", (-1.0, 0.0, 0.0), (1.0, 1.0, 1.0))  # face at -0.5
+    b2 = rec(2, "wallB", (0.8, 0.0, 0.0), (1.0, 1.0, 1.0))  # face at 0.3
+    g_real = T.corridor_gate(b1, b2)
+    assert g_real.width == pytest.approx(0.8, abs=1e-9)
+    assert g_real.degenerate is False
+
+    # Same b1, but wallB pushed in so its footprint now overlaps b1's by 0.1m.
+    b3 = rec(2, "wallB", (-0.1, 0.0, 0.0), (1.0, 1.0, 1.0))  # face at -0.6, overlaps b1
+    g_overlap = T.corridor_gate(b1, b3)
+    assert T.P.footprints_overlap(b1.aabb_min, b1.aabb_max, b3.aabb_min, b3.aabb_max)
+    assert g_overlap.degenerate is True
 
 
 # --------------------------------------------------------------------------- issue #63

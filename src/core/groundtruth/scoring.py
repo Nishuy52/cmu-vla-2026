@@ -49,6 +49,7 @@ from core.geometry import primitives as P
 from core.geometry import toolbox as T
 from core.geometry.toolbox import (
     DEFAULT_THRESHOLDS,
+    MIN_PASSABLE_GATE_WIDTH_M,
     Capsule,
     Gate,
     Thresholds,
@@ -1314,6 +1315,11 @@ class InstructionRubricScore:
     leg_outcomes: list[IFLegOutcome] = field(default_factory=list)
     n_threading_legs: int = 0
     n_threading_violations: int = 0  # corridor legs the driven traj never threaded
+    #: issue #155: corridor legs whose anchors' AABBs already overlap, producing a
+    #: gate narrower than the vehicle can fit through (``Gate.degenerate``) — not
+    #: scored as a violation (no robot could have threaded a non-existent gap) but
+    #: reported separately so a degenerate-gate case is never silently invisible.
+    n_threading_unevaluable: int = 0
     threading_details: list[str] = field(default_factory=list)
     n_avoid_specs: int = 0
     n_avoid_violations: int = 0  # avoid capsules the driven traj entered
@@ -1461,8 +1467,23 @@ def score_instruction_rubric(
     # (c) threading + avoid penalties over the DRIVEN trajectory.
     threading_details: list[str] = []
     n_thread_viol = 0
+    n_thread_unevaluable = 0
     threaded_by_leg: dict[int, bool] = {}
     for leg_i, gate in corridor_gates:
+        if gate.degenerate:
+            # issue #155: the anchors' AABBs already overlap and the constructed
+            # gate is narrower than the vehicle can ever fit through — there is no
+            # real navigable gap here to thread, so no robot (live or offline)
+            # could have satisfied this requirement. Leave the leg's ``threaded``
+            # at None (unevaluated, same as a non-corridor leg) instead of
+            # recording a violation it could never have avoided.
+            n_thread_unevaluable += 1
+            threading_details.append(
+                f"leg {leg_i}: gate degenerate (anchors' footprints overlap, "
+                f"width={gate.width:.3f}m < {MIN_PASSABLE_GATE_WIDTH_M:.2f}m) — "
+                "threading unevaluable, not scored"
+            )
+            continue
         ok, msg = threading_check(traj, gate)
         threaded_by_leg[leg_i] = ok
         if not ok:
@@ -1500,6 +1521,10 @@ def score_instruction_rubric(
         note_parts.append("driven trajectory empty — pipeline produced no motion")
     if n_thread_viol:
         note_parts.append(f"{n_thread_viol} corridor leg(s) never threaded")
+    if n_thread_unevaluable:
+        note_parts.append(
+            f"{n_thread_unevaluable} corridor leg(s) had a degenerate gate — threading unevaluable"
+        )
     if n_avoid_viol:
         note_parts.append(f"{n_avoid_viol} avoid capsule(s) breached")
     return InstructionRubricScore(
@@ -1510,6 +1535,7 @@ def score_instruction_rubric(
         leg_outcomes=outcomes,
         n_threading_legs=len(corridor_gates),
         n_threading_violations=n_thread_viol,
+        n_threading_unevaluable=n_thread_unevaluable,
         threading_details=threading_details,
         n_avoid_specs=len(avoid_capsules),
         n_avoid_violations=n_avoid_viol,
