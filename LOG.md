@@ -2251,3 +2251,49 @@ dumps are gated on success, so those exact 9 have no evidence (#159).
 **Next step:** collect the three dispatched agents, verify each with a
 fresh-context verifier before merging, then re-run the sweep to measure #153's
 effect on the 0.533 headline.
+
+### 2026-07-29 (cont.) — fix pass before the re-measurement sweep
+
+**Merged (7 issues):** #149 + #158 (harvest fails loudly instead of exiting 0
+with no scores; capture-completeness guard flags starved slots), #157 + #159
+item 1 (watchdog logs its real gate; diagnostics fire on the failing path),
+**#153** (the duplicate-instance explosion — the headline defect), #161 (the
+extent veto is now covered by a load-bearing test), **#155** (degenerate
+corridor gate), #148 (epsilon-tolerant standoff clamp, cherry-picked).
+
+**#156 REJECTED — do not re-attempt as written.** The root cause found is real
+and important: the IF-F5 avoid-anchor withhold has been INERT since it was
+written, because `_commit_forced()` defaults to True with no `budget_frac` hook,
+making `not _commit_forced()` permanently False. But simply enabling the guard
+measured **if_rubric 0.889 -> 0.561 (-0.328)** with threading violations 1 -> 5,
+because routes that never commit never thread their corridors. `gt_battery.py:763`
+builds the head with no `forced_assembly` hook, so offline "withhold until
+forced" means "withhold forever"; live the hook fires at 480 s against a 540 s
+watchdog, leaving ~60 s to drive. The withhold premise had never been exercised
+and the measurement says it is wrong at current timing. Re-scoped on the issue:
+the real fix is upstream grounding (#154/#145), since both failing questions are
+grounding failures.
+
+**Battery deltas measured this session (75 questions, same tree otherwise):**
+main 0.889 / 1 thread_viol; +#155 0.900 / 0; +#148 0.900 / 0 (no movement);
++#156 0.561 / 5. #155's row-by-row diff moved exactly 1 of 75 rows — the
+diagnosed leg — with `mean_ordered_leg_credit` unchanged.
+
+**#163 filed — the offline battery does not predict live behaviour.** Same
+questions, same scorers: IF 0.889 offline vs 0.533 live; object_reference IoU
+1.000 vs 0.000; numerical 1.000 vs 0.13-0.20; threading violations 1 vs 5; avoid
+violations 0 vs 2. Perception/tracking fixes (#153, #154, #145) are invisible
+offline **by construction**, so a null battery delta is not a null effect. The
+battery catches regressions; only the live run measures gains.
+
+**Process lesson (now in memory):** a green 1861-test gate is not evidence a
+behaviour change is safe — #156 passed every test while costing a third of the
+IF score. Every behaviour change now gets a battery run against its merge base
+before merge, plus a check that hook wiring does not differ between
+`gt_battery.py` and `ros_adapter/adapter_node.py`.
+
+**Cluster pre-flight for the re-measurement sweep (all verified):** no jobs
+queued; the four run-time-reread helpers byte-identical local vs remote; all 15
+scenes present; the three generated matrices byte-identical to the baseline
+sweep's, guaranteeing a clean A/B against 702059-61; prerequisites present and
+46 TB free. Submission is gated on #154/#145 landing.
