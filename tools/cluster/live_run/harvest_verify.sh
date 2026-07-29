@@ -75,10 +75,48 @@ if [ ${#run_dirs[@]} -eq 0 ]; then
   echo "== no ros bag captured (older run, or recorder failed — see the *_bag*.log)"
   exit 0
 fi
-echo "== scoring ${#run_dirs[@]} captured run(s) with tools/score_live_run.py"
+# #149: a bare `python` resolves to whatever's on PATH — outside the repo
+# venv that's /usr/bin/python, which imports tools.score_live_run fine (so
+# `--help` looks healthy) but dies at runtime on the first bag read with
+# `ModuleNotFoundError: No module named 'rosbags'`. The old `|| echo` then
+# swallowed that per-run, so the loop ran to completion and the script
+# exited 0 having written zero scores — a 30-question sweep harvested
+# "successfully" with nothing to show for it (#149). Resolve an explicit
+# interpreter instead of trusting PATH: honour PYTHON= if the caller set
+# it, else the repo venv, else fall back to PATH `python` (and let the
+# loud pre-flight check below catch the case where none of that works).
+SCORE_PYTHON=${PYTHON:-}
+if [ -z "$SCORE_PYTHON" ] && [ -x "$REPO/.venv/bin/python" ]; then
+  SCORE_PYTHON="$REPO/.venv/bin/python"
+fi
+SCORE_PYTHON=${SCORE_PYTHON:-python}
+
+if ! command -v "$SCORE_PYTHON" >/dev/null 2>&1 && [ ! -x "$SCORE_PYTHON" ]; then
+  echo "== FATAL: scoring cannot run at all — interpreter '$SCORE_PYTHON' not found."
+  echo "   (is the repo venv built at $REPO/.venv? or set PYTHON=<interpreter>.)"
+  echo "== ${#run_dirs[@]} captured run(s) were harvested but NONE could be scored."
+  exit 1
+fi
+if ! "$SCORE_PYTHON" -c "import rosbags" >/dev/null 2>&1; then
+  echo "== FATAL: scoring cannot run at all — '$SCORE_PYTHON' has no 'rosbags' module."
+  echo "   (is the repo venv built at $REPO/.venv? activate it, or set PYTHON=<interpreter>.)"
+  echo "== ${#run_dirs[@]} captured run(s) were harvested but NONE could be scored."
+  exit 1
+fi
+
+echo "== scoring ${#run_dirs[@]} captured run(s) with tools/score_live_run.py ($SCORE_PYTHON)"
+score_failures=0
 for rd in "${run_dirs[@]}"; do
   # each run dir is captures/<scene>/<qdir>; scores.md/json land under captures/
-  python -m tools.score_live_run "$rd" --out "$OUT/captures" \
-    || echo "   score_live_run failed for $rd (is the host venv active? are GT scenes present?)"
+  if ! "$SCORE_PYTHON" -m tools.score_live_run "$rd" --out "$OUT/captures"; then
+    echo "   score_live_run failed for $rd (are GT scenes present? see the error above)"
+    score_failures=$((score_failures + 1))
+  fi
 done
+if [ "$score_failures" -gt 0 ]; then
+  echo "== WARNING: $score_failures/${#run_dirs[@]} run(s) failed to score — scores.md is incomplete"
+fi
 [ -f "$OUT/captures/scores.md" ] && { echo "== scores"; cat "$OUT/captures/scores.md"; }
+if [ "$score_failures" -gt 0 ]; then
+  exit 1
+fi

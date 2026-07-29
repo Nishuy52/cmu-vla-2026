@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import statistics
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
@@ -516,6 +517,133 @@ def _capture_issues(qdir: str, capture: BagCapture) -> list[str]:
     return issues
 
 
+#: Final record of debug/<slot>/instance_index.jsonl (or the flat
+#: debug/instance_index.jsonl in a single-question harvest) — one JSON
+#: object per line, written by the runtime's periodic instance-index
+#: dump; the last line carries the run's final tally.
+INSTANCE_INDEX_FILENAME = "instance_index.jsonl"
+
+#: A slot processing fewer than this fraction of its job's median
+#: keyframe count is treated as starved. Chosen against job 702061 (#158):
+#: the two genuinely-starved loft slots ran at 6% and 28% of that job's
+#: median keyframe count, while every healthy slot in the same job sat
+#: at >=86% of the median — a wide enough margin to absorb legitimate
+#: scene-to-scene scan-length variation without false-flagging a slot
+#: that's merely scoring a smaller/simpler scene.
+STARVED_KEYFRAME_RATIO = 0.5
+
+#: Below this many sibling slots in a batch, "the job's median" isn't a
+#: meaningful baseline (e.g. a 2-slot batch where one slot is legitimately
+#: half the other) — skip the relative check and rely on the unconditional
+#: zero-instance check alone.
+MIN_SLOTS_FOR_MEDIAN = 3
+
+
+def _debug_dir_for_run(run_dir: Path) -> Path | None:
+    """Locate the harvested job's debug dir for a scored ``run_dir``.
+
+    Mirrors ``harvest_verify.sh``'s harvest layout: a single-question
+    harvest lays out ``<OUT>/captures/<scene>/<qdir>`` next to a flat
+    ``<OUT>/debug/``; a batch harvest lays out
+    ``<OUT>/captures/<slot>/<scene>/<qdir>`` next to ``<OUT>/debug/<slot>/``.
+    Both hang off a ``captures`` path segment, which this walks up to find.
+    Returns ``None`` when ``run_dir`` isn't under a harvested ``captures/``
+    tree at all (e.g. an ad hoc dev capture with no debug/ sibling) —
+    the capture-completeness guard is then simply inapplicable, not an error.
+    """
+    parts = run_dir.resolve().parts
+    if "captures" not in parts:
+        return None
+    idx = len(parts) - 1 - parts[::-1].index("captures")
+    out_root = Path(*parts[:idx]) if idx else None
+    if out_root is None:
+        return None
+    debug_root = out_root / "debug"
+    if not debug_root.is_dir():
+        return None
+    tail = parts[idx + 1:]
+    if len(tail) >= 3 and (debug_root / tail[0]).is_dir():
+        return debug_root / tail[0]  # batch layout: debug/<slot>/
+    return debug_root  # single-job flat layout
+
+
+def _last_instance_index_record(debug_dir: Path) -> dict | None:
+    """Last JSON record in ``debug_dir/instance_index.jsonl``, or ``None``."""
+    path = debug_dir / INSTANCE_INDEX_FILENAME
+    if not path.is_file():
+        return None
+    last_line: str | None = None
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                last_line = line
+    if last_line is None:
+        return None
+    try:
+        return json.loads(last_line)
+    except json.JSONDecodeError:
+        return None
+
+
+def _capture_completeness_issues(run_dir: Path) -> list[str]:
+    """Flag a run whose perception build looks starved (#158).
+
+    Reads ONLY the already-written ``debug/<slot>/instance_index.jsonl``
+    final record (``keyframes_processed``/``total_instances``) — no new
+    runtime instrumentation. Job 702061 slot 3 processed 12 keyframes and
+    built 0 instances over a full 780s run, yet reported SUCCESS and was
+    scored into the aggregate as if it were a real measurement.
+
+    Zero instances is ALWAYS flagged, unconditionally: a completed run
+    that built nothing measured the harness failing, not the pipeline.
+    Beyond that, a slot processing far fewer keyframes than its OTHER
+    slots in the same job (median, not a fixed constant — scenes
+    legitimately vary in scan length) is flagged too; see
+    :data:`STARVED_KEYFRAME_RATIO`. This is complementary to the #127
+    ``DEGRADED`` sentinel (handled in ``harvest_verify.sh``): that one
+    fires when the sim endpoint never came up at all, this one fires when
+    the run completed normally but the perception stack saw almost nothing.
+    """
+    debug_dir = _debug_dir_for_run(run_dir)
+    if debug_dir is None:
+        return []
+    record = _last_instance_index_record(debug_dir)
+    if record is None:
+        return []
+
+    issues: list[str] = []
+    keyframes = record.get("keyframes_processed")
+    instances = record.get("total_instances")
+
+    if instances == 0:
+        issues.append(
+            f"perception built zero instances ({keyframes} keyframes processed) — "
+            "capture-completeness failure (#158)"
+        )
+
+    is_batch_slot = debug_dir.name != "debug"
+    if is_batch_slot and instances != 0 and isinstance(keyframes, (int, float)):
+        peer_keyframes = []
+        for peer in sorted(debug_dir.parent.iterdir()):
+            if not peer.is_dir():
+                continue
+            peer_record = _last_instance_index_record(peer)
+            if peer_record is None:
+                continue
+            kf = peer_record.get("keyframes_processed")
+            if isinstance(kf, (int, float)):
+                peer_keyframes.append(kf)
+        if len(peer_keyframes) >= MIN_SLOTS_FOR_MEDIAN:
+            median_kf = statistics.median(peer_keyframes)
+            if median_kf > 0 and keyframes < STARVED_KEYFRAME_RATIO * median_kf:
+                issues.append(
+                    f"keyframes_processed={keyframes} is far below the job's "
+                    f"median ({median_kf:.0f}) — capture-completeness issue (#158)"
+                )
+    return issues
+
+
 # --------------------------------------------------------------------------- offline pairing
 
 
@@ -563,7 +691,7 @@ def score_run(
     bag_dir = run_dir / "bag"
     capture = read_bag_capture(bag_dir)
     text = capture.question_text or _run_log_question(run_dir)
-    capture_issues = _capture_issues(qdir, capture)
+    capture_issues = _capture_issues(qdir, capture) + _capture_completeness_issues(run_dir)
 
     row: dict[str, Any] = {
         "scene": scene,
