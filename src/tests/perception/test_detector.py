@@ -47,6 +47,7 @@ from core.perception.detector import (
     _norm_cxcywh_to_tile_xyxy,
     build_gdino_prompt,
     refresh_prompt,
+    _eviction_safe_vocab_order,
     CROSS_TILE_NMS_IOU_THRESHOLD,
     suppress_cross_tile_duplicates,
 )
@@ -1705,3 +1706,107 @@ def test_refresh_prompt_no_dump_io_without_env_var(monkeypatch, tmp_path):
     det = FakeDetector()
     refresh_prompt(det, ["sofa"], _standing_vocab_nouns())
     assert list(tmp_path.iterdir()) == []
+
+
+# ------------------------------------------- oversized-vocab question-noun invariant --
+
+
+def test_build_gdino_prompt_question_nouns_survive_arbitrarily_oversized_vocab():
+    # Issue #145's design goal, generalised past the CURRENT 116-noun standing vocab:
+    # a question's own anchor/disambiguator nouns must reach the composed prompt no
+    # matter how large the general vocabulary grows -- not just under today's measured
+    # size. A synthetic 2000-noun vocab (each one deliberately long, so every single
+    # one is expensive) makes the point independent of any real vocab's specifics.
+    question_nouns = ["potted plant", "cabinet", "hookah", "tray", "trash can"]
+    huge_vocab = [f"synthetic-filler-noun-number-{i:04d}" for i in range(2000)]
+    dropped: list[str] = []
+    prompt = build_gdino_prompt(question_nouns, huge_vocab, dropped_out=dropped)
+    kept_phrases = _kept_phrases(prompt)
+    for noun in question_nouns:
+        assert noun in kept_phrases
+    # sanity: the fixture is meaningful -- the huge vocab actually overflows the budget.
+    assert dropped
+    for noun in question_nouns:
+        assert noun not in dropped
+
+
+def test_refresh_prompt_question_nouns_survive_arbitrarily_oversized_vocab():
+    # Same invariant, exercised through the real refresh_prompt seam (the shared
+    # local+remote entry point) rather than build_gdino_prompt directly.
+    question_nouns = ["potted plant", "cabinet"]
+    huge_vocab = [f"synthetic-filler-noun-number-{i:04d}" for i in range(2000)]
+    det = FakeDetector()
+    refresh_prompt(det, question_nouns, huge_vocab)
+    kept_phrases = _kept_phrases(det.prompt)
+    for noun in question_nouns:
+        assert noun in kept_phrases
+
+
+# ---------------------------------------- cost-aware disambiguator ordering (#145) ----
+
+
+def test_eviction_safe_vocab_order_is_cost_aware_when_headroom_exists():
+    # Issue #145: build_gdino_prompt stops trying every subsequent vocab noun the
+    # instant ONE fails to fit -- so which priority noun is tried first, among several
+    # that don't all fit in the available headroom, determines how many actually make
+    # it in. This constructs a synthetic scenario with exactly enough headroom for the
+    # CHEAPEST of two priority nouns but not the more expensive one, and confirms the
+    # cheap one is rescued -- which the old fixed-discovery-order reorder could not
+    # guarantee (a fixed order might have tried the expensive one first and rescued
+    # nothing).
+    from core.perception.vocab import DISAMBIGUATOR_PRIORITY_NOUNS
+
+    cheap, expensive = "jar", "pyramid candle holder"
+    assert cheap in DISAMBIGUATOR_PRIORITY_NOUNS and expensive in DISAMBIGUATOR_PRIORITY_NOUNS
+
+    def cost_estimator(text: str) -> int:
+        # word-count based: 1 token/word, so "jar" (1) is far cheaper than
+        # "pyramid candle holder" (3), and a filler noun costs exactly 1.
+        return len(text.split())
+
+    # A vocab whose survivor prefix leaves headroom for exactly ONE extra word-token:
+    # one filler noun that survives, then both priority nouns in the FIXED historical
+    # order (expensive first) so the un-cost-aware path would try (and fail on) the
+    # expensive one first and never even attempt the cheap one.
+    vocab = ["filler", expensive, cheap]
+    # Room for "filler" (2 word-tokens) plus " . jar" (2 more: separator + the word) --
+    # i.e. exactly enough for the cheap noun once it is tried, but not for "filler" plus
+    # " . pyramid candle holder" (4 more word-tokens: separator + 3 words).
+    budget = cost_estimator(f"filler . {cheap} .")
+
+    dropped: list[str] = []
+    prompt = build_gdino_prompt(
+        (), vocab, max_tokens=budget, token_estimator=cost_estimator, dropped_out=dropped,
+    )
+    kept_phrases = _kept_phrases(prompt)
+    assert "filler" in kept_phrases
+    # Un-reordered (fixed discovery order tries `expensive` before `cheap`): confirms
+    # the fixture is meaningful -- without reordering, the cheap noun would be starved.
+    assert expensive not in kept_phrases and cheap not in kept_phrases
+
+    reordered = _eviction_safe_vocab_order(
+        (), (), vocab, max_tokens=budget, token_estimator=cost_estimator,
+    )
+    dropped2: list[str] = []
+    prompt2 = build_gdino_prompt(
+        (), reordered, max_tokens=budget, token_estimator=cost_estimator, dropped_out=dropped2,
+    )
+    kept2 = _kept_phrases(prompt2)
+    assert "filler" in kept2
+    assert cheap in kept2, "cost-aware reorder must rescue the cheaper priority noun"
+    assert expensive not in kept2, "still not enough headroom for the expensive one"
+
+
+def test_eviction_safe_vocab_order_still_never_evicts_a_survivor_when_cost_aware():
+    # The core #91 safety invariant must hold under the new cost-aware ordering too.
+    vocab = _standing_vocab_nouns()
+    dropped_before: list[str] = []
+    build_gdino_prompt((), vocab, dropped_out=dropped_before)
+    survived_before = {n for n in vocab if n not in set(dropped_before)}
+
+    reordered = _eviction_safe_vocab_order((), (), vocab)
+    dropped_after: list[str] = []
+    build_gdino_prompt((), reordered, dropped_out=dropped_after)
+    survived_after = {n for n in reordered if n not in set(dropped_after)}
+
+    assert survived_before <= survived_after

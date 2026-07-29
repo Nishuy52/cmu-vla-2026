@@ -859,6 +859,18 @@ def _eviction_safe_vocab_order(
     environment's actual path once ``transformers`` is installed) counts differently
     and may have different headroom; this fix does not assume either way; it is safe
     under whichever estimator ``build_gdino_prompt`` is actually called with.
+
+    Issue #145 follow-up: the dropped TAIL is reordered cost-ascending (cheapest
+    priority noun first — :func:`core.perception.vocab.prioritize_vocab_nouns`'s
+    ``cost_fn``), not in :data:`~core.perception.vocab.DISAMBIGUATOR_PRIORITY_NOUNS`'s
+    fixed discovery order. :func:`build_gdino_prompt` stops trying every subsequent
+    noun the instant one fails to fit, so whichever priority noun is tried first
+    determines how many actually make it into whatever headroom exists — cost-
+    ascending order maximises that count. Under today's measured 3-token heuristic
+    headroom this still rescues nothing (the cheapest, ``wall decal``, costs 4), so
+    the honest finding above is unchanged; the ordering only pays off once headroom
+    grows (a smaller standing vocab, the real tokenizer, or a future prune), and it
+    can never make things worse than the un-cost-aware order.
     """
     baseline_dropped: list[str] = []
     build_gdino_prompt(
@@ -871,7 +883,7 @@ def _eviction_safe_vocab_order(
     dropped_set = set(baseline_dropped)
     survived = [n for n in vocab_nouns if n not in dropped_set]
     tail = [n for n in vocab_nouns if n in dropped_set]
-    return survived + prioritize_vocab_nouns(tail)
+    return survived + prioritize_vocab_nouns(tail, cost_fn=token_estimator)
 
 
 #: Issue #145: the composed GDINO prompt was logged nowhere -- not in job stdout, not
