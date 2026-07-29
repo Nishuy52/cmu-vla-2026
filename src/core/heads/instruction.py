@@ -1061,6 +1061,25 @@ class InstructionHead:
         except Exception:  # noqa: BLE001 — a broken signal must not strand the route
             return True
 
+    def _budget_pressure_forces_commit(self) -> bool:
+        """Strict sibling of ``_commit_forced()`` for gates whose unconfigured default
+        must be HOLD, not commit (issue #156).
+
+        Same ``budget_frac() >= PROVISIONAL_COMMIT_FRAC`` pressure test, but returns
+        False — not True — when ``budget_frac is None``. ``_commit_forced()``'s
+        permissive "no signal == commit now" default exists for H4c's provisional-
+        terminal gate and Stage 3 Gate 3, both of which need to byte-preserve legacy
+        behaviour when unconfigured; those callers keep using ``_commit_forced()``
+        unchanged. IF-F5's avoid-anchor withhold is the opposite: unconfigured means no
+        evidence of pressure, so it must stay held. This variant supplies that reading of
+        the exact same signal without touching ``_commit_forced()`` or its callers."""
+        if self.budget_frac is None:
+            return False
+        try:
+            return float(self.budget_frac()) >= PROVISIONAL_COMMIT_FRAC
+        except Exception:  # noqa: BLE001 — a broken signal must not strand the route
+            return False
+
     def _maybe_build_or_extend_route(self, start_xy: tuple[float, float], scene) -> None:
         """Build the committed route over the grounded prefix, or extend it as later
         legs ground. Rebuilds from ``start_xy`` whenever the committable prefix grows
@@ -1085,10 +1104,29 @@ class InstructionHead:
         # route the forbidden capsule can't yet be stamped into. Once we already have a
         # follower we keep driving it (re-stamp happens on rebuild); this gate only blocks
         # the FIRST commit.
+        #
+        # Issue #156: this used to test ``not self._commit_forced()``, whose unconfigured
+        # default (``budget_frac is None``) is True — "no pressure, commit now" — which
+        # made the withhold permanently dead with no ``budget_frac`` hook wired (the
+        # live-run default): a route could commit and drive to completion with an avoid
+        # anchor never grounded and its capsule never stamped (livingroom_2/chinese_room).
+        # The withhold needs the OPPOSITE unconfigured default (hold), while still
+        # releasing on either genuine pressure signal:
+        #   - ``_forced_assembly_reached()`` — the T-90 time-pressure gate (issue #33),
+        #     defaults False when unconfigured.
+        #   - ``_budget_pressure_forces_commit()`` — the strict sibling of
+        #     ``_commit_forced()`` added for this gate: same budget_frac threshold test,
+        #     but defaults False (not True) when unconfigured, so late-stage budget
+        #     pressure can still force the commit — never strand on a missing avoid
+        #     anchor once genuine pressure says driving blind beats stalling further —
+        #     without reviving the dead-by-default behaviour this fix removes.
+        # ``_commit_forced()`` itself is untouched: its permissive default is still relied
+        # on by the H4c provisional-terminal gate and Stage 3 Gate 3.
         if (
             self._follower is None
             and not self._avoids_all_resolvable(scene)
-            and not self._commit_forced()
+            and not self._forced_assembly_reached()
+            and not self._budget_pressure_forces_commit()
         ):
             return
         if self._follower is not None and want <= self._driven_prefix:
