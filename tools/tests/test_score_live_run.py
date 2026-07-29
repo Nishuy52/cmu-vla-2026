@@ -14,6 +14,8 @@ import numpy as np
 from core.groundtruth.scoring import Frame2D
 from tools.score_live_run import (
     DEFAULT_BASELINE_DIR,
+    _capture_completeness_issues,
+    _debug_dir_for_run,
     _decimate_xy,
     _load_offline_index,
     _marker_aabb_in_object_frame,
@@ -24,6 +26,13 @@ from tools.score_live_run import (
     _squash,
     main,
 )
+
+
+def _write_instance_index(path, records):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        for rec in records:
+            fh.write(json.dumps(rec) + "\n")
 
 
 def test_decimate_xy_keeps_endpoints_and_drops_close_points():
@@ -265,3 +274,132 @@ def test_main_requires_out_when_target_given(tmp_path, capsys):
     after_bytes = before.read_bytes() if before.is_file() else None
     assert after_bytes == before_bytes  # baseline dir untouched
     assert "--out" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #158 capture-completeness
+
+
+def _make_batch_job(tmp_path, slot_keyframes_instances):
+    """Build a fake harvested batch job dir and return its slots' run dirs.
+
+    ``slot_keyframes_instances`` maps slot name -> (keyframes_processed,
+    total_instances) for that slot's final instance_index.jsonl record.
+    Mirrors harvest_verify.sh's batch layout: captures/<slot>/<scene>/<qdir>
+    next to debug/<slot>/instance_index.jsonl.
+    """
+    out = tmp_path / "job"
+    run_dirs = {}
+    for slot, (keyframes, instances) in slot_keyframes_instances.items():
+        run_dir = out / "captures" / slot / "scene" / "inst"
+        run_dir.mkdir(parents=True)
+        _write_instance_index(
+            out / "debug" / slot / "instance_index.jsonl",
+            [
+                {"keyframes_processed": max(1, keyframes // 2), "total_instances": 0},
+                {"keyframes_processed": keyframes, "total_instances": instances},
+            ],
+        )
+        run_dirs[slot] = run_dir
+    return run_dirs
+
+
+def test_debug_dir_for_run_batch_layout(tmp_path):
+    run_dirs = _make_batch_job(tmp_path, {"3_loft_inst": (12, 0)})
+    debug_dir = _debug_dir_for_run(run_dirs["3_loft_inst"])
+    assert debug_dir == tmp_path / "job" / "debug" / "3_loft_inst"
+
+
+def test_debug_dir_for_run_single_job_flat_layout(tmp_path):
+    out = tmp_path / "job"
+    run_dir = out / "captures" / "scene" / "inst"
+    run_dir.mkdir(parents=True)
+    (out / "debug").mkdir(parents=True)
+    assert _debug_dir_for_run(run_dir) == out / "debug"
+
+
+def test_debug_dir_for_run_no_captures_segment_returns_none(tmp_path):
+    run_dir = tmp_path / "somewhere" / "scene" / "inst"
+    run_dir.mkdir(parents=True)
+    assert _debug_dir_for_run(run_dir) is None
+
+
+def test_debug_dir_for_run_no_debug_dir_returns_none(tmp_path):
+    run_dir = tmp_path / "job" / "captures" / "scene" / "inst"
+    run_dir.mkdir(parents=True)
+    assert _debug_dir_for_run(run_dir) is None
+
+
+def test_capture_completeness_zero_instances_always_flagged(tmp_path):
+    # Job 702061 slot 3: 12 keyframes, 0 instances over a full run — this
+    # must be flagged unconditionally, not as a function of any threshold.
+    run_dirs = _make_batch_job(
+        tmp_path,
+        {
+            "0_slot": (140, 69),
+            "1_slot": (150, 90),
+            "2_slot": (140, 87),
+            "3_starved": (12, 0),
+        },
+    )
+    issues = _capture_completeness_issues(run_dirs["3_starved"])
+    assert any("zero instances" in i for i in issues)
+    assert any("#158" in i for i in issues)
+
+
+def test_capture_completeness_healthy_run_not_flagged(tmp_path):
+    # A job matching the shape of 702061's slots 4-9: keyframe counts vary
+    # scene to scene but none falls far below the job's median, and every
+    # slot built a non-trivial instance count. None of these must be flagged.
+    run_dirs = _make_batch_job(
+        tmp_path,
+        {
+            "4_office_1": (139, 87),
+            "5_office_1": (125, 87),
+            "6_office_2": (173, 32),
+            "7_office_2": (165, 38),
+            "8_studio": (148, 113),
+            "9_studio": (166, 77),
+        },
+    )
+    for slot, run_dir in run_dirs.items():
+        assert _capture_completeness_issues(run_dir) == [], f"{slot} was flagged"
+
+
+def test_capture_completeness_starved_keyframes_flagged_relative_to_median(tmp_path):
+    # A slot that built SOME instances but processed far fewer keyframes
+    # than its job siblings (job 702061 slot 2: 40 keyframes vs a ~145
+    # median from the other slots) is still a capture-completeness issue,
+    # not just the zero-instance case.
+    run_dirs = _make_batch_job(
+        tmp_path,
+        {
+            "0_slot": (140, 69),
+            "1_slot": (150, 90),
+            "2_starved_nonzero": (41, 39),
+            "4_slot": (140, 87),
+            "5_slot": (125, 87),
+        },
+    )
+    issues = _capture_completeness_issues(run_dirs["2_starved_nonzero"])
+    assert any("median" in i for i in issues)
+    assert any("#158" in i for i in issues)
+
+
+def test_capture_completeness_too_few_slots_skips_relative_check(tmp_path):
+    # Below MIN_SLOTS_FOR_MEDIAN, "the job's median" isn't meaningful (a
+    # 2-slot batch where one is legitimately half the other) — only the
+    # unconditional zero-instance check should still apply.
+    run_dirs = _make_batch_job(
+        tmp_path,
+        {
+            "0_slot": (140, 69),
+            "1_smaller_scene": (40, 10),
+        },
+    )
+    assert _capture_completeness_issues(run_dirs["1_smaller_scene"]) == []
+
+
+def test_capture_completeness_no_debug_dir_returns_no_issues(tmp_path):
+    run_dir = tmp_path / "job" / "captures" / "scene" / "inst"
+    run_dir.mkdir(parents=True)
+    assert _capture_completeness_issues(run_dir) == []
