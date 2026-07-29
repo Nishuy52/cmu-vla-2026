@@ -1746,6 +1746,10 @@ class GTQuestionScore:
     n_legs: int | None = None
     n_legs_reached_in_order: int | None = None
     n_threading_violations: int | None = None
+    #: issue #155: corridor legs whose gate was flagged degenerate (anchors' AABBs
+    #: overlap, gate narrower than the vehicle can fit through) and so were excluded
+    #: from ``n_threading_violations`` rather than scored as a violation.
+    n_threading_unevaluable: int | None = None
     n_avoid_violations: int | None = None
     driven_n_poses: int | None = None
     #: Per-leg rubric geometry + outcomes (meth-F7/F8). ``leg_goals`` is
@@ -2120,6 +2124,7 @@ def score_scene(
         rec.n_legs = rub.n_legs
         rec.n_legs_reached_in_order = rub.n_legs_reached_in_order
         rec.n_threading_violations = rub.n_threading_violations
+        rec.n_threading_unevaluable = rub.n_threading_unevaluable
         rec.n_avoid_violations = rub.n_avoid_violations
         rec.driven_n_poses = rub.driven_n_poses
         # Per-leg rubric geometry + outcomes into the row (meth-F7/F8): the resolved
@@ -2498,6 +2503,9 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
             "mean_ordered_leg_credit": _mean([s.ordered_leg_credit for s in inf_scored]),
             "total_threading_violations": sum(
                 s.n_threading_violations or 0 for s in inf_scored
+            ),
+            "total_threading_unevaluable": sum(
+                s.n_threading_unevaluable or 0 for s in inf_scored
             ),
             "total_avoid_violations": sum(
                 s.n_avoid_violations or 0 for s in inf_scored

@@ -153,6 +153,54 @@ def test_rubric_threading_violation_penalises():
     assert r.rubric_score == pytest.approx(0.0)  # 1 leg, 1 violation -> clamped 0
 
 
+def test_rubric_threading_still_violation_when_gate_is_a_genuine_wide_miss():
+    """issue #155 done-criterion: a normal, non-degenerate, genuinely wide gate
+    that the trajectory never threads must still score as a violation exactly as
+    before -- the degenerate-gate fix must not blanket-relax the rubric."""
+    gate = Gate(
+        np.array([0.0, -1.0]), np.array([0.0, 1.0]), np.array([0.0, 0.0]), 2.0,
+        degenerate=False,
+    )
+    traj = np.array([[1, 0], [2, 0], [3, 0]], dtype=float)
+    goals = [("corridor_between", (0.0, 0.0))]
+    r = score_instruction_rubric(traj, goals, corridor_gates=[(0, gate)])
+    assert r.n_threading_violations == 1
+    assert r.n_threading_unevaluable == 0
+    assert r.rubric_score == pytest.approx(0.0)
+
+
+def test_rubric_degenerate_gate_is_unevaluable_not_a_violation():
+    """issue #155 regression: livingroom_1 leg 1's exact diagnosed geometry. The
+    driven trajectory never came near the degenerate 1.3cm sliver (closest
+    approach 1.08m in the live run) -- with the fix, this must NOT be recorded as
+    a threading violation (no robot could ever have threaded a non-existent gap),
+    but the case must still be visible via ``n_threading_unevaluable`` rather than
+    silently vanishing."""
+    from core.geometry.toolbox import corridor_gate
+
+    sofa_min = np.array([-2.588, -3.704, 0.0])
+    sofa_max = np.array([-0.704, -0.636, 1.0])
+    table_min = np.array([-0.717, -2.833, 0.0])
+    table_max = np.array([0.084, -2.032, 1.0])
+    sofa = _rec(0, "sofa", *((sofa_min + sofa_max)[:2] / 2.0))
+    table = _rec(60, "round table", *((table_min + table_max)[:2] / 2.0))
+    sofa.aabb_min, sofa.aabb_max = sofa_min, sofa_max
+    table.aabb_min, table.aabb_max = table_min, table_max
+    gate = corridor_gate(sofa, table)
+    assert gate.degenerate  # sanity: this is the diagnosed degenerate case
+
+    # Driven trajectory bbox from the tracked repro: x in [-0.93, 1.01], y in
+    # [-5.01, 0.55] -- reaches the room but never within ~1m of the gate sliver.
+    traj = np.array([[0.0, 0.55], [0.0, -2.5], [0.0, -5.0]], dtype=float)
+    goals = [("corridor_between", (float(gate.midpoint[0]), float(gate.midpoint[1])))]
+    r = score_instruction_rubric(traj, goals, corridor_gates=[(0, gate)], tol=10.0)
+    assert r.n_threading_violations == 0
+    assert r.n_threading_unevaluable == 1
+    assert any("degenerate" in d for d in r.threading_details)
+    # not scored as a threading penalty: only ordered-arrival credit applies.
+    assert r.penalty == pytest.approx(0.0)
+
+
 def test_rubric_threading_satisfied_no_penalty():
     gate = Gate(
         np.array([0.0, -1.0]), np.array([0.0, 1.0]), np.array([0.0, 0.0]), 2.0
