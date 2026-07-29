@@ -141,6 +141,17 @@ class TrackerConfig:
     # blocked; tight enough that two distinct same-class objects at typical spacing
     # (e.g. adjacent desk monitors) cannot fuse into one oversized box.
     extent_veto_factor: float = 1.3
+    # Issue #153: floor below which the extent veto never fires, regardless of how
+    # far the accumulated union has grown. A match landing THIS close to the
+    # candidate's own centroid is, by construction, a re-observation of the same
+    # physical object (the fused centroid is a noisy summary of the same points);
+    # rejecting it just mints a duplicate instance at the same spot instead of
+    # preventing anything. Chosen well below every real inter-object spacing this
+    # veto exists to police -- #94's desk monitors (0.5 m) and #89's dense chair
+    # cluster (0.8 m) -- and well above single-object depth-noise centroid drift
+    # (millimetres to a few centimetres), so it only short-circuits the
+    # ~zero-distance case the veto's own docstring calls out as wrong to reject.
+    extent_veto_min_sep: float = 0.2
     # H15(a) track decay: an instance still at n_obs==1 that has not been re-observed
     # within this many keyframes of first sighting is a one-frame ghost and is pruned.
     # Confirmed tracks (n_obs>=2) are NEVER decayed. 0 disables decay.
@@ -220,9 +231,13 @@ def _assoc_gate(label: str, cfg: TrackerConfig) -> float:
     return float(np.clip(cfg.gate_extent_frac * diag, cfg.gate_min, cfg.gate))
 
 
-def _match_plausible(candidate: InstanceRecord, fused: Fused3D, cfg: TrackerConfig) -> bool:
+def _match_plausible(
+    candidate: InstanceRecord, fused: Fused3D, cfg: TrackerConfig, dist: float
+) -> bool:
     """Issue #94: veto a match that would blow the fused box past a plausible size
-    for its class, however close the centroids landed under the gate.
+    for its class -- UNLESS (issue #153) the centroids landed within
+    ``cfg.extent_veto_min_sep`` of each other, in which case this is by construction
+    a re-observation of the same physical object and the veto never fires.
 
     Compares the SORTED (thin, mid, long) extent of the union of ``candidate``'s
     current trimmed AABB and the incoming detection's raw cluster AABB against the
@@ -235,7 +250,17 @@ def _match_plausible(candidate: InstanceRecord, fused: Fused3D, cfg: TrackerConf
     natural size and pass; two distinct same-class objects at roughly their class's
     typical spacing (e.g. adjacent desk monitors, adjacent dense-packed chairs) blow
     the union past ``extent_veto_factor`` x typical and are correctly kept apart.
+
+    Issue #153: without the ``dist`` floor, a real object whose accumulated AABB has
+    already grown past ``extent_veto_factor`` x typical (e.g. after one prior fuse
+    revealed more of it) permanently vetoes EVERY later re-observation, however
+    close the centroid -- each veto falls to ``associate``'s else-branch and mints a
+    fresh duplicate instance at the same spot, forever. Extent is only meaningful
+    evidence of "different object" when the two detections are actually apart; at
+    near-zero separation it is not evidence of anything and must not veto.
     """
+    if dist <= cfg.extent_veto_min_sep:
+        return True
     from core.perception.dimension_priors import prior_for
 
     prior = prior_for(canonical_for_match(candidate.label))
@@ -336,7 +361,7 @@ def associate(
             dist = float(np.linalg.norm(fused.centroid - cand.centroid))
             if dist > best_dist:
                 continue
-            if not _match_plausible(cand, fused, cfg):
+            if not _match_plausible(cand, fused, cfg, dist):
                 continue
             best = cand
             best_dist = dist
