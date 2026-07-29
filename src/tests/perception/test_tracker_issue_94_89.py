@@ -306,6 +306,73 @@ def test_genuinely_distinct_dense_chairs_mostly_stay_separate_post_fix():
     assert len(idx.all_instances()) == 4
 
 
+# --------------------------------------------------------------------------- #161: veto must actually veto
+
+
+def _tv_cloud_161(depth_centre, y_centre=0.0, z_centre=0.735, n=60, seed=0):
+    """Same shape as the television cluster in test_tracker_issue_153.py (sorted
+    typ_ext (0.06, 0.791, 1.262)): thin depth, wide/tall footprint -- reproduced
+    locally rather than imported so this file's #161 coverage does not depend on
+    #153's fixture staying importable."""
+    rng = np.random.default_rng(seed)
+    return np.column_stack([
+        depth_centre + rng.uniform(-0.02, 0.02, n),
+        y_centre + rng.uniform(-0.6, 0.6, n),
+        z_centre + rng.uniform(-0.4, 0.4, n),
+    ]).astype(np.float32)
+
+
+def _two_tvs_at_spacing(spacing):
+    """Two genuinely distinct televisions ``spacing`` metres apart (y-axis), both
+    first seen in ONE keyframe -- builds the (det, fused) pairs an associate() call
+    needs, does not call associate() itself."""
+    od = _odom()
+    det_a = _det_for_point(2.60, 0.0, 0.735, od, "television")
+    det_b = _det_for_point(2.60, spacing, 0.735, od, "television")
+    f_a = _fuse(det_a, _tv_cloud_161(2.60, y_centre=0.0, seed=1), od)
+    f_b = _fuse(det_b, _tv_cloud_161(2.60, y_centre=spacing, seed=2), od)
+    assert f_a is not None and f_b is not None
+    return [(det_a, f_a), (det_b, f_b)]
+
+
+def test_issue_161_extent_veto_decisive_band_two_tvs_still_split():
+    """Coverage gap closed (#161): every test in this file up to this point keeps
+    same-class instances apart via the per-class CENTROID gate alone -- monitor gate
+    0.36 m vs 0.5 m test spacing, chair gate 0.68 m vs 0.8 m test spacing -- so
+    ``_match_plausible`` (the extent veto) is called 17 times across this file and
+    never once actually returns False. Disabling it entirely
+    (``extent_veto_min_sep=5.0``) left every one of those 9 tests still passing.
+
+    Two genuinely distinct televisions at 0.65 m spacing (centroid distance ~0.61 m)
+    sit BELOW the television centroid gate (0.745 m, from dimension_priors' sorted
+    typ_ext (0.06, 0.791, 1.262)), so the candidate reaches ``_match_plausible`` --
+    unlike every existing test here. The extent veto is the ONLY thing that then
+    keeps them as 2 instances: see
+    test_issue_161_extent_veto_disabled_same_tvs_collapse_to_one directly below,
+    which proves that by disabling the veto and watching this exact scenario
+    collapse to 1."""
+    idx = BasicSceneIndex()
+    fused_dets = _two_tvs_at_spacing(0.65)
+    associate(fused_dets, idx)
+    assert len(idx.all_instances()) == 2
+
+
+def test_issue_161_extent_veto_disabled_same_tvs_collapse_to_one():
+    """Paired with test_issue_161_extent_veto_decisive_band_two_tvs_still_split
+    above (SAME scenario, SAME 0.65 m spacing) to prove that test is load-bearing:
+    with the veto effectively disabled (``extent_veto_min_sep=5.0``, well above any
+    centroid distance this scenario can produce, so ``_match_plausible`` always
+    returns True), the two genuinely distinct televisions wrongly fuse into ONE
+    instance -- pinning the exact defect the veto exists to prevent (#94's "112
+    monitor detections collapse to 1 instance", here reproduced for the television
+    class the veto is calibrated tightest around)."""
+    idx = BasicSceneIndex()
+    fused_dets = _two_tvs_at_spacing(0.65)
+    cfg = TrackerConfig(extent_veto_min_sep=5.0)
+    associate(fused_dets, idx, cfg=cfg)
+    assert len(idx.all_instances()) == 1
+
+
 @pytest.mark.parametrize("factor", [0.5, 1.0, 2.0])
 def test_extent_veto_factor_is_the_only_new_tunable_beyond_defaults(factor):
     """Sanity: TrackerConfig accepts extent_veto_factor overrides without raising
