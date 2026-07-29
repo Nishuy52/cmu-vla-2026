@@ -2193,3 +2193,61 @@ than derived, and update the committed `reports/gt_battery_*` artifacts. Then
 #146 (the two tools still using the spurious frame) before any figure from them is
 trusted. A live run remains the missing evidence for #77, #82, #85, #103, #115,
 #118, #132 and #143.
+
+---
+
+## 2026-07-29 — IF cluster sweep harvested: first at-scale live IF measurement
+
+**Done:**
+- Harvested the 30-question IF sweep (jobs 702059/702060/702061, 2 questions x
+  15 scenes, chained afterany off 701984). All 30 slots `SUCCESS`, no crashes,
+  no `DEGRADED` sentinels, all bags scoreable.
+- Scored all 30 captures. **Live IF = 0.5333 vs offline baseline 0.7444
+  (-0.2111).** 16 of 30 worse live, 10 equal, 4 better. Ordered legs
+  45/72 = 62.5%; 5 runs reached zero legs; 6 scored 1.0 and 6 scored 0.0.
+  coverage_1m median 0.687 / min 0.093.
+- **#124 confirmed working live**: `frame_available` true on all 30 with
+  `frame_fit_residual_m` max 0.0453 m. The previously derived ~0.861 figure is
+  not supported by this run.
+- Diagnosed and filed 8 issues (#152-#159). Root-caused the dominant perception
+  defect; see below.
+
+**Headline defect — #153 (duplicate instances).** 188 of 1847 tracked instances
+(10.2%) are byte-identical duplicates — same label, bitwise-equal centroid — in
+10 of 30 runs. Worst: `chair` x61, `television` x48, `picture` x17, `lamp` x19,
+all at one identical position; 1225 of 1378 studio TV pairs within 1.0 m.
+Root cause traced to `_match_plausible` (`core/perception/tracker.py:223-250`),
+which vetoes association "however close the centroids landed under the gate"
+when the union AABB exceeds `extent_veto_factor` (1.3) x the class's typical
+extent; `associate()` then mints a fresh instance at the identical centroid
+(`tracker.py:356-359`). The n_obs=2 signature on 49 of 53 duplicate televisions
+fits exactly. This is NOT #128 (gate width — a 0.75 m gate trivially matches at
+distance 0, which is why `fix/128-assoc-gate` bought nothing and cost 1.8pp
+recall) and NOT #89's `merge_into`-fallback path (already bypassed).
+The veto exists for #94's under-segmentation, so the fix must not simply raise
+the factor.
+
+**Decisions:**
+- Filed one umbrella issue (#152) for the measurement plus one issue per
+  mechanism, rather than a single report — the tracker is the actionable queue.
+- Dispatched fixes for #153 and #157/#159-item-1; #155 dispatched as diagnosis
+  only, since planner-vs-scorer is unsettled and the fix depends on the verdict.
+
+**Two hypotheses refuted (recorded so they are not re-derived):**
+- The watchdog cutting DRIVE_OUT at 540 s does NOT cost score: watchdog-ended
+  runs mean 0.5362 / 64.9% legs vs 0.5238 / 53.3% for `route drive complete`.
+- Driven path length is not a signal either: <20 m runs mean 0.5583,
+  >=20 m runs mean 0.4833.
+
+**Also found:** merged two-class GDINO labels (`couch sofa`,
+`coffee table dining table`) becoming instance classes (#154); 5 corridor
+threading failures, 2 of which reached every leg (#155); 2 avoid-region
+violations, one costing a full 0.5 on an otherwise perfect run (#156); the
+watchdog log string misstating its own gate by 30 s (#157); both loft slots
+starved to ~20% of normal camera frames with one building zero instances yet
+reporting SUCCESS (#158); and `verify yielded nothing` on 9/30 runs whose plan
+dumps are gated on success, so those exact 9 have no evidence (#159).
+
+**Next step:** collect the three dispatched agents, verify each with a
+fresh-context verifier before merging, then re-run the sweep to measure #153's
+effect on the 0.533 headline.
