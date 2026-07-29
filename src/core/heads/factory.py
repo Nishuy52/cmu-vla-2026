@@ -390,7 +390,7 @@ def _plan_to_dict(plan: Plan) -> dict:
     }
 
 
-def dump_plan(state: "HeadState", tag: str = "answer_time") -> None:
+def dump_plan(state: "HeadState", tag: str = "answer_time", *, answer=None) -> None:
     """Append one JSONL record of the resolved ``Plan`` (+ whatever candidate-count
     context is cleanly reachable), if :data:`ENV_PLAN_DUMP_PATH` is set. No-op (no I/O
     at all) when unset, matching ``core.perception.scene_index.dump_instance_index``.
@@ -425,6 +425,10 @@ def dump_plan(state: "HeadState", tag: str = "answer_time") -> None:
 
     Any failure (bad path, unwritable dir, etc.) is swallowed -- diagnostics must never
     break the run they are observing.
+
+    Issue #159 item 1: called regardless of whether a final answer was produced (the
+    ``answer`` kwarg, when passed, is recorded as ``answer_present`` in the record) --
+    the "verify yielded nothing" runs are exactly the ones that need this snapshot most.
     """
     path = os.environ.get(ENV_PLAN_DUMP_PATH)
     if not path or state.plan is None:
@@ -433,6 +437,7 @@ def dump_plan(state: "HeadState", tag: str = "answer_time") -> None:
         record: dict = {
             "wall_time": time.time(),
             "tag": tag,
+            "answer_present": answer is not None,
             "plan": _plan_to_dict(state.plan),
         }
         target = state.plan.target
@@ -492,13 +497,15 @@ def _final_answer(state: HeadState):
         answer = state.object_ref.verify()
     elif qt is QType.INSTRUCTION_FOLLOWING and state.instruction is not None:
         answer = state.instruction.terminal_waypoint()
-    if answer is not None and state.scene is not None:
-        # Opt-in live diagnostics (issues #84/#89): snapshot the instance index at
-        # answer time. No-op unless VLA_INSTANCE_DUMP_PATH is set.
+    # Opt-in live diagnostics (issues #84/#89/#159): fire whether or not an answer was
+    # produced -- the runs where verify/terminal_waypoint yields nothing are exactly the
+    # ones that most need a snapshot of what was seen. answer_present in the dumped plan
+    # record (see dump_plan) lets a reader tell the two cases apart.
+    if state.scene is not None:
+        # No-op unless VLA_INSTANCE_DUMP_PATH is set.
         dump_instance_index(state.scene, tag="answer_time")
-        # Opt-in live diagnostics (issue #102): the resolved Plan that produced this
-        # answer. No-op unless VLA_PLAN_DUMP_PATH is set.
-        dump_plan(state, tag="answer_time")
+    # No-op unless VLA_PLAN_DUMP_PATH is set (dump_plan also no-ops if state.plan is None).
+    dump_plan(state, tag="answer_time", answer=answer)
     return answer
 
 

@@ -14,10 +14,14 @@ complete (arrival / exhausted-with-no-replan-budget) or the watchdog floor fires
 whichever is first. NUMERICAL and OBJECT_REFERENCE go ANSWER -> DONE exactly as before.
 
 WATCHDOG is an *overlay*, not a state:
-  * at elapsed >= 570 s (watchdog_floor): publish the FloorAnswers answer for the qtype
+  * at elapsed >= 540 s (watchdog_floor): publish the FloorAnswers answer for the qtype
     and force DONE, regardless of the current state;
-  * at elapsed >= 510 s (forced_assembly): force transition into VERIFY/ANSWER with
+  * at elapsed >= 480 s (forced_assembly): force transition into VERIFY/ANSWER with
     whatever exists, so best-effort assembly runs before the hard floor.
+  These are the controller's EFFECTIVE, skew-hedged defaults (fsm/budget.py
+  DEFAULT_WATCHDOG_FLOOR_S / DEFAULT_FORCED_ASSEMBLY_S); the neutral interface
+  constants (core.interfaces WATCHDOG_FLOOR_S / FORCED_ASSEMBLY_S) stay at 570/510
+  (see core.calibration.BudgetTunables for the split).
 
 All heavy/external work (parse, one explore step, verify) is injected as callables so the
 FSM runs deterministically against stubs in tests; the real wiring is done at integration.
@@ -242,7 +246,7 @@ class QuestionController:
 
         # WATCHDOG overlay — checked before normal state work.
         if self.budget is not None and self.budget.watchdog_floor:
-            self._watchdog_publish(io, reason="watchdog_floor>=570s")
+            self._watchdog_publish(io, reason=f"watchdog_floor>={self._watchdog_floor_s:.0f}s")
             return
         if self.budget is not None and self.budget.forced_assembly and self.state not in (
             State.VERIFY,

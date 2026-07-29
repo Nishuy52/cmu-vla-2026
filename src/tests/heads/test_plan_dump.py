@@ -209,3 +209,32 @@ def test_final_answer_does_not_dump_plan_when_env_unset(monkeypatch, tmp_path):
     io = MockRobotIO(SyntheticScene(0), FakeClock())
     cbs["verify"](io, numerical_plan("chair"), WorldView(scene=sc))
     assert list(tmp_path.iterdir()) == []
+
+
+def test_final_answer_dumps_plan_when_answer_is_none(monkeypatch, tmp_path):
+    """Issue #159 item 1: the plan dump must fire even when verify() yields nothing --
+    those are exactly the runs that most need the diagnostic snapshot."""
+    out = tmp_path / "plan.jsonl"
+    monkeypatch.setenv(ENV_PLAN_DUMP_PATH, str(out))
+    # No "lamp" in the scene, and object_ref is never advance()'d, so verify() -> None.
+    sc = scene(inst(1, "chair"))
+    cbs = build_callables(sc)
+    io = MockRobotIO(SyntheticScene(0), FakeClock())
+    ans = cbs["verify"](io, object_plan("lamp"), WorldView(scene=sc))
+    assert ans is None
+
+    rec = json.loads(out.read_text().strip())
+    assert rec["tag"] == "answer_time"
+    assert rec["answer_present"] is False
+    assert rec["plan"]["target"]["noun"] == "lamp"
+
+
+def test_dump_plan_records_answer_present_true(monkeypatch, tmp_path):
+    out = tmp_path / "plan.jsonl"
+    monkeypatch.setenv(ENV_PLAN_DUMP_PATH, str(out))
+    sc = scene(inst(1, "chair"))
+    state = _state_for(numerical_plan("chair"), sc)
+    dump_plan(state, answer=object())
+
+    rec = json.loads(out.read_text().strip())
+    assert rec["answer_present"] is True
