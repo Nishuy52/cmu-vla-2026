@@ -6,6 +6,7 @@ import json
 import os
 
 import numpy as np
+import pytest
 
 from core.interfaces import InstanceRecord, SceneIndex
 from core.perception.scene_index import (
@@ -345,6 +346,175 @@ def test_labels_foldable_unrelated_fragments_of_same_object_not_transitive():
     """Documented limitation: 'potted' and 'plant' alone (neither the compound) do not
     fold against each other directly."""
     assert not labels_foldable("potted", "plant")
+
+
+# --------------------------------------------------------------- issue #154: merged labels
+
+
+def test_resolve_merged_label_door_door_folds_to_door():
+    from core.perception.scene_index import _resolve_merged_label
+
+    assert _resolve_merged_label("door door") == ("door", ())
+    assert _resolve_merged_label("door door frame") == ("door frame", ())
+    assert _resolve_merged_label("counter counter") == ("counter", ())
+
+
+def test_resolve_merged_label_two_class_merge_keeps_both_as_alias():
+    from core.perception.scene_index import _resolve_merged_label
+
+    assert _resolve_merged_label("cabinet shelf") == ("cabinet", ("shelf",))
+    assert _resolve_merged_label("elephant figurine horse figurine") == (
+        "elephant figurine",
+        ("horse figurine",),
+    )
+    assert _resolve_merged_label("computer monitor projector screen") == (
+        "computer monitor",
+        ("projector screen",),
+    )
+
+
+def test_resolve_merged_label_dropped_middle_word_folds_to_the_bigger_class():
+    """'map wall' (missing 'decal') and 'pyramid holder' (missing 'candle') are
+    fragments of one bigger real class with an internal word dropped, not a
+    merge of two smaller real classes ('map' + 'wall', 'pyramid' + 'holder') --
+    real live data (cluster_verify job 702059) contains exactly this case."""
+    from core.perception.scene_index import _resolve_merged_label
+
+    assert _resolve_merged_label("map wall") == ("map wall decal", ())
+    assert _resolve_merged_label("pyramid holder") == ("pyramid candle holder", ())
+
+
+def test_resolve_merged_label_unresolvable_merge_is_left_untouched():
+    """'cabinet bedside file cabinet' has no full decomposition into real classes
+    (a bare 'bedside' names nothing) -- guessing which part to keep would risk
+    discarding a legitimate detection outright, so this deliberately no-ops."""
+    from core.perception.scene_index import _resolve_merged_label
+
+    assert _resolve_merged_label("cabinet bedside file cabinet") is None
+
+
+def test_resolve_merged_label_single_word_never_touched():
+    """A single-word label can never BE the merged-label bug -- nothing merged
+    into it -- so the couch<->sofa synonym collapse (out of scope here) is left
+    entirely to normalize_label, unaffected by this fix."""
+    from core.perception.scene_index import _resolve_merged_label
+
+    assert _resolve_merged_label("couch") is None
+    assert _resolve_merged_label("door") is None
+
+
+# Every legitimate multi-word class named in issue #154 as a getting-it-wrong
+# trap -- each MUST resolve to exactly itself, no split, no alias.
+_LEGITIMATE_COMPOUNDS = (
+    "coffee table", "dining table", "bedside table", "potted plant",
+    "pyramid candle holder", "map wall decal", "file cabinet",
+    "projector screen", "computer monitor", "door frame", "kitchen counter",
+    "calligraphy painting",
+)
+
+
+@pytest.mark.parametrize("label", _LEGITIMATE_COMPOUNDS)
+def test_resolve_merged_label_leaves_legitimate_compounds_untouched(label):
+    from core.perception.scene_index import _resolve_merged_label
+
+    assert _resolve_merged_label(label) == (label, ())
+
+
+@pytest.mark.parametrize("label", _LEGITIMATE_COMPOUNDS)
+def test_add_leaves_legitimate_compounds_as_their_own_single_instance(label):
+    """End-to-end through the real entry point (add()): a legitimate compound
+    detection must still found exactly one instance under its own name, with no
+    alias invented -- the getting-it-wrong-is-worse-than-the-bug guard from
+    issue #154's design constraints."""
+    idx = BasicSceneIndex()
+    survivor = idx.add(_rec(1, label, [0, 0, 0], [1, 1, 1]))
+    assert len(idx.all_instances()) == 1
+    assert survivor.label == label
+    assert survivor.aliases == ()
+    assert idx.by_label(label) == [survivor]
+
+
+def test_add_founds_door_door_as_a_plain_door_instance():
+    """Issue #154: unlike the pre-fix behaviour (a 'door door' detection with no
+    prior 'door' instance to fold against permanently founds its own 'door door'
+    class), a brand-new instance is canonicalised at creation time."""
+    idx = BasicSceneIndex()
+    survivor = idx.add(_rec(1, "door door", [0, 0, 0], [1, 1, 1]))
+    assert survivor.label == "door"
+    assert [r.label for r in idx.all_instances()] == ["door"]
+
+
+def test_add_elephant_figurine_horse_figurine_both_findable_by_anchor():
+    """Issue #154 worst case: a single merged detection must not become a
+    phantom 'elephant figurine horse figurine' class that no anchor can ever
+    reach. Splitting into two synthetic instances would invent geometry no
+    detection ever supported (one box, one detected region) -- so this resolves
+    to ONE instance findable by EITHER of the real anchors the question turns
+    on, via the alias/synonym match tier."""
+    idx = BasicSceneIndex()
+    survivor = idx.add(_rec(1, "elephant figurine horse figurine", [0, 0, 0], [1, 1, 1]))
+    assert len(idx.all_instances()) == 1
+    assert survivor.label == "elephant figurine"
+    assert idx.by_label("elephant figurine") == [survivor]
+    assert idx.by_label("horse figurine") == [survivor]
+
+
+def test_add_two_real_single_word_classes_merge_both_findable():
+    """'cabinet shelf' merges two genuinely distinct real classes (unlike 'door
+    door', neither is a fragment of the other) -- must not become its own
+    phantom 'cabinet shelf' class, and must not silently vanish either."""
+    idx = BasicSceneIndex()
+    survivor = idx.add(_rec(1, "cabinet shelf", [0, 0, 0], [1, 1, 1]))
+    assert survivor.label == "cabinet"
+    assert idx.by_label("cabinet") == [survivor]
+    assert idx.by_label("shelf") == [survivor]
+
+
+def test_add_merged_label_still_merges_by_iou_into_existing_canonical_instance():
+    """A merged-label detection that overlaps an already-established canonical
+    instance must fuse into it, not mint a second phantom instance. "door door
+    frame" canonicalises whole to "door frame" (issue #154), which is still a
+    #89-style fold of the established "door" instance's own label (a "door
+    frame" is a superset-fold of bare "door"), so the two observations of what
+    is geometrically the same object correctly fuse into one -- established
+    label kept, n_obs incremented."""
+    a_min, a_max = [0, 0, 0], [1, 1, 1]
+    b_min, b_max = [0.2, 0.2, 0.2], [1.2, 1.2, 1.2]
+    idx = BasicSceneIndex(
+        [_rec(1, "door", a_min, a_max, points=_box_points(a_min, a_max), n_obs=1)]
+    )
+    incoming = _rec(
+        2, "door door frame", b_min, b_max, points=_box_points(b_min, b_max), n_obs=1
+    )
+    survivor = idx.add(incoming)
+    assert len(idx.all_instances()) == 1
+    assert survivor.label == "door"
+    assert survivor.n_obs == 2
+
+
+def test_add_merged_label_alias_survives_fuse_into_established_plain_target():
+    """Issue #154: if a plain "elephant figurine" instance was already
+    established (no alias) BEFORE a merged "elephant figurine horse figurine"
+    detection of the same object arrives, the merged detection's extra alias
+    ("horse figurine") must still end up reachable on the fused survivor --
+    not silently dropped just because the target predates it."""
+    a_min, a_max = [0, 0, 0], [1, 1, 1]
+    b_min, b_max = [0.2, 0.2, 0.2], [1.2, 1.2, 1.2]
+    idx = BasicSceneIndex(
+        [_rec(1, "elephant figurine", a_min, a_max, points=_box_points(a_min, a_max), n_obs=1)]
+    )
+    incoming = _rec(
+        2,
+        "elephant figurine horse figurine",
+        b_min,
+        b_max,
+        points=_box_points(b_min, b_max),
+        n_obs=1,
+    )
+    survivor = idx.add(incoming)
+    assert len(idx.all_instances()) == 1
+    assert survivor.label == "elephant figurine"
+    assert idx.by_label("horse figurine") == [survivor]
 
 
 def test_add_disjoint_reassigns_colliding_id():

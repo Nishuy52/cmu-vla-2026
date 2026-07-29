@@ -24,6 +24,7 @@ import json
 import os
 import threading
 import time
+from functools import lru_cache
 
 import numpy as np
 
@@ -281,6 +282,267 @@ def labels_foldable(a: str, b: str) -> bool:
     return ta <= tb or tb <= ta
 
 
+# --------------------------------------------------------------- merged-label resolution
+#
+# Issue #154: GDINO phrase decoding also emits labels that are TWO DIFFERENT class
+# names concatenated into one token span ("couch sofa", "cabinet shelf", "elephant
+# figurine horse figurine") -- a different failure from #89's SAME-class fragments
+# above. #89's labels_foldable (a token-SUBSET test) is deliberately blind to which
+# side is the real class: fed "cabinet shelf", it folds against BOTH a "cabinet"
+# instance and a "shelf" instance, because {cabinet} and {shelf} are each a subset
+# of {cabinet, shelf} -- it was built to recognise a fragment of ONE class, not to
+# adjudicate which of two real classes a merged label actually names. Telling the
+# two apart needs an outside arbiter of what a REAL class even is: the training
+# vocabulary (core.parsing.vocab.SINGLE_NOUNS / PHRASES), not a string heuristic
+# over the labels observed so far.
+#
+# Design decision -- fold to canonical class(es) via alias, never invent a second
+# box: splitting one detection into two synthetic instances would fabricate
+# geometry nobody observed (the box only ever bounded ONE detected region, and nothing
+# here knows how to divide it between two classes). So a merged label always
+# resolves to exactly ONE instance: its label becomes the first recognised
+# canonical class (reading order), and every OTHER canonical class the label also
+# names is recorded as an alias. An alias participates in the SYNONYM match tier
+# (by_label_tiered), so an anchor for any of the merged classes still finds this
+# instance instead of reading zero hits -- e.g. the elephant/horse figurine case
+# (#154 comment): both `elephant figurine` and `horse figurine` resolve to the one
+# instance actually detected, rather than neither ever matching a phantom
+# `elephant figurine horse figurine` class. That is deliberately the most a
+# label-only fix can promise: a detection that only ever drew ONE box around what
+# turned out to be two distinct real objects needs a decode fix in the detector
+# itself to truly recover both (out of scope here -- see OWNERSHIP; neither
+# vocab.py nor detector.py is touched by this fix).
+#
+# Three steps, tried in order, all driven by the vocabulary rather than a
+# similarity heuristic -- each earlier step is a MORE conservative reading than
+# the next, so it always gets first refusal:
+#  1. self-match -- the label's own (per-token normalised) token set equals ONE
+#     real class's token set exactly, order and duplicates ignored: "door door" ->
+#     {door} == "door"'s own set -> the label IS "door", just doubled. No alias --
+#     this is #89's case, just resolved eagerly at creation time instead of
+#     waiting for a same-label instance to already exist to fold against (which is
+#     how a doubled/fragment label could end up founding and permanently naming
+#     its own instance before any "clean" observation of the same object arrived).
+#     Legitimate compounds are ALWAYS their own canonical vocabulary entry (that's
+#     what makes them legitimate), so this step protects every one of them before
+#     steps 2/3 ever run: "pyramid candle holder" is itself a vocabulary phrase,
+#     so it self-matches whole and is never handed to the later steps that would
+#     otherwise be tempted to read it as "pyramid" + "candle holder" (both
+#     independently real classes too).
+#  2. superset -- only reached when step 1 fails. The label's token set is a
+#     STRICT subset of exactly one real class's token set: "map wall" ({map,
+#     wall}) is a subset of "map wall decal"'s own {map, wall, decal} -- read as
+#     that ONE bigger class with an internal word ("decal") dropped, not as
+#     "map" + "wall" concatenated. This has to run BEFORE decomposition: by
+#     token shape alone a dropped-middle-word fragment of a real 3-word class is
+#     indistinguishable from two real shorter classes standing side by side, and
+#     "one real object, its longer name partly dropped" is the safer read of
+#     that ambiguity (it costs nothing the object didn't already have; the
+#     alternative invents a second class outright). This mirrors #89's existing
+#     subset-fold philosophy (:func:`labels_foldable`), just grounded against the
+#     real vocabulary instead of whichever instance happens to already be in the
+#     index.
+#  3. decompose -- only reached when steps 1 and 2 both fail (the label is not,
+#     as a whole, any real class, nor a fragment of exactly one). Try to
+#     partition the label's word sequence, left to right, into two or more
+#     consecutive spans that EACH equal a real class exactly (a small
+#     backtracking search over canonical class boundaries -- observed merged
+#     labels top out around 4 tokens, so this is cheap regardless of vocabulary
+#     size). Succeeds only when the ENTIRE label is accounted for by real classes
+#     with nothing left over: "elephant figurine horse figurine" -> "elephant
+#     figurine" + "horse figurine" (both real); "cabinet shelf" -> "cabinet" +
+#     "shelf" (both real, single-word). If no such full partition exists (e.g. one
+#     span is real but a leftover token names nothing in the vocabulary, as in the
+#     rare "cabinet bedside file cabinet"), this deliberately gives up and leaves
+#     the label untouched -- guessing which part is genuine and silently dropping
+#     the rest would risk erasing a legitimate detection outright, which is worse
+#     than leaving a rare unresolved label exactly as today.
+#
+# Scope note: only multi-word raw labels are ever considered (see the token-count
+# guard in :func:`_resolve_merged_label`). A single-word label is never the merged-
+# label bug by construction (there is nothing to have merged), so this never
+# touches e.g. a bare "couch" detection -- normalize_label's existing couch<->sofa
+# synonym handling is untouched and out of scope for this fix.
+
+
+@lru_cache(maxsize=1)
+def _canonical_class_tokens() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Every canonical class in the training vocabulary
+    (:data:`core.parsing.vocab.SINGLE_NOUNS` / :data:`core.parsing.vocab.PHRASES`
+    values), each pre-tokenised through this module's own per-token
+    :func:`normalize_label` so it compares to an incoming label on equal footing
+    (the vocabulary's own "couch" and an incoming "sofa" both normalise to the
+    token "sofa"). Cached: the vocabulary is a fixed module constant, built once.
+    Deferred import (matching this module's existing lazy-import style for
+    cross-package references) -- ``core.parsing.vocab`` has no reverse dependency
+    on this module today, but importing it lazily keeps this module's own
+    import-time surface unchanged either way.
+    """
+    from core.parsing.vocab import PHRASES, SINGLE_NOUNS
+
+    names = set(SINGLE_NOUNS) | set(PHRASES.values())
+    return tuple(
+        (name, tuple(normalize_label(t) for t in name.split()))
+        for name in sorted(names)
+    )
+
+
+def _normalized_tokens(label: str) -> tuple[str, ...]:
+    """Whitespace-tokenised, per-token :func:`normalize_label`-normalised, ORDER-
+    preserving tokens of ``label`` -- the order-sensitive counterpart to
+    :func:`_fold_tokens` (which discards order/duplicates for the subset test).
+    """
+    return tuple(normalize_label(t) for t in label.strip().lower().split() if t)
+
+
+def _canonical_token_set_match(tokens: tuple[str, ...]) -> str | None:
+    """The canonical class name whose (deduped) token set exactly equals
+    ``tokens``'s (deduped) set, or ``None`` if no such class exists. Order- and
+    duplicate-insensitive on purpose: "door door" ({door}) and "coffee table
+    table" ({coffee, table}) both need to reach their whole real class this way.
+    """
+    target = frozenset(tokens)
+    if not target:
+        return None
+    for name, name_tokens in _canonical_class_tokens():
+        if frozenset(name_tokens) == target:
+            return name
+    return None
+
+
+def _canonical_superset_match(tokens: tuple[str, ...]) -> str | None:
+    """A canonical class whose token set STRICTLY contains ``tokens``'s (deduped)
+    set -- i.e. ``label`` reads as a FRAGMENT of one bigger real class with some
+    internal word dropped ("map wall" missing "decal" from "map wall decal";
+    "pyramid holder" missing "candle" from "pyramid candle holder"), rather than
+    smaller real classes concatenated. Checked BEFORE decomposition on purpose:
+    "one real object, its longer name partly dropped" is the more conservative
+    reading of an ambiguous shorter label -- it matches #89's existing subset-
+    fold philosophy (:func:`labels_foldable`), just grounded against the real
+    vocabulary instead of whichever instance happens to already be in the index.
+    A subset-of-decompose candidate (module note: "map wall" -> "map" + "wall",
+    both independently real single-word classes) would otherwise be indistinguishable
+    from this fragment case by shape alone; without this check running first,
+    the decomposer would confidently but wrongly split what is really a single
+    truncated detection into two phantom classes neither of which the object
+    actually is. Returns the SMALLEST such superset class when more than one
+    exists (invents the least beyond what was actually observed), or ``None``.
+    """
+    target = frozenset(tokens)
+    if not target:
+        return None
+    best: tuple[int, str] | None = None
+    for name, name_tokens in _canonical_class_tokens():
+        superset = frozenset(name_tokens)
+        if superset > target:  # strict superset only -- equality is step 1's job
+            if best is None or len(superset) < best[0]:
+                best = (len(superset), name)
+    return best[1] if best else None
+
+
+def _decompose_into_canonical_classes(tokens: tuple[str, ...]) -> list[str] | None:
+    """Partition ``tokens`` left to right into consecutive spans that each equal a
+    canonical class's token sequence exactly (order-sensitive), covering EVERY
+    token with nothing left over. Returns the ordered list of matched class names,
+    or ``None`` if no such full partition exists.
+
+    Backtracking search, longest-span-first at each position (so a more specific
+    class like "door frame" is tried before a shorter prefix like "door" when both
+    fit -- this only affects WHICH accepting partition is found first when more
+    than one exists, never whether one exists). Memoised on position: each
+    position is resolved at most once. Cheap regardless of vocabulary size --
+    observed merged labels top out around 4 tokens.
+    """
+    classes = sorted(_canonical_class_tokens(), key=lambda nc: -len(nc[1]))
+    n = len(tokens)
+    memo: dict[int, list[str] | None] = {}
+
+    def helper(i: int) -> list[str] | None:
+        if i == n:
+            return []
+        if i in memo:
+            return memo[i]
+        memo[i] = None  # guard against pathological re-entry; classes are static
+        result: list[str] | None = None
+        for name, name_tokens in classes:
+            span = len(name_tokens)
+            if span == 0 or i + span > n:
+                continue
+            if tokens[i : i + span] == name_tokens:
+                rest = helper(i + span)
+                if rest is not None:
+                    result = [name] + rest
+                    break
+        memo[i] = result
+        return result
+
+    return helper(0)
+
+
+def _resolve_merged_label(label: str) -> tuple[str, tuple[str, ...]] | None:
+    """Resolve a raw incoming detection ``label`` against the training vocabulary
+    (issue #154). Returns ``None`` when no vocabulary-grounded correction applies
+    (leave the label exactly as given -- see the module note above), else
+    ``(canonical_label, extra_aliases)``: ``extra_aliases`` is empty for a same-
+    class fragment/duplicate ("door door" -> ("door", ())), and holds every OTHER
+    real class the label also names for a genuine multi-class merge ("cabinet
+    shelf" -> ("cabinet", ("shelf",))).
+    """
+    tokens = _normalized_tokens(label)
+    if len(tokens) < 2:
+        # a single-word label is never the merged-label bug -- nothing to have
+        # merged (see the module-level scope note).
+        return None
+
+    whole = _canonical_token_set_match(tokens)
+    if whole is not None:
+        return normalize_label(whole), ()
+
+    fragment_of = _canonical_superset_match(tokens)
+    if fragment_of is not None:
+        return normalize_label(fragment_of), ()
+
+    parts = _decompose_into_canonical_classes(tokens)
+    if not parts:
+        return None
+    ordered: list[str] = []
+    for p in parts:
+        canon = normalize_label(p)
+        if canon not in ordered:
+            ordered.append(canon)
+    if len(ordered) < 2:
+        # every decomposed chunk collapsed to the SAME class after synonym
+        # folding (e.g. "couch" + "couch") -- a fragment/duplicate, not a merge.
+        return ordered[0], ()
+    return ordered[0], tuple(ordered[1:])
+
+
+def _resolve_incoming_label(rec: InstanceRecord) -> InstanceRecord:
+    """Apply issue #154's vocabulary-grounded label resolution to a fresh
+    detection before it reaches merge-target lookup / instance creation in
+    :meth:`BasicSceneIndex.add`. A no-op when :func:`_resolve_merged_label` finds
+    no correction. Mutates ``rec`` in place (label + aliases) rather than
+    copying: by the time a detection reaches ``add()`` it is a fresh, single-
+    owner record built by the caller (tracker/fusion) purely to be handed off
+    here -- matching how ``add()`` already treats it (appended directly into
+    ``self._instances`` on the new-instance path with no defensive copy).
+    """
+    resolved = _resolve_merged_label(rec.label)
+    if resolved is None:
+        return rec
+    canonical, extra_aliases = resolved
+    if canonical == rec.label and not extra_aliases:
+        return rec
+    rec.label = canonical
+    if extra_aliases:
+        merged_aliases = list(rec.aliases)
+        for alias in extra_aliases:
+            if alias not in merged_aliases:
+                merged_aliases.append(alias)
+        rec.aliases = tuple(merged_aliases)
+    return rec
+
+
 def _levenshtein(a: str, b: str) -> int:
     """Standard Levenshtein edit distance (iterative two-row DP)."""
     if a == b:
@@ -506,6 +768,11 @@ class BasicSceneIndex:
         ``None`` (the default, and every non-live caller) leaves colour untouched.
         """
         with self._lock:
+            # Issue #154: resolve a GDINO-merged/fragmented label against the
+            # training vocabulary BEFORE it can ever found a new instance or
+            # participate in merge-target lookup -- see the module note above
+            # _resolve_merged_label.
+            rec = _resolve_incoming_label(rec)
             target = self._find_merge_target(rec)
             if target is None:
                 if rec.instance_id in (r.instance_id for r in self._instances):
@@ -567,6 +834,14 @@ class BasicSceneIndex:
         calls this with an id it did not itself just read off ``all_instances()``.
         """
         with self._lock:
+            # Issue #154: canonicalise/alias BEFORE fusing so a merged-label
+            # observation's extra alias (e.g. "horse figurine" off an
+            # "elephant figurine horse figurine" detection) survives into the
+            # target even when the target's OWN label was already the plain,
+            # unmerged form -- see _fuse's alias-union for the other half of
+            # this: label wins from whichever side is the established target,
+            # aliases accumulate from both sides.
+            rec = _resolve_incoming_label(rec)
             for existing in self._instances:
                 if existing.instance_id == instance_id:
                     self._fuse(existing, rec, colour_obs=colour_obs)
@@ -612,6 +887,14 @@ class BasicSceneIndex:
         ``target.color_bins``/``target.caption`` are recomputed from the merged
         totals. ``None`` (no colour observation this frame, e.g. the whole cluster
         fell outside the panorama) leaves any existing colour untouched.
+
+        Issue #154: ``other.aliases`` are unioned into ``target.aliases``
+        (target's own aliases kept first, ``other``'s new ones appended, no
+        duplicates) rather than discarded — a merged-label detection's extra
+        alias (e.g. "horse figurine" off a canonicalised "elephant figurine
+        horse figurine" observation, see :func:`_resolve_incoming_label`) must
+        stay reachable even when it fuses by IoU into an already-established
+        plain-labelled target that predates it and never carried that alias.
         """
         # Deferred import: dimension_priors imports normalize_label from this
         # module, so a module-level import here would be a load cycle.
@@ -635,6 +918,12 @@ class BasicSceneIndex:
         target.centroid = (lo + hi) / 2.0
         target.n_obs += other.n_obs
         target.score = max(target.score, other.score)
+        if other.aliases:
+            merged_aliases = list(target.aliases)
+            for alias in other.aliases:
+                if alias not in merged_aliases:
+                    merged_aliases.append(alias)
+            target.aliases = tuple(merged_aliases)
         if colour_obs is not None:
             prior = self._colour_tally.get(target.instance_id)
             merged = merge_tallies(prior, colour_obs) if prior is not None else colour_obs
