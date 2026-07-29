@@ -137,11 +137,22 @@ def test_repeat_sighting_PRE_FIX_mints_duplicate():
     assert dist < 0.1
 
 
-def test_genuinely_distinct_same_class_objects_at_realistic_spacing_still_split():
+def test_genuinely_distinct_same_class_objects_well_outside_centroid_gate_still_split():
     """#94 must-not-regress: two genuinely distinct televisions at a realistic
     (if tight) 1.0 m spacing, both first seen in the SAME keyframe, must stay TWO
     instances -- extent_veto_min_sep (0.2 m) is well below this spacing, so the
-    floor added for #153 never masks a real distinct-object case."""
+    floor added for #153 never masks a real distinct-object case.
+
+    Renamed from ...at_realistic_spacing_still_split (#161): 1.0 m spacing is well
+    OUTSIDE the television centroid gate (0.745 m, from dimension_priors' sorted
+    typ_ext (0.06, 0.791, 1.262)), so the candidate pair is excluded by the
+    per-class centroid gate and `_match_plausible` (the extent veto) is never even
+    consulted here -- this test exercises the centroid gate, not the veto, despite
+    its old name. Coverage for the veto actually being decisive (the 0.44-0.75 m
+    band where centroid distance clears the gate but the extent veto still fires)
+    now lives in test_tracker_issue_94_89.py's
+    test_issue_161_extent_veto_decisive_band_two_tvs_still_split /
+    test_issue_161_extent_veto_disabled_same_tvs_collapse_to_one pair."""
     idx = BasicSceneIndex()
     od = _odom()
 
