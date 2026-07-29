@@ -1085,10 +1085,28 @@ class InstructionHead:
         # route the forbidden capsule can't yet be stamped into. Once we already have a
         # follower we keep driving it (re-stamp happens on rebuild); this gate only blocks
         # the FIRST commit.
+        #
+        # Issue #156: this used to test ``not self._commit_forced()`` here. But
+        # ``_commit_forced()`` is the H4c PROVISIONAL-terminal / ``budget_frac`` gate (see
+        # its own docstring) — its unconfigured default (``budget_frac is None``) is True,
+        # "no pressure to withhold, so commit immediately". With no budget_frac hook wired
+        # (the live-run default), that made ``not self._commit_forced()`` permanently
+        # False, so this whole guard was a no-op regardless of avoid resolvability — the
+        # route committed and drove even with every avoid anchor ungrounded. That is
+        # exactly the livingroom_2/chinese_room failure (#156): 2/2 legs driven, both
+        # avoid anchors never resolved, no capsule ever stamped.
+        #
+        # IF-F5 needs the OPPOSITE unconfigured default: the withhold must actually hold
+        # until either the avoid anchor grounds, or genuine pressure says stalling further
+        # costs more than driving blind risks. ``_forced_assembly_reached()`` is that
+        # signal — the T-90 time-pressure gate, defaulting to False (no override) when
+        # unconfigured — so an unresolvable avoid anchor now blocks the first commit by
+        # default, and only the same late-stage pressure that already overrides the
+        # single-obs floor (issue #33) can force a commit past it.
         if (
             self._follower is None
             and not self._avoids_all_resolvable(scene)
-            and not self._commit_forced()
+            and not self._forced_assembly_reached()
         ):
             return
         if self._follower is not None and want <= self._driven_prefix:

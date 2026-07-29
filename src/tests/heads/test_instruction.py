@@ -308,6 +308,54 @@ def test_avoid_capsule_stamped_once():
     assert cm1.capsule_blocked.any()  # a capsule was stamped
 
 
+def test_unresolvable_avoid_anchor_withholds_first_commit():
+    """Issue #156: an avoid anchor with zero grounding instances (the "unicorn" never
+    detected) must keep the WHOLE route uncommitted (IF-F5) — driving now would cut
+    through a forbidden corridor that can't yet be stamped into the costmap — even
+    though the main leg itself is well-grounded."""
+    sc = scene(inst(1, "sofa", n_obs=3, centroid=(2.0, 2.0, 0.0)))
+    head = InstructionHead(
+        plan=instruction_plan(
+            [_goto("sofa")], avoid=[AvoidSpec(near=Anchor(noun="unicorn"))]
+        )
+    )
+    io = _DriveIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert head._legs[0].geom is not None  # main leg IS grounded (PLANNED)
+    assert head._follower is None  # route stays UNCOMMITTED: avoid anchor unresolved
+    assert head.terminal_waypoint() is None
+
+
+def test_unresolvable_avoid_anchor_commits_under_forced_assembly():
+    """Once the T-90 forced-assembly gate is reached, IF-F5's withhold no longer applies
+    (never strand a route forever) — the route commits with whatever avoid capsules
+    resolved, same override used by the issue #33 single-obs floor."""
+    sc = scene(inst(1, "sofa", n_obs=3, centroid=(2.0, 2.0, 0.0)))
+    head = InstructionHead(
+        plan=instruction_plan(
+            [_goto("sofa")], avoid=[AvoidSpec(near=Anchor(noun="unicorn"))]
+        ),
+        forced_assembly=lambda: True,
+    )
+    io = _DriveIO(SyntheticScene(0))
+    head.advance(io, sc)
+    assert head._follower is not None  # forced-assembly pressure commits it anyway
+
+
+def test_resolvable_avoid_anchors_still_commit_and_stamp():
+    """Issue #156 regression guard: an avoid anchor that DOES ground must be completely
+    unaffected by the IF-F5 fix — the route commits normally and its capsule is stamped
+    into the costmap, same as before."""
+    sc, idx = _if_scene()
+    head = InstructionHead(
+        plan=instruction_plan([_goto("sofa")], avoid=[AvoidSpec(near=Anchor(noun="vase"))])
+    )
+    io = _DriveIO(sc)
+    head.advance(io, idx)
+    assert head._follower is not None
+    assert head._costmap.capsule_blocked.any()  # avoid capsule was stamped
+
+
 def test_via_near_leg_drives():
     sc, idx = _if_scene()
     head = InstructionHead(plan=instruction_plan([_via("table"), _goto("sofa")]))
