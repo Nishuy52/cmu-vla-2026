@@ -237,6 +237,10 @@ run_one() {
   #        core/heads/instruction.py:124 (VLA_LEG_RELAX_DUMP_PATH, IF questions only)
   export VLA_PLAN_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/resolved_plan.jsonl
   export VLA_LEG_RELAX_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/relaxation_audit.jsonl
+  # issue #145: composed GDINO prompt(s) + token-budget-dropped vocab nouns, once per
+  # question latch (plus once at boot priming) -- see core/perception/detector.py's
+  # dump_prompt_diagnostics. Same #119 discipline: derived from VLA_EXPLORE_DEBUG_DIR.
+  export VLA_PROMPT_DUMP_PATH=$VLA_EXPLORE_DEBUG_DIR/prompt_diagnostics.jsonl
   export VLA_LLM_USAGE_LOG=~/verify_batch_${J}_usage_${SLOT}.jsonl
   python -c "from ros_adapter.adapter_node import main; main()" > ~/verify_batch_${J}_adapter_${SLOT}.log 2>&1 &
   ADAPTER_PID=$!

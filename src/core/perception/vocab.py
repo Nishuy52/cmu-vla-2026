@@ -29,7 +29,7 @@ than none.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Sequence
+from typing import Callable, Sequence
 
 from core.parsing.vocab import NOUN_ALIASES
 
@@ -191,10 +191,13 @@ DISAMBIGUATOR_PRIORITY_NOUNS: tuple[str, ...] = (
 )
 
 
-def prioritize_vocab_nouns(vocab_nouns: Sequence[str]) -> list[str]:
+def prioritize_vocab_nouns(
+    vocab_nouns: Sequence[str],
+    *,
+    cost_fn: Callable[[str], int] | None = None,
+) -> list[str]:
     """Stable-partition ``vocab_nouns``: :data:`DISAMBIGUATOR_PRIORITY_NOUNS` members
-    first (in their given relative order), everything else after (also in its given
-    relative order).
+    first, everything else after (also in its given relative order).
 
     Pure reordering, never a filter — every noun ``vocab_nouns`` contains is still
     present afterward, exactly once, so this never changes WHICH nouns are eligible for
@@ -207,12 +210,30 @@ def prioritize_vocab_nouns(vocab_nouns: Sequence[str]) -> list[str]:
     standing vocab and plan nouns are both lowercase), so this deliberately does not
     re-normalise — the same discipline as :func:`bridge_synonyms`, which normalises
     explicitly rather than have every caller guess whether it already has.
+
+    Issue #145: ``cost_fn``, when given, additionally sorts the priority subset itself
+    by ascending ``cost_fn(noun)`` (a stable sort, so nouns of equal cost keep their
+    given relative order) instead of leaving it in :data:`DISAMBIGUATOR_PRIORITY_NOUNS`'s
+    fixed discovery order. :func:`core.perception.detector.build_gdino_prompt` stops
+    trying to fit ANY further noun the moment one doesn't fit the token budget (a
+    noun's failure isn't a per-noun skip, it ends the whole fill) — so when only
+    partial headroom is available past a budget cut, which priority noun is tried
+    FIRST determines how many of them actually make it in: trying the cheapest one
+    first maximises that count, whereas the historical fixed order (the sequence the
+    #91 evidence happened to name them in) could try an expensive one first and burn
+    the only headroom available on a noun that alone doesn't fit, stopping before a
+    cheaper one downstream ever gets a turn. ``cost_fn`` defaults to ``None``, which
+    preserves the exact given-order behaviour every existing caller/test already
+    relies on when it is not passed — this is a pure additive capability, not a change
+    to the default.
     """
     priority_set = set(DISAMBIGUATOR_PRIORITY_NOUNS)
     priority: list[str] = []
     rest: list[str] = []
     for noun in vocab_nouns:
         (priority if noun in priority_set else rest).append(noun)
+    if cost_fn is not None:
+        priority = sorted(priority, key=cost_fn)
     return priority + rest
 
 

@@ -395,3 +395,34 @@ def test_prioritize_vocab_nouns_all_priority_or_none():
     assert prioritize_vocab_nouns(only_priority) == only_priority
     no_priority = ["ball", "chair", "table"]
     assert prioritize_vocab_nouns(no_priority) == no_priority
+
+
+# ------------------------------------------------------- cost-aware priority (#145) --
+
+
+def test_prioritize_vocab_nouns_cost_fn_sorts_priority_tier_ascending():
+    # Issue #145: with a cost_fn, the priority tier is sorted cheapest-first instead
+    # of the fixed discovery order DISAMBIGUATOR_PRIORITY_NOUNS happens to list them
+    # in -- "jar" (3 chars) must sort ahead of "pyramid candle holder" (22 chars)
+    # even though the constant lists it later.
+    nouns = ["pyramid candle holder", "ball", "jar", "chair"]
+    result = prioritize_vocab_nouns(nouns, cost_fn=len)
+    priority_seen = [n for n in result if n in DISAMBIGUATOR_PRIORITY_NOUNS]
+    assert priority_seen == ["jar", "pyramid candle holder"]
+    # still a pure reorder: nothing filtered, nothing invented.
+    assert sorted(result) == sorted(nouns)
+
+
+def test_prioritize_vocab_nouns_cost_fn_ties_keep_given_order():
+    # A stable sort: equal-cost priority nouns keep their relative input order.
+    nouns = ["wall decal", "candle holder"]  # both cost_fn -> 0 under this stub
+    result = prioritize_vocab_nouns(nouns, cost_fn=lambda n: 0)
+    assert result == ["wall decal", "candle holder"]
+
+
+def test_prioritize_vocab_nouns_default_unchanged_without_cost_fn():
+    # Omitting cost_fn must reproduce the exact historical fixed-order behaviour --
+    # this is a pure additive capability, not a change to any existing caller.
+    nouns = ["pyramid candle holder", "ball", "jar", "chair"]
+    assert prioritize_vocab_nouns(nouns) == prioritize_vocab_nouns(nouns, cost_fn=None)
+    assert prioritize_vocab_nouns(nouns) == ["pyramid candle holder", "jar", "ball", "chair"]
