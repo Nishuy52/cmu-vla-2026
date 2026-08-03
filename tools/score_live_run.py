@@ -478,9 +478,26 @@ def score_instruction_following_run(
         frame=None,  # driven_object is already in the object frame
         leg_instance_aabbs=leg_instance_aabbs,
     )
+    # issue #165 (live counterpart of #162's row-rendering defect): when EVERY leg
+    # failed goal construction / anchor resolution, ``rub.n_legs == 0`` and
+    # ``score_instruction_rubric`` reports ``rubric_score = 0.0`` by construction
+    # (``n_in_order / n_legs if n_legs else 0.0``) -- that 0.0 is not a scored
+    # failure, there is nothing left to score. Mirrors
+    # ``core.runner.gt_battery.score_scene``'s fix for the identical defect: the row
+    # carries ``headline = None`` + an explicit exclusion note instead of a 0.0 that
+    # reads as "scored zero" and deflates any mean computed over these rows (e.g.
+    # ``write_report``'s ``scores.md`` mean line).
+    rubric_excluded = rub.n_legs == 0
+    exclusion_note = (
+        "IF excluded from mean: zero evaluable legs -- every leg failed goal "
+        "construction or anchor resolution (issue #162/#165)"
+        if rubric_excluded else ""
+    )
     return {
-        "rubric_score": round(rub.rubric_score, 4),
-        "ordered_leg_credit": round(rub.ordered_leg_credit, 4),
+        "rubric_score": None if rubric_excluded else round(rub.rubric_score, 4),
+        "ordered_leg_credit": (
+            None if rubric_excluded else round(rub.ordered_leg_credit, 4)
+        ),
         "n_legs": rub.n_legs,
         "n_legs_reached_in_order": rub.n_legs_reached_in_order,
         "n_threading_violations": rub.n_threading_violations,
@@ -490,12 +507,13 @@ def score_instruction_following_run(
         "frechet_m": rub.frechet_m,
         "coverage_1m": round(rub.coverage_1m, 4) if rub.coverage_1m is not None else None,
         "if_question_index": i,
-        "headline": round(rub.rubric_score, 4),
+        "headline": None if rubric_excluded else round(rub.rubric_score, 4),
+        "rubric_excluded": rubric_excluded,
         "note": "; ".join(
             filter(
                 None,
-                [f"legs={rub.n_legs_reached_in_order}/{rub.n_legs}", empty_note]
-                + rub.threading_details + rub.avoid_details,
+                [exclusion_note, f"legs={rub.n_legs_reached_in_order}/{rub.n_legs}",
+                 empty_note] + rub.threading_details + rub.avoid_details,
             )
         ),
     }
@@ -821,8 +839,13 @@ def write_report(
         issues = "; ".join(r.get("capture_issues") or []) or ""
         note = r.get("note") or ""
         q = (r.get("question") or "")[:70]
+        # issue #165: a row excluded because every leg was unevaluable renders as
+        # "unevaluable", never "n/a" (indistinguishable from "not attempted") or a
+        # scored 0.0 -- the exclusion note already spells out why (see `note`).
+        live_excluded = bool((r.get("live") or {}).get("rubric_excluded"))
+        live_cell = "unevaluable" if live_excluded else _fmt(r.get("headline_live"))
         lines.append(
-            f"| {r['scene']} | {r['qdir']} | {_fmt(r.get('headline_live'))} | "
+            f"| {r['scene']} | {r['qdir']} | {live_cell} | "
             f"{_fmt(r.get('headline_offline'))} | {_fmt(r.get('delta'))} | {issues} | "
             f"{note} | {q} |"
         )
@@ -832,6 +855,31 @@ def write_report(
     lines.append(
         f"Runs with a capture-completeness issue: {n_capture_issues}/{len(rows)}."
     )
+    lines.append("")
+
+    # issue #165: per-qtype mean of ``headline_live``, EXCLUDING rows whose IF rubric
+    # geometry yielded zero evaluable legs (``live.rubric_excluded``, the live
+    # counterpart of ``core.runner.gt_battery``'s issue #162 exclusion) as well as any
+    # other row with no live headline at all. Without this a run with zero evaluable
+    # legs -- ``headline_live: null`` -- would otherwise get averaged in as a 0.0 by
+    # any consumer that naively means the column, deflating the mean for a question
+    # the pipeline correctly refused to fabricate a goal for rather than failed.
+    lines.append("## Mean headline by type")
+    lines.append("")
+    lines.append("| Type | n | n_scored | n_excluded | mean_headline |")
+    lines.append("|---|---|---|---|---|")
+    for qtype in ("numerical", "object_reference", "instruction_following"):
+        trows = [r for r in rows if r.get("qtype") == qtype]
+        excluded = [r for r in trows if (r.get("live") or {}).get("rubric_excluded")]
+        scored = [r for r in trows if r.get("headline_live") is not None]
+        mean_headline = (
+            round(statistics.mean(r["headline_live"] for r in scored), 4)
+            if scored else None
+        )
+        lines.append(
+            f"| {qtype} | {len(trows)} | {len(scored)} | {len(excluded)} | "
+            f"{_fmt(mean_headline)} |"
+        )
     lines.append("")
 
     md_path.write_text("\n".join(lines), encoding="utf-8")

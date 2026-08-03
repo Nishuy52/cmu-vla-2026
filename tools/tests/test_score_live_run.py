@@ -258,6 +258,88 @@ def test_write_report_records_offline_baseline_source(tmp_path):
     assert payload["offline_baseline_source"] == str(offline_path)
 
 
+def test_write_report_excludes_rubric_excluded_rows_from_mean_and_shows_unevaluable(tmp_path):
+    """Issue #165 (live counterpart of #162's row-rendering defect): a run whose
+    IF rubric geometry yielded zero evaluable legs must have ``headline_live: None``
+    (never the misleading 0.0), must render as "unevaluable" in the scores.md table
+    (not "n/a", not "0.0000"), and must be excluded from the per-type mean line."""
+    from tools.score_live_run import write_report
+
+    rows = [
+        {
+            "scene": "arabic_room", "qdir": "inst", "qtype": "instruction_following",
+            "question": "stool/table q", "headline_live": None,
+            "live": {"rubric_excluded": True, "rubric_score": None},
+        },
+        {
+            "scene": "loft", "qdir": "inst", "qtype": "instruction_following",
+            "question": "Q2", "headline_live": 0.6,
+            "live": {"rubric_excluded": False, "rubric_score": 0.6},
+        },
+    ]
+    offline_path = tmp_path / "baseline" / "gt_battery_results.json"
+    md_path, json_path = write_report(rows, tmp_path / "out", offline_results_path=offline_path)
+
+    md = md_path.read_text(encoding="utf-8")
+    assert "unevaluable" in md
+    assert "0.0000" not in md  # never rendered as a scored zero
+    # mean over instruction_following counts only the one truly-scored row
+    assert "| instruction_following | 2 | 1 | 1 | 0.6000 |" in md
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["rows"][0]["headline_live"] is None
+
+
+def test_score_instruction_following_run_zero_evaluable_legs_excluded(monkeypatch, tmp_path):
+    """Row-level unit test for the score_instruction_following_run fix: when
+    ``score_instruction_rubric`` reports ``n_legs == 0`` (every leg unevaluable,
+    issue #162), the returned dict must carry ``headline: None`` +
+    ``rubric_excluded: True`` -- not the ``rubric_score = 0.0`` the scorer computes
+    internally by construction for that case."""
+    import numpy as np
+
+    import tools.score_live_run as SLR
+
+    class _Rub:
+        rubric_score = 0.0
+        ordered_leg_credit = 0.0
+        n_legs = 0
+        n_legs_reached_in_order = 0
+        n_threading_violations = 0
+        n_avoid_violations = 0
+        driven_n_poses = 3
+        frechet_m = None
+        coverage_1m = None
+        threading_details: list = []
+        avoid_details: list = []
+
+    class _Ctx:
+        if_texts = ["Go to the stool near the table."]
+        frame = SLR.S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+        gt = object()
+        idx = object()
+        spawn_xy = None
+        scene = "arabic_room"
+
+    class _Capture:
+        odom_xy = np.zeros((3, 2))
+        odom_xy_raw_n = 3
+
+    monkeypatch.setattr(SLR.GB, "_IF_TRAJ_INDEX", {0: 0})
+    monkeypatch.setattr(SLR.GB, "_if_rubric_geometry", lambda *a, **k: ([], [], [], [], []))
+    monkeypatch.setattr(SLR.S, "score_instruction_rubric", lambda *a, **k: _Rub())
+
+    result = SLR.score_instruction_following_run(
+        _Ctx(), "Go to the stool near the table.", _Capture(),
+        questions_dir=tmp_path,
+    )
+    assert result["headline"] is None
+    assert result["rubric_score"] is None
+    assert result["ordered_leg_credit"] is None
+    assert result["rubric_excluded"] is True
+    assert "excluded" in result["note"]
+
+
 def test_main_requires_out_when_target_given(tmp_path, capsys):
     # A targeted invocation (single run dir or non-default root) must never
     # silently fall back to writing into the committed DEFAULT_BASELINE_DIR
