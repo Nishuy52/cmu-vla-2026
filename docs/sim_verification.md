@@ -567,4 +567,48 @@ adapter rebuild) to confirm nothing silently regressed. Tier tells you which mac
 | K2.7 | Dummy round-trip | publish a `Find …` question on `/challenge_question` | marker on `/selected_object_marker` + object waypoint |
 | K2.8 | Relaunch isolation | `docker compose down && up`, re-ask one question | fresh answer, no cross-question state, ~10-min loop |
 
+## Live-replay: offline resolution regression tests (#163)
+
+`tools/live_replay.py` (`python -m tools.live_replay resolve <job-or-slot-dir>...`)
+replays a harvested cluster-verify run's captured perception offline against
+TODAY's resolution/selection/counting code, without a fresh 7.5 h cluster
+verify cycle. It exists because #163 quantified that the offline `gt_battery`
+(a simulated follower over GT-perfect indexes) does not predict live behaviour
+(a real robot over live-PERCEIVED indexes) — on the same questions, the same
+scenes, the same scorers: instruction_following rubric 0.889 offline vs 0.533
+live, object_reference IoU 1.000 offline vs 0.000 live, 1 offline threading
+violation vs 5 live. Most tuning/fix work in this codebase is resolution logic
+(anchor tie-breaks, clause verification, counting gates, corridor placement)
+that never touches perception/exploration — for exactly that slice, live-replay
+gives an A/B in seconds instead of a cluster cycle, from artifacts a verify job
+already wrote (`reports/cluster_verify/<job>/debug/<slot>/instance_index.jsonl`
++ `resolved_plan.jsonl`, matched against the job's `captures/scores.json` row).
+
+```bash
+python -m tools.live_replay resolve reports/cluster_verify/<job>/debug --out reports/scratch/live_replay_<job>
+python -m tools.live_replay rescore ...   # Mode 2: unchanged pass-through to tools/score_live_run.py
+```
+
+**What it CAN validate**: any change confined to resolution/selection/counting/
+scoring over a FIXED, already-perceived instance set — exactly the family of
+change a battery-green/live-red result from #163 showed the offline battery
+cannot be trusted to predict. It calls the exact same production code
+(`core.geometry.toolbox.resolve/counting/corridor_gate`, `ObjectRefHead`,
+`NumericalHead`, `InstructionHead._resolve_leg_anchors`) a live run would, over
+a frozen snapshot of what that run's perception stack actually produced.
+
+**What it CANNOT validate**: anything that would change WHICH instances got
+perceived, when, or how confidently (perception/detection/tracking/NMS/
+association), or how the robot explored or drove (exploration policy, planner,
+costmap, timing/budget gates, the FSM's early-answer stability logic). The
+captured instance index and driven trajectory are frozen inputs — #163's
+object_reference IoU 1.000-vs-0.000 and 1-vs-5 threading gaps were NOT
+resolution bugs (a resolution replay of a run's own captured perception still
+resolves against the SAME imperfect instances the live run saw); they trace to
+perception/tracking/exploration, which only a live run (or a new offline
+battery run, itself unable to reproduce them) can move. A clean live-replay
+diff is evidence resolution logic didn't regress — it is never evidence a
+live run's headline score will hold, or evidence perception/exploration
+changes are safe.
+
 *Rows above the first Tier-2 line run on Windows/WSL; the Tier-2 rows need the native Ubuntu sim.*
