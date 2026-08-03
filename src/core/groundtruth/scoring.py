@@ -56,7 +56,11 @@ from core.geometry.toolbox import (
     capsule_violated,
     threading_check,
 )
-from core.groundtruth.arrival import NOMINAL_ARRIVAL_TOL_M, derived_arrival_tol_m
+from core.groundtruth.arrival import (
+    NOMINAL_ARRIVAL_TOL_M,
+    PASS_BY_NOMINAL_TOL_M,
+    derived_arrival_tol_m,
+)
 from core.groundtruth.vocab_bridge import bridge_synonyms, bridged_agree
 from core.interfaces import InstanceRecord, MarkerBox, SceneIndex
 from core.parsing.regex_tier import _SUPERLATIVE_PREDS as _PARSER_SUPERLATIVE_PREDS
@@ -1237,6 +1241,25 @@ def leg_arrival_tol_m(fit_residual_p95_m: float, **kwargs) -> float:
     """
     return derived_arrival_tol_m(fit_residual_p95_m, **kwargs)
 
+
+#: Base tolerance (m) ADDED TO an instance's own AABB half-diagonal for a PASS-BY/
+#: VIA_NEAR leg (issue #100) — see :func:`_is_pass_by_leg` for the classification and
+#: :data:`core.groundtruth.arrival.PASS_BY_NOMINAL_TOL_M`'s docstring for why this is a
+#: SEPARATE nominal from :data:`LEG_ARRIVAL_TOL_M`, not the same constant reused: both
+#: are :func:`core.groundtruth.arrival.derived_arrival_tol_m` evaluated at a per-scene
+#: correspondence-fit residual, but the STOP tolerance (:data:`LEG_ARRIVAL_TOL_M`) uses
+#: the P95 of that residual (robustness to an unlucky scene, needed because a STOP leg
+#: has no other slack term) while this one uses the MEDIAN (the "typical" residual,
+#: appropriate once the leg's own AABB half-diagonal is already the dominant slack
+#: term). Stacking the P95 STOP tolerance on top of the footprint term was the
+#: generosity issue #100 measured directly: PASS-BY tolerances of 2.0-2.4 m credited
+#: live closest-approaches as far as 1.84 m as "reached".
+#:
+#: Thin re-export of :data:`core.groundtruth.arrival.PASS_BY_NOMINAL_TOL_M` (this
+#: module's canonical name for it, mirroring :data:`LEG_ARRIVAL_TOL_M`) — this is
+#: :func:`score_instruction_rubric`'s ``pass_by_tol`` default.
+PASS_BY_ARRIVAL_TOL_M: float = PASS_BY_NOMINAL_TOL_M
+
 #: Step (m) the driven polyline is densified to before leg-arrival checks. The v1
 #: kinematic follower emits one pose per planned waypoint (no densification), so a
 #: route that passes centimeters from a goal mid-segment could be scored NOT reached
@@ -1290,11 +1313,13 @@ class IFLegOutcome:
     #: see :func:`_is_pass_by_leg`.
     pass_by: bool = False
     #: The actual tolerance (m) applied to THIS leg. Equals the caller's
-    #: ``tol`` for a STOP leg; equals ``instance_aabb_half_diagonal + tol`` for
-    #: a PASS-BY leg with a resolvable instance AABB (parameter-free —
-    #: derived from the instance's own footprint, not a new tuned constant);
-    #: falls back to the caller's ``tol`` for a PASS-BY leg with no AABB
-    #: supplied (old callers, :data:`None` in ``leg_instance_aabbs``).
+    #: ``tol`` for a STOP leg; equals ``instance_aabb_half_diagonal +
+    #: pass_by_tol`` for a PASS-BY leg with a resolvable instance AABB
+    #: (parameter-free — derived from the instance's own footprint, not a new
+    #: tuned constant); falls back to the caller's ``pass_by_tol`` (issue #100
+    #: — NOT ``tol``, the STOP tolerance; see :data:`PASS_BY_ARRIVAL_TOL_M`)
+    #: for a PASS-BY leg with no AABB supplied (old callers, :data:`None` in
+    #: ``leg_instance_aabbs``).
     tol_used: float = 0.0
 
 
@@ -1379,6 +1404,7 @@ def score_instruction_rubric(
     trajectory_ply: os.PathLike | str | None = None,
     frame: Frame2D | None = None,
     tol: float = LEG_ARRIVAL_TOL_M,
+    pass_by_tol: float = PASS_BY_ARRIVAL_TOL_M,
     leg_instance_aabbs: list[tuple[np.ndarray, np.ndarray] | None] | None = None,
 ) -> InstructionRubricScore:
     """Score a DRIVEN trajectory against the instruction rubric proxy (IF-F2).
@@ -1391,28 +1417,42 @@ def score_instruction_rubric(
       avoid_capsules: forbidden regions active for the whole traversal.
       trajectory_ply / frame: optional reference PLY (+ scene frame) for the SECONDARY
         Fréchet/coverage diagnostics only.
+      tol: STOP-leg tolerance (the terminal GOTO/"stop-at" leg and every
+        CORRIDOR_BETWEEN leg). Unaffected by issue #100.
+      pass_by_tol: PASS-BY/VIA_NEAR-leg tolerance (issue #100) — a SEPARATE
+        parameter from ``tol``, not the same number reused, because the two legs
+        kinds need differently-aggregated versions of the same underlying
+        registration-residual measurement (see
+        :data:`PASS_BY_ARRIVAL_TOL_M`'s docstring). Added to the instance's own
+        AABB half-diagonal when ``leg_instance_aabbs`` supplies one.
       leg_instance_aabbs: OPTIONAL, parallel to ``leg_goals`` (issue #70) — the
         resolved anchor's own ``(aabb_min, aabb_max)`` per leg, ``None`` where
         unresolved/unavailable. Mirrors the existing ``leg_instance_ids``
         parallel-list convention (``core.runner.gt_battery._if_rubric_geometry``).
         Compatible extension: omitted entirely (the default), every leg falls
-        back to the plain STOP semantics below — old callers keep working
-        unmodified. Only consumed for PASS-BY legs (see below); STOP legs
-        never read it.
+        back to the plain PASS-BY/STOP semantics below — old callers keep
+        working unmodified. Only consumed for PASS-BY legs (see below); STOP
+        legs never read it.
 
     Scoring:
-      * (a) per-leg-kind arrival semantics (issue #70): each leg is classified
-        STOP or PASS-BY by :func:`_is_pass_by_leg` (VIA_NEAR legs and
-        non-terminal GOTO legs are PASS-BY; the terminal GOTO/"stop-at" leg
-        and CORRIDOR_BETWEEN legs stay STOP). A STOP leg's tolerance is
-        ``tol`` unchanged. A PASS-BY leg's tolerance is widened to
-        ``instance_aabb_half_diagonal + tol`` when ``leg_instance_aabbs``
-        supplies an AABB for it (parameter-free: derived from the instance's
-        own footprint, not a new tuned constant) — modelling "the demonstrator
-        drove past the landmark" as closest-approach-within-the-object's-own-
-        reach rather than exact-point arrival, per the ceiling evidence (see
-        :func:`_is_pass_by_leg`'s docstring). Falls back to plain ``tol`` when
-        no AABB is available for a PASS-BY leg.
+      * (a) per-leg-kind arrival semantics (issue #70, tolerance tightened by
+        issue #100): each leg is classified STOP or PASS-BY by
+        :func:`_is_pass_by_leg` (VIA_NEAR legs and non-terminal GOTO legs are
+        PASS-BY; the terminal GOTO/"stop-at" leg and CORRIDOR_BETWEEN legs stay
+        STOP). A STOP leg's tolerance is ``tol`` unchanged. A PASS-BY leg's
+        tolerance is ``instance_aabb_half_diagonal + pass_by_tol`` when
+        ``leg_instance_aabbs`` supplies an AABB for it (parameter-free: the
+        footprint term is derived from the instance's own footprint, not a new
+        tuned constant) — modelling "the demonstrator drove past the landmark"
+        as closest-approach-within-the-object's-own-reach rather than
+        exact-point arrival, per the ceiling evidence (see
+        :func:`_is_pass_by_leg`'s docstring). ``pass_by_tol`` is its OWN
+        derived tolerance (:data:`PASS_BY_ARRIVAL_TOL_M`'s default), not
+        ``tol`` reused — issue #100 found that reusing the STOP tolerance
+        double-paid for registration-residual robustness the footprint term
+        already buys, credentialing closest-approaches as far as 1.84 m as
+        "reached". Falls back to plain ``pass_by_tol`` when no AABB is
+        available for a PASS-BY leg.
       * (b) ordered per-leg arrival: walk the trajectory once; a leg counts only if a
         pose reaches it within its (per-(a)) tolerance AND at/after the previous
         ordered leg's arrival index (partial credit = ordered legs reached / total
@@ -1438,12 +1478,17 @@ def score_instruction_rubric(
     n_in_order = 0
     for i, (kind, goal) in enumerate(leg_goals):
         pass_by = _is_pass_by_leg(kind, i, n_legs)
-        leg_tol = tol
-        if pass_by and leg_instance_aabbs is not None and i < len(leg_instance_aabbs):
-            aabb = leg_instance_aabbs[i]
-            if aabb is not None:
-                half_diag = P.footprint_diagonal(aabb[0], aabb[1]) / 2.0
-                leg_tol = half_diag + tol
+        if pass_by:
+            # issue #100: PASS-BY legs use their OWN nominal (pass_by_tol), never the
+            # STOP tolerance (tol) — see PASS_BY_ARRIVAL_TOL_M's docstring.
+            leg_tol = pass_by_tol
+            if leg_instance_aabbs is not None and i < len(leg_instance_aabbs):
+                aabb = leg_instance_aabbs[i]
+                if aabb is not None:
+                    half_diag = P.footprint_diagonal(aabb[0], aabb[1]) / 2.0
+                    leg_tol = half_diag + pass_by_tol
+        else:
+            leg_tol = tol
         # "reached" ignores order (did we ever get there); "reached_in_order" requires
         # arrival at/after the previous ordered leg's arrival.
         any_idx = _first_arrival_index(traj, goal, leg_tol, 0)

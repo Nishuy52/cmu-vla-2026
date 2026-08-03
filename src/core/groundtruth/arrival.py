@@ -20,6 +20,14 @@ Every term in :func:`derived_arrival_tol_m` cites the exact source
 constant/measurement it derives from; the only term that is not directly a
 measured/coded constant is the small fixed safety margin, justified in-line
 where it is defined.
+
+A THIRD consumer, added by issue #100, uses the same formula at a different
+residual input rather than a new formula: :data:`core.groundtruth.scoring.
+PASS_BY_ARRIVAL_TOL_M` (the PASS-BY/VIA_NEAR leg tolerance) evaluates
+:func:`derived_arrival_tol_m` at :data:`PASS_BY_NOMINAL_FIT_RESIDUAL_M`
+instead of :data:`NOMINAL_FIT_RESIDUAL_P95_M` — see that constant's docstring
+for why a PASS-BY leg needs the median, not the p95, of the same underlying
+per-scene residual measurement.
 """
 from __future__ import annotations
 
@@ -142,3 +150,48 @@ NOMINAL_FIT_RESIDUAL_P95_M: float = 1.2256
 #: with every other parameter at its default — the value
 #: :data:`core.heads.instruction.ARRIVAL_TOL_M` is set to.
 NOMINAL_ARRIVAL_TOL_M: float = derived_arrival_tol_m(NOMINAL_FIT_RESIDUAL_P95_M)
+
+
+# --------------------------------------------------------------------------- nominal (PASS-BY)
+
+#: Issue #100: the PASS-BY/VIA_NEAR leg tolerance needs its OWN nominal residual term,
+#: distinct from :data:`NOMINAL_FIT_RESIDUAL_P95_M` — same source measurement, different
+#: (and here, cited) aggregate statistic.
+#:
+#: A STOP leg (the terminal "stop at X" GOTO, or a corridor-gate midpoint) has no other
+#: slack term for hitting an exact point, so :data:`NOMINAL_FIT_RESIDUAL_P95_M` uses the
+#: P95 (worst-typical, not worst-case) of the per-scene correspondence-fit residual —
+#: robustness against an unlucky scene's frame fit is the whole job of that term there.
+#:
+#: A PASS-BY leg (issue #70's ``core.groundtruth.scoring._is_pass_by_leg``: VIA_NEAR at
+#: any position, or a non-terminal GOTO) already carries its OWN, separately-derived
+#: slack term — the resolved instance's own AABB half-diagonal
+#: (``core.groundtruth.scoring.score_instruction_rubric``: ``leg_tol = half_diag +
+#: pass_by_tol``). That footprint term is already the dominant source of "how far off
+#: the exact centroid can a still-genuine arrival land" for a PASS-BY leg (a robot that
+#: drives past a landmark's OWN extent has passed it, full stop — no registration slack
+#: needed to explain that). Stacking the P95 (a worst-typical-CASE, i.e. an unlucky
+#: SCENE's) registration residual on top of the footprint term double-pays for the same
+#: robustness the footprint term already buys, and was measured (issue #100) to make the
+#: PASS-BY tolerance too generous to discriminate grounding quality: 2.0-2.4 m tolerances
+#: credited live closest-approaches as far as 1.84 m as "reached".
+#:
+#: The fix keeps the same formula and the same underlying measurement
+#: (``reports/issue59_leg_ceiling.json``, 15 battery scenes, one ``fit_residual_m`` per
+#: scene, range 0.1953-1.8103 m) — only the aggregate changes, from the P95 to the
+#: MEDIAN: ``numpy.median(residuals) == 0.4671`` m (rounded to 4 dp below). The median is
+#: the "typical" (not "worst-typical") per-scene registration residual — appropriate once
+#: a separate term is already carrying the robustness-to-an-unlucky-scene burden, and
+#: still a real, cited, un-tuned statistic of the EXISTING snapshot (not reverse-derived
+#: from any battery run's credited-leg distances — the derivation only reads the
+#: pre-existing residual snapshot, not the arrival outcomes it is meant to score).
+PASS_BY_NOMINAL_FIT_RESIDUAL_M: float = 0.4671
+
+#: :func:`derived_arrival_tol_m` evaluated at :data:`PASS_BY_NOMINAL_FIT_RESIDUAL_M` with
+#: every other parameter at its default — the value
+#: :data:`core.groundtruth.scoring.PASS_BY_ARRIVAL_TOL_M` (and hence
+#: :func:`core.groundtruth.scoring.score_instruction_rubric`'s ``pass_by_tol`` default) is
+#: set to. Still built from the SAME four cited terms as the STOP tolerance
+#: (vehicle_radius + grid_diagonal/2 + residual + margin) — only the residual input
+#: differs.
+PASS_BY_NOMINAL_TOL_M: float = derived_arrival_tol_m(PASS_BY_NOMINAL_FIT_RESIDUAL_M)

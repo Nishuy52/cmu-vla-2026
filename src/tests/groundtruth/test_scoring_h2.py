@@ -439,9 +439,12 @@ def test_is_pass_by_leg_classification():
 
 def test_pass_by_leg_widens_tolerance_by_instance_half_diagonal():
     # Non-terminal goto (leg 1 of 3) at (5, 0) with a 2x2 m footprint (half-diag
-    # sqrt(8)/2 ~= 1.414 m). Base tol=0.5 m; the driven path passes 1.5 m off the
-    # goal -- inside the widened pass-by radius (1.914 m) but well outside the bare
-    # tol. Only widening the tolerance (not moving the goal point) explains a hit.
+    # sqrt(8)/2 ~= 1.414 m). Base pass_by_tol=0.5 m; the driven path passes 1.5 m off
+    # the goal -- inside the widened pass-by radius (1.914 m) but well outside the
+    # bare tol. Only widening the tolerance (not moving the goal point) explains a
+    # hit. pass_by_tol is passed explicitly (issue #100: it is a SEPARATE parameter
+    # from tol, not the same number reused) -- tol is left at its default and must
+    # play no part in this leg's tolerance.
     aabb = _aabb(5.0, 0.0, 1.0, 1.0)
     leg_goals = [
         ("goto", (0.0, 0.0)),
@@ -451,7 +454,7 @@ def test_pass_by_leg_widens_tolerance_by_instance_half_diagonal():
     aabbs = [None, aabb, None]
     traj = np.array([[0, 0], [5, 1.5], [10, 0]], dtype=float)
     r = score_instruction_rubric(
-        traj, leg_goals, tol=0.5, leg_instance_aabbs=aabbs
+        traj, leg_goals, pass_by_tol=0.5, leg_instance_aabbs=aabbs
     )
     leg1 = r.leg_outcomes[1]
     assert leg1.pass_by is True
@@ -472,12 +475,16 @@ def test_stop_leg_ignores_instance_aabb_even_when_supplied():
     assert leg0.reached is False  # 1.5 m away, outside the bare 0.5 m stop tolerance
 
 
-def test_pass_by_leg_without_aabb_falls_back_to_plain_tol():
+def test_pass_by_leg_without_aabb_falls_back_to_plain_pass_by_tol():
     # No leg_instance_aabbs supplied at all (old-caller compatibility) -- a pass-by
-    # leg must behave exactly like today: plain tol, no widening.
+    # leg must behave exactly like today: plain pass_by_tol, no widening. Issue #100:
+    # the fallback is pass_by_tol, NOT tol -- tol is set to a different value here to
+    # prove it plays no part.
     leg_goals = [("goto", (0.0, 0.0)), ("goto", (5.0, 0.0))]
     traj = np.array([[0, 0], [5, 1.5]], dtype=float)
-    r = score_instruction_rubric(traj, leg_goals, tol=0.5)  # no leg_instance_aabbs
+    r = score_instruction_rubric(
+        traj, leg_goals, tol=99.0, pass_by_tol=0.5
+    )  # no leg_instance_aabbs
     leg0 = r.leg_outcomes[0]
     assert leg0.pass_by is True  # non-terminal goto -- still classified pass-by
     assert leg0.tol_used == pytest.approx(0.5)  # but no AABB -> no widening
@@ -489,11 +496,60 @@ def test_via_near_pass_by_even_as_terminal_leg():
     aabb = _aabb(3.0, 0.0, 0.5, 0.5)  # half-diag sqrt(0.5) ~= 0.707
     leg_goals = [("via_near", (3.0, 0.0))]
     traj = np.array([[3.0, 0.8]], dtype=float)  # 0.8 m off, outside bare 0.3 tol
-    r = score_instruction_rubric(traj, leg_goals, tol=0.3, leg_instance_aabbs=[aabb])
+    r = score_instruction_rubric(
+        traj, leg_goals, pass_by_tol=0.3, leg_instance_aabbs=[aabb]
+    )
     leg0 = r.leg_outcomes[0]
     assert leg0.pass_by is True
     assert leg0.tol_used == pytest.approx(math.hypot(1.0, 1.0) / 2.0 + 0.3)
     assert leg0.reached is True
+
+
+def test_pass_by_default_tol_no_longer_credits_a_1_5m_miss():
+    # Issue #100 regression: livingroom_4 leg1 shape from the offline battery (a
+    # non-terminal goto with half-diag ~0.4999 m, driven closest-approach 1.5469 m)
+    # used to be credited under the OLD tol reuse (half_diag + LEG_ARRIVAL_TOL_M ~=
+    # 1.746 -> tol_used 2.2462, comfortably > 1.5469). Under the new default
+    # pass_by_tol it must NOT be credited.
+    from core.groundtruth.scoring import PASS_BY_ARRIVAL_TOL_M
+
+    aabb = _aabb(5.0, 0.0, 0.3536, 0.3536)  # half-diag ~= 0.5
+    leg_goals = [
+        ("goto", (0.0, 0.0)),
+        ("goto", (5.0, 0.0)),  # pass-by (non-terminal)
+        ("goto", (20.0, 0.0)),  # stop (terminal) -- never reached, irrelevant here
+    ]
+    aabbs = [None, aabb, None]
+    # An out-and-back path held at a fixed y-offset (1.5469 m) as it passes x=5: its
+    # closest approach to the goal (5, 0) is EXACTLY 1.5469 m, at the vertex, with no
+    # nearer point elsewhere on the (densified) path -- a diagonal straight shot would
+    # interpolate a nearer closest-approach than the intended one and contaminate
+    # the test.
+    traj = np.array([[10.0, 1.5469], [5.0, 1.5469], [10.0, 1.5469]], dtype=float)
+    r = score_instruction_rubric(traj, leg_goals, leg_instance_aabbs=aabbs)
+    leg1 = r.leg_outcomes[1]
+    assert leg1.pass_by is True
+    assert leg1.tol_used == pytest.approx(0.5 + PASS_BY_ARRIVAL_TOL_M, abs=1e-3)
+    assert leg1.tol_used < 1.5469  # the miss is no longer inside tolerance
+    assert leg1.reached is False
+
+
+def test_pass_by_default_tol_still_credits_a_sub_1m_arrival():
+    # Issue #100: the mass of the credited-leg distribution (offline battery:
+    # median ~0.7 m closest-approach for PASS-BY legs) must stay credited under the
+    # tightened default -- this is not a blanket tightening, only the outlier tail.
+    aabb = _aabb(5.0, 0.0, 0.3536, 0.3536)  # half-diag ~= 0.5, same footprint as above
+    leg_goals = [
+        ("goto", (0.0, 0.0)),
+        ("goto", (5.0, 0.0)),  # pass-by (non-terminal)
+        ("goto", (20.0, 0.0)),  # stop (terminal) -- never reached, irrelevant here
+    ]
+    # Same out-and-back construction as the miss test above, at 0.95 m instead.
+    traj = np.array([[10.0, 0.95], [5.0, 0.95], [10.0, 0.95]], dtype=float)
+    r = score_instruction_rubric(traj, leg_goals, leg_instance_aabbs=[None, aabb, None])
+    leg1 = r.leg_outcomes[1]
+    assert leg1.pass_by is True
+    assert leg1.reached is True
 
 
 def test_corridor_between_leg_stays_stop_tolerance_with_ordering_intact():
