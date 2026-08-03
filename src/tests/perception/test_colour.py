@@ -8,6 +8,7 @@ never populate color_bins/caption from a weak observation).
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from core.interfaces import InstanceRecord
 from core.perception.colour import (
@@ -15,6 +16,9 @@ from core.perception.colour import (
     MAX_UNCLASSIFIABLE_FRACTION,
     MIN_DOMINANT_FRACTION,
     MIN_MEAN_SATURATION,
+    MIN_TOP_TWO_MARGIN,
+    UNCLASSIFIABLE,
+    ColourTally,
     abstain_reason,
     build_caption,
     dominant_fraction,
@@ -23,6 +27,7 @@ from core.perception.colour import (
     quantise_pixel_names,
     tally_from_colors,
     top_bins,
+    top_two_margin,
     unclassifiable_fraction,
 )
 from core.perception.scene_index import BasicSceneIndex
@@ -329,3 +334,110 @@ def test_out_of_gamut_guard_does_not_disturb_uniform_gray():
     assert unclassifiable_fraction(tally) < MAX_UNCLASSIFIABLE_FRACTION
     assert abstain_reason(tally) is None
     assert top_bins(tally)[0].name == "gray"
+
+
+# --------------------------------------------------------------------- close-margin guard (#147)
+
+
+def test_top_two_margin_direct():
+    """Unit-level check of the gap computation itself, independent of pixel
+    synthesis -- named-vs-unclassifiable, named-vs-named, and single-bucket."""
+    assert top_two_margin(ColourTally(counts={"pink": 51, UNCLASSIFIABLE: 49})) == pytest.approx(0.02)
+    assert top_two_margin(ColourTally(counts={"gray": 68, "brown": 32})) == pytest.approx(0.36)
+    assert top_two_margin(ColourTally(counts={"red": 10})) == 1.0
+
+
+def test_49_51_unclassifiable_split_abstains_on_close_margin():
+    """Issue #147's reported failure: 49% out-of-gamut / 51% just-inside-gamut
+    pink used to clear MAX_UNCLASSIFIABLE_FRACTION (0.49 < 0.5) and
+    MIN_DOMINANT_FRACTION (0.51 >= 0.35) and answer confidently 'pink'. The
+    margin gate must now abstain instead -- the two shares are a coin flip
+    apart, not clear evidence either way."""
+    rng = np.random.default_rng(17)
+    # Pink centroid pixels: comfortably inside MAX_CENTROID_LAB_DISTANCE.
+    pink = _rgb_block((197.2, 133.8, 144.2), 51, rng, noise=5.0)
+    # Pure white: unclassifiable (out-of-gamut, see test_pure_white_is_unclassifiable_and_abstains).
+    white = _rgb_block((250.0, 250.0, 250.0), 49, rng, noise=3.0)
+    colors = np.concatenate([pink, white], axis=0)
+    valid = np.ones(len(colors), dtype=bool)
+
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    # Confirm neither pre-existing floor fires on its own -- this is genuinely
+    # the close-margin case, not a restatement of an existing gate.
+    assert unclassifiable_fraction(tally) < MAX_UNCLASSIFIABLE_FRACTION
+    assert dominant_fraction(tally) >= MIN_DOMINANT_FRACTION
+    assert top_two_margin(tally) < MIN_TOP_TWO_MARGIN
+    assert abstain_reason(tally) == "close_margin"
+    assert top_bins(tally) == ()
+
+
+def test_49_51_two_named_colours_abstains_on_close_margin():
+    """The same near-tie failure mode with two NAMED colours instead of
+    named-vs-unclassifiable (the general 'top-two colour bins split ~49/51'
+    case from the issue title, not just its unclassifiable-vs-named
+    reproduction)."""
+    rng = np.random.default_rng(18)
+    gray = _rgb_block((110.0, 121.3, 121.5), 51, rng, noise=5.0)
+    brown = _rgb_block((168.6, 98.9, 58.6), 49, rng, noise=5.0)
+    colors = np.concatenate([gray, brown], axis=0)
+    valid = np.ones(len(colors), dtype=bool)
+
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert dominant_fraction(tally) >= MIN_DOMINANT_FRACTION
+    assert top_two_margin(tally) < MIN_TOP_TWO_MARGIN
+    assert abstain_reason(tally) == "close_margin"
+    assert top_bins(tally) == ()
+
+
+def test_sofa_68_32_split_still_answers_confidently():
+    """The #121 worked example this fix must not break: livingroom_1's sofa is
+    GT gray 0.68 / brown 0.32 (top-two gap 0.36) -- well clear of
+    MIN_TOP_TWO_MARGIN, so it must still answer 'gray' confidently, not
+    abstain."""
+    rng = np.random.default_rng(19)
+    gray = _rgb_block((110.0, 121.3, 121.5), 68, rng, noise=5.0)
+    brown = _rgb_block((168.6, 98.9, 58.6), 32, rng, noise=5.0)
+    colors = np.concatenate([gray, brown], axis=0)
+    valid = np.ones(len(colors), dtype=bool)
+
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert top_two_margin(tally) >= MIN_TOP_TWO_MARGIN
+    assert abstain_reason(tally) is None
+    bins = top_bins(tally)
+    assert bins[0].name == "gray"
+
+
+def test_close_margin_guard_does_not_disturb_clear_primary_colour():
+    """Regression guard: the new margin gate must not affect a clearly-dominant
+    saturated colour with a negligible runner-up (already covered by
+    test_clear_primary_colour_does_not_abstain, re-asserted against this gate
+    specifically)."""
+    rng = np.random.default_rng(20)
+    colors = _rgb_block((220.0, 110.0, 100.0), 200, rng, noise=8.0)
+    valid = np.ones(len(colors), dtype=bool)
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert top_two_margin(tally) >= MIN_TOP_TWO_MARGIN
+    assert abstain_reason(tally) is None
+    assert top_bins(tally)[0].name == "red"
+
+
+def test_low_saturation_reason_not_shadowed_by_close_margin():
+    """Regression guard: the pre-existing 50/50 gray/black zero-saturation
+    tally (test_greyscale_low_saturation_abstains) also happens to have a
+    close top-two margin (0.5/0.5) -- confirm it still reports its original,
+    more specific reason ('low_saturation') rather than being reclassified as
+    'close_margin' now that both gates would fire on it."""
+    lo = np.tile([55.0, 55.0, 55.0], (50, 1))
+    hi = np.tile([63.0, 63.0, 63.0], (50, 1))
+    colors = np.concatenate([lo, hi], axis=0)
+    valid = np.ones(len(colors), dtype=bool)
+
+    tally = tally_from_colors(colors, valid)
+    assert tally is not None
+    assert top_two_margin(tally) < MIN_TOP_TWO_MARGIN  # would also trip the new gate
+    assert abstain_reason(tally) == "low_saturation"
+    assert top_bins(tally) == ()
