@@ -419,7 +419,7 @@ def test_or_ordinal_phrasing_tiebreak(loft_referential):
             }
         }
     }
-    tid, source, method = S._gt_target_from_referential(
+    tid, source, method, _amb = S._gt_target_from_referential(
         "Find the vase closest to the guitar.", ref, []
     )
     assert tid == 5  # the literal 'closest', not the 'second closest'
@@ -463,7 +463,7 @@ def test_or_superlative_requires_superlative_statement():
         }
     }
     q = "Find the speaker on the TV cabinet closest to the potted plant on the TV cabinet."
-    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    tid, source, method, _amb = S._gt_target_from_referential(q, ref, [])
     assert tid is None
     assert method == "none"
 
@@ -489,7 +489,7 @@ def test_or_superlative_genuine_statement_still_matches():
             }
         }
     }
-    tid, source, method = S._gt_target_from_referential(
+    tid, source, method, _amb = S._gt_target_from_referential(
         "Find the vase closest to the guitar.", ref, []
     )
     assert tid == 46
@@ -569,7 +569,7 @@ def test_gt_target_relation_match_via_nested_disambiguator_anchor():
         }
     }
     q = "Find the bowl on the table that is closest to the folding screen."
-    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    tid, source, method, _amb = S._gt_target_from_referential(q, ref, [])
     assert tid == 9
     assert method == "relation"
 
@@ -594,7 +594,7 @@ def test_gt_target_superlative_match_via_nested_disambiguator_anchor():
         }
     }
     q = "Find the pillow closest to the book on the stool."
-    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    tid, source, method, _amb = S._gt_target_from_referential(q, ref, [])
     assert tid == 12
     assert method == "relation"
 
@@ -666,7 +666,7 @@ def test_or_genuine_tie_still_ambiguous_livingroom1_pillow():
         (scene_dir / "livingroom_1_referential_statements.json").read_text()
     )
     q = "Find the pillow on the sofa that is closest to the windows."
-    tid, source, method = S._gt_target_from_referential(q, referential, [])
+    tid, source, method, _amb = S._gt_target_from_referential(q, referential, [])
     assert tid is None
     assert source == "ambiguous"
     assert method == "none"
@@ -692,7 +692,7 @@ def test_or_margin_synthetic_one_token_ordinal_beats_scaled_floor():
         }
     }
     q = "Find the paper cup on the table closest to the printer stand."
-    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    tid, source, method, _amb = S._gt_target_from_referential(q, ref, [])
     assert tid == 84
     assert method == "relation"
 
@@ -716,7 +716,7 @@ def test_or_margin_synthetic_genuine_tie_stays_ambiguous():
         }
     }
     q = "Find the pillow on the sofa that is closest to the windows."
-    tid, source, method = S._gt_target_from_referential(q, ref, [])
+    tid, source, method, _amb = S._gt_target_from_referential(q, ref, [])
     assert tid is None
     assert source == "ambiguous"
     assert method == "none"
@@ -790,11 +790,12 @@ def test_or_geometry_fallback_declines_ordinal_relation():
     assert r.gt_target_id is None
 
 
-def test_or_geometry_fallback_declines_ambiguous_text_result():
-    """The geometry fallback must only fire when the text ladder found ZERO
-    candidates ('none'), never when it found candidates but couldn't pick one
-    ('ambiguous') -- an ambiguous text result is a different failure mode this
-    fallback must not paper over."""
+def test_or_geometry_fallback_adjudicates_ambiguous_text_result():
+    """issue #170: when the text ladder found candidates but couldn't pick one
+    ('ambiguous'), the geometry fallback now adjudicates AMONG THOSE candidates —
+    here only instance 2 is actually geometrically 'on' the cabinet, so it wins and
+    the result is recorded as 'geometry_ambiguous' (distinguishable from a clean
+    zero-candidate 'geometry' resolution or a clean text resolution)."""
     cabinet = _box(1, "file cabinet", 0, 1, 0, 1, 0, 1)
     plant_on = _box(2, "potted plant", 0.3, 0.5, 0.3, 0.5, 1.0, 1.3)
     plant_off = _box(3, "potted plant", 5, 5.3, 5, 5.3, 0, 0.3)
@@ -817,8 +818,43 @@ def test_or_geometry_fallback_declines_ambiguous_text_result():
     r = S.score_object_reference(
         "Find the potted plant on the file cabinet.", idx, instances, referential=ref,
     )
+    assert r.target_source == "geometry_ambiguous"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 2
+    assert not np.isnan(r.iou)
+
+
+def test_or_geometry_fallback_still_ambiguous_when_geometry_cant_decide():
+    """Guard: an ambiguous text result whose candidates are BOTH geometrically 'on'
+    the anchor (so geometry can't break the tie either) must stay honestly
+    'ambiguous', not fabricate a winner — same non-guessing guarantee as the
+    zero-candidate case, just restricted to the ambiguous candidate set."""
+    cabinet = _box(1, "file cabinet", 0, 1, 0, 1, 0, 1)
+    plant_a = _box(2, "potted plant", 0.1, 0.3, 0.1, 0.3, 1.0, 1.3)
+    plant_b = _box(3, "potted plant", 0.6, 0.8, 0.6, 0.8, 1.0, 1.3)
+    instances = [cabinet, plant_a, plant_b]
+    idx = BasicSceneIndex(instances)
+    ref = {
+        "regions": {
+            "0": {
+                "the black plant that is near the small cabinet": [
+                    {"target_index": "2", "target_class": "plant", "relation": "near",
+                     "anchors": {"anchor_1": {"class": "cabinet"}}},
+                ],
+                "the brown plant that is near the gray cabinet": [
+                    {"target_index": "3", "target_class": "plant", "relation": "near",
+                     "anchors": {"anchor_1": {"class": "cabinet"}}},
+                ],
+            }
+        }
+    }
+    r = S.score_object_reference(
+        "Find the potted plant on the file cabinet.", idx, instances, referential=ref,
+    )
     assert r.target_source == "ambiguous"
     assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
 
 
 @requires_full_unity

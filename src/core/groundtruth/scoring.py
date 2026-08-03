@@ -538,7 +538,8 @@ class ObjectRefScore:
     iou: float
     our_marker: MarkerBox | None
     gt_target_id: int | None
-    # "referential" | "unique_in_scene" | "geometry" | "ambiguous" | "none"
+    # "referential" | "unique_in_scene" | "geometry" | "geometry_ambiguous" |
+    # "ambiguous" | "none"
     target_source: str
     # "exact" | "fuzzy" | "relation" | "unique" | "geometric" | "none"
     match_method: str = "none"
@@ -568,11 +569,16 @@ def _iter_statements(referential: dict | None):
 
 def _gt_target_from_referential(
     text: str, referential: dict | None, instances: list[InstanceRecord]
-) -> tuple[int | None, str, str]:
+) -> tuple[int | None, str, str, frozenset[int]]:
     """Find the GT target object id for an object-reference question.
 
-    Returns ``(target_index, source, match_method)`` where ``match_method`` is one of
-    ``"exact"`` / ``"fuzzy"`` / ``"relation"`` / ``"none"``. Matching ladder:
+    Returns ``(target_index, source, match_method, ambiguous_ids)`` where
+    ``match_method`` is one of ``"exact"`` / ``"fuzzy"`` / ``"relation"`` / ``"none"``,
+    and ``ambiguous_ids`` is the set of candidate instance ids step 3's phrasing
+    tie-break could not choose among (empty unless ``source == "ambiguous"`` via the
+    genuine multi-candidate tie in step 3c) so a caller can adjudicate among THOSE
+    candidates specifically (issue #170) rather than guessing or widening to the
+    whole scene. Matching ladder:
 
     1. **exact** — the question, normalised (whitespace/case/punctuation), equals a
        generated statement string. Highest confidence, no guessing.
@@ -591,7 +597,7 @@ def _gt_target_from_referential(
     ``"none"`` is returned when nothing matches — never a guess.
     """
     if not referential:
-        return None, "none", "none"
+        return None, "none", "none", frozenset()
 
     q = _norm_stmt(text)
     plan = parse_regex(text)
@@ -602,7 +608,7 @@ def _gt_target_from_referential(
         if _norm_stmt(stmt) == q:
             tid = ann.get("target_index")
             if tid is not None:
-                return int(tid), "referential", "exact"
+                return int(tid), "referential", "exact", frozenset()
 
     # 2) fuzzy (Jaccard >= threshold) with a target-class guard.
     best_tid: int | None = None
@@ -616,7 +622,7 @@ def _gt_target_from_referential(
             if tid is not None:
                 best_j, best_tid = j, int(tid)
     if best_tid is not None:
-        return best_tid, "referential", "fuzzy"
+        return best_tid, "referential", "fuzzy", frozenset()
 
     # 3) class + relation + anchor match. Ordered relations ("closest" vs "second
     # closest"/"third closest") all share one ``relation`` string, so a plain class+
@@ -626,7 +632,7 @@ def _gt_target_from_referential(
     # (this is how "closest to the guitar" selects the *closest* vase, not the second/
     # third); (c) genuine tie -> "ambiguous", never guessed.
     if plan.target is None:
-        return None, "ambiguous", "none"
+        return None, "ambiguous", "none", frozenset()
     q_rels = set(_question_relations(plan))
     # Recurses through each anchor's nested ``disambiguator`` chain (issue #95).
     anchor_nouns = {normalize_label(a.noun) for a in iter_target_anchors(plan.target)}
@@ -685,7 +691,7 @@ def _gt_target_from_referential(
             id_best_j[tid] = j
             id_best_union[tid] = len(set(q.split()) | set(stmt_norm.split()))
     if len(id_best_j) == 1:
-        return next(iter(id_best_j)), "referential", "relation"
+        return next(iter(id_best_j)), "referential", "relation", frozenset()
     if id_best_j:
         # Phrasing tie-break: pick the id whose best statement most overlaps the
         # question, but only when it strictly and clearly beats the runner-up (guards
@@ -714,15 +720,78 @@ def _gt_target_from_referential(
         union = id_best_union[top_id]
         margin_required = top_j / (2.0 * (union + 1))
         if top_j >= 0.5 and top_j - second_j >= margin_required:
-            return top_id, "referential", "relation"
-        return None, "ambiguous", "none"
-    return None, "none", "none"
+            return top_id, "referential", "relation", frozenset()
+        # Genuine tie: candidates exist but text can't pick one. Hand the exact
+        # candidate set to the caller so a geometry fallback can adjudicate among
+        # THESE ids (issue #170) instead of guessing or widening to the whole scene.
+        return None, "ambiguous", "none", frozenset(id_best_j)
+    return None, "none", "none", frozenset()
+
+
+def _resolve_geometric_anchor(
+    anchor, index: SceneIndex, thresholds: Thresholds, *, depth: int = 0
+) -> InstanceRecord | None:
+    """Resolve one :class:`~core.plan_schema.Anchor` to a unique GT instance.
+
+    A plain anchor (no disambiguator) resolves iff its noun matches exactly one
+    scene instance. A disambiguated anchor ("the cabinet UNDER the picture")
+    resolves iff its OWN sub-anchor first resolves uniquely (recursively, capped
+    at ``_MAX_GEOMETRY_ANCHOR_DEPTH`` levels — matches the parser's own nesting
+    cap so this never out-reaches what a real question can express) and exactly
+    one of the anchor-noun's instances geometrically satisfies the disambiguator's
+    predicate against that resolved sub-anchor. A superlative disambiguator
+    ("the sofa closest to the door") is declined, same reasoning as a top-level
+    superlative clause (see :func:`_gt_target_from_geometry`) — out of scope here.
+    """
+    if depth > _MAX_GEOMETRY_ANCHOR_DEPTH:
+        return None
+    matches = list(index.by_label(anchor.noun))
+    if anchor.disambiguator is None:
+        return matches[0] if len(matches) == 1 else None
+    disamb = anchor.disambiguator
+    if disamb.negated or len(disamb.anchors) != 1 or _is_superlative_clause(disamb):
+        return None
+    sub_fn = T._BINARY_PREDS.get(disamb.pred)
+    if sub_fn is None or sub_fn is T.in_ or sub_fn is T.with_feature:
+        return None
+    sub_anchor_inst = _resolve_geometric_anchor(
+        disamb.anchors[0], index, thresholds, depth=depth + 1
+    )
+    if sub_anchor_inst is None:
+        return None
+    winners = [r for r in matches if sub_fn(r, sub_anchor_inst, thresholds).passed]
+    return winners[0] if len(winners) == 1 else None
+
+
+#: Recursion cap for :func:`_resolve_geometric_anchor` — the parser's own anchor
+#: nesting depth limit (``core.geometry.toolbox._MAX_ANCHOR_DEPTH``) already bounds
+#: how deep a real question can nest; this mirrors that so the geometry fallback
+#: never tries harder than a question could actually ask.
+_MAX_GEOMETRY_ANCHOR_DEPTH = 2
 
 
 def _gt_target_from_geometry(
-    plan, index: SceneIndex, instances: list[InstanceRecord], thresholds: Thresholds
+    plan,
+    index: SceneIndex,
+    instances: list[InstanceRecord],
+    thresholds: Thresholds,
+    *,
+    candidate_ids: frozenset[int] | None = None,
 ) -> tuple[int | None, str, str]:
     """Geometry-grounded fallback GT target (issue #92 fix 3 — corpus coverage).
+
+    ``candidate_ids``, when given (issue #170), restricts the target-class pool to
+    those specific instance ids before applying the geometric predicate — this is
+    how the caller re-uses this SAME verified-geometric-fact machinery to adjudicate
+    an AMBIGUOUS text tie-break (candidates exist, phrasing couldn't pick one) rather
+    than the zero-candidate case this fallback originally targeted. Restricting to
+    the ambiguous set (instead of leaving it ``None``, i.e. the whole scene) means a
+    physical relation that happens to hold for some OTHER, non-candidate instance of
+    the same class can never masquerade as the answer — only genuine members of the
+    text ladder's own candidate set are eligible winners. Returns
+    ``target_source == "geometry_ambiguous"`` instead of ``"geometry"`` in that case
+    so a reader can tell an ambiguity-adjudicated pick apart from a clean
+    zero-candidate geometric resolution.
 
     Scope, established before writing this (issue #92): 10 of the 30 training
     object-reference questions get ZERO candidates out of the referential-statement
@@ -759,7 +828,19 @@ def _gt_target_from_geometry(
     EXACT predicate against the sole matching anchor instance. Any ambiguity (more
     than one candidate anchor, more than one candidate target satisfying the
     predicate, an unmapped/ordinal/``between``/multi-anchor clause) falls through to
-    ``"none"`` rather than guessing.
+    ``"none"`` rather than guessing. Superlative clauses (``closest_to``/
+    ``farthest_from``) stay out of scope EVEN in ambiguity-adjudication mode
+    (issue #170): a training-corpus battery run proved two of the training
+    questions' ambiguous ties are exactly this shape, and letting geometry rank
+    them moved the battery's or_instance_match off its frozen 12/12 baseline —
+    which issue #170 requires stay byte-identical. Left for separately-approved
+    follow-up work.
+
+    The clause's OWN anchor may itself carry a nested (non-superlative) disambiguator
+    ("the potted plant NEAR the book ON the cabinet" — the outer anchor is "book",
+    narrowed by "on the cabinet"); :func:`_resolve_geometric_anchor` resolves that
+    anchor identity the same GT-geometric way, still requiring a UNIQUE resolution at
+    every level, never widening past what the text itself specifies.
     """
     if plan.target is None:
         return None, "none", "none"
@@ -770,24 +851,24 @@ def _gt_target_from_geometry(
     if clause.negated or len(clause.anchors) != 1:
         return None, "none", "none"
     anchor = clause.anchors[0]
-    if anchor.disambiguator is not None:
-        return None, "none", "none"
     fn = T._BINARY_PREDS.get(clause.pred)
     if fn is None or fn is T.in_ or fn is T.with_feature:
         # `in`/`with` describe containment/possession, not a support/adjacency
         # relation the referential-statement generator would encode as `on`/`near`/
         # `above` in the first place -- out of this fallback's stated scope.
         return None, "none", "none"
-    anchor_matches = index.by_label(anchor.noun)
-    if len(anchor_matches) != 1:
+    anchor_inst = _resolve_geometric_anchor(anchor, index, thresholds)
+    if anchor_inst is None:
         return None, "none", "none"
-    anchor_inst = anchor_matches[0]
     candidates = index.by_label(plan.target.noun)
+    if candidate_ids is not None:
+        candidates = [r for r in candidates if r.instance_id in candidate_ids]
     winners = [
         r.instance_id for r in candidates if fn(r, anchor_inst, thresholds).passed
     ]
     if len(winners) == 1:
-        return winners[0], "geometry", "geometric"
+        source = "geometry_ambiguous" if candidate_ids is not None else "geometry"
+        return winners[0], source, "geometric"
     return None, "none", "none"
 
 
@@ -806,12 +887,15 @@ def score_object_reference(
     matching the question (``target_source == "referential"``); (2) category
     uniqueness — if the scene holds exactly one instance of the target noun it needs
     no disambiguation and IS the target (``"unique_in_scene"``); (3) — only when (1)
-    found genuinely ZERO candidates, never when it found some but couldn't disambiguate
-    — a direct geometric relation check against the GT AABBs for single-anchor
-    physical relations the statement corpus doesn't cover (``"geometry"``, issue #92
-    fix 3; see :func:`_gt_target_from_geometry`). When none of the three pins a
-    trustworthy target the IoU is left undefined (NaN) and flagged
-    (``"ambiguous"``/``"none"``) rather than guessed — we never fabricate a target.
+    found genuinely ZERO candidates — a direct geometric relation check against the
+    GT AABBs for single-anchor physical relations the statement corpus doesn't cover
+    (``"geometry"``, issue #92 fix 3; see :func:`_gt_target_from_geometry`); (4) —
+    only when (1) found an AMBIGUOUS candidate set (a genuine text-phrasing tie
+    between two or more real candidates) — the SAME geometric check, restricted to
+    just those candidates, adjudicating among them rather than guessing
+    (``"geometry_ambiguous"``, issue #170). When none of the four pins a trustworthy
+    target the IoU is left undefined (NaN) and flagged (``"ambiguous"``/``"none"``)
+    rather than guessed — we never fabricate a target.
     """
     plan = parse_regex(text)
     our_marker: MarkerBox | None = None
@@ -830,16 +914,31 @@ def score_object_reference(
         if len(cat) == 1:
             unique_target_id = cat[0].instance_id
 
-    gt_id, source, method = _gt_target_from_referential(text, referential, instances)
+    gt_id, source, method, ambiguous_ids = _gt_target_from_referential(
+        text, referential, instances
+    )
     # Prefer a referential-annotated target; else fall back to category-uniqueness;
     # else (issue #92 fix 3) a direct geometric relation check, but ONLY when the
     # statement ladder found genuinely ZERO candidates ("none") — an "ambiguous"
     # result means candidates exist but a text tie-break failed to pick one, which
-    # is a different failure mode this geometric check must not paper over.
+    # is a different failure mode this geometric check must not paper over: it gets
+    # its OWN geometry pass below (issue #170), restricted to those same candidates,
+    # rather than being folded into the zero-candidate branch.
     if gt_id is None and unique_target_id is not None:
         gt_id, source, method = unique_target_id, "unique_in_scene", "unique"
     elif gt_id is None and source == "none" and plan.target is not None:
         gt_id, source, method = _gt_target_from_geometry(plan, index, instances, thresholds)
+    elif gt_id is None and source == "ambiguous" and plan.target is not None and ambiguous_ids:
+        # issue #170: candidates exist but the text tie-break couldn't pick one —
+        # let the SAME verified-geometric-fact machinery adjudicate among just those
+        # candidates (never the whole scene). Only overwrite source/method when it
+        # actually resolves one; an unresolved geometry pass must not clobber the
+        # honest "ambiguous" flag with a misleading "none".
+        geo_id, geo_source, geo_method = _gt_target_from_geometry(
+            plan, index, instances, thresholds, candidate_ids=ambiguous_ids
+        )
+        if geo_id is not None:
+            gt_id, source, method = geo_id, geo_source, geo_method
     by_id = {r.instance_id: r for r in instances}
 
     if our_marker is None:
