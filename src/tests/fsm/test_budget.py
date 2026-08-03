@@ -129,11 +129,31 @@ def test_gate_ordering_invariant_holds_for_defaults():
         assert explore_max < fa < wf < QUESTION_BUDGET_S
 
 
+def test_numerical_explore_budget_raised_and_still_orders_against_both_gate_pairs():
+    """#150: NUMERICAL's soft explore budget was raised from 210 -> 450 s so a numerical
+    question (which answers in place with no drive-out phase) is not cut off ~270 s early
+    relative to the effective 480 s forced-assembly gate. It is now the qtype that sets
+    `max(EXPLORE_BUDGET_S.values())`, and construction must still succeed against both the
+    neutral (510/570) and effective/pulled-in (480/540) gate pairs -- i.e. the 30 s settle
+    margin below DEFAULT_FORCED_ASSEMBLY_S is real headroom, not a rounding accident.
+    """
+    assert EXPLORE_BUDGET_S[QType.NUMERICAL] == 450.0
+    assert EXPLORE_BUDGET_S[QType.NUMERICAL] == max(EXPLORE_BUDGET_S.values())
+    assert DEFAULT_FORCED_ASSEMBLY_S - EXPLORE_BUDGET_S[QType.NUMERICAL] == pytest.approx(30.0)
+    for fa, wf in (
+        (FORCED_ASSEMBLY_S, WATCHDOG_FLOOR_S),
+        (DEFAULT_FORCED_ASSEMBLY_S, DEFAULT_WATCHDOG_FLOOR_S),
+    ):
+        b = BudgetState(FakeClock(0.0), QType.NUMERICAL, forced_assembly_s=fa, watchdog_floor_s=wf)
+        b.latch()
+        assert b.explore_budget() == 450.0
+
+
 @pytest.mark.parametrize(
     "fa, wf",
     [
         (570.0, 540.0),  # forced_assembly after floor
-        (200.0, 540.0),  # forced_assembly below max explore (270)
+        (400.0, 540.0),  # forced_assembly below max explore (450, NUMERICAL — #150)
         (480.0, 700.0),  # floor past total budget
         (540.0, 540.0),  # equal (must be strict)
     ],

@@ -361,6 +361,68 @@ def test_numerical_no_early_answer_when_nobs_too_low():
     assert ctrl.state is State.EXPLORE_EXECUTE  # n_obs < 3 -> not early
 
 
+def test_numerical_keeps_exploring_past_old_270s_budget():
+    """#150: NUMERICAL's soft explore budget was raised 210 -> 450 s (well past the old
+    INSTRUCTION_FOLLOWING-level 270 s ceiling other qtypes still use) because NUMERICAL
+    answers in place with no drive-out phase, so extra exploration time is never traded
+    away -- it only buys more sensing coverage before the effective forced-assembly gate.
+    An unstable count must still be exploring at 300 s (past the OLD 210/270 s budgets,
+    under the NEW 450 s one) and only get forced to VERIFY once the new budget is spent.
+    """
+    clk = FakeClock(0.0)
+    scene = FakeScene([make_instance(1, "chair")])
+    # Unstable margin (< 25%): never qualifies for the early-answer gate, so only the
+    # soft explore budget (or forced assembly) can move EXPLORE_EXECUTE -> VERIFY.
+    world = WorldView(scene=scene, stability=StabilitySignal(winner_margin=0.10, min_contrib_n_obs=5))
+    ctrl, _ = build_controller(qtype=QType.NUMERICAL, world=world)
+    io = FakeRobotIO(clk, q_of(QType.NUMERICAL))
+    ctrl.tick(io)  # -> PARSING
+    ctrl.state = State.EXPLORE_EXECUTE
+
+    from core.interfaces import EXPLORE_BUDGET_S
+
+    budget_s = EXPLORE_BUDGET_S[QType.NUMERICAL]
+    assert budget_s == 450.0  # pins the #150 value this test exercises
+
+    # Past every qtype's OLD budget (210/240/270) and past the other qtypes' current
+    # budgets too, but still short of NUMERICAL's new 450 s budget and the 480 s
+    # forced-assembly gate: exploration must still be running.
+    clk.set(300.0)
+    ctrl.tick(io)
+    assert ctrl.state is State.EXPLORE_EXECUTE
+    assert io.publish_count == 0
+
+    # Cross the new budget -> forced into VERIFY (then answers from the floor/verify path).
+    clk.set(budget_s + 1.0)
+    ctrl.tick(io)
+    assert ctrl.state in (State.VERIFY, State.ANSWER, State.DONE)
+    for _ in range(4):
+        ctrl.tick(io)
+    assert io.publish_count == 1
+
+
+def test_numerical_early_answer_still_fires_once_stable_within_raised_budget():
+    """The raised NUMERICAL budget must not delay an already-stable count: the
+    stability-based early-answer gate (`_early_answer_ready`) still exits
+    EXPLORE_EXECUTE immediately, well inside the new 450 s ceiling, exactly as it did
+    inside the old 210 s one (architecture §1 row 8 / #150's "costs nothing when the
+    room is small" claim)."""
+    clk = FakeClock(0.0)
+    scene = FakeScene([make_instance(1, "chair"), make_instance(2, "chair")])
+    world = WorldView(scene=scene, stability=StabilitySignal(winner_margin=0.4, min_contrib_n_obs=3))
+    ctrl, _ = build_controller(qtype=QType.NUMERICAL, world=world)
+    io = FakeRobotIO(clk, q_of(QType.NUMERICAL))
+    ctrl.tick(io)  # -> PARSING
+    ctrl.state = State.EXPLORE_EXECUTE
+    clk.set(70.0)  # far below both the old (210) and new (450) explore budgets
+    ctrl.tick(io)  # stability is met -> early gate fires regardless of the raised budget
+    assert ctrl.state in (State.VERIFY, State.ANSWER, State.DONE)
+    for _ in range(4):
+        ctrl.tick(io)
+    assert io.publish_count == 1
+    assert clk.now() < 210.0  # answered early, well before even the OLD budget
+
+
 def test_if_never_early_with_ungrounded_subgoal():
     clk = FakeClock(0.0)
     world = WorldView(
