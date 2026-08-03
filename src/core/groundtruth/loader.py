@@ -17,8 +17,9 @@ Each object row becomes an :class:`~core.interfaces.InstanceRecord`:
   question nouns match ``raw_label`` exactly, not the coarser NYU labels. A small,
   scene-and-object-id-scoped table (:data:`_SCENE_LABEL_CORRECTIONS`) additionally
   grants specific mislabelled objects an extra ``aliases`` entry when geometry
-  unambiguously contradicts ``raw_label`` (issue #110) — ``label`` itself is never
-  overwritten and no CSV row is touched.
+  unambiguously contradicts ``raw_label`` (issue #110, generalised in #144 via
+  ``tools.gt_label_geometry_validator``) — ``label`` itself is never overwritten and
+  no CSV row is touched.
 * ``aabb_min/aabb_max`` = the **AABB-of-OBB approximation** (see :func:`obb_to_aabb`):
   the object's oriented box is rotated by its heading, then the axis-aligned min/max
   over the 8 rotated corners is taken. This is a strict *over*-approximation — a box
@@ -425,8 +426,79 @@ def _object_region_map(
 #: "remote" query second-guess a genuine remote elsewhere). Keying on
 #: ``(scene_name, object_id)`` is the narrowest correction that resolves the
 #: mislabelled panel to "tv" while leaving object_id 72 exactly as annotated.
+#: Issue #144: the class of defect behind #110, found by
+#: :mod:`tools.gt_label_geometry_validator` (an offline scan that flags any raw-label
+#: instance whose true OBB volume — never the AABB-of-OBB, which is a deliberate
+#: over-approximation for rotated boxes — sits >=12x or <=1/12x its class's
+#: :mod:`core.perception.dimension_priors` typical volume, restricted to labels with
+#: >=3 instances pooled across all 15 scenes so there is a "family" to be out of).
+#: Every entry below was individually verified against its raw geometry (position,
+#: footprint, height, and — for the repeated case — cross-scene consistency) before
+#: being added; the validator only proposes candidates, it never auto-applies one.
+#:
+#: livingroom_2 object_id 53, raw_label "clock": a 1.038 x 0.062 x 1.062 m panel
+#: centred at z=2.09m (spanning ~1.56-2.62m, near the ceiling) on the same wall run as
+#: the scene's genuine "tv" (object_ids 8/9) and "painting" (object_id 73) instances.
+#: A 1 m square "clock" mounted near-ceiling is implausible to read as a clock; its
+#: geometry (thin near-square wall panel) fits the scene's own "mirror" class far
+#: better (volume ~2.2x the dimension_priors mirror-typical vs. ~13.5x the
+#: clock-typical) -- corrected to "mirror".
+#:
+#: studio object_id 46, raw_label "vase": 0.296 x 0.384 x 2.493 m, floor-to-near-
+#: ceiling height. Volume is 21x the vase-typical (an impossible vase) but sits almost
+#: exactly on the dimension_priors "column" typical on every axis (thin/mid/long all
+#: within ~15% of the column median) -- corrected to "column".
+#:
+#: studio object_id 6, raw_label "hanger": 0.457 x 0.438 x 1.731 m, a furniture-scale
+#: footprint and shoulder height. A coat/garment "hanger" is a small, paper-thin,
+#: handheld item -- physically incompatible with this box regardless of prior (no
+#: dimension_priors entry exists for "hanger" at all, all VLA-3D instances of that
+#: label being genuinely small). The geometry instead fits a floor coat rack: close
+#: to the dimension_priors "rack" typical on the mid axis, same order of magnitude on
+#: thin/long -- corrected to "rack".
+#:
+#: home_building_1 object_ids {91, 160, 195, 198, 206, 216, 256, 276, 308, 371, 423},
+#: raw_label "lamp": ELEVEN instances, every one 0.766 x 0.766 x 4.32 m (matching to
+#: three decimal places), gray, centred at z~2.15m (floor-to-ceiling), scattered
+#: across four different regions of a large multi-room building. No real floor lamp
+#: is 4.3 m tall (more than twice the tallest real floor lamps); the volume is ~24x
+#: the lamp-typical. The near-exact size/colour repetition across many rooms plus a
+#: floor-to-ceiling span instead matches a single reused structural-column asset:
+#: volume sits within ~4x the dimension_priors "column" typical (vs. ~24x for
+#: "lamp") on every one of the eleven -- corrected to "column".
+#:
+#: livingroom_2 object_id 81, raw_label "lamp": 0.597 x 1.856 x 2.100 m -- a lamp
+#: base 1.86 m across is not a lamp. Its dimensions fit the dimension_priors
+#: "bookcase" typical closely (volume ~1.5x typical vs. ~22x the lamp-typical, long
+#: axis within 6% of the bookcase median) -- corrected to "bookcase".
+#:
+#: Other tools.gt_label_geometry_validator hits were reviewed and left uncorrected as
+#: plausible-but-unusual, not mislabels (see issue #144's resolution comment for the
+#: full per-candidate table): structural classes (wall/window/door/floor/curtain) vary
+#: legitimately with room shell geometry; "book"/"books" outliers are annotation
+#: boxes drawn around a shelf/stack of books, which does not make "book" a WRONG class
+#: (unlike #110/the entries above, no alternate class fits better); "tray" (home_
+#: building_1, object 252) is thin/flat exactly like a tray, just an oversized one (no
+#: better-fitting class); "phone" extremes are known annotation-size noise (#144's own
+#: heuristic scan note); "picture"/"pillow"/"flowers"/"fireplace"/small "vase"/"table"
+#: outliers are within the range of real-world size variation for those classes.
 _SCENE_LABEL_CORRECTIONS: dict[tuple[str, int], tuple[str, ...]] = {
     ("livingroom_1", 91): ("tv",),
+    ("livingroom_2", 53): ("mirror",),
+    ("studio", 46): ("column",),
+    ("studio", 6): ("rack",),
+    ("home_building_1", 91): ("column",),
+    ("home_building_1", 160): ("column",),
+    ("home_building_1", 195): ("column",),
+    ("home_building_1", 198): ("column",),
+    ("home_building_1", 206): ("column",),
+    ("home_building_1", 216): ("column",),
+    ("home_building_1", 256): ("column",),
+    ("home_building_1", 276): ("column",),
+    ("home_building_1", 308): ("column",),
+    ("home_building_1", 371): ("column",),
+    ("home_building_1", 423): ("column",),
+    ("livingroom_2", 81): ("bookcase",),
 }
 
 
