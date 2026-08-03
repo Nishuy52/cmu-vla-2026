@@ -254,6 +254,53 @@ def test_score_scene_if_produces_two_numbers():
 
 
 @requires_loft
+def test_score_scene_if_zero_evaluable_legs_row_is_excluded_not_scored_zero(monkeypatch):
+    """Issue #165: a question whose IF rubric geometry construction fails for every
+    leg (``n_legs == 0``, issue #162) must carry ``rubric_score=None`` +
+    ``rubric_excluded=True`` on the row -- NOT the misleading ``rubric_score=0.0``
+    that ``score_instruction_rubric`` computes internally by construction
+    (``n_in_order / n_legs if n_legs else 0.0``). The row-level data must say
+    "excluded", matching what the aggregate already means."""
+    gt = load_scene(LOFT_DIR)
+    with open(QUESTIONS_JSON, encoding="utf-8") as fh:
+        data = json.load(fh)
+    entry = next(e for e in data if e["scene"] == "loft")
+    monkeypatch.setattr(GB, "_if_rubric_geometry", lambda *a, **k: ([], [], [], [], []))
+    scores = GB.score_scene(gt, entry["questions"], questions_dir=QUESTIONS_DIR,
+                             drive_if=True)
+    ifs = [s for s in scores if s.qtype == QType.INSTRUCTION_FOLLOWING.value]
+    assert ifs
+    for s in ifs:
+        assert s.n_legs == 0
+        assert s.rubric_score is None
+        assert s.ordered_leg_credit is None
+        assert s.rubric_excluded is True
+        assert s.rubric_exclusion_reason
+
+
+def test_md_table_zero_evaluable_legs_row_reads_unevaluable_not_zero():
+    """Issue #165: the ``scores.md``-style table must not render an excluded row as
+    ``rubric=0.00`` -- that reads as "scored zero" to anyone scanning the table,
+    exactly the misread the issue reports."""
+    from core.runner.gt_battery import GTQuestionScore, _md_table
+
+    excluded = GTQuestionScore(
+        scene="arabic_room", qtype=QType.INSTRUCTION_FOLLOWING.value,
+        question="stool/table q", rubric_score=None, ordered_leg_credit=None,
+        n_legs=0, n_legs_reached_in_order=0, rubric_excluded=True,
+        rubric_exclusion_reason="zero evaluable legs",
+    )
+    unscored = GTQuestionScore(
+        scene="b", qtype=QType.INSTRUCTION_FOLLOWING.value, question="q1",
+        note="drive_if disabled; IF unscored",
+    )
+    table = _md_table([excluded, unscored])
+    assert "rubric=0.00" not in table
+    assert "unevaluable" in table
+    assert "IF unscored" in table
+
+
+@requires_loft
 @pytest.mark.slow
 def test_run_gt_battery_emits_report(tmp_path):
     """End-to-end: discover loft under the sample Unity root, write a report."""
@@ -1520,23 +1567,26 @@ def test_score_instruction_rubric_missed_constructible_leg_still_scores_as_befor
 
 def test_aggregate_excludes_zero_evaluable_leg_question_from_if_rubric():
     """Issue #162 (v3 correction): a question every one of whose legs failed goal
-    construction has ``n_legs == 0`` and ``rubric_score == 0.0`` by construction
-    (``core.groundtruth.scoring.score_instruction_rubric`` returns 0.0, not None,
-    when ``n_legs`` is 0). Counting that 0.0 in the ``if_rubric`` aggregate would
-    depress the battery for exactly the case #162 was fixed to handle honestly —
-    refusing to fabricate a goal must not itself read as a scored failure. Mirrors
-    the #155 precedent (``n_threading_unevaluable`` legs excluded from the
-    threading-violation count): here the whole QUESTION is excluded from the
-    rubric means, not scored as 0.0 or 1.0."""
+    construction has ``n_legs == 0``. Issue #165: such a row carries
+    ``rubric_score = None`` + ``rubric_excluded = True`` (NOT the misleading 0.0
+    ``core.groundtruth.scoring.score_instruction_rubric`` computes internally for
+    ``n_legs == 0`` by construction) -- the row-level data must say "not scored",
+    matching what the aggregate has always meant. Counting a 0.0 here in the
+    ``if_rubric`` aggregate would depress the battery for exactly the case #162
+    was fixed to handle honestly — refusing to fabricate a goal must not itself
+    read as a scored failure. Mirrors the #155 precedent (``n_threading_unevaluable``
+    legs excluded from the threading-violation count): here the whole QUESTION is
+    excluded from the rubric means, not scored as 0.0 or 1.0."""
     from core.runner.gt_battery import GTQuestionScore, aggregate
 
     rows = [
         # Fully unscoreable: both legs failed goal construction. Must NOT drag
-        # the mean down to 0.0 for this row.
+        # the mean down to 0.0 for this row, and must not render as a scored 0.0.
         GTQuestionScore(
             scene="a", qtype=QType.INSTRUCTION_FOLLOWING.value, question="q0",
-            rubric_score=0.0, ordered_leg_credit=0.0, n_legs=0,
+            rubric_score=None, ordered_leg_credit=None, n_legs=0,
             n_legs_reached_in_order=0, n_goal_construction_unevaluable=2,
+            rubric_excluded=True, rubric_exclusion_reason="zero evaluable legs",
         ),
         # A normal, fully-scored perfect question.
         GTQuestionScore(
@@ -1553,8 +1603,10 @@ def test_aggregate_excludes_zero_evaluable_leg_question_from_if_rubric():
         ),
     ]
     agg = aggregate(rows)["instruction_following"]
-    assert agg["n_scored"] == 3
-    # only the genuinely-scored q1/q2 count toward the rubric means
+    # issue #165: n_scored now agrees with the mean's denominator (only the
+    # genuinely-scored q1/q2) -- the excluded q0 no longer inflates it.
+    assert agg["n_scored"] == 2
+    assert agg["n_excluded"] == 1
     assert agg["n_zero_evaluable_legs"] == 1
     assert agg["mean_rubric_score"] == 0.5
     assert agg["mean_ordered_leg_credit"] == 0.5
@@ -1569,12 +1621,14 @@ def test_aggregate_if_rubric_none_when_all_questions_zero_evaluable_legs():
     rows = [
         GTQuestionScore(
             scene="a", qtype=QType.INSTRUCTION_FOLLOWING.value, question="q0",
-            rubric_score=0.0, ordered_leg_credit=0.0, n_legs=0,
+            rubric_score=None, ordered_leg_credit=None, n_legs=0,
             n_legs_reached_in_order=0, n_goal_construction_unevaluable=1,
+            rubric_excluded=True, rubric_exclusion_reason="zero evaluable legs",
         ),
     ]
     agg = aggregate(rows)["instruction_following"]
-    assert agg["n_scored"] == 1
+    assert agg["n_scored"] == 0
+    assert agg["n_excluded"] == 1
     assert agg["n_zero_evaluable_legs"] == 1
     assert agg["mean_rubric_score"] is None
     assert agg["mean_ordered_leg_credit"] is None

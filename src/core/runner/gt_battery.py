@@ -1908,8 +1908,22 @@ class GTQuestionScore:
     target_source: str = ""
     match_method: str = ""
     # instruction_following — HEADLINE: rubric proxy over the DRIVEN trajectory (IF-F2)
+    #: ``None`` both when IF scoring never ran for this row (see ``note``) AND when
+    #: it ran but every leg was excluded from scoring (see ``rubric_excluded`` below)
+    #: -- issue #165: a rubric-scored question always carries a real float here;
+    #: ``rubric_score is None`` always means "not counted in the mean", never "scored
+    #: zero". Distinguish the two ``None`` cases via ``rubric_excluded``.
     rubric_score: float | None = None
     ordered_leg_credit: float | None = None
+    #: issue #165: True iff IF rubric scoring ran for this question (``n_legs`` is set)
+    #: but every leg was unevaluable (``n_legs == 0``, issue #162's "nothing left to
+    #: score" case) -- so ``rubric_score``/``ordered_leg_credit`` were left ``None``
+    #: rather than encoded as the misleading ``0.0``, and the question is excluded
+    #: from ``mean_rubric_score``/``mean_ordered_leg_credit``. False for a normally
+    #: scored row AND for a row where IF scoring never ran at all.
+    rubric_excluded: bool = False
+    #: Human-readable reason, set together with ``rubric_excluded``. Empty otherwise.
+    rubric_exclusion_reason: str = ""
     n_legs: int | None = None
     n_legs_reached_in_order: int | None = None
     n_threading_violations: int | None = None
@@ -2300,8 +2314,23 @@ def score_scene(
             leg_instance_aabbs=leg_instance_aabbs,
             **({"tol": tol} if tol is not None else {}),
         )
-        rec.rubric_score = round(rub.rubric_score, 4)
-        rec.ordered_leg_credit = round(rub.ordered_leg_credit, 4)
+        # issue #165: ``rub.n_legs == 0`` is issue #162's "every leg unevaluable" case --
+        # ``score_instruction_rubric`` reports ``rubric_score``/``ordered_leg_credit`` as
+        # 0.0 by construction (``n_in_order / n_legs if n_legs else 0.0``), which is not a
+        # scored failure, there is nothing left to score. Render that as an explicit
+        # exclusion (``None`` + reason) instead of the misleading 0.0, so a row-level
+        # scan of ``rubric_score`` can never mistake "excluded" for "scored zero" the way
+        # the aggregate ``mean_rubric_score`` already treats it (see below).
+        if rub.n_legs == 0:
+            rec.rubric_excluded = True
+            rec.rubric_exclusion_reason = (
+                "zero evaluable legs -- every leg failed goal construction or anchor "
+                "resolution; excluded from mean_rubric_score, not scored as a failure "
+                "(issue #162/#165)"
+            )
+        else:
+            rec.rubric_score = round(rub.rubric_score, 4)
+            rec.ordered_leg_credit = round(rub.ordered_leg_credit, 4)
         rec.n_legs = rub.n_legs
         rec.n_legs_reached_in_order = rub.n_legs_reached_in_order
         rec.n_threading_violations = rub.n_threading_violations
@@ -2640,7 +2669,12 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
     # Instruction following (IF-F2): HEADLINE is the rubric-proxy score over the driven
     # trajectory; Frechet/coverage are secondary diagnostics only. Aligned vs unaligned
     # is retained for the diagnostic columns.
-    inf_scored = [s for s in inf if s.rubric_score is not None]
+    # issue #165: ``inf_attempted`` is every question IF rubric scoring actually ran for
+    # (``n_legs`` was set, whether normally scored or excluded below) -- the set the old
+    # ``inf_scored`` covered before rows carried ``rubric_score = 0.0`` for the excluded
+    # case. Kept for the totals below (threading/avoid-violation counts etc.) which are
+    # meaningful over every attempted row regardless of exclusion.
+    inf_attempted = [s for s in inf if s.n_legs is not None]
     # issue #162: a question every one of whose legs failed goal construction (or
     # anchor resolution) has ZERO evaluable legs -- ``n_legs == 0`` -- and
     # ``score_instruction_rubric`` reports ``rubric_score = 0.0`` / ``ordered_leg_
@@ -2656,8 +2690,12 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
     # from the rubric aggregate rather than scored as a rubric failure. A question
     # with at least one evaluable leg keeps counting normally, including any
     # legitimate 0.0 it earns by that leg simply not being reached.
-    inf_rubric_eligible = [s for s in inf_scored if (s.n_legs or 0) > 0]
-    inf_zero_evaluable_legs = [s for s in inf_scored if (s.n_legs or 0) == 0]
+    # issue #165: the exclusion is now read straight off ``rubric_excluded`` (set at
+    # scoring time, row carries ``rubric_score = None`` + a reason) instead of being
+    # re-derived here from ``n_legs`` -- ``inf_rubric_eligible``'s membership is
+    # unchanged, but the underlying row no longer lies about being "scored zero".
+    inf_rubric_eligible = [s for s in inf_attempted if not s.rubric_excluded]
+    inf_zero_evaluable_legs = [s for s in inf_attempted if s.rubric_excluded]
     inf_aligned = [s for s in inf if s.frame_aligned]
     unaligned_scenes = sorted({s.scene for s in inf if s.frame_aligned is False})
     # meth-F11: partition the unaligned set into DATA-confirmed unfittable scenes (the GT
@@ -2696,32 +2734,39 @@ def aggregate(scores: list[GTQuestionScore]) -> dict:
         },
         "instruction_following": {
             "n": len(inf),
-            "n_scored": len(inf_scored),
+            #: issue #165: agrees with the mean's denominator now -- questions where
+            #: every leg was unevaluable no longer count as "scored" here (they moved
+            #: to ``n_excluded`` below), matching what ``mean_rubric_score`` already
+            #: averaged over.
+            "n_scored": len(inf_rubric_eligible),
+            #: issue #165: alias of ``n_zero_evaluable_legs`` (kept below for backward
+            #: compatibility) under the name the issue asks for.
+            "n_excluded": len(inf_zero_evaluable_legs),
             #: issue #162: questions excluded from the two rubric means below
             #: because EVERY leg failed goal construction / anchor resolution
             #: (``n_legs == 0``) -- nothing left to score, so not counted as a
             #: rubric failure. See ``inf_rubric_eligible`` above.
             "n_zero_evaluable_legs": len(inf_zero_evaluable_legs),
             # HEADLINE (rubric proxy over driven trajectory) -- issue #162: means
-            # over ``inf_rubric_eligible``, NOT ``inf_scored``, so a question with
+            # over ``inf_rubric_eligible``, NOT every attempted row, so a question with
             # zero evaluable legs doesn't silently count as a 0.0 rubric failure.
             "mean_rubric_score": _mean([s.rubric_score for s in inf_rubric_eligible]),
             "mean_ordered_leg_credit": _mean(
                 [s.ordered_leg_credit for s in inf_rubric_eligible]
             ),
             "total_threading_violations": sum(
-                s.n_threading_violations or 0 for s in inf_scored
+                s.n_threading_violations or 0 for s in inf_attempted
             ),
             "total_threading_unevaluable": sum(
-                s.n_threading_unevaluable or 0 for s in inf_scored
+                s.n_threading_unevaluable or 0 for s in inf_attempted
             ),
             #: issue #162: total GOTO/VIA_NEAR legs skipped because no free arrival
             #: point could be constructed (see ``GTQuestionScore.n_goal_construction_unevaluable``).
             "total_goal_construction_unevaluable": sum(
-                s.n_goal_construction_unevaluable or 0 for s in inf_scored
+                s.n_goal_construction_unevaluable or 0 for s in inf_attempted
             ),
             "total_avoid_violations": sum(
-                s.n_avoid_violations or 0 for s in inf_scored
+                s.n_avoid_violations or 0 for s in inf_attempted
             ),
             # SECONDARY diagnostics only (frame-aligned planned-path shape metrics)
             "n_aligned": len(inf_aligned),
@@ -2776,7 +2821,15 @@ def _md_table(scores: list[GTQuestionScore]) -> str:
             )
         else:
             # HEADLINE: rubric proxy over the driven trajectory; frechet/coverage secondary.
-            if s.rubric_score is None:
+            if s.rubric_excluded:
+                # issue #165: distinct from plain "IF unscored" -- scoring ran but every
+                # leg was unevaluable, so the question is excluded from the mean rather
+                # than counted as an unscored row or a scored 0.0.
+                metric = (
+                    f"IF unevaluable (excluded from mean): {s.rubric_exclusion_reason} "
+                    f"legs={s.n_legs_reached_in_order}/{s.n_legs}"
+                )
+            elif s.rubric_score is None:
                 metric = "IF unscored"
             else:
                 fr = "n/a" if s.frechet_m is None else f"{s.frechet_m:.2f}m"
