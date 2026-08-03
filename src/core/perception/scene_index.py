@@ -898,12 +898,15 @@ class BasicSceneIndex:
         """
         # Deferred import: dimension_priors imports normalize_label from this
         # module, so a module-level import here would be a load cycle.
-        from core.perception.dimension_priors import floor_degenerate_aabb
+        from core.perception.dimension_priors import cap_fused_extent, floor_degenerate_aabb
 
         clouds = [p for p in (target.points, other.points) if p is not None and len(p)]
         if clouds:
             fused = np.vstack(clouds).astype(float)
             target.points = fused
+        else:
+            fused = None
+        if fused is not None:
             lo, hi = _trimmed_aabb(fused)
         else:
             # no points to trim with — union the boxes as a fallback
@@ -913,6 +916,12 @@ class BasicSceneIndex:
         # (duplicate/collinear points, or two already-degenerate boxes unioned) —
         # raise only that broken axis to a plausible floor, centre preserved.
         lo, hi = floor_degenerate_aabb(lo, hi, target.label)
+        # Issue #104: the missing other half of the dimension-sanity table — a
+        # match-time veto (tracker._match_plausible, #94/#153) cannot stop an
+        # accumulated box drifting past a plausible size through many individually-
+        # safe co-located merges, so this caps the RESULT of every fuse instead.
+        # Fails open (no-op) for classes with no prior and boxes already in bound.
+        lo, hi = cap_fused_extent(lo, hi, target.label, points=fused)
         target.aabb_min = lo
         target.aabb_max = hi
         target.centroid = (lo + hi) / 2.0
