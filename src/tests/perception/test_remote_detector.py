@@ -424,3 +424,36 @@ def test_recovery_resets_backoff(fake_server):
     assert len(fake_server.requests) == n_before + 1
     assert det._consecutive_failures == 1
     assert det._next_retry_at - clock() == pytest.approx(1.0)  # GDINO_BACKOFF_BASE_S
+
+
+# ------------------------------------------------------------------ #172: caption-label guard
+
+
+def test_remote_detector_drops_a_server_detection_still_carrying_the_caption_marker(fake_server):
+    """Issue #172 defence-in-depth (#134's lesson: fix both paths). The server-side fix
+    (detector.py) should mean this never happens, but if an unpatched/old server ever
+    replies with a label that still contains the caption join marker, the client must
+    drop it rather than trust and forward it -- other, legitimate detections in the
+    same response still come through."""
+
+    def response(body):
+        return 200, {
+            "per_tile": [
+                [
+                    {
+                        "bbox_xyxy": [1.0, 2.0, 3.0, 4.0],
+                        "label": "magazine . ottoman . potted plant . dressing table .",
+                        "score": 0.19,
+                    },
+                    {"bbox_xyxy": [5.0, 6.0, 7.0, 8.0], "label": "ottoman", "score": 0.4},
+                ],
+            ]
+        }
+
+    fake_server.response = response
+    det = _detector(fake_server, vocab_pass_cadence=1)
+    det.question_prompt = "magazine . ottoman . potted plant . dressing table ."
+
+    out = det(_tiles(1))
+
+    assert [d.label for d in out[0]] == ["ottoman"]
