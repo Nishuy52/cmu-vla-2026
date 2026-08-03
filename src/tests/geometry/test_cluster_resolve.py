@@ -1,15 +1,16 @@
 """Issue #160: cluster contiguous same-class fragments into one anchor footprint
-at RESOLVE time.
+at RESOLVE time, and issue #167: route-context tie-break for a corridor leg's
+anchor pair once clustering still leaves more than two candidates.
 
 Ground-truth reference (arabic_room, ``data/vla3d/Unity/arabic_room
 /arabic_room_object_result.csv``): exactly TWO ``column`` instances,
     id=23  center (-0.993,  1.081, 1.392)  extents (0.503, 0.503, 2.782)
     id=30  center (-0.993, -1.133, 1.392)  extents (0.503, 0.503, 2.782)
-matching #167's later evidence ("GT arabic_room has exactly TWO column
-instances"). The live index (#160's own evidence, 18-23 ``column`` instances)
-fragments each real column into several small same-footprint, different-height
-detections -- this file's 18-fragment fixture reconstructs that shape without
-the (unavailable locally) banked ``instance_index.jsonl``.
+matching #167's "GT arabic_room has exactly TWO column instances" evidence. The
+live index (#160's own evidence, 18-23 ``column`` instances) fragments each real
+column into several small same-footprint, different-height detections -- this
+file's 18-fragment fixture reconstructs that shape without the (unavailable
+locally) banked ``instance_index.jsonl``.
 """
 from __future__ import annotations
 
@@ -134,3 +135,96 @@ def test_plausible_merge_of_two_touching_fragments_of_one_real_object():
     resolved = T._resolve_anchor(Anchor(noun="column"), idx, T.DEFAULT_THRESHOLDS)
     assert len(resolved) == 1
     assert resolved[0].n_obs == 6  # 3 + 3
+
+
+# --------------------------------------------------------------------------- #167
+
+
+def _three_column_clusters_fixture() -> list:
+    """Three well-separated single-instance ``column`` candidates -- clustering
+    (#160) has nothing to merge here (no footprint overlap), so this exercises
+    ``resolve_corridor_pair``'s >2-candidate route-context tie-break directly.
+
+    col_a=(0,0), col_b=(4,0), col_c=(0,4): a route travelling along the X axis
+    from (-2,0) to (6,0) passes almost exactly between col_a and col_b (near-zero
+    detour); threading it between col_a and col_c (perpendicular) or col_b and
+    col_c requires a large detour off that line.
+    """
+    return [
+        rec(1, "column", (0.0, 0.0, 1.4), (0.4, 0.4, 2.8)),
+        rec(2, "column", (4.0, 0.0, 1.4), (0.4, 0.4, 2.8)),
+        rec(3, "column", (0.0, 4.0, 1.4), (0.4, 0.4, 2.8)),
+    ]
+
+
+def test_corridor_pair_picks_minimum_detour_of_three_clusters():
+    idx = FakeIndex(_three_column_clusters_fixture())
+    anchor = Anchor(noun="column")
+    pair = T.resolve_corridor_pair(
+        anchor, idx, T.DEFAULT_THRESHOLDS, from_xy=(-2.0, 0.0), to_xy=(6.0, 0.0)
+    )
+    assert pair is not None
+    ids = sorted(c.instance_id for c in pair)
+    assert ids == [1, 2]  # col_a/col_b straddle the route; col_c is a detour
+
+
+def test_corridor_pair_route_context_flips_the_choice():
+    """Same three clusters, a route travelling along the Y axis instead: the
+    minimum-detour pair must flip to the pair straddling THAT line, proving the
+    tie-break reads route context rather than a fixed geometric bias."""
+    idx = FakeIndex(_three_column_clusters_fixture())
+    anchor = Anchor(noun="column")
+    pair = T.resolve_corridor_pair(
+        anchor, idx, T.DEFAULT_THRESHOLDS, from_xy=(0.0, -2.0), to_xy=(0.0, 6.0)
+    )
+    assert pair is not None
+    ids = sorted(c.instance_id for c in pair)
+    assert ids == [1, 3]  # col_a/col_c now straddle the (vertical) route
+
+
+def test_corridor_pair_terminal_leg_only_from_xy_known():
+    """A terminal corridor leg has no "next leg" goal; the #167 commit body's
+    contract is that the caller passes the robot's current pose as ``to_xy``
+    instead, so this only exercises the degenerate ``to_xy=None`` path directly:
+    with no destination term, the detour collapses to "closest gate to
+    ``from_xy``" -- col_a/col_c's gate (near (0, 2)) is closest to (-2, 0), not
+    col_a/col_b's (near (2, 0))."""
+    idx = FakeIndex(_three_column_clusters_fixture())
+    anchor = Anchor(noun="column")
+    pair = T.resolve_corridor_pair(
+        anchor, idx, T.DEFAULT_THRESHOLDS, from_xy=(-2.0, 0.0), to_xy=None
+    )
+    assert pair is not None
+    assert sorted(c.instance_id for c in pair) == [1, 3]
+
+
+def test_corridor_pair_deterministic_with_no_route_context():
+    """Both endpoints unknown: falls back to the lowest two instance ids,
+    deterministic and reproducible (never an accident of list order)."""
+    idx = FakeIndex(_three_column_clusters_fixture())
+    anchor = Anchor(noun="column")
+    pair = T.resolve_corridor_pair(
+        anchor, idx, T.DEFAULT_THRESHOLDS, from_xy=None, to_xy=None
+    )
+    assert pair is not None
+    assert sorted(c.instance_id for c in pair) == [1, 2]
+
+
+def test_corridor_pair_exactly_two_candidates_returns_them_unconditionally():
+    col_a = rec(23, "column", (-0.993, 1.081, 1.392), (0.503, 0.503, 2.782))
+    col_b = rec(30, "column", (-0.993, -1.133, 1.392), (0.503, 0.503, 2.782))
+    idx = FakeIndex([col_a, col_b])
+    pair = T.resolve_corridor_pair(
+        Anchor(noun="column"), idx, T.DEFAULT_THRESHOLDS,
+        from_xy=(100.0, 100.0), to_xy=(-100.0, -100.0),  # irrelevant, only 2 exist
+    )
+    assert pair is not None
+    assert sorted(c.instance_id for c in pair) == [23, 30]
+
+
+def test_corridor_pair_none_with_fewer_than_two_candidates():
+    idx = FakeIndex([rec(1, "column", (0.0, 0.0, 1.4), (0.4, 0.4, 2.8))])
+    pair = T.resolve_corridor_pair(
+        Anchor(noun="column"), idx, T.DEFAULT_THRESHOLDS, from_xy=None, to_xy=None
+    )
+    assert pair is None

@@ -1758,6 +1758,82 @@ def corridor_gate(
     return Gate(pa, pb, mid, width, degenerate=degenerate)
 
 
+def resolve_corridor_pair(
+    anchor: Anchor,
+    index: SceneIndex,
+    th: Thresholds,
+    from_xy: tuple[float, float] | None,
+    to_xy: tuple[float, float] | None,
+) -> tuple[InstanceRecord, InstanceRecord] | None:
+    """#167: pick the two DISTINCT anchor instances for a bare "the two X" /
+    "between the two X" corridor leg, with a route-context tie-break when
+    clustering (#160) still leaves more than two same-label candidates.
+
+    ``_resolve_anchor`` (with #160 clustering applied) supplies the candidate
+    pool. With 0 or 1 candidates no pair exists (``None``). With exactly 2 the
+    choice is unambiguous -- return them, lower ``instance_id`` first for a
+    deterministic, reproducible order. With more than 2 (the corridor scorer
+    intentionally leaves untouched -- see the #167 commit body: it resolves on
+    GT, which has exactly two "column" instances for arabic_room and so never
+    hits this branch), every unordered pair is scored by DETOUR: the extra
+    distance the route would travel by threading through that pair's gate
+    midpoint versus going straight from ``from_xy`` to ``to_xy``,
+
+        detour(pair) = |from_xy -> gate.midpoint| + |gate.midpoint -> to_xy|
+                        - |from_xy -> to_xy|
+
+    and the minimum-detour pair wins -- the physically closest reading of
+    "between the two columns" when more than two same-label objects exist: the
+    pair that keeps the route most nearly on its already-intended line. Ties
+    (equal detour, float-tolerant) break on ascending
+    ``(instance_id, instance_id)`` for determinism.
+
+    ``from_xy``/``to_xy`` are the previous leg's resolved goal and the next
+    leg's resolved goal (or the robot's current pose when this corridor leg is
+    the route's last leg) -- both purely geometric inputs, no caller state read
+    here. Either or both may be ``None`` (first leg / terminal leg with no pose
+    tracked here); the corresponding term of the detour sum is simply omitted,
+    degrading gracefully to "closest gate to the one known point" or, with
+    both missing, straight to the ascending-``instance_id`` pair (still
+    deterministic, just uninformed by route context).
+    """
+    cands = _resolve_anchor(anchor, index, th)
+    if len(cands) < 2:
+        return None
+    cands = sorted(cands, key=lambda c: c.instance_id)
+    if len(cands) == 2:
+        return cands[0], cands[1]
+
+    def _detour(b1: InstanceRecord, b2: InstanceRecord) -> float:
+        gate = corridor_gate(b1, b2)
+        mid = gate.midpoint
+        total = 0.0
+        straight = 0.0
+        if from_xy is not None:
+            total += float(np.linalg.norm(mid - np.asarray(from_xy, dtype=float)))
+        if to_xy is not None:
+            total += float(np.linalg.norm(mid - np.asarray(to_xy, dtype=float)))
+        if from_xy is not None and to_xy is not None:
+            straight = float(
+                np.linalg.norm(
+                    np.asarray(to_xy, dtype=float) - np.asarray(from_xy, dtype=float)
+                )
+            )
+        return total - straight
+
+    best_pair = None
+    best_detour = None
+    for i in range(len(cands)):
+        for j in range(i + 1, len(cands)):
+            b1, b2 = cands[i], cands[j]
+            d = _detour(b1, b2)
+            key = (round(d, 9), b1.instance_id, b2.instance_id)
+            if best_detour is None or key < best_detour:
+                best_detour = key
+                best_pair = (b1, b2)
+    return best_pair
+
+
 def threading_check(trajectory: np.ndarray, gate: Gate) -> tuple[bool, str]:
     """True if the trajectory polyline properly crosses the gate segment.
 
