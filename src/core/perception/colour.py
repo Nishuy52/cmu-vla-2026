@@ -16,8 +16,11 @@ bad label is a confident wrong answer, not a graceful "don't know". Every path
 into :class:`ColorBin` production funnels through :func:`top_bins`, which
 abstains (returns ``()``, the same shape as "never observed") whenever
 :func:`abstain_reason` finds the evidence weak — too few quantised pixels, no
-clear majority bin ("mixed distribution"), or a low-saturation capture without
-near-unanimous agreement. An abstained instance keeps ``color_bins=()``, which
+clear majority bin ("mixed distribution"), a low-saturation capture without
+near-unanimous agreement, or the top two buckets (named or
+:data:`UNCLASSIFIABLE`) sitting within a corpus-derived margin of each other
+("close margin", issue #147 — see :data:`MIN_TOP_TWO_MARGIN`). An abstained
+instance keeps ``color_bins=()``, which
 the rest of the codebase already treats as "colour unknown" (see
 ``InstanceRecord.color_bins``'s docstring and ``_colour_present``'s no-bins
 fallback) — never as a confident colour mismatch.
@@ -205,7 +208,47 @@ UNCLASSIFIABLE: str = "_unclassifiable"
 #: signal available; a small minority of stray out-of-gamut pixels (specular
 #: highlight, shadow fringe) on an otherwise clearly-coloured object should not
 #: by itself veto an otherwise confident classification.
+#:
+#: Issue #147: this floor alone is NOT a sufficient abstention rule -- a tally
+#: at 49% unclassifiable / 51% dominant-named clears it (0.49 < 0.5) and answers
+#: confidently, even though the two shares are a coin flip apart. See
+#: :data:`MIN_TOP_TWO_MARGIN` below, which composes with this gate rather than
+#: replacing it: this floor still catches the "unclassifiable outright wins"
+#: case, the margin gate catches the "unclassifiable/named (or named/named)
+#: near-tie" case this floor structurally cannot.
 MAX_UNCLASSIFIABLE_FRACTION: float = 0.5
+
+#: Issue #147 follow-up to #121's out-of-gamut guard. ``MAX_UNCLASSIFIABLE_
+#: FRACTION`` alone lets a 49%-unclassifiable / 51%-named split answer
+#: confidently (0.49 < 0.5), reproducing the original "confident wrong colour"
+#: failure mode at a smaller split. This gate instead compares the tally's
+#: TOP TWO buckets directly -- named vs named, or named vs
+#: :data:`UNCLASSIFIABLE` -- and abstains (:func:`abstain_reason` ->
+#: ``"close_margin"``) whenever they are within :data:`MIN_TOP_TWO_MARGIN` of
+#: each other, regardless of which floor either individually clears. See
+#: :func:`top_two_margin`.
+#:
+#: Threshold evidence (measured 3 Aug 2026 against every ``*_object_result.csv``
+#: across all 15 VLA-3D Unity scenes): of 1967 GT colour slots, 869 declare 2+
+#: colour schemes (``object_color_scheme_percentage{1,2}``); the top1-top2
+#: percentage-point gap across those 869 ranges from 0.005 to 1.0 with no clean
+#: bimodal split -- density is roughly uniform (~10-20 slots per 1-point bucket)
+#: from gap 0.00 up through ~0.30, then rises toward a large mass at gap ~1.0
+#: (dominated by the 1098 single-colour-only slots, always gap=1.0, plus
+#: genuinely near-unanimous multi-colour ones). Coarse buckets: gap<0.02: 24
+#: slots, gap<0.05: 61, gap<0.10: 140, gap<0.15: 205, gap<0.20: 251 (out of 869).
+#: Two anchors fix the usable window: a constructed 49%/51% split (gap 0.02)
+#: must abstain (this issue); the livingroom_1 sofa (gray 0.68 / brown 0.32,
+#: gap 0.36) must still answer "gray" confidently (#121's own worked example).
+#: 0.15 sits inside that 0.02-0.36 window -- >7x the abstain anchor, well under
+#: half the confident anchor -- and lands in a corpus region with no sharp
+#: density change either side of it, so no single scene's outcome hinges on
+#: exactly where within the gap it falls. It also matches the corpus' own
+#: authoring: livingroom_1 has several near-50/50 wall/door slots (e.g. gray
+#: 0.503/black 0.497, gap 0.006) that are themselves a coin flip between two
+#: names in the source annotation -- abstaining on those, rather than picking
+#: one, is the correct behaviour this gate is meant to produce.
+MIN_TOP_TWO_MARGIN: float = 0.15
 
 
 # ----------------------------------------------------------------------- tally
@@ -359,6 +402,25 @@ def unclassifiable_fraction(tally: ColourTally) -> float:
     return tally.counts.get(UNCLASSIFIABLE, 0) / total
 
 
+def top_two_margin(tally: ColourTally) -> float:
+    """Gap between the tally's top two buckets, as a fraction of its total.
+
+    Unlike :func:`dominant_fraction` (which only ever considers NAMED bins),
+    this ranks EVERY bucket including :data:`UNCLASSIFIABLE` -- issue #147: the
+    failure mode is a near-tie between the winning named colour and whatever is
+    in second place, and that runner-up is just as often the unclassifiable
+    sentinel (the reported 49/51 case) as a second named colour. Returns
+    ``1.0`` when there is no second bucket at all (a single-bucket tally is
+    maximally unambiguous), ``0.0`` for an exact tie. See :data:`MIN_TOP_TWO_MARGIN`."""
+    total = tally.total
+    if total == 0:
+        return 1.0
+    counts = sorted(tally.counts.values(), reverse=True)
+    top = counts[0]
+    second = counts[1] if len(counts) > 1 else 0
+    return (top - second) / total
+
+
 def mean_saturation(tally: ColourTally) -> float:
     """Mean HSV saturation across every quantised pixel in the tally, in [0, 1]."""
     total = tally.total
@@ -370,7 +432,16 @@ def mean_saturation(tally: ColourTally) -> float:
 def abstain_reason(tally: ColourTally | None) -> str | None:
     """``None`` if ``tally`` is confident enough to commit to a colour bin, else
     a short machine-readable reason (``"no_observation"``, ``"too_few_pixels"``,
-    ``"out_of_gamut"``, ``"mixed_distribution"``, ``"low_saturation"``)."""
+    ``"out_of_gamut"``, ``"mixed_distribution"``, ``"low_saturation"``,
+    ``"close_margin"``).
+
+    ``close_margin`` (issue #147) is checked LAST, after every existing gate,
+    so it only ever adds new abstentions on top of the pre-#147 behaviour --
+    a tally that already abstains for some other reason keeps that reason
+    (e.g. the 50/50 gray/black zero-saturation tally in the tests stays
+    ``"low_saturation"``, not ``"close_margin"``); it only reclassifies a
+    would-have-been-confident tally whose top two buckets are within
+    :data:`MIN_TOP_TWO_MARGIN` of each other."""
     if tally is None or tally.total == 0:
         return "no_observation"
     if tally.total < MIN_TALLY_PIXELS:
@@ -382,6 +453,8 @@ def abstain_reason(tally: ColourTally | None) -> str | None:
         return "mixed_distribution"
     if mean_saturation(tally) < MIN_MEAN_SATURATION and frac < HIGH_AGREEMENT_FRACTION:
         return "low_saturation"
+    if top_two_margin(tally) < MIN_TOP_TWO_MARGIN:
+        return "close_margin"
     return None
 
 
@@ -464,6 +537,7 @@ __all__ = [
     "MIN_DOMINANT_FRACTION",
     "MIN_MEAN_SATURATION",
     "MIN_TALLY_PIXELS",
+    "MIN_TOP_TWO_MARGIN",
     "UNCLASSIFIABLE",
     "ColourTally",
     "abstain_reason",
@@ -477,5 +551,6 @@ __all__ = [
     "srgb_to_linear",
     "tally_from_colors",
     "top_bins",
+    "top_two_margin",
     "unclassifiable_fraction",
 ]
