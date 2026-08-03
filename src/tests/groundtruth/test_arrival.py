@@ -16,6 +16,8 @@ from core.groundtruth.arrival import (
     FIXED_SAFETY_MARGIN_M,
     NOMINAL_ARRIVAL_TOL_M,
     NOMINAL_FIT_RESIDUAL_P95_M,
+    PASS_BY_NOMINAL_FIT_RESIDUAL_M,
+    PASS_BY_NOMINAL_TOL_M,
     derived_arrival_tol_m,
 )
 from core.nav.costmap import VEHICLE_RADIUS_M
@@ -140,3 +142,50 @@ def test_explore_step_provisional_tolerance_is_untouched():
     from core.heads.explore_step import PROVISIONAL_ARRIVAL_TOL_M
 
     assert PROVISIONAL_ARRIVAL_TOL_M == 0.8
+
+
+# --------------------------------------------------------------------------- PASS-BY nominal (issue #100)
+
+
+def test_pass_by_nominal_tol_is_the_formula_at_the_pass_by_nominal_residual():
+    assert PASS_BY_NOMINAL_TOL_M == pytest.approx(
+        derived_arrival_tol_m(PASS_BY_NOMINAL_FIT_RESIDUAL_M)
+    )
+
+
+def test_pass_by_nominal_residual_is_a_plausible_value_from_the_same_battery_provenance():
+    # Same sanity bound as test_nominal_fit_residual_is_a_plausible_p95_from_battery_
+    # provenance, same source snapshot (reports/issue59_leg_ceiling.json,
+    # 0.1953-1.8103 m across the 15 battery scenes) -- guards against a typo'd
+    # constant that no longer reflects any real measurement of that snapshot.
+    assert 0.1953 <= PASS_BY_NOMINAL_FIT_RESIDUAL_M <= 1.8103
+
+
+def test_pass_by_nominal_residual_is_the_median_not_the_p95():
+    # The whole point of issue #100's fix: a DIFFERENT (smaller) aggregate of the
+    # SAME underlying measurement, not a new/independently-tuned number.
+    assert PASS_BY_NOMINAL_FIT_RESIDUAL_M < NOMINAL_FIT_RESIDUAL_P95_M
+
+
+def test_pass_by_nominal_tol_is_tighter_than_the_stop_nominal_tol():
+    # Direct regression guard for the issue #100 generosity: the PASS-BY base
+    # tolerance (before the instance's own AABB half-diagonal is added) must be
+    # strictly smaller than the STOP tolerance it used to reuse wholesale.
+    assert PASS_BY_NOMINAL_TOL_M < NOMINAL_ARRIVAL_TOL_M
+
+
+def test_pass_by_nominal_tol_still_shares_the_same_structural_terms():
+    # Not a new formula -- same four cited terms, only the residual input differs.
+    expected = (
+        VEHICLE_RADIUS_M
+        + DEFAULT_CELL_M * math.sqrt(2.0) / 2.0
+        + PASS_BY_NOMINAL_FIT_RESIDUAL_M
+        + FIXED_SAFETY_MARGIN_M
+    )
+    assert PASS_BY_NOMINAL_TOL_M == pytest.approx(expected)
+
+
+def test_scoring_pass_by_arrival_tol_m_matches_pass_by_nominal():
+    from core.groundtruth.scoring import PASS_BY_ARRIVAL_TOL_M
+
+    assert PASS_BY_ARRIVAL_TOL_M == pytest.approx(PASS_BY_NOMINAL_TOL_M)
