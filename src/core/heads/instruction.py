@@ -1276,6 +1276,16 @@ class InstructionHead:
         #     without reviving the dead-by-default behaviour this fix removes.
         # ``_commit_forced()`` itself is untouched: its permissive default is still relied
         # on by the H4c provisional-terminal gate and Stage 3 Gate 3.
+        #
+        # Issue #159 reconciliation: this gate (and the #33/Stage-3 gates above it) must
+        # keep blocking the DRIVE exactly as documented — a withheld route stays
+        # uncommitted, ``self._follower`` stays None, and NOTHING here changes that.
+        # ``terminal_waypoint()`` is where the ANSWER side is reconciled: it falls back
+        # to ``_grounded_prefix_goal()`` (the furthest leg with resolved ``geom``, which
+        # ``_ground_legs`` computes independently of any commit decision) whenever no
+        # follower/terminal/last-published-waypoint exists. So an avoid-withheld route
+        # still drives nothing this tick (unchanged), but verify/forced-assembly reading
+        # ``terminal_waypoint()`` gets the grounded prefix's goal instead of None.
         if (
             self._follower is None
             and not self._avoids_all_resolvable(scene)
@@ -1730,6 +1740,35 @@ class InstructionHead:
                 return g[1] if isinstance(g[0], tuple) else g
         return None
 
+    def _grounded_prefix_goal(self) -> tuple[float, float] | None:
+        """Issue #159 — the goal (x, y) of the FURTHEST ordered leg that has grounded
+        geometry, i.e. the last leg in the leading contiguous run counted by
+        ``_grounded_prefix_len``.
+
+        ``terminal_waypoint``'s only real fallback source when NO route has been
+        committed (``_follower is None`` and it never advanced far enough to leave a
+        ``_last_wp``): every withhold gate in ``_committable_prefix_len``/
+        ``_maybe_build_or_extend_route`` (the #33 single-obs floor, the Stage 3
+        goal-credibility gate, and the #156 avoid-anchor withhold) blocks the DRIVE —
+        whether a route gets BUILT and FOLLOWED — not whether the leg's own geometry
+        exists. ``self._legs`` already carries that geometry the instant
+        ``_ground_legs`` resolves it, independent of any commit decision, so this reads
+        it directly rather than needing a follower at all.
+
+        Ordered-leg credit is exactly prefix-shaped (the rubric scores each ordered leg
+        independently up to the first miss), so returning the furthest GROUNDED leg's
+        goal — even one that is withheld from the committed drive — still banks
+        whatever the route earned so far. Returns None only when nothing has grounded
+        at all (``_grounded_prefix_len() == 0``), the genuine "nothing to bank" case.
+        """
+        n = self._grounded_prefix_len()
+        if n == 0:
+            return None
+        g = self._legs[n - 1].geom
+        if g is None:  # pragma: no cover — _grounded_prefix_len already guarantees this
+            return None
+        return g[1] if isinstance(g[0], tuple) else g
+
     def drive_complete(self) -> bool:
         """True once the IF drive has nothing left to do (IF-F4 continue-drive).
 
@@ -1789,6 +1828,22 @@ class InstructionHead:
         path keeps the vehicle threading the planned route. Only once the follower is
         exhausted (or the vehicle is already within reach of the terminal) do we publish
         the raw terminal coordinate.
+
+        Issue #159 — reconciling the commit withhold with the answer floor: every
+        withhold gate (#33's single-obs floor, Stage 3's goal-credibility gate, #156's
+        avoid-anchor withhold in ``_maybe_build_or_extend_route``) governs whether a
+        route gets COMMITTED and DRIVEN — i.e. whether ``self._follower`` ever gets
+        built. None of them erase the geometry those gates are withholding: a withheld
+        leg is still PLANNED (``self._legs[i].geom`` resolved) even though it is not yet
+        driven. Before this fix, a withheld route with ``_follower is None`` and no prior
+        ``_last_wp`` fell straight through to ``None`` here, and the FSM's verify/forced-
+        assembly path then published the generic floor answer instead of anything the
+        head actually knows — "verify yielded nothing" even when a leg or two had fully
+        grounded. Withholding the DRIVE must not become withholding the ANSWER: the last
+        resort below banks the furthest GROUNDED leg's goal (``_grounded_prefix_goal``)
+        so verify/forced-assembly always gets the best partial credit available, and only
+        returns None when truly nothing has grounded (case (c) below stays a floor
+        matter, not a head one).
         """
         follower = self._follower
         if (
@@ -1801,7 +1856,12 @@ class InstructionHead:
                 return crumb
         if self._terminal_xy is not None:
             return WaypointCmd(float(self._terminal_xy[0]), float(self._terminal_xy[1]))
-        return self._last_wp
+        if self._last_wp is not None:
+            return self._last_wp
+        prefix_goal = self._grounded_prefix_goal()
+        if prefix_goal is not None:
+            return WaypointCmd(float(prefix_goal[0]), float(prefix_goal[1]))
+        return None
 
 
 def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:

@@ -90,7 +90,13 @@ def test_sealed_pocket_produces_uncreditable_clamp():
 def test_clamped_leg_withheld_while_budget_available():
     """Gate 3: a GOTO leg whose resolved goal clamps beyond the credibility bar is
     PLANNED (geometry present) but withheld from the COMMITTED route while budget
-    pressure has not forced the commit and forced-assembly has not been reached."""
+    pressure has not forced the commit and forced-assembly has not been reached.
+
+    Issue #159: the commit withhold above is unchanged (still uncommitted, no
+    follower) — but ``terminal_waypoint()`` still banks the PLANNED leg's own
+    (clamped) goal via the grounded-prefix fallback rather than returning None:
+    withholding the DRIVE must not become withholding the ANSWER.
+    """
     sc, idx = _sealed_pocket_scene()
     forced = {"v": False}
     inst = InstructionHead(
@@ -104,7 +110,9 @@ def test_clamped_leg_withheld_while_budget_available():
     assert _clamped_leg(inst) > GOAL_CLAMP_CREDIBILITY_BAR_M
     assert inst._committable_prefix_len() == 0
     assert inst._follower is None, "an uncreditable clamp must not be committed"
-    assert inst.terminal_waypoint() is None
+    tw = inst.terminal_waypoint()
+    assert tw is not None  # #159: grounded-prefix fallback banks the clamped leg's goal
+    assert (tw.x, tw.y) == inst._legs[0].geom
 
 
 def test_clamped_leg_commits_once_forced_assembly_reached():
