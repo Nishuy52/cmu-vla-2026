@@ -95,6 +95,20 @@ STANDOFF_ARRIVAL_MARGIN_M: float = 0.15
 #: orders of magnitude looser than the float noise this exists to absorb while still
 #: being far tighter than any real overshoot worth rejecting.
 STANDOFF_CLAMP_EPS_M: float = 1e-9
+#: Issue #143 — proxy (m) for the clearance the RUBRIC's own goal push uses
+#: (``core.runner.gt_battery._RUBRIC_GOAL_CLEARANCE_M``, gt_battery.py:1030), so the
+#: head's standoff clamp can be re-referenced against the rubric's approached-near-edge
+#: goal instead of the anchor centroid (see ``_standoff_max_dist_m``) without importing
+#: the offline battery module (the head stays ROS-free/light — module docstring).
+#: ``gt_battery``'s own comment documents that its value (0.4) is chosen to MATCH
+#: ``core.nav.costmap.VEHICLE_RADIUS_M`` ("the same 'vehicle's own body can't be here'
+#: margin the real navigation stack already inflates every obstacle by, so the rubric
+#: goal and the drivable target agree on what counts as clear") — so this aliases the
+#: already-imported ``VEHICLE_RADIUS_M`` rather than duplicate the literal, which keeps
+#: the two in sync automatically if either ever changes for a shared reason (a true
+#: value-only coincidence would instead need its own literal; this one is documented as
+#: deliberate on the battery side).
+RUBRIC_EDGE_PUSH_PROXY_M: float = VEHICLE_RADIUS_M
 MIN_GROUND_OBS: int = 3  # per architecture: grounded == confirmed with >= 3 obs
 
 # Issue #33 — route-prefix commitment floor: a leg backed by only a SINGLE observation
@@ -703,12 +717,15 @@ class InstructionHead:
         multi-sided object, moving the goal much further from where the vehicle
         would actually arrive than the clearance fix requires. Reusing that
         already-chosen direction keeps the standoff to the minimum deviation that
-        clears the floor. ``_standoff_push`` itself clamps the push distance so the
-        result never leaves ``ARRIVAL_TOL_M`` of the anchor centroid -- for a large
-        anchor (a bed, a sofa) the clearance floor and the arrival tolerance can
-        genuinely conflict, and trading a short-of-goal wedge for an
-        outside-tolerance miss is not a fix (both are disqualifying, and the
-        tolerance miss is unrecoverable while the wedge at least banks partial
+        clears the floor. ``_standoff_push`` itself clamps the push distance to
+        ``_standoff_max_dist_m(rec)`` (issue #143: re-referenced from the anchor
+        centroid to the anchor's approached near edge, which is what the rubric's
+        arrival tolerance is actually measured from — see that method's docstring)
+        so the result stays within a plausible rubric arrival tolerance of the
+        rubric's own goal -- for a large anchor (a bed, a sofa) the clearance floor
+        and that tolerance can still genuinely conflict, and trading a short-of-goal
+        wedge for an outside-tolerance miss is not a fix (both are disqualifying, and
+        the tolerance miss is unrecoverable while the wedge at least banks partial
         credit)."""
         raw = self._goto_point_raw(rec, prev_gate)
         cm = self._costmap
@@ -716,19 +733,82 @@ class InstructionHead:
             return raw
         c = TB.P._as3(rec.centroid)
         anchor_xy = (float(c[0]), float(c[1]))
-        return self._standoff_push(anchor_xy, raw, self._near_thresh(rec))
+        return self._standoff_push(
+            anchor_xy, raw, self._near_thresh(rec), self._standoff_max_dist_m(rec)
+        )
+
+    def _standoff_max_dist_m(self, rec) -> float:
+        """Issue #143 — the terminal-leg standoff's clamp distance (m, from the anchor
+        CENTROID), re-referenced from ``ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M``
+        alone (correct only if the rubric's arrival goal SITS AT the centroid) to
+        account for the rubric's actual goal placement.
+
+        The rubric does not measure arrival from the centroid. ``_nearest_free_goal``
+        (``core.runner.gt_battery.py:1085``) pushes the leg's scored goal off the
+        anchor's OWN footprint, directionally, toward the side the route approaches
+        from (issue #66) — landing at ``half_extent_along_the_picked_axis +
+        _RUBRIC_GOAL_CLEARANCE_M`` from the centroid (gt_battery.py:1206-1220: the
+        picked axis is whichever of x/y the approach point is more offset on, and the
+        push goes to that axis's AABB edge plus ``_RUBRIC_GOAL_CLEARANCE_M`` —
+        gt_battery.py:1030, 0.4 m). The old centroid-referenced clamp treated that
+        offset as zero, which is only true for a footprint-less anchor — for a real
+        bed/sofa/table it is routinely ~1 m (issue #143's measured 220-case median:
+        1.012 m), so the clamp rejected pushes the rubric would still have credited
+        (measured: 40.9% of full-clearance large-anchor pushes rejected, 72.2% of
+        those would have scored).
+
+        The head cannot see the rubric's own axis choice or exact push target (it is
+        ROS-free/light and does not import gt_battery — module docstring) so this must
+        be a CONSERVATIVE proxy, safe regardless of which axis the rubric picks: the
+        SMALLER of the anchor's two footprint half-extents, never the half-diagonal.
+        The half-diagonal upper-bounds the true near-edge distance for EITHER axis, so
+        using it here would let the clamp overshoot how close the rubric's goal could
+        actually be for an elongated anchor (a 2.5 x 1.8 m bed's half-diagonal is
+        1.54 m, but the rubric's own push can land as close as 0.9 m, the SHORT
+        half-extent, if it happens to pick that axis) — eating into the
+        ``ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M`` safety budget this clamp exists
+        to protect and reopening the #126 "trade a wedge for a tolerance miss" failure
+        mode. Using the smaller half-extent instead guarantees the rubric's actual
+        offset is never LESS than this term, whichever axis it ends up choosing, so
+        the budget on top is never eaten into by an over-optimistic footprint
+        estimate.
+
+        A malformed/absent AABB (no footprint yet -- pre-grounding) falls back to 0.0,
+        the same as the old formula's implicit assumption, which is exactly as
+        (over-)conservative as before for that case."""
+        try:
+            ext = rec.aabb_max - rec.aabb_min
+            half_w, half_h = 0.5 * abs(float(ext[0])), 0.5 * abs(float(ext[1]))
+            near_edge_extent_m = min(half_w, half_h)
+        except Exception:  # noqa: BLE001 — a malformed rec falls back to the old bound
+            near_edge_extent_m = 0.0
+        return (
+            near_edge_extent_m
+            + RUBRIC_EDGE_PUSH_PROXY_M
+            + (ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M)
+        )
 
     def _standoff_push(
         self, anchor_xy: tuple[float, float], raw: tuple[float, float], near_thresh_m: float,
+        max_dist: float | None = None,
     ) -> tuple[float, float]:
         """Move ``raw`` out along the anchor->raw direction, nudged onto the nearest
-        PASSABLE cell, capped so the result never leaves ``ARRIVAL_TOL_M`` (less
-        ``STANDOFF_ARRIVAL_MARGIN_M``) of the anchor centroid.
+        PASSABLE cell, capped so the result never leaves ``max_dist`` of the anchor
+        centroid.
+
+        ``max_dist`` defaults to ``ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M`` (the
+        pre-#143 centroid-referenced bound) when not supplied -- production callers
+        pass ``_standoff_max_dist_m(rec)`` instead (issue #143: re-references the
+        clamp to the anchor's approached near edge, which is what the rubric's
+        arrival tolerance is actually measured from, not the centroid -- see that
+        method's docstring for the full derivation and citations). The default exists
+        so this method's own clamp-mechanics tests (the ULP-rounding re-validation,
+        issue #148) can exercise it directly without needing a real anchor footprint.
 
         ``near_thresh_m`` (the VIA_NEAR-style footprint+clearance target) can EXCEED
-        the arrival tolerance for a large anchor -- a bed, a sofa, a dining table --
-        where clearing the planner's obstacle floor and staying inside the rubric's
-        scored band genuinely conflict. Trading a short-of-goal wedge for an
+        ``max_dist`` for a large anchor -- a bed, a sofa, a dining table -- where
+        clearing the planner's obstacle floor and staying inside the rubric's scored
+        band genuinely conflict. Trading a short-of-goal wedge for an
         outside-tolerance miss is not a fix (issue #126 verification), so the push
         distance is clamped to ``max_dist`` FIRST, before anything else: the goal
         may end up under-clearing the planner's floor for a large enough anchor, but
@@ -758,7 +838,8 @@ class InstructionHead:
         dist = math.hypot(dx, dy)
         if dist < 1e-6:
             return raw
-        max_dist = ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M
+        if max_dist is None:
+            max_dist = ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M
         if dist >= max_dist:
             return raw  # raw already at/beyond the clamp -- no room to push further
         ux, uy = dx / dist, dy / dist

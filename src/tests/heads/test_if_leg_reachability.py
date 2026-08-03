@@ -212,14 +212,64 @@ def test_goto_standoff_only_applies_to_the_terminal_leg():
     assert head._clearance_m(leg1.geom) > head._clearance_m(raw1) + 0.05
 
 
-def test_goto_standoff_stays_within_arrival_tolerance_for_a_large_anchor():
-    """issue #126 verification fix: a LARGE terminal anchor (a 2.5 m x 1.8 m bed,
-    half-diagonal ~1.54 m) pushed a full VIA_NEAR-style near_thresh out (half_diag +
-    VIA_NEAR_CLEARANCE_M ~= 1.99 m) lands OUTSIDE ARRIVAL_TOL_M (1.7463 m) -- trading
-    a short-of-goal wedge for an unrecoverable tolerance miss, which is not a fix.
-    The standoff must clamp the push so the final goal stays within ARRIVAL_TOL_M of
-    the anchor centroid, with margin (not landing exactly on the boundary)."""
-    from core.heads.instruction import ARRIVAL_TOL_M, STANDOFF_ARRIVAL_MARGIN_M
+def test_goto_standoff_reaches_full_clearance_for_a_large_anchor():
+    """issue #143: a LARGE terminal anchor (a 2.5 m x 1.8 m bed) must now reach the
+    full ``VIA_NEAR_CLEARANCE_M`` (0.45 m) clearance target. Pre-#143, the standoff
+    clamp was referenced against the anchor CENTROID
+    (``ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M`` ~= 1.596 m) -- but the bed's
+    ``near_thresh`` (half_diag + inflation + VIA_NEAR_CLEARANCE_M ~= 2.39 m) exceeds
+    that, so the old clamp rejected the push outright and left the raw (near-zero
+    clearance) goal untouched (issue #126's own worked example for this exact
+    anchor). The rubric, however, measures arrival from the anchor's approached NEAR
+    EDGE, not the centroid (``gt_battery._nearest_free_goal``, issue #66) -- so the
+    clamp's true budget is much larger than the old centroid-referenced one, and this
+    push should now go through to the full near_thresh target.
+
+    The companion assertion -- that the resulting goal still stays within
+    ARRIVAL_TOL_M of a PLAUSIBLE rubric goal (computed the same way
+    ``gt_battery._nearest_free_goal`` does: half-extent along whichever axis the
+    rubric picks, plus its own edge-clearance constant) for either axis the rubric
+    might choose -- is ``test_goto_standoff_large_anchor_stays_within_a_plausible_
+    rubric_tolerance`` below; #126's "never trade a wedge for an unrecoverable
+    tolerance miss" guarantee is what that test pins."""
+    from core.heads.instruction import VIA_NEAR_CLEARANCE_M
+
+    sc = SyntheticScene(0)
+    sc.rooms = [Room(0.0, 0.0, 14.0, 14.0)]
+    sc.place_box("bed", 7.0, 7.0, 2.5, 1.8, 0.6)
+    idx = BasicSceneIndex(sc.instances())
+    head = InstructionHead(plan=instruction_plan([_goto("bed")]))
+    io = _IO(sc, start=(1.0, 1.0))
+    for _ in range(8):
+        head.advance(io, idx)
+        io.advance_time(1.0)
+        if head._follower is not None and head._follower.path:
+            break
+
+    leg = head._legs[0]
+    assert leg.geom is not None
+    goal = leg.geom
+    raw = head._goto_point_raw(leg.record)
+
+    assert head._clearance_m(goal) >= VIA_NEAR_CLEARANCE_M - 1e-6, (
+        f"bed standoff clearance {head._clearance_m(goal):.3f} m short of the "
+        f"{VIA_NEAR_CLEARANCE_M} m target -- issue #143 was supposed to make this "
+        f"reachable for a large anchor"
+    )
+    assert goal != raw, "large-anchor standoff did nothing -- clamp still rejects it"
+
+
+def test_goto_standoff_large_anchor_stays_within_a_plausible_rubric_tolerance():
+    """issue #143's #126-guarantee regression: the re-referenced clamp must still
+    make an outside-tolerance miss impossible under the head's own geometry. Computes
+    a worst-case ``|head_goal - plausible_rubric_goal|`` for the bed anchor the same
+    way ``gt_battery._nearest_free_goal`` would place its own goal (half-extent along
+    whichever axis it ends up picking, plus its own edge-clearance constant --
+    gt_battery.py:1206-1220, 1030) and asserts it never leaves ``ARRIVAL_TOL_M``,
+    regardless of which axis the rubric happens to choose (the head cannot see that
+    choice at runtime -- see ``InstructionHead._standoff_max_dist_m``)."""
+    from core.heads.instruction import ARRIVAL_TOL_M
+    from core.runner.gt_battery import _RUBRIC_GOAL_CLEARANCE_M
 
     sc = SyntheticScene(0)
     sc.rooms = [Room(0.0, 0.0, 14.0, 14.0)]
@@ -237,10 +287,66 @@ def test_goto_standoff_stays_within_arrival_tolerance_for_a_large_anchor():
     assert leg.geom is not None
     goal = leg.geom
     d = math.hypot(goal[0] - 7.0, goal[1] - 7.0)
-    assert d <= ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M + 1e-6, (
-        f"standoff goal at {d:.3f} m from centroid is outside the (margined) "
-        f"arrival tolerance"
+
+    half_w, half_h = 2.5 / 2.0, 1.8 / 2.0
+    plausible_rubric_offsets = [
+        half_w + _RUBRIC_GOAL_CLEARANCE_M,
+        half_h + _RUBRIC_GOAL_CLEARANCE_M,
+    ]
+    worst_gap = max(abs(d - off) for off in plausible_rubric_offsets)
+    assert worst_gap <= ARRIVAL_TOL_M - 1e-6, (
+        f"head goal {d:.3f} m from centroid is {worst_gap:.3f} m from a plausible "
+        f"rubric goal ({plausible_rubric_offsets}), outside ARRIVAL_TOL_M "
+        f"({ARRIVAL_TOL_M} m) -- issue #126's guarantee regressed"
     )
+
+
+def test_standoff_max_dist_small_anchor_unchanged_from_centroid_clamp():
+    """issue #143 must not change behaviour for small/compact anchors: the whole
+    point of the re-referenced clamp is that it EXCEEDS the old centroid-referenced
+    bound (``ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M``) once the anchor's own
+    near-edge offset is added on top -- so for anything with a real footprint the new
+    clamp is strictly less restrictive, never more. The four #132 anchor footprints
+    (all well under the old clamp's own near_thresh, so the old clamp never bound
+    them either) still land on the SAME goal as ``_goto_point_raw`` would under the
+    old formula: unclamped push to ``near_thresh``."""
+    from core.heads.instruction import ARRIVAL_TOL_M, STANDOFF_ARRIVAL_MARGIN_M
+
+    old_max_dist = ARRIVAL_TOL_M - STANDOFF_ARRIVAL_MARGIN_M
+    for label, sx, sy in [
+        ("arabic_jar", 0.18, 0.13),
+        ("trash_can", 0.46, 0.46),
+        ("potted_plant", 0.22, 0.22),
+        ("mirror", 0.26, 0.23),
+    ]:
+        sc = SyntheticScene(0)
+        sc.rooms = [Room(0.0, 0.0, 10.0, 10.0)]
+        sc.place_box(label, 5.0, 5.0, sx, sy, 0.6)
+        idx = BasicSceneIndex(sc.instances())
+        head = InstructionHead(plan=instruction_plan([_goto(label)]))
+        io = _IO(sc, start=(1.0, 1.0))
+        for _ in range(6):
+            head.advance(io, idx)
+            io.advance_time(1.0)
+            if head._follower is not None and head._follower.path:
+                break
+
+        leg = head._legs[0]
+        assert leg.geom is not None, f"{label}: leg never grounded a goal"
+        rec = leg.record
+        new_max_dist = head._standoff_max_dist_m(rec)
+        near_thresh = head._near_thresh(rec)
+        assert new_max_dist >= old_max_dist, (
+            f"{label}: new clamp {new_max_dist:.3f} m is TIGHTER than the old "
+            f"centroid-referenced clamp {old_max_dist:.3f} m -- issue #143 must "
+            f"never make the clamp more restrictive"
+        )
+        # Neither clamp binds for these small footprints (near_thresh is comfortably
+        # under both), so the actually-driven goal is identical either way.
+        assert near_thresh < old_max_dist, (
+            f"{label}: test assumption broken -- near_thresh {near_thresh:.3f} m "
+            f"is not under the old clamp {old_max_dist:.3f} m any more"
+        )
 
 
 # --------------------------------------------------------------------------- #148
