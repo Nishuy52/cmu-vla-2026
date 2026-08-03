@@ -57,10 +57,11 @@ from core.perception.scene_index import BasicSceneIndex
 from core.runner.gt_battery import (
     DEFAULT_QUESTIONS,
     DEFAULT_QUESTIONS_ROOT,
+    DEFAULT_UNITY_SCENES_ROS2_ROOT,
     _IF_TRAJ_INDEX,
+    _fit_scene_if_frame,
     _find_scene_folder,
     _if_rubric_geometry,
-    _terminal_goal_centroid,
     collect_scene_fit_residuals,
 )
 
@@ -80,6 +81,7 @@ def measure(
     questions_dir: Path,
     *,
     tol: float | None = None,
+    unity_scenes_ros2_root: Path | None = None,
 ) -> dict:
     """Measure the GT-reference leg-arrival ceiling.
 
@@ -98,7 +100,8 @@ def measure(
     p95_residual: float | None = None
     if tol is None:
         residuals = collect_scene_fit_residuals(
-            groundtruth, questions_path=questions, questions_dir=questions_dir
+            groundtruth, questions_path=questions, questions_dir=questions_dir,
+            unity_scenes_ros2_root=unity_scenes_ros2_root,
         )
         finite = [r for r in residuals.values() if r is not None]
         if finite:
@@ -124,20 +127,15 @@ def measure(
         scenes_seen.append(scene)
         if_texts = entry["questions"].get("instruction_following", [])
 
-        # Per-scene rigid fit (trajectory frame -> object frame), exactly as the battery.
-        if_traj: list[np.ndarray | None] = []
-        if_goal: list[np.ndarray | None] = []
-        for i, text in enumerate(if_texts):
-            tq = _IF_TRAJ_INDEX.get(i)
-            arr: np.ndarray | None = None
-            if tq is not None:
-                cand = Path(questions_dir) / scene / f"trajectory_q{tq}.ply"
-                if cand.exists():
-                    arr = S.load_trajectory_ply(cand)
-            if_traj.append(arr)
-            if_goal.append(_terminal_goal_centroid(text, idx) if arr is not None else None)
-        pairs = [(t, g) for t, g in zip(if_traj, if_goal) if t is not None and t.shape[0] > 0]
-        frame, residual = S.align_scene_trajectories(pairs) if pairs else (None, None)
+        # Per-scene sim->object frame, resolved the same way the battery does (issue
+        # #146): IDENTITY-first via object_list.txt id match, endpoint-correspondence
+        # fit only as a gated fallback (see GB._fit_scene_if_frame's docstring).
+        # Calling S.align_scene_trajectories directly here would bypass that fix and
+        # can produce a nonsense-but-self-consistent frame (issue #124).
+        if_traj, _if_cands, frame, residual, _pairs = _fit_scene_if_frame(
+            gt, idx, if_texts, questions_dir,
+            unity_scenes_ros2_root=unity_scenes_ros2_root,
+        )
 
         for i, text in enumerate(if_texts):
             arr = if_traj[i]
@@ -246,11 +244,17 @@ def main(argv: list[str] | None = None) -> int:
         help="override: fixed STOP-leg tolerance (m). Default derives it live from "
              "this run's own p95 fit residual (issue #70).",
     )
+    ap.add_argument(
+        "--unity-scenes-ros2-root", default=str(DEFAULT_UNITY_SCENES_ROS2_ROOT),
+        help="root holding <scene>/object_list.txt, used to resolve the sim->object "
+             "frame identity-first (issue #124/#146; see GB._fit_scene_if_frame).",
+    )
     args = ap.parse_args(argv)
 
     result = measure(
         Path(args.groundtruth), Path(args.questions), Path(args.questions_dir),
         tol=args.tol,
+        unity_scenes_ros2_root=args.unity_scenes_ros2_root,
     )
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

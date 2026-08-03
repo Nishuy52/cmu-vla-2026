@@ -295,6 +295,7 @@ def score_scene(
     scene_graph: dict | None,
     questions_dir: os.PathLike | str | None,
     thresholds,
+    unity_scenes_ros2_root: os.PathLike | str | None = None,
 ) -> SceneQScores:
     """Threshold-aware challenge scoring of one scene (mirrors gt_battery.score_scene).
 
@@ -350,6 +351,7 @@ def score_scene(
         out.add(
             _score_if(
                 if_texts, gt, idx, questions_dir=questions_dir, thresholds=thresholds,
+                unity_scenes_ros2_root=unity_scenes_ros2_root,
             )
         )
     return out
@@ -362,6 +364,7 @@ def _score_if(
     *,
     questions_dir: os.PathLike | str | None,
     thresholds,
+    unity_scenes_ros2_root: os.PathLike | str | None = None,
 ) -> SceneQScores:
     """IF scoring for a scene: fit the scene frame, drive each trajectory, rubric-score it.
 
@@ -379,26 +382,18 @@ def _score_if(
     computed from the fixed-threshold goal, so it too cannot be gamed by ``thresholds``.
     """
     out = SceneQScores()
-    if_traj: list[np.ndarray | None] = []
-    if_goal: list[np.ndarray | None] = []
-    for i, text in enumerate(if_texts):
-        traj_q = GB._IF_TRAJ_INDEX.get(i)
-        traj_arr: np.ndarray | None = None
-        if questions_dir is not None and traj_q is not None:
-            cand = Path(questions_dir) / gt.scene_name / f"trajectory_q{traj_q}.ply"
-            if cand.exists():
-                traj_arr = S.load_trajectory_ply(cand)
-        if_traj.append(traj_arr)
-        # INSTRUMENT (frozen): the scene-alignment goal is reference geometry, not the
-        # system under test — resolve it with gt_battery's fixed-default helper so the
-        # alignment gate below can't be gamed by the swept `thresholds` (see module
-        # docstring "Threshold injection").
-        if_goal.append(
-            GB._terminal_goal_centroid(text, idx) if traj_arr is not None else None
-        )
-
-    pairs = [(t, g) for t, g in zip(if_traj, if_goal) if t is not None and t.shape[0] > 0]
-    frame, residual = S.align_scene_trajectories(pairs) if pairs else (None, None)
+    # INSTRUMENT (frozen): the scene-alignment frame is reference geometry, not the
+    # system under test — resolve it through gt_battery's shared helper (issue #146)
+    # so this path can't diverge from the runner's issue #124 fix: IDENTITY-first via
+    # object_list.txt id match, endpoint-correspondence fit only as a gated fallback.
+    # Calling S.align_scene_trajectories directly here bypassed that fix entirely (a
+    # wrong-but-self-consistent fit still clears the residual gate — see
+    # GB._fit_scene_if_frame's docstring) and cannot be gamed by the swept
+    # ``thresholds`` either way (see module docstring "Threshold injection").
+    if_traj, _if_cands, frame, residual, pairs = GB._fit_scene_if_frame(
+        gt, idx, if_texts, questions_dir,
+        unity_scenes_ros2_root=unity_scenes_ros2_root,
+    )
 
     spawn_xy: tuple[float, float] | None = None
     if frame is not None and pairs:
@@ -622,11 +617,13 @@ class SceneEvaluator:
         questions_dir: os.PathLike | str | None,
         base_cal: Calibration | None = None,
         cache_dir: os.PathLike | str | None = None,
+        unity_scenes_ros2_root: os.PathLike | str | None = None,
     ) -> None:
         self.root = Path(unity_root)
         self.questions_by_scene = questions_by_scene
         self.questions_dir = questions_dir
         self.base_cal = base_cal or default_calibration()
+        self.unity_scenes_ros2_root = unity_scenes_ros2_root
         self.cache_dir = Path(cache_dir) if cache_dir is not None else None
         if self.cache_dir is not None:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -700,6 +697,7 @@ class SceneEvaluator:
             scene_graph=scene_graph,
             questions_dir=self.questions_dir,
             thresholds=cal.geometry,
+            unity_scenes_ros2_root=self.unity_scenes_ros2_root,
         )
         self._eval_cache[key] = res
         self._disk_store(cfg_hash, scene, res)
@@ -1051,6 +1049,11 @@ def main(argv: list[str] | None = None) -> int:
         "--no-cache", action="store_true",
         help="disable the on-disk (config,scene) cache under <out>/cache/ (no resume)",
     )
+    ap.add_argument(
+        "--unity-scenes-ros2-root", default=str(GB.DEFAULT_UNITY_SCENES_ROS2_ROOT),
+        help="root holding <scene>/object_list.txt, used to resolve the sim->object "
+             "frame identity-first (issue #124/#146; see GB._fit_scene_if_frame).",
+    )
     args = ap.parse_args(argv)
 
     scenes_subset = (
@@ -1072,7 +1075,7 @@ def main(argv: list[str] | None = None) -> int:
 
     evaluator = SceneEvaluator(
         args.groundtruth, questions_by_scene, questions_dir=args.questions_dir,
-        cache_dir=cache_dir,
+        cache_dir=cache_dir, unity_scenes_ros2_root=args.unity_scenes_ros2_root,
     )
     spec = default_sweep_spec()
     result = run_cv_sweep(evaluator, spec, folds, n_samples=args.n_samples, seed=args.seed)
