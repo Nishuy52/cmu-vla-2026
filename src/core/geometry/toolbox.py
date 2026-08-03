@@ -74,6 +74,17 @@ class Thresholds:
     light_luma_min: float = 220.0  # symmetric brightness cutoff for "white" on a
     #   neutral bin. Conservative (no white-query battery evidence); a provision for
     #   the sweep, kept high so mid-grays never read white.
+    # Issue #160: ceiling on a contiguous-fragment cluster's merged sorted-axis
+    # extent, as a multiple of the class's typical (data-derived) extent -- SAME
+    # constant and SAME semantics as core.perception.tracker.TrackerConfig
+    # .extent_veto_factor (not a new tunable, just reused across the module
+    # boundary: that veto polices same-batch tracker MERGES, this one polices
+    # anchor-RESOLUTION-time fragment clustering). A merged footprint under this
+    # bound is a plausible reconstruction of one real object (e.g. a pillar's
+    # height-sliced fragments); one that exceeds it is a bridged blob spanning
+    # more than one real object (e.g. two sofas plus the gap between them) and
+    # must not be merged.
+    cluster_extent_veto_factor: float = 1.3
 
 
 DEFAULT_THRESHOLDS = Thresholds()
@@ -776,6 +787,142 @@ def _audit_add(audit: list[Relaxation] | None, step: str, detail: str) -> None:
         audit.append(entry)
 
 
+def _merge_fragment_footprint(members: Sequence[InstanceRecord]) -> InstanceRecord:
+    """Build a synthetic candidate spanning ``members``' union AABB (RESOLUTION ONLY).
+
+    Never inserted into any index -- the caller uses it as one anchor candidate
+    among others and discards it once resolution picks a winner. ``instance_id``
+    is the smallest member id (already a real, globally-unique tracker id that no
+    other live candidate in this anchor's pool can collide with, since every
+    member it was drawn from is removed from the pool in its place); ``score`` and
+    ``n_obs`` accumulate (max confidence observed, total distinct sightings across
+    the fragments); ``label``/``caption``/``aliases``/``color_bins`` are copied from
+    the largest-footprint member as the most representative single fragment.
+    """
+    lo = np.minimum.reduce([m.aabb_min for m in members])
+    hi = np.maximum.reduce([m.aabb_max for m in members])
+    rep = max(members, key=lambda m: P.footprint_area(m.aabb_min, m.aabb_max))
+    return InstanceRecord(
+        instance_id=min(m.instance_id for m in members),
+        label=rep.label,
+        score=max(m.score for m in members),
+        n_obs=sum(m.n_obs for m in members),
+        centroid=(lo + hi) / 2.0,
+        aabb_min=lo,
+        aabb_max=hi,
+        caption=rep.caption,
+        aliases=rep.aliases,
+        color_bins=rep.color_bins,
+    )
+
+
+def _cluster_plausible(merged: InstanceRecord, th: Thresholds) -> bool:
+    """True if ``merged``'s sorted-axis extent is within a plausible size for its
+    class (fail-open: no dimension prior for the class -> can't judge -> allow).
+
+    Mirrors ``core.perception.tracker._match_plausible``'s per-axis sorted-extent
+    comparison exactly (same veto value, see :attr:`Thresholds
+    .cluster_extent_veto_factor`), applied here to a candidate CLUSTER footprint
+    instead of a tracker MERGE.
+    """
+    from core.perception.dimension_priors import prior_for
+
+    prior = prior_for(merged.label)
+    if prior is None:
+        return True
+    ext = np.sort(merged.extents)
+    typ = np.sort(prior.typ_ext)
+    return bool(np.all(ext <= th.cluster_extent_veto_factor * typ))
+
+
+def _cluster_same_label(
+    indexed_members: Sequence[tuple[int, InstanceRecord]], th: Thresholds
+) -> list[tuple[int, InstanceRecord]]:
+    """Union-find one label group's fragments by XY footprint contiguity (#160),
+    returning ``(sort_key, record)`` pairs: one merged candidate per plausible
+    component, the untouched original for singletons or implausible (bridged-
+    blob) components. ``sort_key`` is the lowest original ``cands`` index feeding
+    that output record, so :func:`_cluster_anchor_candidates` can restore a
+    stable, first-occurrence order across label groups.
+    """
+    n = len(indexed_members)
+    if n < 2:
+        return list(indexed_members)
+
+    members = [r for _, r in indexed_members]
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if P.footprints_overlap(
+                members[i].aabb_min, members[i].aabb_max,
+                members[j].aabb_min, members[j].aabb_max,
+            ):
+                union(i, j)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+
+    out: list[tuple[int, InstanceRecord]] = []
+    for idxs in groups.values():
+        orig_idxs = [indexed_members[k][0] for k in idxs]
+        first = min(orig_idxs)
+        if len(idxs) == 1:
+            out.append((first, members[idxs[0]]))
+            continue
+        merged = _merge_fragment_footprint([members[k] for k in idxs])
+        if _cluster_plausible(merged, th):
+            out.append((first, merged))
+        else:
+            # #160: adjacency chained past a plausible single-object footprint --
+            # a bridged blob, not a reconstruction. Leave the fragments unmerged
+            # rather than hand resolution an impossible anchor.
+            out.extend((indexed_members[k][0], members[k]) for k in idxs)
+    return out
+
+
+def _cluster_anchor_candidates(
+    cands: Sequence[InstanceRecord], th: Thresholds
+) -> list[InstanceRecord]:
+    """#160: cluster contiguous same-canonical-class fragments into one candidate
+    footprint, for anchor RESOLUTION ONLY -- never mutates the scene index.
+
+    A live-quality index tracks a real fragmented object (a pillar sliced by
+    height, a sofa split across the frustum) as several small same-label
+    instances whose union is the real object's footprint but no single instance
+    covers it. Containment/support predicates (``on``/``above``) and multi-anchor
+    predicates (``between``) evaluated against any ONE fragment therefore see the
+    wrong-sized anchor. Grouping happens strictly within each distinct ``label``
+    (never across classes) and only merges components whose union footprint
+    clears :func:`_cluster_plausible`, so an adjacency chain that has bridged past
+    two real, distinct objects (or the gap between them) is left unclustered
+    rather than handed to resolution as one implausible blob.
+    """
+    if len(cands) < 2:
+        return list(cands)
+    by_label: dict[str, list[tuple[int, InstanceRecord]]] = {}
+    for i, c in enumerate(cands):
+        by_label.setdefault(c.label, []).append((i, c))
+
+    out: list[tuple[int, InstanceRecord]] = []
+    for group in by_label.values():
+        out.extend(_cluster_same_label(group, th))
+    out.sort(key=lambda t: t[0])
+    return [r for _, r in out]
+
+
 def _resolve_anchor(
     anchor: Anchor,
     index: SceneIndex,
@@ -785,10 +932,12 @@ def _resolve_anchor(
 ) -> list[InstanceRecord]:
     """Resolve an anchor to matching records (noun + attributes + nested disambiguator).
 
-    Base pool = noun (typo-tolerant) filtered by the anchor's own attributes. When
-    the anchor carries a nested disambiguator clause it is bound here (this is the
-    dominant multi-constraint object-reference form, e.g. "the bowl on the table
-    CLOSEST TO the screen"):
+    Base pool = noun (typo-tolerant) filtered by the anchor's own attributes, then
+    clustered (#160): contiguous same-label fragments merge into one candidate
+    footprint for resolution only (see :func:`_cluster_anchor_candidates`; the
+    scene index itself is never touched). When the anchor carries a nested
+    disambiguator clause it is bound here (this is the dominant multi-constraint
+    object-reference form, e.g. "the bowl on the table CLOSEST TO the screen"):
 
     * non-superlative disambiguator -> keep only anchor candidates for which the
       clause holds (anchor as subject);
@@ -804,6 +953,7 @@ def _resolve_anchor(
     if anchor.attributes:
         _class_pool = cands  # same-class pool for relative size ranking (DD-A12)
         cands = [c for c in cands if _attrs_match(c, anchor.attributes, _class_pool, th)]
+    cands = _cluster_anchor_candidates(cands, th)
 
     disamb = anchor.disambiguator
     if disamb is None or not cands or _depth >= _MAX_ANCHOR_DEPTH:

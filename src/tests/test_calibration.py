@@ -215,7 +215,7 @@ def test_field_counts_per_subsystem():
         "budget": len(fields(cal.budget)),
     }
     assert counts == {
-        "geometry": 18,  # +3 colour-salience knobs (issues #11/#12)
+        "geometry": 19,  # +3 colour-salience knobs (issues #11/#12), +1 cluster extent-veto (#160)
         "fusion": 6,  # +1 lateral-clustering radius knob (issue: cone-inflation fix)
         "tracker": 6,  # +3 size-aware association knobs (issues #94/#89), +1 extent-veto min-sep floor (#153)
         "keyframe": 3,
