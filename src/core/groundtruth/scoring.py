@@ -732,24 +732,62 @@ def _gt_target_from_referential(
     return None, "none", "none", frozenset()
 
 
+def _strongest_tier_matches(index: SceneIndex, noun: str) -> list[InstanceRecord]:
+    """``noun`` matches restricted to the index's own strongest non-empty MatchTier.
+
+    ``SceneIndex.by_label`` deliberately pools every tier (exact, synonym, head-noun,
+    typo) so the RESOLVER's candidate gathering stays permissive — a bare "cabinet"
+    legitimately admits a "tv cabinet" cousin into the pool, because that pool then
+    goes through a further predicate check (see
+    ``core.geometry.toolbox._match_anchor_noun``'s bare-noun exemption). This GT-
+    identity fallback (issue #170) has no such second filter: it must pin down ONE
+    specific referenced object, not gather generous candidates. So it always prefers
+    the strongest non-empty tier — bare noun or not — the same "an exact match is
+    never polluted by fuzzy cousins" rule :meth:`by_label_tiered` documents for
+    itself. Falls back to the flat :meth:`by_label` for a minimal test double that
+    doesn't expose tier provenance.
+    """
+    tiered = getattr(index, "by_label_tiered", None)
+    if tiered is None:
+        return list(index.by_label(noun))
+    hits = list(tiered(noun))
+    if not hits:
+        return []
+    best_tier = min(t for _, t in hits)
+    return [r for r, t in hits if t == best_tier]
+
+
 def _resolve_geometric_anchor(
     anchor, index: SceneIndex, thresholds: Thresholds, *, depth: int = 0
 ) -> InstanceRecord | None:
     """Resolve one :class:`~core.plan_schema.Anchor` to a unique GT instance.
 
-    A plain anchor (no disambiguator) resolves iff its noun matches exactly one
-    scene instance. A disambiguated anchor ("the cabinet UNDER the picture")
-    resolves iff its OWN sub-anchor first resolves uniquely (recursively, capped
-    at ``_MAX_GEOMETRY_ANCHOR_DEPTH`` levels — matches the parser's own nesting
-    cap so this never out-reaches what a real question can express) and exactly
-    one of the anchor-noun's instances geometrically satisfies the disambiguator's
-    predicate against that resolved sub-anchor. A superlative disambiguator
-    ("the sofa closest to the door") is declined, same reasoning as a top-level
-    superlative clause (see :func:`_gt_target_from_geometry`) — out of scope here.
+    A plain anchor (no disambiguator) resolves iff its noun's strongest-tier match
+    set (see :func:`_strongest_tier_matches`) is exactly one instance. A
+    disambiguated anchor ("the cabinet UNDER the picture") resolves iff its OWN
+    sub-anchor first resolves uniquely (recursively, capped at
+    ``_MAX_GEOMETRY_ANCHOR_DEPTH`` levels — matches the parser's own nesting cap so
+    this never out-reaches what a real question can express) and exactly one of the
+    anchor-noun's strongest-tier instances geometrically satisfies the
+    disambiguator's predicate against that resolved sub-anchor.
+
+    An EARLIER draft of this function resolved the sub-anchor existentially instead
+    (a candidate wins if the predicate holds against ANY sub-anchor instance,
+    mirroring how the resolver's own ``core.geometry.toolbox._apply_disambiguator``
+    reads such a clause) — deliberately reverted (issue #170): a training-corpus
+    battery run proved it moves the battery's or_instance_match off its frozen
+    12/12 baseline (to 13/13), which issue #170 requires stay byte-identical. The
+    strict "sub-anchor must itself already be unique" form here never does, so it
+    stays the shipped behaviour; existential resolution is left for separately-
+    approved follow-up work.
+
+    A superlative disambiguator ("the sofa closest to the door") is declined, same
+    reasoning as a top-level superlative clause (see
+    :func:`_gt_target_from_geometry`) — out of scope here.
     """
     if depth > _MAX_GEOMETRY_ANCHOR_DEPTH:
         return None
-    matches = list(index.by_label(anchor.noun))
+    matches = _strongest_tier_matches(index, anchor.noun)
     if anchor.disambiguator is None:
         return matches[0] if len(matches) == 1 else None
     disamb = anchor.disambiguator
@@ -849,12 +887,40 @@ def _gt_target_from_geometry(
     if plan.target is None:
         return None, "none", "none"
     clauses = plan.target.clauses
-    if len(clauses) != 1 or _is_superlative_clause(clauses[0]):
+    if len(clauses) != 1:
         return None, "none", "none"
     clause = clauses[0]
     if clause.negated or len(clause.anchors) != 1:
         return None, "none", "none"
     anchor = clause.anchors[0]
+
+    if _is_superlative_clause(clause):
+        # Zero-candidate mode has no restricted pool to rank -- ranking the WHOLE
+        # target class would just re-derive our own resolver's answer as "ground
+        # truth", not an independent check, so it stays declined there. In
+        # ambiguity-adjudication mode the pool is already the text ladder's OWN
+        # small tied candidate set (never the whole scene), so ranking just those
+        # by the named superlative is a genuinely independent GT-geometry check —
+        # see :func:`_gt_target_from_geometry`'s module docstring note on this.
+        if candidate_ids is None:
+            return None, "none", "none"
+        anchor_inst = _resolve_geometric_anchor(anchor, index, thresholds)
+        if anchor_inst is None:
+            return None, "none", "none"
+        candidates = [
+            r for r in index.by_label(plan.target.noun) if r.instance_id in candidate_ids
+        ]
+        if len(candidates) < 2:
+            return None, "none", "none"
+        ranked = (
+            T.farthest_from(candidates, anchor_inst, thresholds)
+            if clause.pred == T.Pred.FARTHEST_FROM
+            else T.closest_to(candidates, anchor_inst, thresholds)
+        )
+        if ranked.order and ranked.margin > P.EPS:
+            return ranked.order[0], "geometry_ambiguous", "geometric"
+        return None, "none", "none"
+
     fn = T._BINARY_PREDS.get(clause.pred)
     if fn is None or fn is T.in_ or fn is T.with_feature:
         # `in`/`with` describe containment/possession, not a support/adjacency

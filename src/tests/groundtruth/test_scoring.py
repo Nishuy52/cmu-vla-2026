@@ -875,3 +875,169 @@ def test_or_geometry_fallback_real_office1_plant_on_cabinet():
     assert r.target_source == "geometry"
     assert r.gt_target_id == 55
     assert not np.isnan(r.iou)
+
+
+# --------------------------------------------------------------------------- nested-
+# anchor geometry adjudication (issue #170): the ambiguity-adjudication geometry
+# fallback also resolves a clause whose own anchor carries a nested (non-superlative)
+# disambiguator, e.g. "the vase ON the cabinet BELOW the picture" — the outer anchor
+# ("cabinet") is pinned by first resolving its own disambiguator's anchor uniquely.
+
+
+def test_or_geometry_fallback_ambiguous_nested_anchor_resolves():
+    """Two ambiguous vase candidates; only one sits on the SPECIFIC cabinet that is
+    itself uniquely pinned by its own nested disambiguator ("below the picture")."""
+    cabinet_a = _box(1, "cabinet", 0, 1, 0, 1, 0, 1)  # under the picture
+    cabinet_b = _box(2, "cabinet", 5, 6, 5, 6, 0, 1)  # not under the picture
+    picture = _box(3, "picture", 0.2, 0.8, 0.2, 0.8, 1.5, 2.0)
+    vase_a = _box(4, "vase", 0.3, 0.5, 0.3, 0.5, 1.0, 1.3)  # on cabinet_a
+    vase_b = _box(5, "vase", 5.3, 5.5, 5.3, 5.5, 1.0, 1.3)  # on cabinet_b
+    instances = [cabinet_a, cabinet_b, picture, vase_a, vase_b]
+    idx = BasicSceneIndex(instances)
+    ref = {
+        "regions": {
+            "0": {
+                "the tall vase that is on a cabinet": [
+                    {"target_index": "4", "target_class": "vase", "relation": "on",
+                     "anchors": {"anchor_1": {"class": "cabinet"}}},
+                ],
+                "the short vase that is on a cabinet": [
+                    {"target_index": "5", "target_class": "vase", "relation": "on",
+                     "anchors": {"anchor_1": {"class": "cabinet"}}},
+                ],
+            }
+        }
+    }
+    r = S.score_object_reference(
+        "Find the vase on the cabinet below the picture.",
+        idx, instances, referential=ref,
+    )
+    assert r.target_source == "geometry_ambiguous"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 4
+    assert not np.isnan(r.iou)
+
+
+def test_or_geometry_fallback_nested_anchor_sub_anchor_not_unique_stays_none():
+    """Guard: when the disambiguator's OWN anchor noun matches more than one
+    instance (no unique sub-anchor identity), the outer anchor cannot be pinned
+    either — stays honestly declined, never guesses."""
+    cabinet_a = _box(1, "cabinet", 0, 1, 0, 1, 0, 1)
+    cabinet_b = _box(2, "cabinet", 5, 6, 5, 6, 0, 1)
+    picture_1 = _box(3, "picture", 0.2, 0.8, 0.2, 0.8, 1.5, 2.0)
+    picture_2 = _box(4, "picture", 5.2, 5.8, 5.2, 5.8, 1.5, 2.0)
+    vase_a = _box(5, "vase", 0.3, 0.5, 0.3, 0.5, 1.0, 1.3)
+    vase_b = _box(6, "vase", 5.3, 5.5, 5.3, 5.5, 1.0, 1.3)
+    instances = [cabinet_a, cabinet_b, picture_1, picture_2, vase_a, vase_b]
+    idx = BasicSceneIndex(instances)
+    ref = {
+        "regions": {
+            "0": {
+                "the tall vase that is on a cabinet": [
+                    {"target_index": "5", "target_class": "vase", "relation": "on",
+                     "anchors": {"anchor_1": {"class": "cabinet"}}},
+                ],
+                "the short vase that is on a cabinet": [
+                    {"target_index": "6", "target_class": "vase", "relation": "on",
+                     "anchors": {"anchor_1": {"class": "cabinet"}}},
+                ],
+            }
+        }
+    }
+    r = S.score_object_reference(
+        "Find the vase on the cabinet below the picture.",
+        idx, instances, referential=ref,
+    )
+    assert r.target_source == "ambiguous"
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
+
+
+# --------------------------------------------------------------------------- superlative
+# ambiguity adjudication (issue #170): a superlative clause ("closest to"/"farthest
+# from") is declined in zero-candidate mode (ranking the whole target class would just
+# re-derive our own resolver's answer as "ground truth"), but IS allowed in ambiguity-
+# adjudication mode, because there the pool is already the text ladder's own small tied
+# candidate set, never the whole scene -- a genuinely independent GT-geometry check.
+
+
+def test_or_geometry_fallback_ambiguous_superlative_resolves():
+    """Two ambiguous fossil-decoration candidates tie in text; only one is actually
+    closest to the phone by GT geometry -- the superlative adjudicates the tie."""
+    phone = _box(1, "phone", 0, 0.2, 0, 0.2, 1.0, 1.1)
+    fossil_near = _box(2, "fossil decoration", 0.3, 0.4, 0.3, 0.4, 1.0, 1.1)
+    fossil_far = _box(3, "fossil decoration", 6, 6.2, 6, 6.2, 1.0, 1.1)
+    instances = [phone, fossil_near, fossil_far]
+    idx = BasicSceneIndex(instances)
+    ref = {
+        "regions": {
+            "0": {
+                "the gray fossil decoration that is near the phone": [
+                    {"target_index": "2", "target_class": "fossil decoration",
+                     "relation": "closest", "anchors": {"anchor_1": {"class": "phone"}}},
+                ],
+                "the black fossil decoration that is near the phone": [
+                    {"target_index": "3", "target_class": "fossil decoration",
+                     "relation": "closest", "anchors": {"anchor_1": {"class": "phone"}}},
+                ],
+            }
+        }
+    }
+    r = S.score_object_reference(
+        "Find the fossil decoration closest to the phone.", idx, instances,
+        referential=ref,
+    )
+    assert r.target_source == "geometry_ambiguous"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 2
+    assert not np.isnan(r.iou)
+
+
+def test_or_geometry_fallback_zero_candidate_superlative_still_declines():
+    """Guard: superlative clauses stay declined in ZERO-candidate mode -- ranking
+    every same-class instance in the scene is still out of scope, unaffected by
+    the new ambiguity-adjudication path."""
+    phone = _box(1, "phone", 0, 0.2, 0, 0.2, 1.0, 1.1)
+    fossil_near = _box(2, "fossil decoration", 0.3, 0.4, 0.3, 0.4, 1.0, 1.1)
+    fossil_far = _box(3, "fossil decoration", 6, 6.2, 6, 6.2, 1.0, 1.1)
+    instances = [phone, fossil_near, fossil_far]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the fossil decoration closest to the phone.", idx, instances,
+        referential=None,
+    )
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+
+
+def test_or_geometry_fallback_ambiguous_superlative_genuine_tie_stays_none():
+    """Guard: two ambiguous candidates EXACTLY equidistant from the anchor must
+    not guess a winner via id order -- stays declined."""
+    phone = _box(1, "phone", 0, 0.2, 0, 0.2, 1.0, 1.1)
+    fossil_a = _box(2, "fossil decoration", 1.0, 1.2, 0.0, 0.2, 1.0, 1.1)
+    fossil_b = _box(3, "fossil decoration", -1.0, -0.8, 0.0, 0.2, 1.0, 1.1)
+    instances = [phone, fossil_a, fossil_b]
+    idx = BasicSceneIndex(instances)
+    ref = {
+        "regions": {
+            "0": {
+                "the gray fossil decoration that is near the phone": [
+                    {"target_index": "2", "target_class": "fossil decoration",
+                     "relation": "closest", "anchors": {"anchor_1": {"class": "phone"}}},
+                ],
+                "the black fossil decoration that is near the phone": [
+                    {"target_index": "3", "target_class": "fossil decoration",
+                     "relation": "closest", "anchors": {"anchor_1": {"class": "phone"}}},
+                ],
+            }
+        }
+    }
+    r = S.score_object_reference(
+        "Find the fossil decoration closest to the phone.", idx, instances,
+        referential=ref,
+    )
+    assert r.target_source == "ambiguous"
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
