@@ -48,6 +48,16 @@ Team repo for the CMU Vision-Language-Navigation Challenge 2026. Deadline: **15 
    be opened against them and close them (`Fixes #N`). Known-defect
    lists in docs/reports still get written, but the issue tracker is
    the actionable queue.
+9. **Write all documentation in ASD-STE100 (added 3 Aug 2026).** This
+   rule applies to all text the project keeps: commit messages, LOG.md,
+   GitHub issue text, task records, and all files in `docs/`. Obey the
+   STE writing rules: use the active voice. Use simple tenses. Write
+   one instruction in each sentence. Keep sentences to 25 words or
+   fewer. Use one term for one object; do not change terms for style.
+   Do not use idioms or figurative language. Keep noun clusters to
+   three words or fewer. Code comments and code identifiers are not
+   documentation; the rule does not change them. Text that exists from
+   before this date stays as it is.
 
 ## Session protocol (every session)
 
