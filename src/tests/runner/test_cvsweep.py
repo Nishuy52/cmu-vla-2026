@@ -7,8 +7,10 @@ smoke and vocab-bridge integration tests.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from core.runner import cvsweep as CV
@@ -42,6 +44,75 @@ _FIFTEEN = [
     "livingroom_2", "livingroom_3", "livingroom_4", "loft", "office_1",
     "office_2", "studio",
 ]
+
+
+# ----------------------------------------------------------------------- issue #146
+# cvsweep._score_if used to fit the sim->object frame itself by calling
+# S.align_scene_trajectories directly, bypassing gt_battery's issue #124 fix
+# (identity-first resolution via object_list.txt id match, endpoint fit only as a
+# gated fallback). Regression: with a matching object_list.txt, the identity frame
+# must be used even though the (monkeypatched) raw fit would return the confirmed
+# nonsense shape from #124 (arabic_room: theta=-154.1deg, |t|=4.97m) -- and the raw
+# fit must not even be called.
+
+
+def test_score_if_uses_identity_frame_not_raw_fit(tmp_path, monkeypatch):
+    from tests.runner.test_gt_battery import _synthetic_gt_scene, _write_object_list
+    from core.perception.scene_index import BasicSceneIndex
+
+    gt = _synthetic_gt_scene(
+        [("chair", 1.0, 2.0, 0.5, 0.5, 0.5, 1.0)], scene_name="s146a",
+    )
+    _write_object_list(
+        tmp_path, "s146a", [(0, 1.01, 1.99, 0.48, "chair")],
+    )
+    idx = BasicSceneIndex(gt.instances)
+
+    traj = np.array([[0.0, 0.0, 0.75], [1.0, 0.0, 0.75]], dtype=float)
+
+    align_calls: list = []
+
+    def spy_align(pairs):
+        align_calls.append(pairs)
+        # Confirmed-defect shape (issue #124): clears the 1.0 m residual gate anyway.
+        return GB.S.Frame2D(theta=math.radians(-154.1), t=np.array([4.97, 0.0])), 0.05
+
+    monkeypatch.setattr(GB.S, "align_scene_trajectories", spy_align)
+    monkeypatch.setattr(
+        GB, "_terminal_goal_candidates", lambda text, idx, **k: [np.array([1.0, 2.0])]
+    )
+    monkeypatch.setattr(GB.S, "load_trajectory_ply", lambda *a, **k: traj)
+    monkeypatch.setattr(CV, "_drive_if_trajectory", lambda *a, **k: np.array([[0.0, 0.0]]))
+    monkeypatch.setattr(GB, "_if_rubric_geometry", lambda text, gt, idx: ([], [], [], [], []))
+
+    captured_frames: list = []
+
+    def spy_rubric(driven, leg_goals, **kw):
+        captured_frames.append(kw.get("frame"))
+        return type("_Rub", (), {"rubric_score": 0.0})()
+
+    monkeypatch.setattr(CV.S, "score_instruction_rubric", spy_rubric)
+
+    qdir = tmp_path / "questions" / gt.scene_name
+    qdir.mkdir(parents=True)
+    (qdir / "trajectory_q4.ply").write_bytes(b"")
+
+    CV._score_if(
+        ["go to the chair"], gt, idx,
+        questions_dir=qdir.parent,
+        thresholds=CV.default_calibration().geometry,
+        unity_scenes_ros2_root=tmp_path,
+    )
+
+    assert not align_calls, (
+        "raw endpoint fit was called -- bypasses issue #124's identity-first "
+        "resolution (issue #146 regression)"
+    )
+    assert captured_frames, "rubric never scored -- frame did not clear the alignment gate"
+    frame = captured_frames[0]
+    assert frame is not None
+    assert frame.theta == 0.0
+    np.testing.assert_allclose(frame.t, [0.0, 0.0])
 
 
 # --------------------------------------------------------------------------- folds
@@ -379,9 +450,12 @@ def test_if_scoring_uses_frozen_rubric_geometry_across_configs():
 
     src = inspect.getsource(CV._score_if)
     assert "GB._if_rubric_geometry(text, gt, idx)" in src
-    assert "GB._terminal_goal_centroid(text, idx)" in src
+    # The scene-alignment frame + terminal-goal anchor are resolved once per scene by
+    # the shared #124-corrected helper (issue #146) — pin that _score_if consumes the
+    # frozen frame rather than re-fitting with swept thresholds.
+    assert "GB._fit_scene_if_frame(" in src
     assert "_if_rubric_geometry(text, gt, idx, thresholds)" not in src
-    assert "_terminal_goal_centroid(text, idx, thresholds)" not in src
+    assert "_fit_scene_if_frame(text, gt, idx, thresholds" not in src
 
     # Sanity: score_scene runs end-to-end under both configs without raising, and the
     # IF availability (how many questions counted, i.e. the rubric denominator) is
