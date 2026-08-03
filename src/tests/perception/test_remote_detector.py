@@ -189,6 +189,40 @@ def test_dual_pass_cadence_parity(fake_server):
     assert tick0_thresholds == [pytest.approx(det.question_box_threshold), pytest.approx(det.box_threshold)]
 
 
+# ------------------------------------------------------------------ #91: split box thresholds
+
+
+def test_marginal_score_admitted_for_question_noun_cut_for_vocab_noun_remote(fake_server):
+    """Issue #91 synthetic case, remote path (#134's lesson: both paths must agree). The
+    fake server enforces the threshold it was sent — exactly like the real gdino_server.py
+    (which forwards ``box_threshold`` straight into
+    ``GroundingDinoDetector.run_caption_pass`` -> ``_decode_batch_item``'s
+    ``max_logits > box_threshold`` filter) — so this exercises the same admit/cut
+    semantics as the local-path test, not just that the two request bodies carry
+    different threshold values (already covered by test_dual_pass_cadence_parity)."""
+    RAW_SCORE = 0.18
+
+    def response(body):
+        if RAW_SCORE <= body["box_threshold"]:
+            return 200, {"per_tile": [[] for _ in body["tiles"]]}
+        label = "candle holder" if body["caption"] == "candle holder ." else "chair"
+        return 200, {
+            "per_tile": [[{"bbox_xyxy": [0.0, 0.0, 1.0, 1.0], "label": label, "score": RAW_SCORE}]]
+        }
+
+    fake_server.response = response
+    det = _detector(fake_server, vocab_pass_cadence=1, question_box_threshold=0.15)
+    assert det.box_threshold == 0.35  # vocab default, cuts the 0.18 score
+    det.question_prompt = "candle holder ."
+    det.prompt = "chair ."
+
+    out = det(_tiles(1))
+
+    labels = [d.label for d in out[0]]
+    assert "candle holder" in labels  # question-pass threshold (0.15) admits 0.18
+    assert "chair" not in labels  # vocab-pass threshold (0.35) cuts the identical 0.18 score
+
+
 # ------------------------------------------------------------------ refresh_prompt compat
 
 

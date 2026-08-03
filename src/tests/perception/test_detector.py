@@ -946,6 +946,19 @@ def test_question_box_threshold_precedence(monkeypatch):
     assert GroundingDinoDetector(question_box_threshold=0.4).question_box_threshold == 0.4  # ctor wins
 
 
+def test_question_and_vocab_thresholds_are_explicit_and_split(monkeypatch):
+    # Issue #91: the two box thresholds are separate, explicitly-named config — the
+    # question-pass (recall) floor default is lower than the vocab-pass default, and
+    # the vocab-pass default is the value the whole detector used before #42/#91 (0.35,
+    # unchanged by this issue).
+    monkeypatch.delenv(ENV_GDINO_QUESTION_BOX_THRESHOLD, raising=False)
+    det = GroundingDinoDetector()
+    assert DEFAULT_GDINO_QUESTION_BOX_THRESHOLD == 0.18
+    assert det.box_threshold == 0.35  # vocab default, untouched
+    assert det.question_box_threshold == DEFAULT_GDINO_QUESTION_BOX_THRESHOLD
+    assert det.question_box_threshold < det.box_threshold
+
+
 def test_vocab_pass_cadence_precedence(monkeypatch):
     monkeypatch.delenv(ENV_GDINO_VOCAB_PASS_CADENCE, raising=False)
     assert GroundingDinoDetector().vocab_pass_cadence == DEFAULT_GDINO_VOCAB_PASS_CADENCE
@@ -1010,6 +1023,38 @@ def test_question_pass_uses_its_own_lower_threshold(tmp_path):
     det._dispatch_pass = fake_dispatch
     det(_tiles(2))
     assert 0.22 in seen  # question pass ran with its own threshold, not the vocab 0.35
+
+
+def test_marginal_score_admitted_for_question_noun_cut_for_vocab_noun(tmp_path):
+    """Issue #91 synthetic case: an identical marginal raw score (0.18) clears the lower
+    question-pass box threshold but is cut by the higher vocab-pass box threshold — the
+    exact mechanism that was silently dropping GT disambiguator classes (candle holder,
+    wall decal, ...) whose true score sits in this band. ``fake_dispatch`` mirrors the
+    real ``_decode_batch_item`` filtering rule (``max_logits > box_threshold``, i.e. a
+    score at or below the threshold is never turned into a Detection) so this exercises
+    the intended semantics, not just that two different threshold values get passed down
+    (that plumbing is already covered by test_question_pass_uses_its_own_lower_threshold)."""
+    RAW_SCORE = 0.18
+    det = _dual_pass_detector(
+        tmp_path,
+        question_nouns=["candle holder"],
+        vocab_nouns=["chair"],
+        question_box_threshold=0.15,  # < 0.18: admits the marginal score
+        vocab_pass_cadence=1,
+    )
+    assert det.box_threshold == 0.35  # > 0.18: cuts the identical marginal score
+
+    def fake_dispatch(torch, model, predict_fn, tiles, device, dtype, prompt, box_threshold):
+        if RAW_SCORE <= box_threshold:
+            return [[] for _ in tiles]
+        label = "candle holder" if prompt == det.question_prompt else "chair"
+        return [[Detection(0, (0, 0, 1, 1), label, RAW_SCORE)] if i == 0 else [] for i in range(len(tiles))]
+
+    det._dispatch_pass = fake_dispatch
+    out = det(_tiles(2))
+    labels = [d.label for d in out[0]]
+    assert "candle holder" in labels  # question-pass threshold (0.15) admits the 0.18 score
+    assert "chair" not in labels  # vocab-pass threshold (0.35) cuts the identical 0.18 score
 
 
 def test_vocab_pass_runs_only_every_nth_tick(tmp_path):
@@ -1244,7 +1289,7 @@ def test_ineligible_single_observation():
 
 def test_ineligible_below_score_floor():
     # n_obs sufficient but peak score just under the 0.30 answer floor (still clears the
-    # 0.25 recall floor used for index/exploration — that floor is untouched).
+    # 0.18 recall floor used for index/exploration — that floor is untouched).
     assert is_answer_eligible(_Rec(n_obs=5, score=0.29)) is False
 
 
