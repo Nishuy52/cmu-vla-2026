@@ -2340,3 +2340,22 @@ stays open pending live sweep. Consolidated gate on the merged tree:
 #146 (tool frame bypass, harvested by main session), #100 (pass-by
 tolerance, needs per-leg justification). **Next:** finish those, verifier
 pass, mixed live sweep (inst+nume+obje) to close live-evidence loops.
+
+---
+
+## 2026-08-03 — Full verification sweep submitted on tree 76a55e1
+
+**Done:** The selection fixes #168 and #169 passed two independent
+validations. The loft referent moved from 5.5 m off GT to 0.3 m off GT.
+No row became worse. Issue #171 was already hash-invariant; regression
+tests now pin the invariance. The gate on the sweep tree gives 2009
+passed tests, 0 failures, 0 errors. Main is pushed through 76a55e1.
+
+**Sweep:** Jobs 712070 to 712075, chained with afterany. The matrices
+hold 75 questions: 30 IF (identical to both baselines), 30 OR, 15
+numerical. The cluster tree is byte-identical to the pin. A watcher
+asserts completion, DEGRADED count, and src integrity for each job,
+then harvests it.
+
+**Open issues that wait on this sweep:** #103, #118, #151, #167, #170.
+**IF baselines for comparison:** 0.5402 then 0.5172 on the final scorer.
