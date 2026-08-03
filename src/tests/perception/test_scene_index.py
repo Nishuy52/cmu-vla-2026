@@ -250,6 +250,76 @@ def test_merge_recomputes_trimmed_aabb_from_percentiles():
     assert survivor.aabb_max[0] < 10.0
 
 
+def test_fuse_time_extent_cap_bounds_accumulated_walk_issue_104():
+    """Issue #104: live mechanism -- hotel_room_1's bedside-table instance fused to
+    ~3x its class's typical extent (2.47x1.89x1.53 m vs a ~0.63-0.81 m typical
+    nightstand) even though every contributing match individually cleared
+    tracker._match_plausible (#94/#153: co-located re-observations, dist under
+    extent_veto_min_sep, never veto regardless of how large the RUNNING union has
+    already grown). The bug is therefore in the RESULT of many individually-safe
+    fuses, not in any one match decision -- reproduced here directly against
+    BasicSceneIndex.merge_into (the same unconditional-fuse entrypoint the tracker
+    calls, see its own docstring), independent of the tracker's match logic.
+
+    A same-class instance is walked in small (0.15 m) steps -- comfortably under
+    tracker.TrackerConfig.extent_veto_min_sep (0.2 m), so #153 says a real tracker
+    would never veto any single one of these -- for enough steps that the raw
+    accumulated span (2.4 m) is ~3x the class's typical long axis (0.811 m), #104's
+    exact failure mode. cap_fused_extent (issue #104) must keep the final fused
+    box's sorted extent within FUSE_EXTENT_CAP_FACTOR x the class's typical extent,
+    on every axis.
+    """
+    from core.perception.dimension_priors import FUSE_EXTENT_CAP_FACTOR, prior_for
+
+    label = "nightstand"
+    half = 0.075  # 0.15 m cube cluster per observation
+    seed_pts = _box_points([-half, -half, -half], [half, half, half], n=3)
+    idx = BasicSceneIndex(
+        [_rec(1, label, [-half, -half, -half], [half, half, half], points=seed_pts)]
+    )
+    n_steps = 16
+    step = 0.15  # < extent_veto_min_sep -> every step is a "same object" re-observation
+    for i in range(1, n_steps + 1):
+        cx = i * step
+        cmin = [cx - half, -half, -half]
+        cmax = [cx + half, half, half]
+        rec = _rec(100 + i, label, cmin, cmax, points=_box_points(cmin, cmax, n=3))
+        idx.merge_into(1, rec)
+
+    survivor = idx.all_instances()[0]
+    assert survivor.n_obs == n_steps + 1  # every step really did fuse, none split off
+    ext = np.sort(survivor.aabb_max - survivor.aabb_min)
+    typ = np.sort(prior_for(label).typ_ext)
+
+    raw_span = n_steps * step  # 2.4 m -- what the uncapped walk would have spanned
+    assert raw_span > FUSE_EXTENT_CAP_FACTOR * typ[-1]  # the walk really would have blown up
+    assert np.all(ext <= FUSE_EXTENT_CAP_FACTOR * typ + 1e-6)  # the fix bounds it
+
+
+def test_fuse_time_extent_cap_fails_open_with_no_class_prior():
+    """Issue #104, fail-open half (same convention as tracker._match_plausible/#94):
+    a genuinely large real object of a class with NO dimension prior must not be
+    second-guessed by cap_fused_extent -- with nothing to judge plausibility
+    against, the accumulated box is left exactly as measured, however large."""
+    from core.perception.dimension_priors import prior_for
+
+    label = "not-a-real-vocab-class"
+    assert prior_for(label) is None  # precondition: genuinely unpriored
+
+    a_min, a_max = [0, 0, 0], [4, 4, 4]  # deliberately huge -- no prior to cap it against
+    b_min, b_max = [0.2, 0.2, 0.2], [5, 5, 5]  # heavy overlap -> IoU > 0.3, merge fires
+    idx = BasicSceneIndex(
+        [_rec(1, label, a_min, a_max, points=_box_points(a_min, a_max))]
+    )
+    incoming = _rec(2, label, b_min, b_max, points=_box_points(b_min, b_max))
+    survivor = idx.add(incoming)
+
+    assert len(idx.all_instances()) == 1  # fused
+    # untouched by any class-based cap -- the fused box legitimately spans a->b
+    assert survivor.aabb_max[0] > 4.5
+    assert survivor.aabb_min[0] < 0.5
+
+
 def test_merge_into_fuses_by_id_even_when_disjoint():
     """Issue #89: merge_into trusts the caller's association decision unconditionally
     -- unlike add()'s IoU re-derivation, disjoint boxes still fuse when the caller

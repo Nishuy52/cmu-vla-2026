@@ -416,3 +416,69 @@ def test_scene_label_correction_tv_resolves_mislabelled_panel_only(tmp_path):
 
     remote_hits = {r.instance_id for r in idx.by_label("tv remote")}
     assert remote_hits == {72, 91}, "both objects keep resolving under their real raw_label"
+
+
+# --------------------------------------------------------------------------- #144 scene-scoped label corrections
+
+
+@pytest.mark.parametrize(
+    "scene_name,object_id,expected_alias",
+    [
+        ("livingroom_2", 53, "mirror"),
+        ("studio", 46, "column"),
+        ("studio", 6, "rack"),
+        ("home_building_1", 91, "column"),
+        ("home_building_1", 423, "column"),
+        ("livingroom_2", 81, "bookcase"),
+    ],
+)
+def test_scene_label_correction_144_candidates_resolve(
+    tmp_path, scene_name, object_id, expected_alias
+):
+    """Issue #144: every non-#110 correction added to _SCENE_LABEL_CORRECTIONS must
+    grant exactly its documented alias, and only to the named object -- a sibling
+    same-label object in the same synthetic scene must stay untouched (the same
+    single-instance-scoped guarantee #110's own test pins)."""
+    scene_dir = tmp_path / scene_name
+    scene_dir.mkdir()
+    rows = [
+        _base_row(object_id=str(object_id), raw_label="placeholder-label"),
+        _base_row(object_id="999999", raw_label="placeholder-label"),  # untouched sibling
+    ]
+    path = _write_object_csv(scene_dir, rows)
+    assert path.name.endswith("_object_result.csv")
+
+    scene = load_scene(scene_dir)
+    assert scene.scene_name == scene_name
+    by_id = {r.instance_id: r for r in scene.instances}
+    assert by_id[object_id].aliases == (expected_alias,)
+    assert by_id[999999].aliases == ()  # correction is (scene, object_id)-scoped only
+
+    idx = BasicSceneIndex(scene.instances)
+    hits = {r.instance_id for r in idx.by_label(expected_alias)}
+    assert hits == {object_id}
+
+
+def test_144_home_building_1_lamp_columns_all_eleven_corrected(tmp_path):
+    """Issue #144: all eleven home_building_1 "lamp" instances identified as a
+    reused structural-column asset (identical 0.766x0.766x4.32m box, gray, floor-to-
+    ceiling, repeated across four different regions -- no real floor lamp is 4.3m
+    tall) must resolve to "column", and a genuinely different lamp object_id in the
+    SAME scene must be left alone."""
+    scene_dir = tmp_path / "home_building_1"
+    scene_dir.mkdir()
+    column_ids = (91, 160, 195, 198, 206, 216, 256, 276, 308, 371, 423)
+    rows = [_base_row(object_id=str(oid), raw_label="lamp") for oid in column_ids]
+    rows.append(_base_row(object_id="1", raw_label="lamp"))  # a real, uncorrected lamp
+    path = _write_object_csv(scene_dir, rows)
+    assert path.name.endswith("_object_result.csv")
+
+    scene = load_scene(scene_dir)
+    by_id = {r.instance_id: r for r in scene.instances}
+    for oid in column_ids:
+        assert by_id[oid].aliases == ("column",), f"object {oid} should resolve to column"
+    assert by_id[1].aliases == ()  # untouched: a different object_id, not in the table
+
+    idx = BasicSceneIndex(scene.instances)
+    column_hits = {r.instance_id for r in idx.by_label("column")}
+    assert column_hits == set(column_ids)

@@ -240,6 +240,67 @@ def floor_degenerate_aabb(
     return lo, hi
 
 
+# --------------------------------------------------------------- fuse-time extent cap
+
+# Issue #104: a hard backstop on the box a FUSE actually produces, looser than
+# tracker.TrackerConfig.extent_veto_factor (1.3). That match-time veto
+# (core.perception.tracker._match_plausible) polices any ONE match -- but issue
+# #153 floors the veto at near-zero centroid separation (extent_veto_min_sep) so a
+# genuine re-observation is never blocked, and a long run of such individually-tiny,
+# co-located merges can each legitimately pass while the ACCUMULATED union still
+# creeps well past a plausible size one small step at a time (no single step looks
+# unsafe; the cumulative drift is). #104's reproduction is exactly this: a
+# hotel-room bedside-table instance fused to ~3x its class's typical extent despite
+# every contributing match individually clearing #94/#153's checks. Deliberately
+# looser than the match-time veto (which would fight legitimate single-merge growth,
+# e.g. occlusion revealing more of one real object in one step) -- this only trims
+# the RESULT once it has drifted implausibly large, regardless of how it got there.
+FUSE_EXTENT_CAP_FACTOR: float = 1.5
+
+
+def cap_fused_extent(
+    aabb_min: np.ndarray, aabb_max: np.ndarray, label: str, points: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Cap a freshly fused AABB's sorted extent to :data:`FUSE_EXTENT_CAP_FACTOR` x
+    the class's typical extent (issue #104), re-centred on the accumulated point
+    mass (``points.mean(axis=0)``) when available, else the box's own centre.
+
+    Fails open -- returns the box completely unchanged -- when the class has no
+    dimension prior, the same convention :func:`core.perception.tracker._match_plausible`
+    (#94) uses: with nothing to judge plausibility against, a genuinely huge (or
+    off-vocabulary-shaped) object is never second-guessed against a made-up bound.
+    Also a no-op whenever every sorted axis is already within the cap -- a
+    well-behaved fuse is returned byte-identical, only a box that has actually blown
+    past the bound is touched.
+
+    Unlike :func:`floor_degenerate_aabb` (which only ever grows a too-thin axis),
+    this only ever SHRINKS: it is the missing other half of the dimension-sanity
+    table -- a size backstop on the box a fuse produces, not on a match decision.
+    """
+    lo = np.asarray(aabb_min, dtype=float)
+    hi = np.asarray(aabb_max, dtype=float)
+    prior = prior_for(label)
+    if prior is None:
+        return lo, hi
+    ext = hi - lo
+    limit = FUSE_EXTENT_CAP_FACTOR * prior.typ_ext  # already sorted (thin, mid, long)
+    order = np.argsort(ext, kind="stable")
+    sorted_ext = ext[order]
+    if np.all(sorted_ext <= limit):
+        return lo, hi
+    capped_sorted = np.minimum(sorted_ext, limit)
+    out_ext = ext.copy()
+    for rank, axis in enumerate(order):
+        out_ext[axis] = capped_sorted[rank]
+    if points is not None and len(points):
+        centre = np.asarray(points, dtype=float).mean(axis=0)
+    else:
+        centre = (lo + hi) / 2.0
+    new_lo = centre - out_ext / 2.0
+    new_hi = centre + out_ext / 2.0
+    return new_lo, new_hi
+
+
 def clamp_extents(
     extents: np.ndarray,
     label: str,
