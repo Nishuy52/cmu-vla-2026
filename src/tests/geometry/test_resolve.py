@@ -201,6 +201,64 @@ def test_fallback_category_only_last_resort():
     assert res.audit[-1].step == "category_only"
 
 
+def test_dropped_between_partial_grounding_prefers_near_known_anchor():
+    # loft live repro (#169): "the potted plant between a vase and the cabinet with
+    # a TV on it" -- 'cabinet' is never perceived, so BETWEEN is dropped entirely
+    # (category_only). Before #169 every candidate scored a flat 0.0 on the dropped
+    # clause (both anchors required), so the tie fell to instance id and a distant
+    # plant (lower id) won over the true near-the-vase plant (higher id). The plant
+    # actually near the one grounded anchor (the vase) must win instead.
+    vase = rec(1, "vase", (3.2, -1.1, 0.3), (1.0, 1.0, 0.6))
+    plant_far = rec(2, "potted plant", (-1.2, -1.4, 0.9), (0.4, 0.4, 0.5))  # far, low id
+    plant_near = rec(3, "potted plant", (3.5, -1.1, 0.4), (0.4, 0.4, 0.5))  # near vase
+    idx = FakeIndex([vase, plant_far, plant_near])
+    spec = _spec(
+        "potted plant",
+        clauses=[
+            Clause(
+                Pred.BETWEEN,
+                [Anchor(noun="vase"), Anchor(noun="cabinet")],  # cabinet never grounds
+            )
+        ],
+    )
+    res = T.resolve(spec, idx)
+    assert res.candidates_ranked[0].instance_id == 3
+    assert res.audit[-1].step == "category_only"
+
+
+def test_dropped_between_both_anchors_missing_stays_tied_by_id():
+    # Neither BETWEEN anchor grounds: truly no partial evidence to recover, so the
+    # pre-#169 tie-by-instance-id behaviour is unchanged (the honest answer).
+    plant_a = rec(2, "potted plant", (0, 0, 0), (0.4, 0.4, 0.5))
+    plant_b = rec(1, "potted plant", (9, 9, 0), (0.4, 0.4, 0.5))
+    idx = FakeIndex([plant_a, plant_b])
+    spec = _spec(
+        "potted plant",
+        clauses=[Clause(Pred.BETWEEN, [Anchor(noun="vase"), Anchor(noun="cabinet")])],
+    )
+    res = T.resolve(spec, idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [1, 2]
+
+
+def test_dropped_clause_score_both_anchors_grounded_matches_eval_clause():
+    # Both BETWEEN anchors DO ground: #169's partial-grounding branch must not
+    # engage -- _dropped_clause_score falls straight through to the real,
+    # unmodified _eval_clause score (unit-level check of the guard condition
+    # itself, since forcing resolve() all the way to category_only with both
+    # anchors present and a discriminating score is not constructible: a
+    # nonzero between() score implies the clause already PASSED as a hard
+    # filter, per its own formula).
+    vase = rec(1, "vase", (0, 0, 0), (0.4, 0.4, 0.4))
+    cabinet = rec(2, "cabinet", (10, 0, 0), (0.4, 0.4, 0.4))
+    plant_on_segment = rec(3, "potted plant", (5, 0, 0), (0.3, 0.3, 0.3))
+    idx = FakeIndex([vase, cabinet, plant_on_segment])
+    clause = Clause(Pred.BETWEEN, [Anchor(noun="vase"), Anchor(noun="cabinet")])
+    got = T._dropped_clause_score(plant_on_segment, clause, idx, T.DEFAULT_THRESHOLDS)
+    want = T._eval_clause(plant_on_segment, clause, idx, T.DEFAULT_THRESHOLDS).score
+    assert got == want
+    assert got > 0.0
+
+
 def test_fallback_ladder_order_attrs_then_relation():
     # both an unmatched attribute AND an unsatisfiable relation are present:
     # attributes must be relaxed before any relation is dropped.
