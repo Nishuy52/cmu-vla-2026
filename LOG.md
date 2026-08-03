@@ -2297,3 +2297,28 @@ queued; the four run-time-reread helpers byte-identical local vs remote; all 15
 scenes present; the three generated matrices byte-identical to the baseline
 sweep's, guaranteeing a clean A/B against 702059-61; prerequisites present and
 46 TB free. Submission is gated on #154/#145 landing.
+
+---
+
+## 2026-07-30 — Post-fix sweep harvested: null at headline, diagnosis corrected
+
+**Done:**
+- 703383's g1 confirmed contaminated: concurrent session's cancelled
+  submission (703387, 18:08) rsynced `~/vla/src` mid-run. g1 re-run clean
+  as 703527; forensics show zero src writes after 18:10, so
+  703384/703385/703527 all ran byte-identical to pin `0c738ff`.
+- **#167's duplicate-explosion finding WITHDRAWN**: clean redo shows 4.3%
+  duplicates vs 3.3% baseline (contaminated run showed 21.3%). Issue
+  retitled to the surviving finding.
+- **Sweep verdict (29 matched questions, identical scorer): 0.5402 ->
+  0.5172 (-0.023), inside the ~0.02 scorer-churn floor; legs exactly flat
+  37/58; threading violations 4->6; 10 questions churned 5 up / 5 down.
+  The seven-fix stack did not move live IF in aggregate.**
+- Surviving signals: arabic_room "two columns" 1.0->0.0 reproduced 2/2
+  post-fix with columns grounded (#167, top unexplained regression);
+  office_2 gain traced to the clock leg, NOT the cabinet (still zero
+  instances); #156's withhold changed neither avoid outcome; #165 bites
+  in score_live_run.py too (legs=0/0 rendered as 0.0 both sides).
+
+**Next:** attack what actually binds legs (63.8% unchanged), starting from
+the arabic_room threading regression.
