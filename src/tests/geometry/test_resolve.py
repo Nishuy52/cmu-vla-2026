@@ -84,6 +84,77 @@ def test_resolve_superlative_with_filter():
     assert [c.instance_id for c in res.candidates_ranked] == [2]
 
 
+# --------------------------------------------------------------------------- #168: ungrounded
+# superlative anchor must not degrade to bare instance-id order.
+
+
+def test_ungrounded_superlative_uses_dropped_relation_evidence():
+    # arabic_room live repro: "the pillow closest to the book on the stool" -- 'book'
+    # is never detected (ungrounded anchor), so CLOSEST_TO can't rank; both pillows
+    # are a bare-noun same-tier pair with no HARD clause left (the single ON(stool)
+    # clause fails for both and the ladder falls straight to category_only, since
+    # dropping one-of-one isn't the "weakest of >=2" rung). The pillow actually
+    # closer to the stool (real spatial evidence, id 3 -- the HIGHER, "wrong-by-id"
+    # instance) must win over the far one (id 2), never the lower id by default.
+    stool = rec(1, "stool", (0, 0, 0.25), (0.4, 0.4, 0.5))
+    pillow_far = rec(2, "pillow", (6, 6, 0.5), (0.3, 0.3, 0.2))
+    pillow_near = rec(3, "pillow", (0.3, 0, 0.5), (0.3, 0.3, 0.2))  # right by the stool
+    idx = FakeIndex([stool, pillow_far, pillow_near])
+    spec = _spec(
+        "pillow",
+        clauses=[
+            Clause(Pred.ON, [Anchor(noun="stool")]),
+            Clause(Pred.CLOSEST_TO, [Anchor(noun="book")]),  # never grounds
+        ],
+    )
+    res = T.resolve(spec, idx)
+    assert res.candidates_ranked[0].instance_id == 3
+    steps = [a.step for a in res.audit]
+    assert "superlative_anchor_missing" in steps
+    assert "superlative_tie_unresolved" not in steps  # real evidence discriminated
+
+
+def test_ungrounded_superlative_genuine_tie_is_audited_not_hidden():
+    # No relation clause at all and two otherwise-identical bare-noun pillows: truly
+    # nothing discriminates. The result stays deterministic (instance-id order, as
+    # before) but the tie is now recorded explicitly rather than presented as a
+    # confident pick.
+    pillow_a = rec(2, "pillow", (0, 0, 0.5), (0.3, 0.3, 0.2))
+    pillow_b = rec(1, "pillow", (5, 5, 0.5), (0.3, 0.3, 0.2))
+    idx = FakeIndex([pillow_a, pillow_b])
+    spec = _spec("pillow", clauses=[Clause(Pred.CLOSEST_TO, [Anchor(noun="book")])])
+    res = T.resolve(spec, idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [1, 2]
+    steps = [a.step for a in res.audit]
+    assert "superlative_anchor_missing" in steps
+    assert "superlative_tie_unresolved" in steps
+
+
+def test_ungrounded_superlative_still_honours_tier_and_clause_evidence():
+    # When real tier/clause evidence already discriminates (the pre-#168 case
+    # _tier_priority_order alone always handled correctly), behaviour is unchanged
+    # and no spurious tie is recorded. Both bowls pass NEAR(table) (a weak relation,
+    # so the ladder never needs to drop it), but bowl_close (lower instance id
+    # already, so an id-order tie-break would happen to pick it too -- the point is
+    # this is now a SCORED win, not a coincidence) sits right against the table
+    # while bowl_far is much closer to the threshold edge.
+    table = rec(1, "table", (0, 0, 0.5), (2.0, 2.0, 1.0))
+    bowl_close = rec(2, "bowl", (1.0, 0, 1.05), (0.2, 0.2, 0.1))  # flush against table
+    bowl_far = rec(3, "bowl", (2.7, 0, 1.05), (0.2, 0.2, 0.1))  # near the 1.8m gap edge
+    idx = FakeIndex([table, bowl_close, bowl_far])
+    spec = _spec(
+        "bowl",
+        clauses=[
+            Clause(Pred.NEAR, [Anchor(noun="table")]),  # both pass, different margins
+            Clause(Pred.CLOSEST_TO, [Anchor(noun="book")]),  # never grounds
+        ],
+    )
+    res = T.resolve(spec, idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [2, 3]
+    steps = [a.step for a in res.audit]
+    assert "superlative_tie_unresolved" not in steps
+
+
 # --------------------------------------------------------------------------- fallback ladder
 
 
@@ -128,6 +199,64 @@ def test_fallback_category_only_last_resort():
     res = T.resolve(spec, idx)
     assert [c.instance_id for c in res.candidates_ranked] == [1]
     assert res.audit[-1].step == "category_only"
+
+
+def test_dropped_between_partial_grounding_prefers_near_known_anchor():
+    # loft live repro (#169): "the potted plant between a vase and the cabinet with
+    # a TV on it" -- 'cabinet' is never perceived, so BETWEEN is dropped entirely
+    # (category_only). Before #169 every candidate scored a flat 0.0 on the dropped
+    # clause (both anchors required), so the tie fell to instance id and a distant
+    # plant (lower id) won over the true near-the-vase plant (higher id). The plant
+    # actually near the one grounded anchor (the vase) must win instead.
+    vase = rec(1, "vase", (3.2, -1.1, 0.3), (1.0, 1.0, 0.6))
+    plant_far = rec(2, "potted plant", (-1.2, -1.4, 0.9), (0.4, 0.4, 0.5))  # far, low id
+    plant_near = rec(3, "potted plant", (3.5, -1.1, 0.4), (0.4, 0.4, 0.5))  # near vase
+    idx = FakeIndex([vase, plant_far, plant_near])
+    spec = _spec(
+        "potted plant",
+        clauses=[
+            Clause(
+                Pred.BETWEEN,
+                [Anchor(noun="vase"), Anchor(noun="cabinet")],  # cabinet never grounds
+            )
+        ],
+    )
+    res = T.resolve(spec, idx)
+    assert res.candidates_ranked[0].instance_id == 3
+    assert res.audit[-1].step == "category_only"
+
+
+def test_dropped_between_both_anchors_missing_stays_tied_by_id():
+    # Neither BETWEEN anchor grounds: truly no partial evidence to recover, so the
+    # pre-#169 tie-by-instance-id behaviour is unchanged (the honest answer).
+    plant_a = rec(2, "potted plant", (0, 0, 0), (0.4, 0.4, 0.5))
+    plant_b = rec(1, "potted plant", (9, 9, 0), (0.4, 0.4, 0.5))
+    idx = FakeIndex([plant_a, plant_b])
+    spec = _spec(
+        "potted plant",
+        clauses=[Clause(Pred.BETWEEN, [Anchor(noun="vase"), Anchor(noun="cabinet")])],
+    )
+    res = T.resolve(spec, idx)
+    assert [c.instance_id for c in res.candidates_ranked] == [1, 2]
+
+
+def test_dropped_clause_score_both_anchors_grounded_matches_eval_clause():
+    # Both BETWEEN anchors DO ground: #169's partial-grounding branch must not
+    # engage -- _dropped_clause_score falls straight through to the real,
+    # unmodified _eval_clause score (unit-level check of the guard condition
+    # itself, since forcing resolve() all the way to category_only with both
+    # anchors present and a discriminating score is not constructible: a
+    # nonzero between() score implies the clause already PASSED as a hard
+    # filter, per its own formula).
+    vase = rec(1, "vase", (0, 0, 0), (0.4, 0.4, 0.4))
+    cabinet = rec(2, "cabinet", (10, 0, 0), (0.4, 0.4, 0.4))
+    plant_on_segment = rec(3, "potted plant", (5, 0, 0), (0.3, 0.3, 0.3))
+    idx = FakeIndex([vase, cabinet, plant_on_segment])
+    clause = Clause(Pred.BETWEEN, [Anchor(noun="vase"), Anchor(noun="cabinet")])
+    got = T._dropped_clause_score(plant_on_segment, clause, idx, T.DEFAULT_THRESHOLDS)
+    want = T._eval_clause(plant_on_segment, clause, idx, T.DEFAULT_THRESHOLDS).score
+    assert got == want
+    assert got > 0.0
 
 
 def test_fallback_ladder_order_attrs_then_relation():
