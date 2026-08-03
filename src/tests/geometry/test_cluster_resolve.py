@@ -137,6 +137,43 @@ def test_plausible_merge_of_two_touching_fragments_of_one_real_object():
     assert resolved[0].n_obs == 6  # 3 + 3
 
 
+# ------------------------------------------------ #151 replay finding: head-noun prior
+#
+# tools/replay_live_numerical.py against reports/cluster_verify/699819 caught a real
+# defect (not a synthetic worry): "tv cabinet" has no OWN dimension-prior row (only
+# the generic "cabinet" head noun does), so the original fail-open ("no prior -> can't
+# judge -> allow") let livingroom_3's 27 scattered `tv cabinet` detections -- real,
+# spatially UNRELATED objects that merely happen to chain via footprint adjacency --
+# cluster into one 74 sq m "anchor" with no size check at all, changing "photos on the
+# TV cabinet" from count=6 to count=13 against a truth of 2 (a real regression this
+# file's own replay test below pins). Falling back to the HEAD NOUN's prior
+# ("cabinet") before failing open fixes it.
+
+
+def test_cluster_falls_back_to_head_noun_prior_when_no_exact_prior():
+    """A compound label with no OWN prior row ("tv cabinet") must still be held to
+    its head noun's plausible size ("cabinet"), not fail open. Mirrors the
+    bridged-blob shape: three real, distinct "tv cabinet"-labelled objects
+    chained by a bridging fragment must NOT merge into one anchor."""
+    obj_a = rec(1, "tv cabinet", (0.0, 0.0, 1.0), (0.5, 0.5, 1.0))
+    bridge = rec(2, "tv cabinet", (1.5, 0.0, 1.0), (3.5, 0.2, 1.0))  # spans x:[-0.25,3.25]
+    obj_b = rec(3, "tv cabinet", (3.0, 0.0, 1.0), (0.5, 0.5, 1.0))
+    idx = FakeIndex([obj_a, bridge, obj_b])
+    resolved = T._resolve_anchor(Anchor(noun="tv cabinet"), idx, T.DEFAULT_THRESHOLDS)
+    assert sorted(c.instance_id for c in resolved) == [1, 2, 3]
+
+
+def test_cluster_head_noun_prior_still_admits_a_plausible_merge():
+    """The positive companion: two small "tv cabinet" fragments of ONE real
+    object, well within the head noun's ("cabinet") plausible size, still
+    merge -- the head-noun fallback is a real size check, not a blanket veto."""
+    frag_a = rec(1, "tv cabinet", (-0.1, 0.0, 0.4), (0.3, 0.5, 0.8))
+    frag_b = rec(2, "tv cabinet", (0.1, 0.0, 1.2), (0.3, 0.5, 0.8))
+    idx = FakeIndex([frag_a, frag_b])
+    resolved = T._resolve_anchor(Anchor(noun="tv cabinet"), idx, T.DEFAULT_THRESHOLDS)
+    assert len(resolved) == 1
+
+
 # --------------------------------------------------------------------------- #167
 
 

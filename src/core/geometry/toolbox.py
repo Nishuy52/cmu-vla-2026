@@ -818,16 +818,32 @@ def _merge_fragment_footprint(members: Sequence[InstanceRecord]) -> InstanceReco
 
 def _cluster_plausible(merged: InstanceRecord, th: Thresholds) -> bool:
     """True if ``merged``'s sorted-axis extent is within a plausible size for its
-    class (fail-open: no dimension prior for the class -> can't judge -> allow).
+    class (fail-open: no prior reachable at all for the class -> can't judge ->
+    allow).
 
     Mirrors ``core.perception.tracker._match_plausible``'s per-axis sorted-extent
     comparison exactly (same veto value, see :attr:`Thresholds
     .cluster_extent_veto_factor`), applied here to a candidate CLUSTER footprint
     instead of a tracker MERGE.
+
+    A modified compound label with no OWN prior row falls back to its HEAD
+    NOUN's prior (e.g. "tv cabinet" -> "cabinet") before failing open: an
+    unbounded fail-open here would merge arbitrarily many same-label fragments
+    scattered across a whole scene into one "anchor" with no size check at all
+    -- caught live replaying 699819's livingroom_3 ("tv cabinet" has no exact
+    prior row; 27 scattered, non-fragment `tv cabinet` detections across the
+    room clustered into a single 74 sq m "anchor" with fail-open-only). The
+    head noun almost always shares the physical scale of a compound label
+    (a "tv cabinet" is still cabinet-sized), so this is a strictly better
+    approximation than "can't judge" while remaining honestly fail-open for
+    the classes with no prior reachable by EITHER name.
     """
     from core.perception.dimension_priors import prior_for
+    from core.perception.vocab import head_noun
 
     prior = prior_for(merged.label)
+    if prior is None:
+        prior = prior_for(head_noun(merged.label))
     if prior is None:
         return True
     ext = np.sort(merged.extents)
