@@ -1033,3 +1033,107 @@ def test_sub_anchor_selection_is_order_invariant_synthetic():
     # The only physically-grounded winner is table_1 (its nearest decal is strictly
     # closest), which carries 2 monitors -- every shuffle must land on the same count.
     assert counts == {2}, f"count varied across shuffles: {counts}"
+
+
+# --------------------------------------------------------------------------- #171:
+# resolve()'s tie-break chain must be independent of detection/insertion order --
+# the same property that makes it independent of PYTHONHASHSEED (any hash-order-
+# dependent set/dict feeding a comparison would show up here as an order-sensitive
+# result, since candidate insertion order is exactly what a randomized hash seed
+# would perturb upstream, in scene_index/tracker construction).
+#
+# Investigation (issue #171): re-running the full 75-question offline
+# ``core.runner.gt_battery`` battery with PYTHONHASHSEED in {1, 2, 7} on CURRENT
+# main (post #160/#167/#151) produced byte-identical ``scores`` in all three runs
+# -- the nondeterminism #171 originally reported is no longer reproducible.
+# Auditing every ranking function in this module confirms why: every sort key in
+# the resolve()/tie-break chain (``_stable_by_id``, ``_tier_priority_order``,
+# ``_relaxed_relation_order``, ``_nested_superlative_order``, and #168/#169's
+# ``_ungrounded_superlative_order``/``_dropped_clause_score``) terminates in a
+# plain ``instance_id`` int -- never a ``set(...)`` or a dict keyed by a string
+# whose CPython iteration order PYTHONHASHSEED could perturb (int hashing is
+# never salted, so an int-keyed dict/set's order is unaffected regardless).
+# This matches the #107/#113/#116 "declared, world-grounded prior, never left to
+# fall through to list order" discipline those issues already established.
+#
+# These tests do not reproduce a historical failure (there is none to reproduce
+# against current code) -- they PIN the invariant so a future change to any of
+# these functions cannot silently reintroduce an id-position-dependent (and so,
+# transitively, hash-seed-dependent) ordering without a test going red.
+
+
+def test_tier_priority_order_is_input_order_invariant():
+    import random
+
+    from core.perception.scene_index import BasicSceneIndex
+
+    cousin = rec(1, "dressing table", (0, 0, 0.25), (2.0, 2.0, 0.5))
+    exact = rec(2, "coffee table", (6, 0, 0.25), (2.0, 2.0, 0.5))
+    other_exact = rec(3, "coffee table", (12, 0, 0.25), (2.0, 2.0, 0.5))
+    records = [cousin, exact, other_exact]
+    rng = random.Random(171)
+    orders = set()
+    for _ in range(25):
+        shuffled = list(records)
+        rng.shuffle(shuffled)
+        idx = BasicSceneIndex(shuffled)
+        res = T.resolve(_spec("coffee table"), idx)
+        orders.add(tuple(c.instance_id for c in res.candidates_ranked))
+    assert len(orders) == 1, f"order varied across input shuffles: {orders}"
+    (only,) = orders
+    assert only[0] in (2, 3)  # an exact match, never the head-noun cousin (id 1)
+
+
+def test_relaxed_relation_order_is_input_order_invariant():
+    # #169 shape: a dropped BETWEEN clause with one grounded anchor -- category_only
+    # ranking must be stable regardless of the order candidates were built/inserted in.
+    import random
+
+    vase = rec(1, "vase", (3.2, -1.1, 0.3), (1.0, 1.0, 0.6))
+    plant_far = rec(2, "potted plant", (-1.2, -1.4, 0.9), (0.4, 0.4, 0.5))
+    plant_near = rec(3, "potted plant", (3.5, -1.1, 0.4), (0.4, 0.4, 0.5))
+    records = [vase, plant_far, plant_near]
+    spec = _spec(
+        "potted plant",
+        clauses=[Clause(Pred.BETWEEN, [Anchor(noun="vase"), Anchor(noun="cabinet")])],
+    )
+    rng = random.Random(1691)
+    orders = set()
+    for _ in range(25):
+        shuffled = list(records)
+        rng.shuffle(shuffled)
+        idx = FakeIndex(shuffled)
+        res = T.resolve(spec, idx)
+        orders.add(tuple(c.instance_id for c in res.candidates_ranked))
+    assert len(orders) == 1, f"order varied across input shuffles: {orders}"
+    (only,) = orders
+    assert only[0] == 3  # near the grounded vase, never the far one
+
+
+def test_ungrounded_superlative_order_is_input_order_invariant():
+    # #168 shape: an ungrounded superlative anchor with a dropped-relation signal
+    # to fall back on -- must not depend on detection/insertion order either.
+    import random
+
+    stool = rec(1, "stool", (0, 0, 0.25), (0.4, 0.4, 0.5))
+    pillow_far = rec(2, "pillow", (6, 6, 0.5), (0.3, 0.3, 0.2))
+    pillow_near = rec(3, "pillow", (0.3, 0, 0.5), (0.3, 0.3, 0.2))
+    records = [stool, pillow_far, pillow_near]
+    spec = _spec(
+        "pillow",
+        clauses=[
+            Clause(Pred.ON, [Anchor(noun="stool")]),
+            Clause(Pred.CLOSEST_TO, [Anchor(noun="book")]),  # never grounds
+        ],
+    )
+    rng = random.Random(1681)
+    orders = set()
+    for _ in range(25):
+        shuffled = list(records)
+        rng.shuffle(shuffled)
+        idx = FakeIndex(shuffled)
+        res = T.resolve(spec, idx)
+        orders.add(tuple(c.instance_id for c in res.candidates_ranked))
+    assert len(orders) == 1, f"order varied across input shuffles: {orders}"
+    (only,) = orders
+    assert only[0] == 3  # the pillow actually near the stool, never the far one
