@@ -2322,3 +2322,21 @@ sweep's, guaranteeing a clean A/B against 702059-61; prerequisites present and
 
 **Next:** attack what actually binds legs (63.8% unchanged), starting from
 the arabic_room threading regression.
+
+---
+
+## 2026-08-03 — Fix-all sprint: 21 issues resolved, gate 1993/0/0, pushed
+
+**Done:** merged #82 #91 #104 #115 #143 #144 #147 #150 #159 #160 #163 #164
+#165 (+#166 closed by adjudication, #85/#86 closed by user, #145/#152/#154/
+#162 closed on evidence). New issues from diagnosis: #168 #169 #170 #171.
+Live-replay harness (tools/live_replay.py) now the offline oracle for
+resolution changes. #118 OR mechanism table: grounding 5/9, selection 2/9,
+fusion oversizing 2/9. #151 measured NOT fixed by replay (0/4 recover) —
+stays open pending live sweep. Consolidated gate on the merged tree:
+1993 passed / 0 failed / 0 errors / 38 skipped (PYTHONHASHSEED=0).
+
+**In flight at entry time:** #168/#169/#171 (toolbox selection+determinism),
+#146 (tool frame bypass, harvested by main session), #100 (pass-by
+tolerance, needs per-leg justification). **Next:** finish those, verifier
+pass, mixed live sweep (inst+nume+obje) to close live-evidence loops.
