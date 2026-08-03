@@ -413,8 +413,55 @@ class InstructionHead:
 
     # ------------------------------------------------------------------ grounding
     def _ground_legs(self, scene) -> None:
+        """Ground every leg of the route in order, threading a running ``prev_xy``
+        "where the route approaches THIS leg's anchor from" reference through
+        ``_ground_one`` -> ``_resolve_leg_anchors`` -> ``_ranked_anchor``'s
+        route-continuity tie-break (issue #107/#113).
+
+        Issue #115: this threading must mirror
+        ``core.runner.gt_battery._if_rubric_geometry``'s ``approach_xy`` (the
+        rubric's own, independently-computed route-continuity reference — read-only
+        citation, never imported; the head stays ROS-free/light per the module
+        docstring) or the two sides can select a DIFFERENT physical object for a
+        same-label tie, even though both implement the identical tie-break rule.
+        Two reference points diverged from the battery's convention:
+
+        1. **First leg.** The battery seeds ``approach_xy`` with ``start_xy``, "the
+           point the route departs from" (``_if_rubric_geometry`` docstring,
+           gt_battery.py:1478-1484) — the scene's fixed spawn for an offline
+           scoring pass. The head's live analogue of "the point THIS route departs
+           from" is the vehicle's OWN current pose at grounding time (a route can be
+           (re)grounded mid-drive, e.g. ``_refresh_costmap_and_geometry``, so this is
+           not necessarily the episode's original spawn either — it is the correct
+           live equivalent of the same concept). The pre-#115 code instead seeded
+           ``prev_xy = None`` unconditionally, silently falling back to declared
+           salience for the first leg's tie-break (``_ranked_anchor``'s ``else``
+           branch) rather than the world-grounded route-continuity prior the battery
+           always has available via ``start_xy``.
+        2. **After a CORRIDOR_BETWEEN leg.** The battery advances ``approach_xy`` to
+           the gate's MIDPOINT (gt_battery.py:1642 ``mid = ...``; 1647
+           ``approach_xy = mid``). The pre-#115 code instead carried forward
+           ``g[1]`` — one arbitrary endpoint of the two-point gate segment, not its
+           midpoint — which can sit metres from the midpoint for a wide gate,
+           feeding a materially different tie-break reference into the very next
+           leg's anchor resolution than the rubric's own scoring pass would use for
+           the identical route.
+
+        Goal PROJECTION itself (issue #115's other, larger divergence — the battery
+        pushes a GOTO/VIA_NEAR goal off the anchor's own AABB directionally via
+        ``_nearest_free_goal``, gt_battery.py:1085, while the head projects onto the
+        live costmap's reachable/free space via ``_goto_point``/``_via_point``) is
+        NOT touched here: the head has no equivalent of the battery's pure-geometry
+        footprint push (it needs a costmap to project against, which the battery's
+        offline, terrain-free geometry pass does not have), and unifying the two
+        would mean importing battery logic into a ROS-free head or duplicating a
+        second full push algorithm — both out of scope for a single, contained fix.
+        This gap is pinned, not silently left, by
+        ``tests/heads/test_if_leg_goal_reference_threading.py``'s goal-projection
+        divergence test.
+        """
         legs: list[_GroundedLeg] = []
-        prev_xy: tuple[float, float] | None = None
+        prev_xy: tuple[float, float] | None = self._pose
         prev_kind: LegKind | None = None
         prev_gate: tuple[tuple[float, float], tuple[float, float]] | None = None
         n_legs = len(self.plan.route)
@@ -425,8 +472,15 @@ class InstructionHead:
             legs.append(gl)
             if gl.geom is not None:
                 g = gl.geom
-                prev_xy = g[1] if isinstance(g[0], tuple) else g
-                prev_gate = g if (gl.kind is LegKind.CORRIDOR_BETWEEN and isinstance(g[0], tuple)) else None
+                if isinstance(g[0], tuple):
+                    # CORRIDOR_BETWEEN: g == (p0, p1), the gate's two crossing
+                    # points. Issue #115: thread the MIDPOINT forward (matches
+                    # gt_battery._if_rubric_geometry, gt_battery.py:1642/1647), not
+                    # an arbitrary endpoint.
+                    prev_xy = ((g[0][0] + g[1][0]) / 2.0, (g[0][1] + g[1][1]) / 2.0)
+                else:
+                    prev_xy = g
+                prev_gate = g if gl.kind is LegKind.CORRIDOR_BETWEEN else None
             else:
                 prev_gate = None
             prev_kind = gl.kind
