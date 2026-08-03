@@ -362,11 +362,42 @@ GDINO_BACKOFF_DEGRADE_N: int = 5
 # instances), not target recall — runs at a reduced cadence instead of every tick.
 
 #: Box threshold for the short question-noun-only caption pass. Lower than
-#: :attr:`GroundingDinoDetector.box_threshold`'s 0.35 default because a 2-phrase prompt
-#: carries far less token-position score dilution than the full vocab caption (probe:
-#: peak short-caption teapot score 0.292, 19/19 detections within 6.4 deg of GT at 0.25).
+#: :attr:`GroundingDinoDetector.box_threshold`'s 0.35 default (the vocab-pass default,
+#: unchanged by this issue) because a 2-phrase prompt carries far less token-position
+#: score dilution than the full vocab caption (probe: peak short-caption teapot score
+#: 0.292, 19/19 detections within 6.4 deg of GT at 0.25 — the value this constant held
+#: until issue #91's second step below).
+#:
+#: Issue #91: #145 confirmed the GT disambiguator classes (``candle holder``, ``tv``,
+#: ``window``, ``map wall decal``) DO reach the question-noun caption every tick (grep
+#: ``reports/cluster_verify/703527/debug/*/prompt_diagnostics.jsonl`` for
+#: ``"candle holder"``/``"wall decal"`` — present in all 10 slots' question prompts) —
+#: so the #42 dilution mechanism above is not what is cutting them; the detector still
+#: never emits ``candle holder``/``wall decal`` as a raw :class:`Detection` in that run
+#: (0 hits across 1609 raw-detection records, 10 slots, ``grep -c candle
+#: raw_detections.jsonl`` / ``grep -c decal ...``), i.e. every candidate score for those
+#: two classes fell below the then-current 0.25 box threshold and was silently discarded
+#: before ever becoming a :class:`Detection` (this module's own SCOPE NOTE above: a
+#: sub-threshold score never survives into the dump, so it cannot be read back directly).
+#: What CAN be read back is the shape of the population that DID clear 0.25: of 20382
+#: raw detections across those same 10 slots, the score histogram is dense and
+#: essentially flat immediately above the floor (856 detections land in the very first
+#: [0.25, 0.26) percentile-point bin, 851 in [0.26, 0.27), 3271 total in [0.25, 0.30) —
+#: no visible fall-off approaching 0.25 from above, the signature of a population being
+#: hard-clipped at the floor rather than one that naturally thins out toward it). That is
+#: evidence the true population extends below 0.25 with comparable density, not that 0.25
+#: already sits past a natural noise elbow. Sub-threshold scores for the missing 2 classes
+#: specifically cannot be recovered without a live re-run (out of this fix's scope), so
+#: the new floor is set by the same-magnitude step the original #42 probe already found
+#: necessary once (a ~0.07-0.10 gap below the next caption tier: 0.35 vocab -> 0.25
+#: question was itself a 0.10 step) applied a second time below the still-failing 0.25:
+#: 0.25 -> 0.18. This is a recall floor only (issue #43(a) below): the higher
+#: :data:`DEFAULT_GDINO_ANSWER_MIN_SCORE` (0.30) and the ``n_obs`` gate are UNCHANGED and
+#: still sit above this new floor, so a spuriously-admitted low-score detection still
+#: cannot win an answer on its own — it can only enter the scene index/exploration pool,
+#: exactly like every detection between 0.25 and 0.30 already could.
 ENV_GDINO_QUESTION_BOX_THRESHOLD = "GDINO_QUESTION_BOX_THRESHOLD"
-DEFAULT_GDINO_QUESTION_BOX_THRESHOLD: float = 0.25
+DEFAULT_GDINO_QUESTION_BOX_THRESHOLD: float = 0.18
 
 #: Run the full question+vocab caption pass every Nth detection tick (1 == every tick,
 #: matching the pre-#42 behaviour). The question-noun pass still runs every tick.
@@ -375,14 +406,15 @@ DEFAULT_GDINO_VOCAB_PASS_CADENCE: int = 3
 
 # --------------------------------------------------------------------------- answer eligibility
 
-# Issue #43(a): DEFAULT_GDINO_QUESTION_BOX_THRESHOLD (0.25) above is a RECALL floor — low
-# enough that a weakly-scored, barely-observed instance still enters the scene index and
-# feeds exploration/frontier scoring. That is deliberately permissive; it must not also be
-# the bar an instance clears to WIN an answer. A question-pass-derived instance (i.e. one
-# resolved for the question's own target noun — the noun the short question-noun caption
-# pass grounds on) is ANSWER-eligible only once it has been independently re-observed
-# (n_obs >= the min below) AND its peak detector confidence clears a higher score floor —
-# both stricter than the 0.25 recall floor, which stays untouched for index/exploration.
+# Issue #43(a): DEFAULT_GDINO_QUESTION_BOX_THRESHOLD (0.18 as of issue #91) above is a
+# RECALL floor — low enough that a weakly-scored, barely-observed instance still enters
+# the scene index and feeds exploration/frontier scoring. That is deliberately
+# permissive; it must not also be the bar an instance clears to WIN an answer. A
+# question-pass-derived instance (i.e. one resolved for the question's own target noun —
+# the noun the short question-noun caption pass grounds on) is ANSWER-eligible only once
+# it has been independently re-observed (n_obs >= the min below) AND its peak detector
+# confidence clears a higher score floor — both stricter than the 0.18 recall floor,
+# which stays untouched for index/exploration.
 
 #: Minimum distinct-keyframe observation count for a target-noun instance to be
 #: ANSWER-eligible (win the object-ref ranking head, or populate object-ref floor rung 3).
@@ -390,7 +422,10 @@ ENV_GDINO_ANSWER_MIN_OBS = "GDINO_ANSWER_MIN_OBS"
 DEFAULT_GDINO_ANSWER_MIN_OBS: int = 2
 
 #: Minimum peak detector confidence (``InstanceRecord.score``, max over observations) for
-#: answer eligibility. Above the 0.25 recall floor by design (issue #43(a)).
+#: answer eligibility. Above the 0.18 recall floor by design (issue #43(a)/#91) — a
+#: detection admitted only by the lower question-pass threshold still has to clear this
+#: higher bar (plus the n_obs gate) before it can win an answer, guarding against the
+#: extra low-confidence noise the lower recall floor now admits into the scene index.
 ENV_GDINO_ANSWER_MIN_SCORE = "GDINO_ANSWER_MIN_SCORE"
 DEFAULT_GDINO_ANSWER_MIN_SCORE: float = 0.30
 
