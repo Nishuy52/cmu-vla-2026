@@ -224,6 +224,38 @@ run_one() {
   (ss -ltn 2>/dev/null || true) | grep -q ":$OPORT " && echo "OLLAMA: up on $OPORT" || echo "OLLAMA: MISSING"
   export VLA_LLM_LOCAL_BASE_URL=http://127.0.0.1:$OPORT/v1
 
+  # ---- warm the local model (issue #82) ----
+  # "OLLAMA: up" above only means the TCP port is open — ollama still has to pick a
+  # working CUDA backend (this node's TITAN V is cc=700, too old for ollama's bundled
+  # cuda_v13 build; the fallback probe to cuda_v12 alone costs 3.5-24s per
+  # verify_batch_*_ollama_*.log "skipping CUDA device" -> "inference compute" gaps) and
+  # then, on the FIRST inference request, actually read the ~3GB qwen2.5vl:3b GGUF
+  # weights off disk into VRAM — ollama does that lazily. Left alone, that whole cold
+  # tax lands inside the scored ladder's tight per-call timeout
+  # (core.llm.timeout.DEFAULT_CALL_TIMEOUT_S = 20s), which is exactly what blew the
+  # original livingroom_1 failure's ~20s parse-to-regex window. Fire one throwaway
+  # chat call now, on a generous boot-time-only budget (core.llm.warmup), so the local
+  # tier is already warm by the time a real question can reach it. Best-effort: a
+  # failed/timed-out warmup is only logged, never fatal — the ladder's regex floor is
+  # still the safety net.
+  #
+  # Only worth paying when the local tier can actually be reached FIRST: with
+  # SOCLAAS_API_KEY set the api tier always answers before local ever gets tried (every
+  # batch run since 27 Jul shows zero "tier":"local" usage-log records), so warming it
+  # would only slow this run's batch throughput for no benefit — skip in that case so
+  # the api path is never slowed by this fix.
+  if [ -z "${SOCLAAS_API_KEY:-}" ]; then
+    timeout 250 python -c "
+from core.llm.warmup import warm_up_local
+print('WARMUP_OK' if warm_up_local() else 'WARMUP_FAILED')
+" > ~/verify_batch_${J}_ollama_warmup_${SLOT}.log 2>&1
+    grep -q WARMUP_OK ~/verify_batch_${J}_ollama_warmup_${SLOT}.log \
+      && echo "OLLAMA: warmup ok (model loaded)" \
+      || echo "OLLAMA: warmup failed — first scored call may still cold-load"
+  else
+    echo "OLLAMA: warmup skipped (SoCLaaS primary tier active; local tier not on this run's answering path)"
+  fi
+
   # ---- ai_module adapter (per-question dump paths) ----
   export VLA_EXPLORE_DEBUG_DIR=~/verify_batch_${J}_debug_${SLOT}
   mkdir -p "$VLA_EXPLORE_DEBUG_DIR"

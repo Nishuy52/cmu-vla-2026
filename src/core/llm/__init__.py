@@ -23,10 +23,15 @@ from core.llm.timeout import (
     call_with_timeout,
     with_timeout,
 )
+from core.llm.warmup import (
+    DEFAULT_WARMUP_TIMEOUT_S,
+    warm_up_local,
+)
 
 __all__ = [
     "AnthropicChatAdapter",
     "DEFAULT_CALL_TIMEOUT_S",
+    "DEFAULT_WARMUP_TIMEOUT_S",
     "LlmConfig",
     "LocalStub",
     "OpenAIChatAdapter",
@@ -37,5 +42,6 @@ __all__ = [
     "build_chat_fns_with_tiers",
     "call_with_timeout",
     "load_config",
+    "warm_up_local",
     "with_timeout",
 ]
