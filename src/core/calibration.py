@@ -116,7 +116,10 @@ class BudgetTunables:
     ledger_reserve_s: float = 45.0     # floor-reserve below which no discretionary call (LEDGER_RESERVE_S)
 
     # --- interfaces.py (per-QType soft exploration budgets) ---------------------
-    explore_budget_numerical_s: float = 210.0
+    # numerical raised 210 -> 450 (#150): NUMERICAL answers in place (no drive-out
+    # phase) so more exploration only adds coverage, never trades away answer time;
+    # see the EXPLORE_BUDGET_S comment in core/interfaces.py for the full rationale.
+    explore_budget_numerical_s: float = 450.0
     explore_budget_object_reference_s: float = 240.0
     explore_budget_instruction_following_s: float = 270.0
 

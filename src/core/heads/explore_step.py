@@ -194,7 +194,10 @@ class ExploreHead:
         self._maybe_clear_provisional(scene, pose, t)
 
         if self._policy is None:
-            self._policy = ExplorationPolicy(start_xy=pose, affinity=self._affinity())
+            # #150: NUMERICAL boosts frontier size in scoring (unseen-area coverage is the
+            # objective for counting); see nav.exploration.NUMERICAL_W_SIZE_MULT.
+            qtype = self.plan.qtype if self.plan is not None else None
+            self._policy = ExplorationPolicy(start_xy=pose, affinity=self._affinity(), qtype=qtype)
         decision = self._stepped_decision(pose, t)
         self.last_status = decision.status
         # issue #83: diagnostic-only, no-op unless VLA_EXPLORE_DEBUG_DIR is set (see

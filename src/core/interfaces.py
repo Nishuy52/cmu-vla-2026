@@ -277,8 +277,34 @@ class QType(str, Enum):
 
 
 # Soft per-type exploration budgets (s) before answer-path pressure (architecture §5).
+#
+# NUMERICAL (#150): raised from the original 210.0 to 450.0. NUMERICAL answers in place
+# (no drive-out phase, unlike INSTRUCTION_FOLLOWING), so exploring longer only ever adds
+# sensing coverage -- it never trades away answer-assembly time the way it would for a
+# qtype with post-answer work. Live evidence (#150) shows the merged detector/NMS stack
+# cut numerical over-counting by ~82%, leaving under-counting (never having SEEN an
+# instance) as the entire remaining error source; the old 210 s cap threw away ~270 s of
+# usable sensing before the controller's effective forced-assembly gate
+# (`fsm.budget.DEFAULT_FORCED_ASSEMBLY_S` = 480.0) would have forced VERIFY anyway.
+#
+# 450.0 is chosen as "just under 480.0" with a documented 30 s settle margin, not the
+# literal ceiling, so a NUMERICAL question that is still accumulating observations near
+# the gate gets a full settle window to satisfy `heads.numerical.STABLE_TICKS` (3
+# consecutive equal counts) before losing the distinction between "explore budget spent"
+# (`fsm.controller._tick_explore`) and "forced assembly" (`fsm.controller.tick`'s
+# watchdog overlay) -- both routes still land in VERIFY either way, so the margin is a
+# clarity/logging hedge, not a correctness requirement. 30 s also mirrors the existing
+# SYS-F6 hedge between the neutral (510/570) and effective (480/540) forced-assembly /
+# watchdog-floor pairs (`fsm.budget.py`), reusing the codebase's established margin size
+# rather than inventing a new one (generalization protocol: no fresh magic number).
+#
+# This costs nothing in the common case: NUMERICAL's early-answer gate
+# (`fsm.controller.QuestionController._early_answer_ready`) already exits EXPLORE_EXECUTE
+# the moment the count is stable, so a small room that stabilises in seconds still
+# answers in seconds -- the raised ceiling only matters for scenes that genuinely need the
+# extra ~240 s to keep discovering un-seen instances.
 EXPLORE_BUDGET_S: dict[QType, float] = {
-    QType.NUMERICAL: 210.0,
+    QType.NUMERICAL: 450.0,
     QType.OBJECT_REFERENCE: 240.0,
     QType.INSTRUCTION_FOLLOWING: 270.0,
 }

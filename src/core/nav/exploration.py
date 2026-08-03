@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
 
-from core.interfaces import WaypointCmd
-from core.nav.frontiers import Frontier, detect_frontiers
+from core.interfaces import QType, WaypointCmd
+from core.nav.frontiers import Frontier, W_SIZE, detect_frontiers
 from core.nav.occupancy import FREE, OccupancyGrid
 
 # --------------------------------------------------------------------------- tunables
@@ -30,6 +30,29 @@ SWEEP_S: float = 60.0  # duration of the opening orientation sweep
 SWEEP_SIDE_M: float = 1.0  # side length of the sweep diamond around the start pose
 MIN_FRONTIER_SCORE: float = 0.0  # frontiers below this score aren't worth pursuing
 COVERAGE_SATURATED_FREE_FRAC: float = 0.0  # reserved; frontier absence is the real gate
+
+# #150/#103: for NUMERICAL, UNSEEN AREA is the objective -- an under-count is an instance
+# that was never in view, not a duplicate or a mislabel (#150's live evidence: the merged
+# NMS stack cut over-counting ~82%, leaving coverage as the entire remaining error). The
+# default frontier score (`nav.frontiers.detect_frontiers`) is
+# `w_size * size - w_dist * path_distance + w_affinity * affinity`: a large-but-far
+# frontier bordering a genuinely big unexplored pocket can lose to a small-but-near or
+# high-affinity frontier, so the policy keeps re-covering already-seen ground instead of
+# committing to the pocket that would reveal more instances (the #103 failure mode: the
+# resolved/target region sits outside what was actually explored). Boosting the size term
+# for NUMERICAL only shifts that tradeoff toward "go where there is more unseen boundary
+# to reveal" without touching OBJECT_REFERENCE/INSTRUCTION_FOLLOWING, whose objective is
+# grounding a specific referent rather than exhaustive coverage, or the neutral W_SIZE
+# default other callers (e.g. explore_debug diagnostics) still get with qtype=None.
+#
+# 2.0x is a first, conservative cut: enough to let a frontier roughly twice the boundary
+# size of a rival outweigh the ~1-cell-per-2-score-unit W_DIST penalty (W_SIZE=1.0,
+# W_DIST=0.5 in nav.frontiers) over a few extra metres of travel, without letting size
+# swamp the W_AFFINITY=4.0 semantic term entirely. Flagged as thin evidence per the
+# generalization protocol (docs/calibration.md) -- not fit to a held-out sample, just a
+# principled starting point pending a live A/B; revisit if #150-style coverage evidence
+# comes back with a live before/after on this specific weight.
+NUMERICAL_W_SIZE_MULT: float = 2.0
 
 
 class ExplorationStatus(str, Enum):
@@ -71,6 +94,10 @@ class ExplorationPolicy:
     sweep_side_m: float = SWEEP_SIDE_M
     min_frontier_score: float = MIN_FRONTIER_SCORE
     t0: float | None = None  # question-clock origin; if None, anchored on first step
+    #: #150 -- when QType.NUMERICAL, detect_frontiers is called with a boosted w_size
+    #: (NUMERICAL_W_SIZE_MULT) so unseen-area coverage outweighs distance/affinity more
+    #: than it does for the other qtypes. None (default) == unchanged geometric scoring.
+    qtype: QType | None = None
     _sweep: list[WaypointCmd] = field(default_factory=list)
     _sweep_idx: int = 0
 
@@ -113,7 +140,8 @@ class ExplorationPolicy:
                 return ExplorationDecision(ExplorationStatus.SWEEPING, waypoint=wp)
 
         # --- frontier pursuit ---
-        frontiers = detect_frontiers(grid, vehicle_xy, self.affinity)
+        w_size = NUMERICAL_W_SIZE_MULT * W_SIZE if self.qtype is QType.NUMERICAL else W_SIZE
+        frontiers = detect_frontiers(grid, vehicle_xy, self.affinity, w_size=w_size)
         for f in frontiers:
             if f.score >= self.min_frontier_score:
                 return ExplorationDecision(
