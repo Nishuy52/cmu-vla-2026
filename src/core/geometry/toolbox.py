@@ -1361,7 +1361,9 @@ def resolve(
             audit.append(
                 Relaxation("superlative_anchor_missing", f"{sup.anchors[0].noun} not found")
             )
-            survivors = _tier_priority_order(survivors, index, target.noun, hard_clauses, th)
+            survivors = _ungrounded_superlative_order(
+                survivors, index, target.noun, hard_clauses, original_hard_clauses, th, audit
+            )
     elif not hard_clauses and original_hard_clauses and len(survivors) > 1:
         # issue #59: the fallback ladder dropped every relation clause (category-only
         # rung) because no candidate passed it as a HARD filter — e.g. "the potted
@@ -1414,6 +1416,112 @@ def _relaxed_relation_order(
         return sum(_eval_clause(c, cl, index, th).score for cl in dropped_clauses)
 
     return sorted(survivors, key=lambda c: (-_score(c), c.instance_id))
+
+
+def _ungrounded_superlative_order(
+    survivors: list[InstanceRecord],
+    index: SceneIndex,
+    noun: str,
+    hard_clauses: Sequence[Clause],
+    original_hard_clauses: Sequence[Clause],
+    th: Thresholds,
+    audit: list[Relaxation],
+) -> list[InstanceRecord]:
+    """Order survivors when a superlative's anchor could not be grounded (issue #168).
+
+    Handing this straight to :func:`_tier_priority_order` degenerates to bare
+    ``_stable_by_id`` (lowest instance_id wins -- detection-order luck, not
+    semantics) exactly when the query noun is bare (no tier signal) AND the
+    applied ``hard_clauses`` carry no discriminating score (there are none, or
+    the survivors already tie on them) -- the arabic_room "pillow closest to
+    the book on the stool" live case: ``book`` never grounds, both pillows are
+    a bare-noun same-tier pair, and the fallback ladder's own relaxation left
+    no HARD relation clause to score by.
+
+    Real evidence still wins first, in order of strength:
+
+    1. Label tier + surviving ``hard_clauses`` score (exactly what
+       ``_tier_priority_order`` already provides) -- unchanged for every case
+       that already had a discriminating signal.
+    2. Relevance to whichever relation clauses the fallback ladder RELAXED
+       away (``original_hard_clauses`` minus ``hard_clauses``) -- the same
+       "spatial plausibility of what the instruction actually said" signal
+       ``_relaxed_relation_order`` (issue #59) uses, applied here for the same
+       reason: a dropped clause is still evidence about which candidate the
+       speaker meant, and is strictly more defensible than instance id.
+
+    Only when BOTH signals leave every survivor tied is there genuinely
+    nothing to discriminate on. That case is recorded explicitly in the audit
+    trail (``superlative_tie_unresolved``) rather than silently presented as a
+    confident pick, so a caller inspecting the audit (e.g. diagnostics, or a
+    future provisional-commit gate) can tell a real ranking apart from a coin
+    flip -- existing callers that unconditionally take ``candidates_ranked[0]``
+    are unaffected, since a deterministic order (instance_id, same as before)
+    is still returned.
+    """
+    tier_ordered = _tier_priority_order(survivors, index, noun, hard_clauses, th)
+    if len(tier_ordered) < 2:
+        return tier_ordered
+
+    dropped_clauses = [c for c in original_hard_clauses if c not in hard_clauses]
+
+    def _primary_key(r: InstanceRecord) -> tuple:
+        return _tier_priority_sort_key(r, survivors, index, noun, hard_clauses, th)
+
+    if _is_tied(tier_ordered, _primary_key) and dropped_clauses:
+        relaxed_ordered = _relaxed_relation_order(tier_ordered, dropped_clauses, index, th)
+
+        def _dropped_score_key(r: InstanceRecord) -> float:
+            return -sum(_eval_clause(r, cl, index, th).score for cl in dropped_clauses)
+
+        if not _is_tied(relaxed_ordered, _dropped_score_key):
+            return relaxed_ordered
+        tier_ordered = relaxed_ordered  # still deterministic id order beneath the tie
+
+    if _is_tied(tier_ordered, _primary_key):
+        audit.append(
+            Relaxation(
+                "superlative_tie_unresolved",
+                f"no evidence discriminates {len(tier_ordered)} '{noun}' "
+                "candidates once the superlative anchor failed to ground",
+            )
+        )
+    return tier_ordered
+
+
+def _is_tied(ordered: Sequence[InstanceRecord], key) -> bool:
+    """True if the top two (of >= 2) survivors carry an identical ordering key."""
+    return len(ordered) > 1 and key(ordered[0]) == key(ordered[1])
+
+
+def _tier_priority_sort_key(
+    r: InstanceRecord,
+    recs: Sequence[InstanceRecord],
+    index: SceneIndex,
+    noun: str,
+    hard_clauses: Sequence[Clause],
+    th: Thresholds,
+) -> tuple:
+    """The (tier, -clause_score) prefix of :func:`_tier_priority_order`'s own sort
+    key, exposed standalone so callers can detect a tie on that same evidence
+    without re-deriving it (issue #168)."""
+    from core.perception.scene_index import normalize_label
+    from core.perception.vocab import head_noun
+
+    query = normalize_label(noun)
+    bare = query == head_noun(query)
+    tiered = None if bare else getattr(index, "by_label_tiered", None)
+    tier_by_id: dict[int, MatchTier] = (
+        {} if bare or tiered is None else {rec.instance_id: tier for rec, tier in tiered(noun)}
+    )
+    worst = MatchTier.TYPO
+    score_by_id: dict[int, float] = {}
+    if hard_clauses and th is not None:
+        score_by_id = {
+            rec.instance_id: sum(_eval_clause(rec, cl, index, th).score for cl in hard_clauses)
+            for rec in recs
+        }
+    return (tier_by_id.get(r.instance_id, worst), -score_by_id.get(r.instance_id, 0.0))
 
 
 def _nested_superlative_order(
