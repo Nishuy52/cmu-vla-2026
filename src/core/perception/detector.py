@@ -1137,6 +1137,76 @@ def _norm_cxcywh_to_tile_xyxy(
     return float(x0), float(y0), float(x1), float(y1)
 
 
+#: The exact substring a rendered GDINO caption always uses between noun phrases
+#: (:func:`build_gdino_prompt`'s ``" . ".join(...)``). A label containing this
+#: substring is never a real class name -- it is (at least) two caption nouns stuck
+#: together, the signature of issue #172's raw-caption fallback. Shared by the
+#: detector's own alignment-fallback guard below and the tracker's defence-in-depth
+#: guard (:mod:`core.perception.tracker`).
+CAPTION_JOIN_MARKER: str = " . "
+
+#: Minimum shared (lower-cased) word count between a coarse recovery phrase and a
+#: caption noun for :func:`resolve_alignment_fallback` to accept that noun as the
+#: detection's label (issue #172). 1 -- any single shared content word ("potted" or
+#: "plant" both point at "potted plant" and nothing else in a caption that also has
+#: "magazine"/"ottoman"/"dressing table") is already a stronger signal than the empty
+#: overlap a wrong noun would score, and multi-word nouns in this vocab rarely share a
+#: word with each other (spot-checked against the standing vocab in
+#: core.parsing.vocab), so raising this bound would only trade recall for a rarely-hit
+#: ambiguity case that Never-emit-the-caption already prevents from doing damage.
+FALLBACK_NOUN_MATCH_MIN_WORDS: int = 1
+
+
+def caption_nouns(caption: str) -> list[str]:
+    """Split a rendered GDINO caption back into its individual noun phrases.
+
+    Inverse of :func:`build_gdino_prompt`'s ``" . ".join(nouns) + " ."`` rendering:
+    splits on bare ``"."``, strips whitespace, drops empty segments (the trailing
+    separator, or an empty/whitespace-only caption).
+    """
+    return [p.strip() for p in caption.split(".") if p.strip()]
+
+
+def resolve_alignment_fallback(caption: str, recovery_phrase: str = "") -> str | None:
+    """Issue #172: decide what to do with a detection whose GDINO phrase-span
+    alignment produced no usable phrase (``get_phrases_from_posmap`` returned an empty
+    string -- the guaranteed outcome, per :data:`DEFAULT_GDINO_QUESTION_BOX_THRESHOLD`'s
+    own note, for any query scoring in ``[box_threshold, text_threshold)``, exactly the
+    band issue #91 opened up) or a phrase that still contains the caption's own join
+    marker (should not happen, but is treated the same way out of caution).
+
+    Returns the caption's single best-matching noun, or ``None`` -- meaning the caller
+    must DROP the detection, never fall back to the raw caption as a label.
+
+    * A caption with exactly one noun is unambiguous even with no recovery signal at
+      all: that one noun IS the match.
+    * Otherwise, ``recovery_phrase`` (any weaker/partial text the caller could recover
+      -- e.g. a second decode pass at a lower text threshold; empty string if the
+      caller has no such signal, as in the ``predict()``-wrapped per-tile fallback
+      path, which exposes no per-token scores to recover from) is matched against each
+      caption noun by shared lower-cased word count; the noun with the most shared
+      words wins ties broken by first occurrence in the caption, provided it clears
+      :data:`FALLBACK_NOUN_MATCH_MIN_WORDS`. No match clearing the bound -> drop.
+    """
+    nouns = caption_nouns(caption)
+    if not nouns:
+        return None
+    if len(nouns) == 1:
+        return nouns[0]
+    phrase_words = [w for w in recovery_phrase.lower().split() if w]
+    if not phrase_words:
+        return None
+    phrase_word_set = set(phrase_words)
+    best_noun: str | None = None
+    best_score = FALLBACK_NOUN_MATCH_MIN_WORDS - 1
+    for noun in nouns:
+        noun_words = set(noun.lower().split())
+        score = len(noun_words & phrase_word_set)
+        if score > best_score:
+            best_score, best_noun = score, noun
+    return best_noun
+
+
 class GroundingDinoDetector:
     """Real open-vocab GroundingDINO-class detector (Gate 4).
 
@@ -1537,7 +1607,21 @@ class GroundingDinoDetector:
     def _decode_batch_item(
         self, tile_id: int, tile: np.ndarray, item_logits, item_boxes,
     ) -> list[Detection]:
-        """Decode one batch item's (nq, ntok) logits + (nq, 4) boxes into Detections."""
+        """Decode one batch item's (nq, ntok) logits + (nq, 4) boxes into Detections.
+
+        Issue #172: a query can clear ``box_threshold`` (the max of its per-token
+        logits) yet have every individual token fall short of the stricter
+        ``text_threshold`` -- ``get_phrases_from_posmap`` then decodes an EMPTY
+        phrase. The old code fell back to ``self.prompt`` (the raw, still-joined
+        caption) as the label in that case, emitting phantom instances like
+        ``'magazine . ottoman . potted plant . dressing table .'``. Now: on an empty
+        (or otherwise unusable) phrase, re-decode the SAME query at the lower
+        ``box_threshold`` -- a token that individually clears the bar that admitted
+        this query at all is a legitimate, if weaker, recovery signal -- and hand that
+        coarser phrase to :func:`resolve_alignment_fallback` to pick the caption's
+        best-matching single noun, or drop the detection outright when nothing
+        matches. A caption label is never emitted again.
+        """
         from groundingdino.util.utils import get_phrases_from_posmap
 
         tile_h, tile_w = tile.shape[0], tile.shape[1]
@@ -1550,11 +1634,21 @@ class GroundingDinoDetector:
         for i in keep:
             posmap = item_logits[i] > self.text_threshold
             phrase = get_phrases_from_posmap(posmap, tokenized, tokenizer).replace(".", "").strip()
+            if not phrase or CAPTION_JOIN_MARKER in phrase:
+                coarse_posmap = item_logits[i] > self.box_threshold
+                coarse_phrase = get_phrases_from_posmap(
+                    coarse_posmap, tokenized, tokenizer
+                ).replace(".", "").strip()
+                label = resolve_alignment_fallback(self.prompt, coarse_phrase)
+                if label is None:
+                    continue  # #172: no plausible single noun -- drop, never the raw caption
+            else:
+                label = phrase
             cx, cy, bw, bh = (float(v) for v in item_boxes[i])
             bbox = _norm_cxcywh_to_tile_xyxy(cx, cy, bw, bh, tile_w, tile_h)
             dets.append(
                 Detection(
-                    tile_id=tile_id, bbox_xyxy=bbox, label=phrase or self.prompt,
+                    tile_id=tile_id, bbox_xyxy=bbox, label=label,
                     score=float(max_logits[i]),
                 )
             )
@@ -1586,7 +1680,16 @@ class GroundingDinoDetector:
     def _call_per_tile(
         self, torch, model, predict_fn, tiles: Sequence[np.ndarray], device, dtype,
     ) -> list[list[Detection]]:
-        """Fallback: one ``groundingdino.util.inference.predict`` call per tile."""
+        """Fallback: one ``groundingdino.util.inference.predict`` call per tile.
+
+        Issue #172: ``predict_fn`` (``groundingdino.util.inference.predict``) only
+        returns the already-decoded phrase, discarding the per-token logits that
+        :meth:`_decode_batch_item` uses to recover a coarser phrase on alignment
+        failure -- this path has no equivalent recovery signal to offer
+        :func:`resolve_alignment_fallback`. It still gets the same guarantee (never
+        emit the raw caption as a label): an empty/unusable phrase resolves via the
+        caption-noun-count-1 shortcut when unambiguous, otherwise drops.
+        """
         per_tile: list[list[Detection]] = []
         for b, tile in enumerate(tiles):
             tile_h, tile_w = tile.shape[0], tile.shape[1]
@@ -1601,10 +1704,16 @@ class GroundingDinoDetector:
             for (cx, cy, bw, bh), score, phrase in zip(
                 boxes.tolist(), scores.tolist(), phrases,
             ):
+                if not phrase or CAPTION_JOIN_MARKER in phrase:
+                    label = resolve_alignment_fallback(self.prompt)
+                    if label is None:
+                        continue  # #172: no recovery signal available -- drop
+                else:
+                    label = phrase
                 bbox = _norm_cxcywh_to_tile_xyxy(cx, cy, bw, bh, tile_w, tile_h)
                 dets.append(
                     Detection(
-                        tile_id=b, bbox_xyxy=bbox, label=phrase or self.prompt,
+                        tile_id=b, bbox_xyxy=bbox, label=label,
                         score=float(score),
                     )
                 )

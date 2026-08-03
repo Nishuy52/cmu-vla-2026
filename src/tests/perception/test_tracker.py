@@ -519,3 +519,36 @@ def test_merged_instance_stays_floored_when_both_sightings_flat():
     rec = idx.all_instances()[0]
     assert rec.n_obs == 2
     assert rec.aabb_max[2] - rec.aabb_min[2] > 0.0
+
+
+# ------------------------------------------------------------------ #172: caption-label guard
+
+
+def test_pipeline_rejects_a_detection_whose_label_carries_the_caption_marker(caplog):
+    """Issue #172 defence-in-depth: PerceptionPipeline.process must drop any detection
+    whose label still carries the caption join marker (' . ') before it ever reaches
+    fusion/tracking -- it must never become a tracked instance -- while a normal,
+    co-occurring detection is unaffected."""
+    caption_label = "magazine . ottoman . potted plant . dressing table ."
+    bad = _front_det(label=caption_label, tile_id=0)
+    rear_spec = T.tile_specs()[2]
+    good = Detection(
+        2, (rear_spec.cx - 60, rear_spec.cy - 60, rear_spec.cx + 60, rear_spec.cy + 60),
+        "ottoman", 0.4,
+    )
+    detector = FakeDetector([bad, good])
+    pipe = PerceptionPipeline(detector, keyframe_cfg=KeyframeConfig(every_k=1))
+    cloud = np.vstack([
+        _box_cloud(3.0, 0.0, 0.5, seed=1),
+        _box_cloud(-3.0, 0.0, 0.0, seed=2),
+    ]).astype(np.float32)
+    pano = PanoFrame(t=0.0, image=np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), np.uint8), odom=_odom())
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="core.perception.tracker"):
+        pipe.process(pano, LidarScan(t=0.0, points=cloud))
+
+    labels = [r.label for r in pipe.index.all_instances()]
+    assert labels == ["ottoman"]
+    assert not any(caption_label in r.label for r in pipe.index.all_instances())
+    assert any("172" in rec.message for rec in caplog.records)

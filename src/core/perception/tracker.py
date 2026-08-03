@@ -22,6 +22,7 @@ pattern.
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 
@@ -32,6 +33,7 @@ from core.parsing.vocab import NOUN_ALIASES
 from core.perception.colour import ColourTally, tally_from_colors
 from core.perception.pano_projection import project_points_to_pano, sample_colors
 from core.perception.detector import (
+    CAPTION_JOIN_MARKER,
     Detection,
     DetectorFn,
     ENV_RAW_DETECTION_DUMP_PATH,
@@ -39,6 +41,8 @@ from core.perception.detector import (
     GATE_NO_LIDAR_CLUSTER,
     dump_raw_detections,
 )
+
+_LOGGER = logging.getLogger(__name__)
 from core.perception.fusion import (
     DEFAULT_FUSION_CONFIG,
     Fused3D,
@@ -510,6 +514,19 @@ class PerceptionPipeline:
         colour_obs: list[ColourTally | None] = []
         for tile_dets in per_tile:
             for det in tile_dets:
+                # Issue #172 defence-in-depth: the detector must never emit a raw,
+                # still-joined caption as a label, but this is the one place every
+                # detection (local or remote path) passes through before it can ever
+                # become a tracked instance, so guard here too, cheaply, in case a
+                # future/other detector path misses the fix.
+                if CAPTION_JOIN_MARKER in det.label:
+                    _LOGGER.warning(
+                        "PerceptionPipeline.process: dropping a detection whose label "
+                        "still contains the caption separator %r (label=%r, "
+                        "score=%.4f) -- issue #172 guard.",
+                        CAPTION_JOIN_MARKER, det.label, det.score,
+                    )
+                    continue
                 fused = fuse_detection(
                     det, scan, odom, self.fusion_cfg,
                     n_tiles=self.n_tiles, hfov=self.hfov, vfov=self.vfov,

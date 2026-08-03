@@ -50,6 +50,10 @@ from core.perception.detector import (
     _eviction_safe_vocab_order,
     CROSS_TILE_NMS_IOU_THRESHOLD,
     suppress_cross_tile_duplicates,
+    CAPTION_JOIN_MARKER,
+    FALLBACK_NOUN_MATCH_MIN_WORDS,
+    caption_nouns,
+    resolve_alignment_fallback,
 )
 from core.perception.tiling import DEFAULT_TILE_HFOV, DEFAULT_TILE_VFOV
 
@@ -1855,3 +1859,245 @@ def test_eviction_safe_vocab_order_still_never_evicts_a_survivor_when_cost_aware
     survived_after = {n for n in reordered if n not in set(dropped_after)}
 
     assert survived_before <= survived_after
+
+
+# ------------------------------------------------------------------ #172: caption-label fallback
+
+
+def test_caption_nouns_splits_a_rendered_gdino_caption():
+    caption = "magazine . ottoman . potted plant . dressing table ."
+    assert caption_nouns(caption) == ["magazine", "ottoman", "potted plant", "dressing table"]
+
+
+def test_caption_nouns_empty_caption_is_empty_list():
+    assert caption_nouns("") == []
+    assert caption_nouns("   ") == []
+
+
+def test_resolve_alignment_fallback_single_noun_caption_is_unambiguous():
+    # A one-noun caption needs no recovery signal at all -- it is the only candidate.
+    assert resolve_alignment_fallback("teapot .") == "teapot"
+    assert resolve_alignment_fallback("teapot .", recovery_phrase="") == "teapot"
+
+
+def test_resolve_alignment_fallback_maps_partial_recovery_phrase_to_matching_noun():
+    # Issue #172: the exact live pattern -- a marginal (~0.19) detection whose full
+    # text_threshold decode came up empty, but a coarser recovery decode surfaced the
+    # word "potted", which shares a word with exactly one of the caption's four nouns.
+    caption = "magazine . ottoman . potted plant . dressing table ."
+    assert resolve_alignment_fallback(caption, recovery_phrase="potted") == "potted plant"
+    assert resolve_alignment_fallback(caption, recovery_phrase="plant") == "potted plant"
+
+
+def test_resolve_alignment_fallback_no_plausible_noun_drops():
+    caption = "magazine . ottoman . potted plant . dressing table ."
+    # No recovery signal at all -- multi-noun caption, nothing to disambiguate with.
+    assert resolve_alignment_fallback(caption) is None
+    assert resolve_alignment_fallback(caption, recovery_phrase="") is None
+    # A recovery phrase that shares no word with any caption noun.
+    assert resolve_alignment_fallback(caption, recovery_phrase="xyzzy") is None
+
+
+def test_resolve_alignment_fallback_never_returns_text_containing_the_join_marker():
+    caption = "magazine . ottoman . potted plant . dressing table ."
+    for recovery_phrase in ("", "potted", "xyzzy", "table dressing"):
+        result = resolve_alignment_fallback(caption, recovery_phrase=recovery_phrase)
+        if result is not None:
+            assert CAPTION_JOIN_MARKER not in result
+
+
+# ---- local path (GroundingDinoDetector): _decode_batch_item / _call_per_tile wiring
+
+
+class _FakePosmap:
+    """Stand-in for a torch bool tensor: only carries which threshold produced it, so
+    the fake ``get_phrases_from_posmap`` below can tell the text_threshold decode
+    attempt apart from the box_threshold (coarse recovery) one."""
+
+    def __init__(self, thresh: float) -> None:
+        self.thresh = thresh
+
+
+class _FakeQueryVec:
+    """Stand-in for one query's (ntok,) row of ``item_logits``."""
+
+    def __init__(self, peak: float) -> None:
+        self._peak = peak
+
+    def __gt__(self, thresh):
+        return _FakePosmap(thresh)
+
+
+class _FakeMaxLogits:
+    """Stand-in for ``item_logits.max(dim=1)``'s first element (per-query peak)."""
+
+    def __init__(self, peaks: list[float]) -> None:
+        self._peaks = peaks
+
+    def __gt__(self, thresh):
+        return _FakeBoolVec([p > thresh for p in self._peaks])
+
+    def __getitem__(self, i):
+        return self._peaks[i]
+
+    def __float__(self):
+        return float(self._peaks[0])
+
+
+class _FakeBoolVec(list):
+    def nonzero(self):
+        return _FakeIdxHolder([i for i, v in enumerate(self) if v])
+
+
+class _FakeIdxHolder:
+    def __init__(self, idxs: list[int]) -> None:
+        self._idxs = idxs
+
+    def flatten(self):
+        return self
+
+    def tolist(self):
+        return self._idxs
+
+
+class _FakeItemLogits:
+    """Stand-in for the (nq, ntok) ``item_logits`` tensor _decode_batch_item receives.
+    Only ``max(dim=1)`` and per-query ``__getitem__`` are exercised."""
+
+    def __init__(self, peaks: list[float]) -> None:
+        self._peaks = peaks
+
+    def max(self, dim):
+        assert dim == 1
+        return _FakeMaxLogits(self._peaks), None
+
+    def __getitem__(self, i):
+        return _FakeQueryVec(self._peaks[i])
+
+
+def _install_fake_get_phrases_from_posmap(monkeypatch, text_thresh: float, box_thresh: float, coarse_phrase: str):
+    """Fake ``groundingdino.util.utils.get_phrases_from_posmap``: empty phrase at the
+    query's own ``text_threshold`` decode (the alignment-failure case #172 fixes), a
+    caller-supplied coarse recovery phrase at the lower ``box_threshold`` decode."""
+    import sys
+    import types
+
+    def fake_get_phrases(posmap, tokenized, tokenizer):
+        if posmap.thresh == text_thresh:
+            return ""
+        assert posmap.thresh == box_thresh
+        return coarse_phrase
+
+    monkeypatch.setitem(
+        sys.modules, "groundingdino.util.utils",
+        types.SimpleNamespace(get_phrases_from_posmap=fake_get_phrases),
+    )
+
+
+def _decode_batch_item_detector(tmp_path, *, box_threshold: float, text_threshold: float, prompt: str):
+    import types
+
+    det = _dual_pass_detector(tmp_path, question_nouns=caption_nouns(prompt))
+    det.prompt = prompt
+    det.box_threshold = box_threshold
+    det.text_threshold = text_threshold
+    det._model = types.SimpleNamespace(tokenizer=lambda text: {"input_ids": []})
+    return det
+
+
+def test_decode_batch_item_marginal_score_maps_to_matching_noun(monkeypatch, tmp_path):
+    """Issue #172, local path: a query scoring 0.19 -- inside #91's admitted
+    [box_threshold, text_threshold) band -- decodes an empty phrase at text_threshold.
+    _decode_batch_item must retry at the (lower) box_threshold, recover a coarse
+    phrase, and resolve it to the caption's single matching noun -- never the caption
+    itself."""
+    caption = "magazine . ottoman . potted plant . dressing table ."
+    _install_fake_get_phrases_from_posmap(
+        monkeypatch, text_thresh=0.25, box_thresh=0.18, coarse_phrase="potted",
+    )
+    det = _decode_batch_item_detector(tmp_path, box_threshold=0.18, text_threshold=0.25, prompt=caption)
+
+    item_logits = _FakeItemLogits([0.19])
+    item_boxes = [(0.5, 0.5, 0.1, 0.1)]
+    tile = np.zeros((100, 100, 3), dtype=np.uint8)
+
+    dets = det._decode_batch_item(0, tile, item_logits, item_boxes)
+
+    assert len(dets) == 1
+    assert dets[0].label == "potted plant"
+    assert dets[0].score == pytest.approx(0.19)
+    assert CAPTION_JOIN_MARKER not in dets[0].label
+
+
+def test_decode_batch_item_no_plausible_noun_is_dropped(monkeypatch, tmp_path):
+    caption = "magazine . ottoman . potted plant . dressing table ."
+    _install_fake_get_phrases_from_posmap(
+        monkeypatch, text_thresh=0.25, box_thresh=0.18, coarse_phrase="",
+    )
+    det = _decode_batch_item_detector(tmp_path, box_threshold=0.18, text_threshold=0.25, prompt=caption)
+
+    item_logits = _FakeItemLogits([0.19])
+    item_boxes = [(0.5, 0.5, 0.1, 0.1)]
+    tile = np.zeros((100, 100, 3), dtype=np.uint8)
+
+    dets = det._decode_batch_item(0, tile, item_logits, item_boxes)
+
+    assert dets == []  # dropped -- never the raw caption
+
+
+def _call_per_tile_detector(tmp_path, *, prompt: str):
+    import contextlib
+
+    det = _dual_pass_detector(tmp_path, question_nouns=caption_nouns(prompt))
+    det.prompt = prompt
+    det._to_tensor = lambda tile, torch, device, dtype: "fake_tensor"
+    det._forward_ctx = lambda torch: contextlib.nullcontext()
+    return det
+
+
+class _FakeBoxesTensor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def tolist(self):
+        return self._rows
+
+
+class _FakeScoresTensor:
+    def __init__(self, vals):
+        self._vals = vals
+
+    def tolist(self):
+        return self._vals
+
+
+def test_call_per_tile_single_noun_caption_recovers_without_logits(tmp_path):
+    # The per-tile predict() fallback has no per-token logits to recover a coarse
+    # phrase from, but a one-noun caption needs none -- still never drops a legitimate
+    # single-target detection.
+    det = _call_per_tile_detector(tmp_path, prompt="teapot .")
+
+    def fake_predict_fn(model, image, caption, box_threshold, text_threshold, device):
+        return _FakeBoxesTensor([[0.5, 0.5, 0.1, 0.1]]), _FakeScoresTensor([0.19]), [""]
+
+    per_tile = det._call_per_tile(
+        torch=None, model=None, predict_fn=fake_predict_fn,
+        tiles=[np.zeros((100, 100, 3), dtype=np.uint8)], device="cpu", dtype="float32",
+    )
+    dets = per_tile[0]
+    assert len(dets) == 1
+    assert dets[0].label == "teapot"
+
+
+def test_call_per_tile_multi_noun_caption_with_no_recovery_signal_drops(tmp_path):
+    caption = "magazine . ottoman . potted plant . dressing table ."
+    det = _call_per_tile_detector(tmp_path, prompt=caption)
+
+    def fake_predict_fn(model, image, caption, box_threshold, text_threshold, device):
+        return _FakeBoxesTensor([[0.5, 0.5, 0.1, 0.1]]), _FakeScoresTensor([0.19]), [""]
+
+    per_tile = det._call_per_tile(
+        torch=None, model=None, predict_fn=fake_predict_fn,
+        tiles=[np.zeros((100, 100, 3), dtype=np.uint8)], device="cpu", dtype="float32",
+    )
+    assert per_tile[0] == []  # dropped -- never the raw caption

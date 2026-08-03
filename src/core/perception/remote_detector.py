@@ -36,6 +36,7 @@ from typing import Callable, Sequence
 import numpy as np
 
 from .detector import (
+    CAPTION_JOIN_MARKER,
     Detection,
     DEFAULT_GDINO_QUESTION_BOX_THRESHOLD,
     DEFAULT_GDINO_VOCAB_PASS_CADENCE,
@@ -185,12 +186,26 @@ class RemoteDetector:
         for tile_id, dets_raw in enumerate(per_tile_raw):
             dets: list[Detection] = []
             for d in dets_raw:
+                label = str(d["label"])
+                # Issue #172 defence-in-depth (#134's lesson: fix both paths): the
+                # server wraps GroundingDinoDetector.run_caption_pass, so the fix there
+                # already stops a raw-caption label being minted -- but this client
+                # must not silently trust an old/unpatched server either, so it drops
+                # (never displays/tracks) any label that still carries the caption's
+                # own join marker.
+                if CAPTION_JOIN_MARKER in label:
+                    _LOGGER.warning(
+                        "RemoteDetector: dropping a server detection whose label still "
+                        "contains the caption separator %r (label=%r, score=%r) -- "
+                        "issue #172 guard.", CAPTION_JOIN_MARKER, label, d.get("score"),
+                    )
+                    continue
                 x0, y0, x1, y1 = d["bbox_xyxy"]
                 dets.append(
                     Detection(
                         tile_id=tile_id,
                         bbox_xyxy=(float(x0), float(y0), float(x1), float(y1)),
-                        label=str(d["label"]),
+                        label=label,
                         score=float(d["score"]),
                     )
                 )
