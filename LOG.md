@@ -2436,3 +2436,27 @@ the new scorer. Build the #103 live missed-leg table.
 **Next:** split NEVER-DROVE into unexplored-region vs planner-failure
 per leg (explore_debug has per-frontier accept/reject reasons). Harvest
 the 713411-713413 A/B when it lands tonight.
+
+---
+
+## 2026-08-05 — #181 merged after one refutation; full P3 sweep submitted
+
+**Done:**
+- Merged #181 (IF early-answer gate on a fully grounded, stable route).
+  The first gate run caught the sim-clock guard's precondition: a
+  groundable route now legitimately answers at ~66 sim seconds. The
+  guard keeps its long-burn path via an anchor that can never ground.
+- **The fresh verifier REFUTED the first cut with a reproduction:** a
+  failed parse leaves plan None and the head unbuilt, so
+  ungrounded_subgoals carries the assembler's default zero; the gate
+  fired at t=61 s and banked a degenerate waypoint. The fix treats a
+  missing plan as the ultimate gap. A regression test pins it. The
+  verifier re-ran its reproduction and CONFIRMED the amended merge.
+  Filed #182 for the one theoretical residual (non-QType plan qtype).
+- Full gate green on the amended tree. Pushed.
+
+**Sweep:** six jobs on the P3 tree, chained after the Arm A baseline
+(713793-713795): IF g1-g3 (= Arm B of the approved #181 A/B) plus OR
+g4-g5 and nume g6 (second sample on the post-#176 tree). Each job
+self-syncs ~/vla/src from ~/vla_p3_stage at start, so the tree swap
+happens server-side in the chain gap with no session alive.
