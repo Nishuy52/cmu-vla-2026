@@ -2390,3 +2390,26 @@ then harvests it.
 **Next:** fix #176 (tracker merge). Then #151 becomes measurable. Then
 #177 (between-relations, anchor fallbacks). The IF binding constraint
 stays unknown; #103 is the open lead.
+
+---
+
+## 2026-08-04 — Merge batch #176/#177/#178: gate green, verifier confirmed
+
+**Done:**
+- Merged three worktree fixes after independent verification of each:
+  #176 extent-veto growth judgment (8b6025d, 533 targeted tests), #177
+  GT referent widening (27c5efb, 161 tests), #178 live leg probes
+  (fbdbe8c, 33 tests). All surfaces disjoint; clean merges.
+- The full gate found one failure: the calibration ledger pin. #176
+  adds TrackerConfig.extent_growth_tol. e053090 acknowledges the field
+  (tracker 6 -> 7). All other tests passed on the identical tree.
+- A fresh verifier CONFIRMED all claims. It re-scored real captures:
+  previously scoreable rows keep identical gt_target_id and IoU. Live
+  scalars are unchanged with the new leg structures present. Its
+  slow-ratchet probe found no new unbounded growth path; the residual
+  hole rides the pre-#176 #153 floor and is filed separately.
+- Filed #179 (panel-level screen detections, out of #176 scope).
+
+**Next:** resubmit nume+OR on the new pin (byte-identical matrices =
+clean A/B vs 712650/712651/712652). Re-score the harvested sweeps with
+the new scorer. Build the #103 live missed-leg table.
