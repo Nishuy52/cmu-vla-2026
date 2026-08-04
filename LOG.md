@@ -2359,3 +2359,34 @@ then harvests it.
 
 **Open issues that wait on this sweep:** #103, #118, #151, #167, #170.
 **IF baselines for comparison:** 0.5402 then 0.5172 on the final scorer.
+
+---
+
+## 2026-08-04 — Post-#172 sweep harvested: IF null, OR moves first, nume flips
+
+**Done:**
+- Harvested jobs 712650-712652 (OR 16+14, nume 15) and 712656-712658
+  (IF 3x10) on tree 1fe2167. All 75 slots report SUCCESS. Zero DEGRADED.
+  The cluster src is byte-identical to the pin. All six matrices are
+  byte-identical to the 76a55e1 submission. The A/B pairs are clean.
+- **#172 is confirmed fixed live.** Caption-labelled instances fall from
+  826/3103 (26.6%) to 0/5146 (0.0%).
+- **IF matched A/B (n=25 clean): 0.4600 -> 0.4667 (+0.007, inside
+  noise).** Legs go 26/50 -> 25/50. Threading violations go 5 -> 3.
+  The caption-label defect did not bind IF. The leg cap stays.
+- **OR matched A/B (g4, n=15 clean): mean IoU 0.0088 -> 0.0265.** The
+  sweep produces the first nonzero live OR rows: 0.152, 0.246, 0.259,
+  0.050. 6 of 8 scoreable g4 rows stay at 0.000 (#118).
+- **nume matched (n=12 clean): exact stays 1/12.** Undercounts flip to
+  overcounts (33 vs GT 6; 19 vs 3; 27 vs 8). Filed **#176**: the tracker
+  keeps 46 'chair' instances for 6 GT chairs. #176 blocks #151.
+- Filed **#177**: GT resolution leaves 7/16 OR rows unscoreable after
+  #170. The fix recovered 2 rows, not the predicted 7. The re-scored
+  baseline 701984 goes 9/24 -> 11/24 scoreable.
+- Closed **#167** on two-sweep evidence. Updated #118, #151, #173, #174.
+  The loft starves in 5/5 loft rows (#174). Baselines 701983/701984 are
+  re-scored with the current scorer under captures_rescored_20260804/.
+
+**Next:** fix #176 (tracker merge). Then #151 becomes measurable. Then
+#177 (between-relations, anchor fallbacks). The IF binding constraint
+stays unknown; #103 is the open lead.

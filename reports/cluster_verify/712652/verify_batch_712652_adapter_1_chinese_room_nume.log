@@ -1,0 +1,46 @@
+[WARN] [1785788618.534868693] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785788618.564577365] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785788618.569162346] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785788618.572681811] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785788618.575849481] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785788647.155418411] [vla_ai_module]: question latched: 'Count the number of chairs with pillows on them.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785788661.537097457] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785788661.538534512] [vla_ai_module]: idle->parsing question received
+[INFO] [1785788667.310701908] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/114 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/114 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785788667.456083161] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785788697.520803608] [vla_ai_module]: published 150 waypoints since latch
+[INFO] [1785788707.250359164] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785788727.631821482] [vla_ai_module]: published 295 waypoints since latch
+[INFO] [1785788757.643062807] [vla_ai_module]: published 392 waypoints since latch
+[INFO] [1785788787.888946820] [vla_ai_module]: published 432 waypoints since latch
+[INFO] [1785788817.955000146] [vla_ai_module]: published 485 waypoints since latch
+[INFO] [1785788848.280334016] [vla_ai_module]: published 533 waypoints since latch
+[INFO] [1785788878.521378846] [vla_ai_module]: published 580 waypoints since latch
+[INFO] [1785788908.897119347] [vla_ai_module]: published 623 waypoints since latch
+[INFO] [1785788940.680579786] [vla_ai_module]: published 667 waypoints since latch
+[INFO] [1785788971.256194099] [vla_ai_module]: published 711 waypoints since latch
+[INFO] [1785789001.479956714] [vla_ai_module]: published 749 waypoints since latch
+[INFO] [1785789031.731393556] [vla_ai_module]: published 789 waypoints since latch
+[INFO] [1785789062.216681300] [vla_ai_module]: published 829 waypoints since latch
+[INFO] [1785789092.999144044] [vla_ai_module]: published 870 waypoints since latch
+[INFO] [1785789097.333681820] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785789097.711681169] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785789098.344856713] [vla_ai_module]: published int answer: 33
+[INFO] [1785789098.434039959] [vla_ai_module]: answer->done answered
+[INFO] [1785789098.435358240] [vla_ai_module]: controller DONE; last 9 events: 14.4:idle:question_latched:numerical: 'Count the number of chairs with pillows on them.' | 14.4:idle:transition:idle->parsing question received | 20.2:parsing:parsed:tier=api | 20.2:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 450.2:explore_execute:transition:explore_execute->verify explore budget spent | 450.6:verify:transition:verify->answer verify complete | 451.2:answer:published:IntAnswer via answer_state | 451.2:answer:transition:answer->done answered
