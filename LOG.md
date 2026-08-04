@@ -2413,3 +2413,26 @@ stays unknown; #103 is the open lead.
 **Next:** resubmit nume+OR on the new pin (byte-identical matrices =
 clean A/B vs 712650/712651/712652). Re-score the harvested sweeps with
 the new scorer. Build the #103 live missed-leg table.
+
+---
+
+## 2026-08-04 — Rescore with the b2b4852 scorer; the IF constraint is the drive layer
+
+**Done:**
+- Re-scored 11 harvested groups with the merged scorer into
+  captures_rescored_b2b4852/ (sweeps 712070-712072, 712650-712652,
+  712656-712658; baselines 701983/701984). Zero score failures.
+- **#177 recovery confirmed on sweep data: 712650 goes 8/16 to 12/16
+  scoreable.** The four recovered rows measure 0.000 IoU — wrong
+  answers, now measurable (#118). The four still-flagged rows match
+  the predicted genuinely-ambiguous set.
+- **#103 classification from the #178 live leg probes (105 clean legs,
+  two generations): 25 of 29 hard misses are NEVER-DROVE** — the goal
+  is grounded within ~0.3 m of the GT trajectory and the robot stops
+  1.8-6.2 m short. Grounding errors: 2. Near-miss artifacts: 2.
+  Repeat offenders: office_2 x4, home_building_1/2 x3 each, studio x3.
+  Grounding no longer binds IF; the explore/drive layer does.
+
+**Next:** split NEVER-DROVE into unexplored-region vs planner-failure
+per leg (explore_debug has per-frontier accept/reject reasons). Harvest
+the 713411-713413 A/B when it lands tonight.
