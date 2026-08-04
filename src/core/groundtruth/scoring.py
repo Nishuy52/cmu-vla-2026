@@ -791,16 +791,27 @@ def _resolve_geometric_anchor(
     if anchor.disambiguator is None:
         return matches[0] if len(matches) == 1 else None
     disamb = anchor.disambiguator
+    # Anchor-uniqueness fallback (issue #177): when the disambiguator clause itself
+    # cannot be evaluated at all (negated, multi-anchor, a superlative, or an
+    # unmapped predicate) OR its own sub-anchor cannot be pinned uniquely, the
+    # disambiguator contributes NO verifiable evidence either way — it is neither
+    # confirmed nor contradicted. If the anchor noun's OWN class already has exactly
+    # one strongest-tier instance, that single instance is still an honest,
+    # non-guessed resolution: the disambiguator was redundant narrowing on an
+    # already-unique class, not the thing that made it unique. This never overrides
+    # a disambiguator that COULD be checked and came back false or multi-way tied
+    # (those keep falling through to "declined" below) — it only fires when the
+    # question's extra clause is unverifiable, not when it is verified against us.
     if disamb.negated or len(disamb.anchors) != 1 or _is_superlative_clause(disamb):
-        return None
+        return matches[0] if len(matches) == 1 else None
     sub_fn = T._BINARY_PREDS.get(disamb.pred)
     if sub_fn is None or sub_fn is T.in_ or sub_fn is T.with_feature:
-        return None
+        return matches[0] if len(matches) == 1 else None
     sub_anchor_inst = _resolve_geometric_anchor(
         disamb.anchors[0], index, thresholds, depth=depth + 1
     )
     if sub_anchor_inst is None:
-        return None
+        return matches[0] if len(matches) == 1 else None
     winners = [r for r in matches if sub_fn(r, sub_anchor_inst, thresholds).passed]
     return winners[0] if len(winners) == 1 else None
 
@@ -887,59 +898,236 @@ def _gt_target_from_geometry(
     if plan.target is None:
         return None, "none", "none"
     clauses = plan.target.clauses
-    if len(clauses) != 1:
-        return None, "none", "none"
-    clause = clauses[0]
-    if clause.negated or len(clause.anchors) != 1:
-        return None, "none", "none"
-    anchor = clause.anchors[0]
 
-    if _is_superlative_clause(clause):
-        # Zero-candidate mode has no restricted pool to rank -- ranking the WHOLE
-        # target class would just re-derive our own resolver's answer as "ground
-        # truth", not an independent check, so it stays declined there. In
-        # ambiguity-adjudication mode the pool is already the text ladder's OWN
-        # small tied candidate set (never the whole scene), so ranking just those
-        # by the named superlative is a genuinely independent GT-geometry check —
-        # see :func:`_gt_target_from_geometry`'s module docstring note on this.
-        if candidate_ids is None:
+    if len(clauses) == 1:
+        clause = clauses[0]
+        if clause.negated:
             return None, "none", "none"
-        anchor_inst = _resolve_geometric_anchor(anchor, index, thresholds)
-        if anchor_inst is None:
+
+        # between-relation support (issue #177): BETWEEN carries two anchors, not
+        # one, so it is handled before the generic single-anchor gate below. Same
+        # honesty rule as every other relation here: both anchors must themselves
+        # resolve to a UNIQUE GT instance, and the target class must have exactly
+        # ONE member inside the anchor-to-anchor capsule.
+        if clause.pred is T.Pred.BETWEEN:
+            winners = _geometry_relation_candidates(
+                clause, plan.target.noun, index, thresholds, candidate_ids
+            )
+            if winners is not None and len(winners) == 1:
+                source = "geometry_ambiguous" if candidate_ids is not None else "geometry"
+                return winners[0].instance_id, source, "geometric"
             return None, "none", "none"
-        candidates = [
-            r for r in index.by_label(plan.target.noun) if r.instance_id in candidate_ids
-        ]
-        if len(candidates) < 2:
+
+        if len(clause.anchors) != 1:
             return None, "none", "none"
-        ranked = (
-            T.farthest_from(candidates, anchor_inst, thresholds)
-            if clause.pred == T.Pred.FARTHEST_FROM
-            else T.closest_to(candidates, anchor_inst, thresholds)
+        anchor = clause.anchors[0]
+
+        if _is_superlative_clause(clause):
+            # Zero-candidate mode has no restricted pool to rank -- ranking the WHOLE
+            # target class would just re-derive our own resolver's answer as "ground
+            # truth", not an independent check, so it stays declined there. In
+            # ambiguity-adjudication mode the pool is already the text ladder's OWN
+            # small tied candidate set (never the whole scene), so ranking just those
+            # by the named superlative is a genuinely independent GT-geometry check —
+            # see :func:`_gt_target_from_geometry`'s module docstring note on this.
+            if candidate_ids is None:
+                return None, "none", "none"
+            anchor_inst = _resolve_geometric_anchor(anchor, index, thresholds)
+            if anchor_inst is None:
+                return None, "none", "none"
+            candidates = [
+                r for r in index.by_label(plan.target.noun) if r.instance_id in candidate_ids
+            ]
+            if len(candidates) < 2:
+                return None, "none", "none"
+            ranked = (
+                T.farthest_from(candidates, anchor_inst, thresholds)
+                if clause.pred == T.Pred.FARTHEST_FROM
+                else T.closest_to(candidates, anchor_inst, thresholds)
+            )
+            if ranked.order and ranked.margin > P.EPS:
+                return ranked.order[0], "geometry_ambiguous", "geometric"
+            return None, "none", "none"
+
+        winners = _geometry_relation_candidates(
+            clause, plan.target.noun, index, thresholds, candidate_ids
         )
-        if ranked.order and ranked.margin > P.EPS:
-            return ranked.order[0], "geometry_ambiguous", "geometric"
+        if winners is not None and len(winners) == 1:
+            source = "geometry_ambiguous" if candidate_ids is not None else "geometry"
+            return winners[0].instance_id, source, "geometric"
         return None, "none", "none"
 
-    fn = T._BINARY_PREDS.get(clause.pred)
-    if fn is None or fn is T.in_ or fn is T.with_feature:
-        # `in`/`with` describe containment/possession, not a support/adjacency
-        # relation the referential-statement generator would encode as `on`/`near`/
-        # `above` in the first place -- out of this fallback's stated scope.
+    if len(clauses) == 2:
+        # Narrow-then-rank (issue #177): the regex-tier parser attaches a plain
+        # relation clause ("on the table") and a top-level superlative clause
+        # ("closest to the folding screen") as two SEPARATE clauses on the same
+        # target, rather than nesting the superlative as the relation anchor's own
+        # disambiguator, whenever the surface phrasing reads that way ("the bowl ON
+        # the table CLOSEST TO the folding screen"). Ranking the superlative over the
+        # WHOLE target class would be the same re-derive-our-own-answer problem the
+        # single-clause case above declines; ranking it over the class-plus-relation
+        # POOL is different — the pool itself is a hard, independently-verified
+        # geometric gate (the same one the single-clause branch trusts), so breaking
+        # a tie inside it by real GT distance is genuine independent evidence, not
+        # circularity. Only fires for exactly one relation clause + one superlative
+        # clause; anything else (two relations, two superlatives, three-plus
+        # clauses) stays declined, same as before #177.
+        superl = [c for c in clauses if _is_superlative_clause(c)]
+        rel = [c for c in clauses if not _is_superlative_clause(c)]
+        if len(superl) != 1 or len(rel) != 1:
+            return None, "none", "none"
+        superl_clause, rel_clause = superl[0], rel[0]
+        if superl_clause.negated or rel_clause.negated or len(superl_clause.anchors) != 1:
+            return None, "none", "none"
+        # Pool step: the relation clause's own anchor need not resolve to a UNIQUE
+        # instance here (existential union across every strongest-tier match — see
+        # :func:`_geometry_relation_pool_existential`) because the pool is only an
+        # intermediate narrowing; the mandatory margin-gated superlative rank below
+        # still has to pin one unique winner before anything is returned.
+        pool = _geometry_relation_pool_existential(
+            rel_clause, plan.target.noun, index, thresholds, candidate_ids
+        )
+        if not pool:
+            return None, "none", "none"
+        if len(pool) == 1:
+            source = "geometry_ambiguous" if candidate_ids is not None else "geometry"
+            return pool[0].instance_id, source, "geometric"
+        superl_anchor = superl_clause.anchors[0]
+        anchor_inst = _resolve_geometric_anchor(superl_anchor, index, thresholds)
+        winner_id: int | None = None
+        if anchor_inst is not None:
+            winner_id = _rank_pool_by_superlative(pool, anchor_inst, superl_clause.pred, thresholds)
+        else:
+            # Anchor-consensus fallback: the superlative's own anchor noun does not
+            # resolve to a UNIQUE instance (e.g. two 'floor' regions), but if EVERY
+            # strongest-tier candidate for that noun ranks the SAME pool member as
+            # the clear (margin > 0) winner, the answer does not depend on which
+            # literal instance the anchor noun names — consensus across every
+            # possibility is still an honest, non-guessed resolution.
+            anchor_matches = _strongest_tier_matches(index, superl_anchor.noun)
+            if len(anchor_matches) > 1:
+                per_anchor_winners = {
+                    _rank_pool_by_superlative(pool, a, superl_clause.pred, thresholds)
+                    for a in anchor_matches
+                }
+                if len(per_anchor_winners) == 1 and None not in per_anchor_winners:
+                    winner_id = next(iter(per_anchor_winners))
+        if winner_id is not None:
+            source = "geometry_ambiguous" if candidate_ids is not None else "geometry"
+            return winner_id, source, "geometric"
         return None, "none", "none"
-    anchor_inst = _resolve_geometric_anchor(anchor, index, thresholds)
-    if anchor_inst is None:
-        return None, "none", "none"
-    candidates = index.by_label(plan.target.noun)
+
+    return None, "none", "none"
+
+
+def _geometry_relation_candidates(
+    clause,
+    target_noun: str,
+    index: SceneIndex,
+    thresholds: Thresholds,
+    candidate_ids: frozenset[int] | None,
+) -> list[InstanceRecord] | None:
+    """Instances of ``target_noun`` that satisfy one non-superlative relation clause.
+
+    Shared "hard geometric gate" both the single-clause fallback and the #177
+    narrow-then-rank fallback build on. Handles the plain single-anchor predicates
+    (``on``/``near``/``above``/``under`` — ``in``/``with`` stay excluded, same
+    scoping reason as before #177: they describe containment/possession, not the
+    support/adjacency relation the statement corpus encodes) AND, new in #177,
+    ``between`` (two anchors, capsule membership).
+
+    Returns ``None`` — not an empty list — when the clause's own shape cannot be
+    evaluated at all (unmapped/excluded predicate, wrong anchor count for the
+    predicate, or an anchor that itself fails to resolve to a UNIQUE GT instance).
+    The caller must treat that as "no evidence either way", distinct from a
+    resolvable clause that genuinely admits zero candidates.
+    """
+    candidates = index.by_label(target_noun)
     if candidate_ids is not None:
         candidates = [r for r in candidates if r.instance_id in candidate_ids]
-    winners = [
-        r.instance_id for r in candidates if fn(r, anchor_inst, thresholds).passed
+
+    if clause.pred is T.Pred.BETWEEN:
+        if len(clause.anchors) != 2:
+            return None
+        b1 = _resolve_geometric_anchor(clause.anchors[0], index, thresholds)
+        b2 = _resolve_geometric_anchor(clause.anchors[1], index, thresholds)
+        if b1 is None or b2 is None:
+            return None
+        return [r for r in candidates if T.between(r, b1, b2, thresholds).passed]
+
+    if len(clause.anchors) != 1:
+        return None
+    fn = T._BINARY_PREDS.get(clause.pred)
+    if fn is None or fn is T.in_ or fn is T.with_feature:
+        return None
+    anchor_inst = _resolve_geometric_anchor(clause.anchors[0], index, thresholds)
+    if anchor_inst is None:
+        return None
+    return [r for r in candidates if fn(r, anchor_inst, thresholds).passed]
+
+
+def _geometry_relation_pool_existential(
+    clause,
+    target_noun: str,
+    index: SceneIndex,
+    thresholds: Thresholds,
+    candidate_ids: frozenset[int] | None,
+) -> list[InstanceRecord] | None:
+    """Like :func:`_geometry_relation_candidates`, for the #177 narrow-then-rank
+    POOL step only: a single-anchor binary-predicate clause's anchor need not
+    resolve to a UNIQUE instance — a candidate that satisfies the relation against
+    ANY strongest-tier anchor instance is admitted (existential union over the
+    anchor noun's class, e.g. "on A table" rather than "on THE table"). This is safe
+    only as an intermediate narrowing step: the caller still requires the companion
+    superlative clause to pin a UNIQUE winner with a genuine margin before returning
+    an answer. It must never stand in for :func:`_geometry_relation_candidates` as a
+    final answer on its own — that stricter, anchor-must-be-unique form is unchanged
+    since #170 to keep the frozen single-clause battery baseline byte-identical.
+    ``between`` has no existential form here (it already needs both its own anchors
+    pinned to define a capsule at all) and defers to the strict helper.
+    """
+    if clause.pred is T.Pred.BETWEEN:
+        return _geometry_relation_candidates(
+            clause, target_noun, index, thresholds, candidate_ids
+        )
+    if len(clause.anchors) != 1:
+        return None
+    fn = T._BINARY_PREDS.get(clause.pred)
+    if fn is None or fn is T.in_ or fn is T.with_feature:
+        return None
+    anchor_matches = _strongest_tier_matches(index, clause.anchors[0].noun)
+    if not anchor_matches:
+        return None
+    candidates = index.by_label(target_noun)
+    if candidate_ids is not None:
+        candidates = [r for r in candidates if r.instance_id in candidate_ids]
+    return [
+        r for r in candidates
+        if any(fn(r, a, thresholds).passed for a in anchor_matches)
     ]
-    if len(winners) == 1:
-        source = "geometry_ambiguous" if candidate_ids is not None else "geometry"
-        return winners[0], source, "geometric"
-    return None, "none", "none"
+
+
+def _rank_pool_by_superlative(
+    pool: list[InstanceRecord],
+    anchor_inst: InstanceRecord,
+    pred,
+    thresholds: Thresholds,
+) -> int | None:
+    """Rank ``pool`` by the named superlative against one resolved anchor instance.
+
+    Returns the winning instance id only when the ranking exists AND its margin
+    clears ``P.EPS`` — same non-guessing bar the rest of this module uses for a
+    superlative tie-break. Returns ``None`` on an empty pool or a genuine (zero
+    or negative) margin tie.
+    """
+    ranked = (
+        T.farthest_from(pool, anchor_inst, thresholds)
+        if pred == T.Pred.FARTHEST_FROM
+        else T.closest_to(pool, anchor_inst, thresholds)
+    )
+    if ranked.order and ranked.margin > P.EPS:
+        return ranked.order[0]
+    return None
 
 
 def score_object_reference(

@@ -1040,4 +1040,289 @@ def test_or_geometry_fallback_ambiguous_superlative_genuine_tie_stays_none():
     assert r.target_source == "ambiguous"
     assert r.match_method == "none"
     assert r.gt_target_id is None
+
+
+# --------------------------------------------------------------------------- #177
+# residual-set resolution: between-relation support, vertical (above/under)
+# narrow-then-rank, and the anchor-uniqueness fallback for an unverifiable nested
+# disambiguator. See :func:`S._gt_target_from_geometry`,
+# :func:`S._geometry_relation_candidates`, :func:`S._geometry_relation_pool_existential`
+# and the #177 update to :func:`S._resolve_geometric_anchor`.
+
+
+def test_or_between_relation_unique_target_resolves():
+    """A single BETWEEN clause with both anchors uniquely resolved pins the ONE
+    target-class instance whose centroid falls in the anchor-to-anchor capsule —
+    the arabic_room 'wall lamp between a door frame and a window' shape (issue
+    #177), synthetic and with unambiguous anchors so it actually resolves."""
+    door = _box(1, "door frame", 0, 1, 0, 1, 0, 2)
+    window = _box(2, "window", 4, 5, 0, 1, 0, 2)
+    lamp_between = _box(3, "wall lamp", 2.4, 2.6, 0.4, 0.6, 1.0, 1.5)
+    lamp_far = _box(4, "wall lamp", 20, 20.2, 20, 20.2, 1.0, 1.5)
+    instances = [door, window, lamp_between, lamp_far]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the wall lamp that is between the door frame and the window.",
+        idx, instances, referential=None,
+    )
+    assert r.target_source == "geometry"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 3
+    assert not np.isnan(r.iou)
+
+
+def test_or_between_relation_ambiguous_anchor_stays_none():
+    """Guard: BETWEEN never guesses which anchor instance is meant. Two 'door
+    frame' instances in the scene -- the arabic_room real-data shape (issue #177)
+    -- means the anchor itself cannot be pinned, so the question stays declined
+    even though a target-class instance clearly sits between ONE of the pairs."""
+    door_a = _box(1, "door frame", 0, 1, 0, 1, 0, 2)
+    door_b = _box(2, "door frame", 10, 11, 10, 11, 0, 2)
+    window = _box(3, "window", 4, 5, 0, 1, 0, 2)
+    lamp = _box(4, "wall lamp", 2.4, 2.6, 0.4, 0.6, 1.0, 1.5)
+    lamp_other = _box(5, "wall lamp", 30, 30.2, 30, 30.2, 1.0, 1.5)
+    instances = [door_a, door_b, window, lamp, lamp_other]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the wall lamp that is between the door frame and the window.",
+        idx, instances, referential=None,
+    )
+    assert r.target_source == "none"
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
+
+
+def test_or_narrow_then_rank_relation_plus_superlative_resolves():
+    """Two separate top-level clauses on the same target ('on the tray' + 'closest
+    to the window') -- the chinese_room 'bowl on the table closest to the folding
+    screen' shape (issue #177). The relation clause narrows to a hard-verified
+    pool (two mugs on the tray); the superlative then breaks the tie by real GT
+    distance, which is genuine independent evidence, not a re-derived guess."""
+    tray = _box(1, "tray", 0, 1, 0, 1, 0, 1)
+    mug_near = _box(2, "mug", 0.6, 0.8, 0.6, 0.8, 1.0, 1.3)
+    mug_far = _box(3, "mug", 0.3, 0.5, 0.3, 0.5, 1.0, 1.3)
+    window = _box(4, "window", 10, 11, 0, 1, 1, 2)
+    instances = [tray, mug_near, mug_far, window]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the mug on the tray closest to the window.", idx, instances,
+        referential=None,
+    )
+    assert r.target_source == "geometry"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 2
+    assert not np.isnan(r.iou)
+
+
+def test_or_narrow_then_rank_vertical_above_and_farthest_from_resolves():
+    """Vertical relation (issue #177): 'picture above the shelf furthest from the
+    floor' -- the hotel_room_1 shape. Both pictures satisfy ABOVE the shelf (the
+    hard gate); FARTHEST_FROM the floor breaks the tie by height."""
+    shelf = _box(1, "shelf", 0, 1, 0, 1, 0, 0.5)
+    floor = _box(2, "floor", -5, 5, -5, 5, -0.1, 0.0)
+    picture_low = _box(3, "picture", 0.2, 0.4, 0.2, 0.4, 0.6, 0.8)
+    picture_high = _box(4, "picture", 0.2, 0.4, 0.2, 0.4, 2.0, 2.2)
+    instances = [shelf, floor, picture_low, picture_high]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the picture above the shelf furthest from the floor.", idx, instances,
+        referential=None,
+    )
+    assert r.target_source == "geometry"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 4
+    assert not np.isnan(r.iou)
+
+
+def test_or_narrow_then_rank_superlative_anchor_consensus_resolves():
+    """Anchor-consensus fallback (issue #177): the superlative's own anchor noun
+    ('floor') is not class-unique (two floor regions), but every strongest-tier
+    'floor' instance ranks the SAME picture as the clear farthest-from winner --
+    the answer does not depend on which literal floor is meant, so consensus
+    across every possibility is still an honest, non-guessed resolution."""
+    shelf = _box(1, "shelf", 0, 1, 0, 1, 0, 0.5)
+    floor_a = _box(2, "floor", -5, -4, -5, -4, -0.1, 0.0)
+    floor_b = _box(3, "floor", 4, 5, 4, 5, -0.1, 0.0)
+    picture_low = _box(4, "picture", 0.2, 0.4, 0.2, 0.4, 0.6, 0.8)
+    picture_high = _box(5, "picture", 0.2, 0.4, 0.2, 0.4, 2.0, 2.2)
+    instances = [shelf, floor_a, floor_b, picture_low, picture_high]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the picture above the shelf furthest from the floor.", idx, instances,
+        referential=None,
+    )
+    assert r.target_source == "geometry"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 5
+    assert not np.isnan(r.iou)
+
+
+def test_or_narrow_then_rank_genuine_tie_stays_none():
+    """Guard: when the two relation-gated pool members are EXACTLY equidistant
+    from the superlative anchor, the tie-break margin is zero and the question
+    must stay declined, never guessed by id order."""
+    tray = _box(1, "tray", 0, 1, 0, 1, 0, 1)
+    mug_a = _box(2, "mug", 0.3, 0.5, 0.3, 0.5, 1.0, 1.3)
+    mug_b = _box(3, "mug", 0.6, 0.8, 0.6, 0.8, 1.0, 1.3)
+    # window centroid sits on the perpendicular bisector of mug_a/mug_b's centroids
+    # (both at distance 0.55 along the diagonal) so both mugs are equidistant.
+    window = _box(4, "window", 5.45, 5.65, -4.55, -4.35, 1.0, 2.0)
+    instances = [tray, mug_a, mug_b, window]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the mug on the tray closest to the window.", idx, instances,
+        referential=None,
+    )
+    assert r.target_source == "none"
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
+
+
+def test_or_anchor_fallback_unique_bare_anchor_overrides_unverifiable_disambiguator():
+    """Anchor-uniqueness fallback (issue #177): 'the cabinet below the picture' --
+    the livingroom_1 'vase on the cabinet below the picture' shape. The cabinet
+    class is already unique in the scene; 'below the picture' cannot itself be
+    checked because 'picture' is not class-unique (two pictures), but that makes
+    the disambiguator unverifiable, not contradicted -- the already-unique cabinet
+    still pins the anchor, and the vase pool on it is a single honest winner."""
+    cabinet = _box(1, "cabinet", 0, 1, 0, 1, 0, 1)
+    picture_a = _box(2, "picture", 0, 1, 0, 1, 1.5, 2.0)
+    picture_b = _box(3, "picture", 5, 6, 5, 6, 1.5, 2.0)
+    vase = _box(4, "vase", 0.3, 0.5, 0.3, 0.5, 1.0, 1.3)
+    vase_elsewhere = _box(6, "vase", 8, 8.2, 8, 8.2, 1.0, 1.3)
+    instances = [cabinet, picture_a, picture_b, vase, vase_elsewhere]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the vase on the cabinet below the picture.", idx, instances,
+        referential=None,
+    )
+    assert r.target_source == "geometry"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 4
+    assert not np.isnan(r.iou)
+
+
+def test_or_anchor_fallback_declines_when_bare_anchor_also_ambiguous():
+    """Guard: the anchor-uniqueness fallback only fires when the BARE anchor noun
+    is itself unique. Two cabinets, same unverifiable disambiguator shape -- there
+    is no honest single anchor to fall back to, so the question stays declined."""
+    cabinet_a = _box(1, "cabinet", 0, 1, 0, 1, 0, 1)
+    cabinet_b = _box(2, "cabinet", 8, 9, 8, 9, 0, 1)
+    picture_a = _box(3, "picture", 0, 1, 0, 1, 1.5, 2.0)
+    picture_b = _box(4, "picture", 5, 6, 5, 6, 1.5, 2.0)
+    vase = _box(5, "vase", 0.3, 0.5, 0.3, 0.5, 1.0, 1.3)
+    vase_elsewhere = _box(6, "vase", 20, 20.2, 20, 20.2, 1.0, 1.3)
+    instances = [cabinet_a, cabinet_b, picture_a, picture_b, vase, vase_elsewhere]
+    idx = BasicSceneIndex(instances)
+    r = S.score_object_reference(
+        "Find the vase on the cabinet below the picture.", idx, instances,
+        referential=None,
+    )
+    assert r.target_source == "none"
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
+
+
+# --------------------------------------------------------------------------- #177
+# real training-scene residual rows (see issue #177's question list): rows that
+# were "match_method=none" / "no GT target matched" against the LIVE scorer before
+# this fix now resolve to a unique GT target from the real GT annotations, and the
+# rows that stay genuinely ambiguous under the real GT data are locked down too.
+
+
+@requires_full_unity
+def test_or_177_chinese_room_bowl_on_table_closest_to_screen_resolves():
+    """Residual row: chinese_room 'Find the bowl on the table closest to the
+    folding screen.' Two tables in the scene make the relation anchor itself
+    ambiguous, but the existential on-table pool has exactly one bowl once
+    ranked by the folding-screen superlative."""
+    scene_dir = FULL_UNITY_ROOT / "chinese_room"
+    referential = __import__("json").loads(
+        (scene_dir / "chinese_room_referential_statements.json").read_text()
+    )
+    scene = load_scene(scene_dir)
+    idx = BasicSceneIndex(scene.instances)
+    q = "Find the bowl on the table closest to the folding screen."
+    r = S.score_object_reference(q, idx, scene.instances, referential=referential)
+    assert r.target_source == "geometry"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 91
+    assert not np.isnan(r.iou)
+
+
+@requires_full_unity
+def test_or_177_hotel_room_1_picture_above_suitcase_furthest_from_floor_resolves():
+    """Residual row: hotel_room_1 'Find the picture above the suitcase furthest
+    from the floor.' Two 'floor' region instances make the superlative anchor
+    ambiguous, but every floor instance ranks the same picture as the clear
+    farthest-from winner (anchor-consensus)."""
+    scene_dir = FULL_UNITY_ROOT / "hotel_room_1"
+    referential = __import__("json").loads(
+        (scene_dir / "hotel_room_1_referential_statements.json").read_text()
+    )
+    scene = load_scene(scene_dir)
+    idx = BasicSceneIndex(scene.instances)
+    q = "Find the picture above the suitcase furthest from the floor."
+    r = S.score_object_reference(q, idx, scene.instances, referential=referential)
+    assert r.target_source == "geometry"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 19
+    assert not np.isnan(r.iou)
+
+
+@requires_full_unity
+def test_or_177_livingroom_1_vase_on_cabinet_below_picture_resolves():
+    """Residual row: livingroom_1 'Find the vase on the cabinet below the
+    picture.' The text ladder ties two vase candidates; the geometry-ambiguous
+    adjudication pass now pins the cabinet (already unique) via the #177
+    anchor-uniqueness fallback and finds one vase on it."""
+    scene_dir = FULL_UNITY_ROOT / "livingroom_1"
+    referential = __import__("json").loads(
+        (scene_dir / "livingroom_1_referential_statements.json").read_text()
+    )
+    scene = load_scene(scene_dir)
+    idx = BasicSceneIndex(scene.instances)
+    q = "Find the vase on the cabinet below the picture."
+    r = S.score_object_reference(q, idx, scene.instances, referential=referential)
+    assert r.target_source == "geometry_ambiguous"
+    assert r.match_method == "geometric"
+    assert r.gt_target_id == 23
+    assert not np.isnan(r.iou)
+
+
+@requires_full_unity
+def test_or_177_arabic_room_wall_lamp_between_stays_flagged():
+    """Guard, real data: arabic_room 'Find the wall lamp that is between a door
+    frame and a window.' has TWO door frames in the GT annotation, so the BETWEEN
+    anchor cannot be pinned uniquely -- stays honestly declined, not guessed."""
+    scene_dir = FULL_UNITY_ROOT / "arabic_room"
+    scene = load_scene(scene_dir)
+    idx = BasicSceneIndex(scene.instances)
+    q = "Find the wall lamp that is between a door frame and a window."
+    r = S.score_object_reference(q, idx, scene.instances, referential=None)
+    assert r.target_source == "none"
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
+
+
+@requires_full_unity
+def test_or_177_japanese_room_red_pillow_closest_to_sushi_stays_flagged():
+    """Guard, real data: japanese_room 'The red pillow closest to the sushi.' is a
+    single top-level superlative clause with zero pre-narrowed candidates -- issue
+    #170's circularity rule still applies (ranking the WHOLE class would just
+    re-derive our own resolver's answer), so this residual row correctly stays
+    declined; #177 does not widen that rule."""
+    scene_dir = FULL_UNITY_ROOT / "japanese_room"
+    scene = load_scene(scene_dir)
+    idx = BasicSceneIndex(scene.instances)
+    q = "The red pillow closest to the sushi."
+    r = S.score_object_reference(q, idx, scene.instances, referential=None)
+    assert r.target_source == "none"
+    assert r.match_method == "none"
+    assert r.gt_target_id is None
+    assert np.isnan(r.iou)
     assert np.isnan(r.iou)
