@@ -114,10 +114,16 @@ def test_repeat_sighting_PRE_FIX_mints_duplicate():
     the behaviour it names no longer reproduces post-fix: with extent_veto_min_sep
     disabled (0.0 -- the pre-#153 unconditional veto), the exact same repeat
     sighting above mints a SECOND instance at the same centroid instead of fusing
-    into the first."""
+    into the first.
+
+    Issue #176 added a second, independent rescue path (the growth-relative check
+    in ``_match_plausible``) that would otherwise still save this exact scenario --
+    the union barely grows past either TV's own extent -- so ``extent_growth_tol``
+    is ALSO disabled here (0.0) to keep pinning the original, fully-unconditional
+    pre-#153 veto this test documents."""
     idx = BasicSceneIndex()
     od = _odom()
-    pre_fix_cfg = TrackerConfig(extent_veto_min_sep=0.0)
+    pre_fix_cfg = TrackerConfig(extent_veto_min_sep=0.0, extent_growth_tol=0.0)
 
     det1 = _tv_det()
     f1 = _fuse(det1, _tv_cloud(2.60, seed=1), od)

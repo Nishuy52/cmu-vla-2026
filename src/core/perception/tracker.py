@@ -156,6 +156,24 @@ class TrackerConfig:
     # (millimetres to a few centimetres), so it only short-circuits the
     # ~zero-distance case the veto's own docstring calls out as wrong to reject.
     extent_veto_min_sep: float = 0.2
+    # Issue #176: once a candidate's OWN accumulated box already sits at or past the
+    # class-typical ceiling (a legitimately large object, or a noisy/oversized
+    # detection that pushed it there), the #153 floor above stops helping the moment
+    # later re-observations drift past 0.2 m -- which large/noisy clusters routinely
+    # do (a bbox spanning half the panorama has far more centroid jitter than a
+    # tightly-boxed monitor). Every such re-observation then fails BOTH #153's
+    # distance floor AND the absolute typical-size ceiling (which the candidate
+    # already exceeds on its own), so it is vetoed regardless of how little the box
+    # would actually grow -- ratcheting one real, already-oversized object into a
+    # fresh duplicate instance every keyframe (the live sweep's 46-chair-for-6-GT
+    # overcount, #176). The fix: judge GROWTH relative to what the candidate already
+    # spans, not just the absolute class ceiling. A merge that does not enlarge the
+    # box beyond this tolerance on any axis is by construction absorbing more of the
+    # SAME already-established (however oversized) object, not annexing a distinct
+    # one -- a genuinely separate object at typical class spacing adds most of its
+    # own footprint to the union (issue #161's two TVs at 0.65 m spacing grow the
+    # union's width by 0.65 m, far past this), so this never masks that case.
+    extent_growth_tol: float = 0.25
     # H15(a) track decay: an instance still at n_obs==1 that has not been re-observed
     # within this many keyframes of first sighting is a one-frame ghost and is pruned.
     # Confirmed tracks (n_obs>=2) are NEVER decayed. 0 disables decay.
@@ -262,19 +280,37 @@ def _match_plausible(
     fresh duplicate instance at the same spot, forever. Extent is only meaningful
     evidence of "different object" when the two detections are actually apart; at
     near-zero separation it is not evidence of anything and must not veto.
+
+    Issue #176: #153's floor only covers near-ZERO separation. A candidate that is
+    already large/noisy enough to sit at or past the typical-size ceiling (a big
+    real object, or a bbox-unstable detection) keeps drifting past that 0.2 m floor
+    on ordinary re-observations, so it fails BOTH the floor AND the absolute ceiling
+    (which it already exceeded before this match was even attempted) on every later
+    keyframe -- ratcheting into a fresh duplicate each time. Below, a merge that does
+    not enlarge the box beyond ``cfg.extent_growth_tol`` on ANY axis is accepted
+    regardless of the absolute ceiling: it is, by construction, absorbing more of the
+    object the candidate already spans, not annexing a separate one -- a genuinely
+    distinct same-class object at typical spacing adds most of its own footprint to
+    the union (issue #161's two TVs 0.65 m apart grow the union's width by 0.65 m),
+    which this growth check still correctly rejects.
     """
     if dist <= cfg.extent_veto_min_sep:
+        return True
+    new_min = fused.points.min(axis=0)
+    new_max = fused.points.max(axis=0)
+    combined_min = np.minimum(candidate.aabb_min, new_min)
+    combined_max = np.maximum(candidate.aabb_max, new_max)
+    combined_ext = combined_max - combined_min
+    candidate_ext = candidate.aabb_max - candidate.aabb_min
+    growth = combined_ext - candidate_ext
+    if bool(np.all(growth <= cfg.extent_growth_tol)):
         return True
     from core.perception.dimension_priors import prior_for
 
     prior = prior_for(canonical_for_match(candidate.label))
     if prior is None:
         return True
-    new_min = fused.points.min(axis=0)
-    new_max = fused.points.max(axis=0)
-    combined_min = np.minimum(candidate.aabb_min, new_min)
-    combined_max = np.maximum(candidate.aabb_max, new_max)
-    ext = np.sort(combined_max - combined_min)
+    ext = np.sort(combined_ext)
     typ = np.sort(prior.typ_ext)
     return bool(np.all(ext <= cfg.extent_veto_factor * typ))
 
