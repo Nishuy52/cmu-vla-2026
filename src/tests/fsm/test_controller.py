@@ -903,3 +903,36 @@ def test_if_drive_out_watchdog_floor_terminates_a_hung_drive():
     ctrl.tick(io)
     assert ctrl.state is State.DONE
     assert io.publish_count == 1  # the ANSWER waypoint; watchdog publish is a latched no-op
+
+
+def test_if_never_early_when_parse_failed_and_plan_is_none():
+    """#181 regression (verifier repro, 5 Aug 2026): a failed parse leaves plan None
+    and the instruction head unbuilt, so WorldView.ungrounded_subgoals carries the
+    assembler's default 0. The gate must read that as the ultimate gap and never
+    fire; the only exit stays the explore budget, exactly as before #181."""
+    clk = FakeClock(0.0)
+    world = WorldView(
+        scene=FakeScene([]),
+        ungrounded_subgoals=0,  # the default -- NOT a head report; no head exists
+    )
+
+    def broken_parse(q):
+        raise RuntimeError("parse failed")
+
+    ctrl, _ = build_controller(qtype=QType.INSTRUCTION_FOLLOWING, world=world)
+    ctrl._parse = broken_parse
+    io = FakeRobotIO(clk, q_of(QType.INSTRUCTION_FOLLOWING))
+    ctrl.tick(io)  # -> PARSING; parse raises, plan stays None
+    assert ctrl.plan is None
+    ctrl.state = State.EXPLORE_EXECUTE
+
+    from core.interfaces import EXPLORE_BUDGET_S
+
+    budget_s = EXPLORE_BUDGET_S[QType.INSTRUCTION_FOLLOWING]
+    for t in (10.0, 20.0, 50.0, 100.0, 200.0, budget_s - 1.0):
+        clk.set(t)
+        ctrl.tick(io)
+        assert ctrl.state is State.EXPLORE_EXECUTE, f"early-answered with no plan at t={t}"
+    clk.set(budget_s + 1.0)
+    ctrl.tick(io)
+    assert ctrl.state in (State.VERIFY, State.ANSWER, State.DRIVE_OUT, State.DONE)

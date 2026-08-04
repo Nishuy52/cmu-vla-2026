@@ -421,6 +421,15 @@ class QuestionController:
         asymmetry invariant (never fire with a gap) is never weakened -- the streak can
         only advance while the route is genuinely fully resolved.
         """
+        if self.plan is None:
+            # No bound route exists (the parse failed or never produced a plan), so
+            # WorldView.ungrounded_subgoals is the assembler's default zero, not the
+            # instruction head's report -- the head was never constructed. That is
+            # the ultimate gap: without this guard a parse failure would bank a
+            # degenerate answer two ticks into EXPLORE_EXECUTE (verifier repro,
+            # 5 Aug 2026) instead of exploring the budget as before #181.
+            self._if_grounded_streak = 0
+            return False
         if self.world.ungrounded_subgoals != 0:
             self._if_grounded_streak = 0
             return False
