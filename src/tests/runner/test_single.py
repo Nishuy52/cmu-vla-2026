@@ -138,7 +138,12 @@ def test_simulated_clock_keeps_wall_far_below_sim_time():
     the ratio is closer to ~50x, so even a partial regression trips this well before the
     literal real-time case.
     """
-    q = "Go to the table and stop at the chair"
+    # The 'wibblesprocket' anchor can never ground, so one subgoal stays open and the
+    # #181 early-answer gate must not fire — this run has to burn the full explore
+    # budget, which is the long-sim-time precondition the clock ratio below needs.
+    # (With every leg groundable, the controller now legitimately answers early and
+    # the run ends near ~66 sim-seconds.)
+    q = "Go to the table and stop at the wibblesprocket"
     t0 = time.process_time()
     r = run_question(q, _io_for(q, "instruction_following"), tick_hz=_HZ)
     cpu = time.process_time() - t0
