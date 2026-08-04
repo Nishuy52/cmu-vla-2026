@@ -9,6 +9,13 @@ This skill runs the measure-diagnose-fix loop against the NUS SoC cluster.
 Each rule below exists because its absence caused a measured failure once.
 The reference files carry the detail; read them at the step that needs them.
 
+Read `references/no-stall-orchestration.md` FIRST, in every session that
+runs a campaign. It holds the operating doctrine: never end a turn purely
+waiting, take over stalled agents fast, dispatch by dependency, resolve
+gates instead of waiting on them, and keep state outside context so a
+restart or a session migration loses nothing. The campaign only works at
+speed because of those rules.
+
 The campaign loop has five phases. Run them in order. Do not skip a phase.
 
 1. Pre-flight and submit.
@@ -129,6 +136,24 @@ move on.
 - Resubmit the affected groups on the new pinned tree (phase 1 again). Keep
   the polluted group's results: identical questions on the pre-fix tree are
   the cheapest possible live A/B anchor.
+
+## Resuming a campaign in a fresh session
+
+A campaign survives session death and migration by design. To resume cold:
+
+1. Read the memory file (`next-session-issue-queue`) for the campaign
+   state: job ids, the pinned commit, baseline numbers, comparison rules.
+2. Read the open issue list. It is the actionable queue and the record
+   that outlives every session.
+3. Probe ssh with a short timeout. If it hangs, the ControlMaster is dead:
+   the cluster jobs are safe server-side; ask the user for one
+   interactive `ssh xlogin true`, then continue.
+4. Check watcher processes (`ps aux | grep harvest_`), read their logs for
+   groups that landed unwatched, and analyse those first.
+5. Re-arm the Monitors (they never survive a restart) and confirm the cron
+   backstop exists; recreate it with the full embedded plan if not.
+6. Keep going. Do not wait for the user to repeat the mandate: the open
+   issues, the queued jobs, and the memory file ARE the mandate.
 
 ## Failure playbook
 
