@@ -340,6 +340,92 @@ def test_score_instruction_following_run_zero_evaluable_legs_excluded(monkeypatc
     assert "excluded" in result["note"]
 
 
+def test_score_instruction_following_run_emits_live_leg_structures(monkeypatch, tmp_path):
+    """Issue #178: the live block must carry leg_goals/leg_outcomes/leg_probe,
+    mirroring the offline block's shapes/field names, consistent with the live
+    scalars (n_legs, n_legs_reached_in_order) the scorer already derives from
+    the same per-leg outcomes."""
+    import numpy as np
+
+    import tools.score_live_run as SLR
+
+    class _Outcome:
+        def __init__(self, index, kind, goal_xy, reached_in_order, threaded, pass_by, tol_used):
+            self.index = index
+            self.kind = kind
+            self.goal_xy = goal_xy
+            self.reached_in_order = reached_in_order
+            self.threaded = threaded
+            self.pass_by = pass_by
+            self.tol_used = tol_used
+
+    _leg_outcomes = [
+        _Outcome(0, "goto", (1.0, 2.0), True, True, False, 0.5),
+        _Outcome(1, "goto", (3.0, 4.0), False, True, False, 0.5),
+    ]
+
+    class _Rub:
+        rubric_score = 0.5
+        ordered_leg_credit = 0.5
+        n_legs = 2
+        n_legs_reached_in_order = 1
+        n_threading_violations = 0
+        n_avoid_violations = 0
+        driven_n_poses = 3
+        frechet_m = None
+        coverage_1m = None
+        threading_details: list = []
+        avoid_details: list = []
+        leg_outcomes = _leg_outcomes
+
+    class _Ctx:
+        if_texts = ["Go to the stool, then go to the table."]
+        frame = SLR.S.Frame2D(theta=0.0, t=np.array([0.0, 0.0]))
+        gt = object()
+        idx = object()
+        spawn_xy = None
+        scene = "arabic_room"
+
+    class _Capture:
+        odom_xy = np.zeros((3, 2))
+        odom_xy_raw_n = 3
+
+    leg_goals = [("goto", (1.0, 2.0)), ("goto", (3.0, 4.0))]
+    leg_instance_ids = [(11,), (22,)]
+
+    monkeypatch.setattr(SLR.GB, "_IF_TRAJ_INDEX", {0: 0})
+    monkeypatch.setattr(
+        SLR.GB, "_if_rubric_geometry",
+        lambda *a, **k: (leg_goals, [], [], leg_instance_ids, [None, None]),
+    )
+    monkeypatch.setattr(SLR.S, "score_instruction_rubric", lambda *a, **k: _Rub())
+
+    result = SLR.score_instruction_following_run(
+        _Ctx(), "Go to the stool, then go to the table.", _Capture(),
+        questions_dir=tmp_path,
+    )
+
+    assert len(result["leg_outcomes"]) == result["n_legs"]
+    assert (
+        sum(o["reached_in_order"] for o in result["leg_outcomes"])
+        == result["n_legs_reached_in_order"]
+    )
+    assert result["leg_goals"] == [
+        ["goto", [1.0, 2.0]], ["goto", [3.0, 4.0]],
+    ]
+    assert result["leg_outcomes"][0] == {
+        "i": 0, "kind": "goto", "goal": [1.0, 2.0],
+        "reached_in_order": True, "threaded": True,
+        "pass_by": False, "tol_used": 0.5,
+    }
+    assert len(result["leg_probe"]) == 2
+    probe0 = result["leg_probe"][0]
+    assert probe0["our_goal"] == [1.0, 2.0]
+    assert probe0["our_instance_id"] == [11]
+    assert "min_dist_driven_to_goal_m" in probe0
+    assert "dist_goal_to_gt_traj_m" in probe0
+
+
 def test_main_requires_out_when_target_given(tmp_path, capsys):
     # A targeted invocation (single run dir or non-default root) must never
     # silently fall back to writing into the committed DEFAULT_BASELINE_DIR

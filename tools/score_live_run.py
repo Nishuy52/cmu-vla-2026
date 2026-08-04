@@ -459,7 +459,7 @@ def score_instruction_following_run(
         if cand.exists():
             traj_path = cand
 
-    leg_goals, corridor_gates, avoid_caps, _leg_ids, leg_instance_aabbs = (
+    leg_goals, corridor_gates, avoid_caps, leg_instance_ids, leg_instance_aabbs = (
         GB._if_rubric_geometry(text, ctx.gt, ctx.idx, start_xy=ctx.spawn_xy)
     )
     empty_note = ""
@@ -478,6 +478,31 @@ def score_instruction_following_run(
         frame=None,  # driven_object is already in the object frame
         leg_instance_aabbs=leg_instance_aabbs,
     )
+    # issue #178: surface the per-leg structures the live path already computes
+    # to produce the scalars below -- SAME shapes/field names as the offline
+    # block (core.runner.gt_battery.score_scene), built off the SAME ``rub``
+    # (not recomputed), so live rows carry per-leg provenance like offline rows.
+    leg_goals_out = [
+        [kind, [float(gx), float(gy)]] for kind, (gx, gy) in leg_goals
+    ]
+    leg_outcomes_out = [
+        {
+            "i": o.index,
+            "kind": o.kind,
+            "goal": [float(o.goal_xy[0]), float(o.goal_xy[1])],
+            "reached_in_order": bool(o.reached_in_order),
+            "threaded": o.threaded,
+            "pass_by": bool(o.pass_by),
+            "tol_used": round(float(o.tol_used), 4),
+        }
+        for o in getattr(rub, "leg_outcomes", [])
+    ]
+    gt_traj_xy = None
+    if traj_path is not None:
+        gt_traj_arr = S.load_trajectory_ply(traj_path)
+        if gt_traj_arr.shape[0] > 0:
+            gt_traj_xy = ctx.frame.apply(gt_traj_arr) if ctx.frame is not None else gt_traj_arr[:, :2]
+    leg_probe_out = GB._leg_probe_rows(leg_goals, leg_instance_ids, driven_object, gt_traj_xy)
     # issue #165 (live counterpart of #162's row-rendering defect): when EVERY leg
     # failed goal construction / anchor resolution, ``rub.n_legs == 0`` and
     # ``score_instruction_rubric`` reports ``rubric_score = 0.0`` by construction
@@ -500,6 +525,9 @@ def score_instruction_following_run(
         ),
         "n_legs": rub.n_legs,
         "n_legs_reached_in_order": rub.n_legs_reached_in_order,
+        "leg_goals": leg_goals_out,
+        "leg_outcomes": leg_outcomes_out,
+        "leg_probe": leg_probe_out,
         "n_threading_violations": rub.n_threading_violations,
         "n_avoid_violations": rub.n_avoid_violations,
         "driven_n_poses_decimated": rub.driven_n_poses,
