@@ -56,6 +56,18 @@ from core.fsm.events import EventLog
 from core.fsm.floors import FloorAnswers, PartialResults
 
 
+# #181 — IF early-answer stability debounce: how many consecutive ticks
+# WorldView.ungrounded_subgoals must read 0 before the IF early-answer gate opens. A
+# leg can flip from grounded back to ungrounded mid-run (a CP3 anchor mismatch demotes
+# the resolved instance and re-plans to the runner-up, core.heads.instruction), so a
+# single tick's zero-gap reading is not proof the route stays resolved. Requiring the
+# state to hold twice mirrors the spirit of the NUMERICAL stability gate's per-instance
+# observation floor (StabilitySignal.min_contrib_n_obs >= 3) without needing new state
+# outside the controller: any tick that reopens a gap resets the streak to zero, so the
+# asymmetry invariant (never fire with a gap) cannot be weakened by this debounce.
+IF_EARLY_ANSWER_STABLE_TICKS: int = 2
+
+
 class State(str, Enum):
     IDLE = "idle"
     PARSING = "parsing"
@@ -165,6 +177,9 @@ class QuestionController:
 
         self._answer_published = False
         self._dump_done = False
+        # #181 — consecutive-tick streak of "all IF legs grounded" (see
+        # IF_EARLY_ANSWER_STABLE_TICKS); read/mutated only by _early_answer_ready.
+        self._if_grounded_streak = 0
 
     # ------------------------------------------------------------------ helpers
     @property
@@ -373,14 +388,44 @@ class QuestionController:
         """Asymmetric early-answer gate (architecture §1 row 8).
 
         NUMERICAL: fire as soon as the injected count is stable (margin >=25% AND all
-        contributing instances >=3 obs). IF: NEVER early with any ungrounded sub-goal.
-        OBJECT_REFERENCE: no aggressive early-finish (fall through to budget/verify).
+        contributing instances >=3 obs). IF: fire once the resolved route is fully
+        grounded AND that state has held stable for IF_EARLY_ANSWER_STABLE_TICKS
+        consecutive ticks (#181) -- see _if_route_ready. OBJECT_REFERENCE: no
+        aggressive early-finish (fall through to budget/verify).
         """
         if self.qtype is QType.NUMERICAL:
             return self.world.stability.stable
         if self.qtype is QType.INSTRUCTION_FOLLOWING:
-            return False  # only the budget/forced path ends IF; never bank early with a gap
+            return self._if_route_ready()
         return False
+
+    def _if_route_ready(self) -> bool:
+        """IF early-answer readiness (#181): every leg grounded, stably.
+
+        Authoritative source: WorldView.ungrounded_subgoals, which the head/factory
+        seam (core.heads.factory._assemble_worldview) fills from
+        InstructionHead.ungrounded_subgoals() (core/heads/instruction.py). A leg only
+        counts as grounded there once its resolved anchor's contributing instance
+        record(s) individually clear MIN_GROUND_OBS (>=3 observations) -- reading this
+        field keeps grounding truth in one place (the head owns relaxation/demotion/
+        runner-up logic) instead of the controller re-deriving it from plan/scene as a
+        proxy that could drift out of sync.
+
+        Stability: a leg can flip back to ungrounded mid-run (a CP3 anchor mismatch
+        demotes the resolved instance and re-plans to the runner-up), so a single tick
+        reading zero gaps is not proof the route stays resolved. This debounces the
+        all-legs-grounded state across IF_EARLY_ANSWER_STABLE_TICKS consecutive ticks,
+        mirroring the spirit of the NUMERICAL gate's per-instance observation floor
+        (StabilitySignal.min_contrib_n_obs >= 3) as protection against a one-tick
+        flicker. Any tick that reopens a gap resets the streak to zero, so the
+        asymmetry invariant (never fire with a gap) is never weakened -- the streak can
+        only advance while the route is genuinely fully resolved.
+        """
+        if self.world.ungrounded_subgoals != 0:
+            self._if_grounded_streak = 0
+            return False
+        self._if_grounded_streak += 1
+        return self._if_grounded_streak >= IF_EARLY_ANSWER_STABLE_TICKS
 
     # ------------------------------------------------------------------ publish
     def _publish(self, io: RobotIO, ans: object, reason: str) -> None:

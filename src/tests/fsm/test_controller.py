@@ -441,6 +441,132 @@ def test_if_never_early_with_ungrounded_subgoal():
     assert io.publish_count == 0
 
 
+def test_if_never_early_with_ungrounded_subgoal_exits_only_on_budget():
+    """#181 (b): with a permanent gap, IF must NEVER early-answer, however many ticks
+    pass -- the only exit is the explore budget (or forced assembly/watchdog), exactly
+    as before this change."""
+    clk = FakeClock(0.0)
+    world = WorldView(
+        scene=FakeScene([make_instance(1, "chair")]),
+        ungrounded_subgoals=1,  # one leg never grounds
+        stability=StabilitySignal(winner_margin=1.0, min_contrib_n_obs=9),
+    )
+    ctrl, _ = build_controller(qtype=QType.INSTRUCTION_FOLLOWING, world=world)
+    io = FakeRobotIO(clk, q_of(QType.INSTRUCTION_FOLLOWING))
+    ctrl.tick(io)  # -> PARSING
+    ctrl.state = State.EXPLORE_EXECUTE
+
+    from core.interfaces import EXPLORE_BUDGET_S
+
+    budget_s = EXPLORE_BUDGET_S[QType.INSTRUCTION_FOLLOWING]
+    # Tick repeatedly well past the point 2 stable ticks would have fired the gate; the
+    # gap never closes, so the gate must never open before the budget is spent.
+    for t in (10.0, 20.0, 50.0, 100.0, 200.0, budget_s - 1.0):
+        clk.set(t)
+        ctrl.tick(io)
+        assert ctrl.state is State.EXPLORE_EXECUTE, f"early-answered with a gap at t={t}"
+    clk.set(budget_s + 1.0)
+    ctrl.tick(io)
+    assert ctrl.state in (State.VERIFY, State.ANSWER, State.DRIVE_OUT, State.DONE)
+
+
+def test_if_early_answer_when_all_legs_grounded_and_stable():
+    """#181 (a): once every leg grounds and that state holds for
+    IF_EARLY_ANSWER_STABLE_TICKS consecutive ticks, IF must bank the route early
+    (VERIFY -> ANSWER -> DRIVE_OUT) well before the explore budget."""
+    clk = FakeClock(0.0)
+    world = WorldView(
+        scene=FakeScene([make_instance(1, "chair")]),
+        ungrounded_subgoals=0,  # every leg grounded
+        partial=PartialResults(first_anchor_pt=(1.0, 2.0, 0.0)),
+    )
+    ctrl, _ = build_controller(qtype=QType.INSTRUCTION_FOLLOWING, world=world)
+    io = FakeRobotIO(clk, q_of(QType.INSTRUCTION_FOLLOWING))
+    ctrl.tick(io)  # -> PARSING
+    ctrl.state = State.EXPLORE_EXECUTE
+    clk.set(60.0)  # well before the 270 s IF explore budget
+
+    ctrl.tick(io)  # 1st stable tick: streak == 1, not enough yet
+    assert ctrl.state is State.EXPLORE_EXECUTE
+    ctrl.tick(io)  # 2nd consecutive stable tick: streak == 2 -> gate opens
+    assert ctrl.state in (State.VERIFY, State.ANSWER, State.DRIVE_OUT, State.DONE)
+    assert clk.now() < 270.0  # answered early, before the explore budget
+
+
+def test_if_grounded_but_unstable_flicker_never_early():
+    """#181 (c): grounding that flickers (grounded one tick, gapped the next) must
+    never accumulate the required consecutive-tick streak, so the gate never opens even
+    though every individual reading momentarily shows a fully-grounded route."""
+    clk = FakeClock(0.0)
+    scene = FakeScene([make_instance(1, "chair")])
+    the_world = WorldView(scene=scene, ungrounded_subgoals=0)
+    calls = {"parse": 0, "explore": 0, "verify": 0}
+
+    def parse(q):
+        calls["parse"] += 1
+        return make_plan(QType.INSTRUCTION_FOLLOWING)
+
+    def explore(io, plan, w):
+        calls["explore"] += 1
+
+    def verify(io, plan, w):
+        calls["verify"] += 1
+        return None
+
+    tick_n = {"n": 0}
+
+    def probe(io):
+        # Flicker: grounded on even ticks, gapped on odd ticks -- never two grounded
+        # ticks in a row, so the debounce streak can never reach 2.
+        tick_n["n"] += 1
+        the_world.ungrounded_subgoals = 0 if tick_n["n"] % 2 == 0 else 1
+        return the_world
+
+    ctrl = QuestionController(parse=parse, explore=explore, verify=verify, probe=probe)
+    io = FakeRobotIO(clk, q_of(QType.INSTRUCTION_FOLLOWING))
+    ctrl.tick(io)  # -> PARSING (tick 1, odd -> gapped)
+    ctrl.state = State.EXPLORE_EXECUTE
+
+    from core.interfaces import EXPLORE_BUDGET_S
+
+    budget_s = EXPLORE_BUDGET_S[QType.INSTRUCTION_FOLLOWING]
+    for t in (10.0, 20.0, 50.0, 100.0, 200.0, budget_s - 1.0):
+        clk.set(t)
+        ctrl.tick(io)
+        assert ctrl.state is State.EXPLORE_EXECUTE, f"early-answered on a flicker at t={t}"
+    clk.set(budget_s + 1.0)
+    ctrl.tick(io)
+    assert ctrl.state in (State.VERIFY, State.ANSWER, State.DRIVE_OUT, State.DONE)
+
+
+def test_numerical_and_or_early_answer_gates_unchanged_by_if_debounce():
+    """#181 (d): the IF stability debounce lives entirely behind the IF branch of
+    _early_answer_ready; NUMERICAL keeps firing on its very first EXPLORE_EXECUTE tick
+    (no debounce added) and OBJECT_REFERENCE keeps never early-firing."""
+    clk = FakeClock(0.0)
+    scene = FakeScene([make_instance(1, "chair"), make_instance(2, "chair")])
+    world = WorldView(scene=scene, stability=StabilitySignal(winner_margin=0.4, min_contrib_n_obs=3))
+    ctrl, _ = build_controller(qtype=QType.NUMERICAL, world=world)
+    io = FakeRobotIO(clk, q_of(QType.NUMERICAL))
+    ctrl.tick(io)  # -> PARSING
+    ctrl.state = State.EXPLORE_EXECUTE
+    clk.set(70.0)
+    ctrl.tick(io)  # single tick: NUMERICAL still fires immediately, no debounce
+    assert ctrl.state in (State.VERIFY, State.ANSWER, State.DONE)
+
+    clk2 = FakeClock(0.0)
+    ctrl_or, _ = build_controller(
+        qtype=QType.OBJECT_REFERENCE, world=WorldView(scene=FakeScene([make_instance(1, "chair")]))
+    )
+    io_or = FakeRobotIO(clk2, q_of(QType.OBJECT_REFERENCE))
+    ctrl_or.tick(io_or)
+    ctrl_or.state = State.EXPLORE_EXECUTE
+    for t in (50.0, 100.0, 150.0):
+        clk2.set(t)
+        ctrl_or.tick(io_or)
+        assert ctrl_or.state is State.EXPLORE_EXECUTE  # OR never early-finishes
+
+
 # --------------------------------------------------------------------------- publish-once
 
 
