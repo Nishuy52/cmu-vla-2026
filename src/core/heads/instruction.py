@@ -125,6 +125,19 @@ MIN_COMMIT_OBS: int = 2
 # follower-exhausted-not-arrived, capsule tripwire) counts against this.
 MAX_REPLANS_PER_QUESTION: int = 3
 
+# Issue #183 — reinvest budget: a separate, bounded allowance of FULL-ROUTE re-drive
+# passes, spent only when the drive has mechanically stalled (the follower exhausted its
+# path) while at least one leg has not yet been individually confirmed reached (see
+# ``all_legs_visited``). Deliberately separate from MAX_REPLANS_PER_QUESTION: that H11 cap
+# protects against a pathological same-tick replan storm during normal driving and can
+# legitimately already be fully spent (on stalls/no-LOS/capsule tripwires earlier in the
+# SAME drive) by the time the route would otherwise be declared complete -- exactly the
+# case #183 exists to fix, so a redrive must not be blocked by an exhausted H11 cap. A
+# redrive is still bounded here so a leg that is genuinely unreachable cannot spin the
+# reinvest mechanism forever; the >=540 s watchdog floor remains the unconditional hard
+# backstop regardless of either budget (core.fsm.controller watchdog overlay).
+MAX_REDRIVE_PASSES: int = 3
+
 # H4c: fraction of the explore budget past which a PROVISIONAL terminal grounding
 # (one resolved via a relaxation rung — drop_relation/category_only/drop_disambiguator)
 # is committed anyway. Below this, we keep exploring for the missing disambiguator/anchor
@@ -341,6 +354,12 @@ class InstructionHead:
     #: log of why each fired. Capped at MAX_REPLANS_PER_QUESTION.
     _replans: int = 0
     _replan_events: list[str] = field(default_factory=list)
+    #: Issue #183 — count of reinvest FULL-ROUTE re-drive passes this question + a
+    #: flight-recorder-visible log of why each fired. Capped at MAX_REDRIVE_PASSES,
+    #: deliberately separate from ``_replans``/MAX_REPLANS_PER_QUESTION (see that
+    #: constant's docstring).
+    _redrives: int = 0
+    _redrive_events: list[str] = field(default_factory=list)
     #: H11 capsule tripwire edge-detect: True once the pose has been observed inside a
     #: stamped capsule, so we re-plan on ENTRY (clear->violated) rather than every tick a
     #: legitimately-engulfed start stays inside (the recovery path already drives it out).
@@ -1579,6 +1598,58 @@ class InstructionHead:
         self._build_route(self._pose, scene, prefix_len)
         return self._follower is not None
 
+    def _can_redrive(self) -> bool:
+        return self._redrives < MAX_REDRIVE_PASSES
+
+    def _redrive(self, reason: str, scene) -> bool:
+        """Issue #183 — reinvest the remaining question budget: rebuild the FULL route
+        (every leg of the plan, not just the previously-committed prefix) from the
+        CURRENT pose and re-drive it in order.
+
+        Reuses the exact same waypoint/planning machinery ``_replan`` uses --
+        ``_build_route`` -> ``_stamp_ground_plan`` -> ``_refresh_costmap_and_geometry``
+        (re-stamps ``self.plan.avoid`` into a fresh clone of the live costmap, identical
+        to the first pass and to every ``_replan``) -> ``plan_through`` (A* over that
+        stamped costmap). A redrive can therefore never create an avoid/threading
+        violation the first pass would not already have created -- it is the same
+        hard-capsule-respecting planner call, just re-invoked from wherever the vehicle
+        now sits instead of the original start pose.
+
+        Bounded by MAX_REDRIVE_PASSES, independent of ``_can_replan()``'s H11 cap (see
+        that constant's docstring for why the two budgets are kept separate). Only ever
+        called from ``_drive`` when the follower has run out of path AND
+        ``all_legs_visited()`` is still False -- i.e. this is spent only to buy another
+        attempt at legs the rubric would still credit, never to re-drive an
+        already-fully-visited route.
+        """
+        if not self._can_redrive() or self.plan is None or not self.plan.route:
+            return False
+        self._redrives += 1
+        unvisited = sorted(set(range(len(self.plan.route))) - self._confirmed)
+        self._redrive_events.append(
+            f"redrive #{self._redrives} @pose={self._pose} reason={reason} "
+            f"unvisited_legs={unvisited}"
+        )
+        _LOG.info(
+            "IF redrive #%d (reason=%s): reinvesting remaining budget, rebuilding the "
+            "full route from pose %s (#183 -- legs not yet individually confirmed: %s).",
+            self._redrives,
+            reason,
+            self._pose,
+            unvisited,
+        )
+        n_legs = len(self.plan.route)
+        self._follower = None
+        self._driven_prefix = 0
+        self._in_capsule = False  # recomputed against the new plan next tick
+        self._build_route(self._pose, scene, n_legs)
+        return self._follower is not None
+
+    def redrive_events(self) -> list[str]:
+        """Flight-recorder-visible log of the #183 reinvest re-drives this question
+        triggered."""
+        return list(self._redrive_events)
+
     def _capsule_tripwire(self, pose: tuple[float, float], scene) -> None:
         """H11 / IF-F5 runtime tripwire: if the current pose (or next crumb) is entering a
         stamped avoid capsule, re-plan away.
@@ -1634,16 +1705,30 @@ class InstructionHead:
                 wp = self._follower.advance(pose, t)
 
         if wp is None:
-            # Follower exhausted its path. If the vehicle actually reached the terminal,
-            # hold the raw terminal coordinate (the drive is complete). If it has NOT
-            # arrived, the path ran out short — re-plan from here toward the terminal
-            # (IF-F8) rather than teleport a distant terminal waypoint (IF-F4).
+            # Follower exhausted its path. If the vehicle actually reached the terminal
+            # AND every leg has itself been individually confirmed reached (#183 --
+            # arriving at a capsule-forced recovery point is NOT the same as having
+            # threaded every ordered leg goal), hold the raw terminal coordinate (the
+            # drive is genuinely complete). Otherwise the path ran out short of what the
+            # rubric would still credit — re-plan from here (IF-F8's cheap same-prefix
+            # H11 replan first, then #183's reinvest full-route redrive if that doesn't
+            # help either) rather than settle or teleport a distant terminal waypoint.
             reached = self._terminal_xy is not None and (
                 _dist(pose, self._terminal_xy) <= ARRIVAL_TOL_M
             )
-            if not reached and self._can_replan():
-                if self._replan("follower_exhausted_not_arrived", self._scene):
-                    wp = self._follower.advance(pose, t) if self._follower else None
+            fully_visited = self.all_legs_visited()
+            if not (reached and fully_visited):
+                if self._can_replan():
+                    if self._replan("follower_exhausted_not_arrived", self._scene):
+                        wp = self._follower.advance(pose, t) if self._follower else None
+                if (
+                    wp is None
+                    and not fully_visited
+                    and self._route_covers_plan()
+                    and self._can_redrive()
+                ):
+                    if self._redrive("follower_exhausted_legs_unvisited", self._scene):
+                        wp = self._follower.advance(pose, t) if self._follower else None
             if wp is None and self._terminal_xy is not None:
                 wp = WaypointCmd(float(self._terminal_xy[0]), float(self._terminal_xy[1]))
         if wp is not None:
@@ -1732,6 +1817,48 @@ class InstructionHead:
             return len(self.plan.route) if self.plan and self.plan.route else 0
         return sum(1 for l in self._legs if not l.grounded)
 
+    def all_legs_visited(self) -> bool:
+        """Issue #183 — True iff every route leg has itself been individually confirmed
+        reached, or the plan has no legs at all. Read-only.
+
+        Anchored on ``_mark_arrivals``'s existing distance-to-goal-AT-POSE check (a leg
+        is added to ``self._confirmed`` only when the vehicle's actual pose measured
+        <= ARRIVAL_TOL_M from that leg's OWN resolved goal coordinate) -- the strictest
+        signal the head can measure against its own goal geometry, and exactly the same
+        measurement the rubric's own ordered-leg scoring takes (arrival within tolerance
+        of the leg's goal), as opposed to a looser proxy such as breadcrumb emission
+        (a crumb can be published toward a leg without the vehicle ever actually
+        reaching it) or "the committed route's driven prefix reaches this leg" (which
+        ``drive_complete``'s ``route_covers_plan`` measures and which a capsule-forced
+        recovery path -- see ``_build_route`` -- can satisfy without ever threading the
+        leg's own goal point).
+
+        The FSM's DRIVE_OUT exit gate (``core.fsm.controller._tick_drive_out``) checks
+        this alongside the head's ``drive_complete()`` report before ending the question
+        (WorldView.legs_visited) -- ``drive_complete()`` alone only reports the DRIVE
+        mechanically stopping (arrival at the terminal, or the follower exhausting with
+        no replan budget left), which is looser than "every ordered leg was actually
+        reached" (#183's live evidence: 5/10 early-fired slots hit the old
+        ``drive_complete`` seconds after answering while a leg still sat metres short).
+        """
+        n_legs = len(self.plan.route) if self.plan and self.plan.route else 0
+        if n_legs == 0:
+            return True
+        return len(self._confirmed) >= n_legs
+
+    def _route_covers_plan(self) -> bool:
+        """True iff the committed route covers the ENTIRE plan: the driven prefix
+        reaches the final leg and no leg remains ungrounded. Factored out of
+        ``drive_complete`` (issue #159) so ``_drive``'s #183 reinvest-redrive trigger
+        uses the identical test for "the whole route is committed" before spending a
+        redrive pass."""
+        n_legs = len(self.plan.route) if self.plan and self.plan.route else 0
+        return (
+            n_legs > 0
+            and self._driven_prefix >= n_legs
+            and self.ungrounded_subgoals() == 0
+        )
+
     def first_anchor_pt(self):
         """(x, y) of the best-grounded first leg goal, for the floor. None if unknown."""
         for leg in self._legs:
@@ -1795,6 +1922,18 @@ class InstructionHead:
         can distinguish "arrived / holding the terminal" from "still streaming crumbs" —
         ``advance``/``_drive`` return ``True`` in BOTH cases (a waypoint was published), so
         the emit bool alone cannot gate DRIVE_OUT termination.
+
+        Issue #183: this signal alone is LOOSER than "every ordered leg was actually
+        reached" — a capsule-forced recovery path (``_build_route``'s fallback) can reach
+        its own endpoint (a legal point near, not necessarily AT, a leg's real goal)
+        without ever threading an intermediate leg's own goal coordinate, and "exhausted
+        with no replan budget" only means the H11 replan cap is spent, not that nothing
+        more could have been driven (see ``all_legs_visited`` and the #183 reinvest
+        redrive in ``_drive``, which spends a SEPARATE budget attempting exactly that
+        before giving up). The FSM (``core.fsm.controller._tick_drive_out``) therefore
+        gates DRIVE_OUT's exit on this signal AND ``all_legs_visited()`` together
+        (``WorldView.drive_complete`` and ``WorldView.legs_visited``), not on this one
+        alone.
         """
         follower = self._follower
         if follower is None:
@@ -1802,13 +1941,7 @@ class InstructionHead:
         # The committed route must cover the entire plan — the driven prefix reaches the
         # final leg and no leg remains ungrounded — or "arrival" is only at an intermediate
         # leg goal while a later anchor is still being hunted.
-        n_legs = len(self.plan.route) if self.plan and self.plan.route else 0
-        route_covers_plan = (
-            n_legs > 0
-            and self._driven_prefix >= n_legs
-            and self.ungrounded_subgoals() == 0
-        )
-        if not route_covers_plan:
+        if not self._route_covers_plan():
             return False
         if self._terminal_xy is not None and _dist(self._pose, self._terminal_xy) <= ARRIVAL_TOL_M:
             return True

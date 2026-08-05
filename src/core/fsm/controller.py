@@ -9,9 +9,17 @@ because for IF the drive IS the answer (IF-F4). ANSWER still publishes exactly o
 waypoint (latched, unchanged), but instead of going straight to DONE the FSM enters
 DRIVE_OUT and KEEPS ticking the answer heads — breadcrumbs, re-grounding, replans — so a
 partially-grounded route's later legs are still attempted with the remaining budget
-(ordered-leg partial credit is real). DRIVE_OUT ends when the head reports the drive
-complete (arrival / exhausted-with-no-replan-budget) or the watchdog floor fires,
-whichever is first. NUMERICAL and OBJECT_REFERENCE go ANSWER -> DONE exactly as before.
+(ordered-leg partial credit is real). DRIVE_OUT ends only once the head reports BOTH the
+drive complete (arrival / exhausted-with-no-replan-budget) AND every leg individually
+visited in order (issue #183 — a "drive complete" report alone can fire on a capsule-
+forced recovery path or a spent H11 replan budget without every ordered leg goal actually
+having been reached; see WorldView.legs_visited / InstructionHead.all_legs_visited), or
+the watchdog floor fires — whichever is first. While the route reports complete but not
+every leg is yet visited and budget remains, the instruction head reinvests the remaining
+budget in a bounded re-drive of the unvisited legs (InstructionHead._redrive) instead of
+the question ending outright; this applies identically whether DRIVE_OUT was entered via
+the #181 early-answer gate or the ordinary explore-budget exit. NUMERICAL and
+OBJECT_REFERENCE go ANSWER -> DONE exactly as before.
 
 WATCHDOG is an *overlay*, not a state:
   * at elapsed >= 540 s (watchdog_floor): publish the FloorAnswers answer for the qtype
@@ -107,8 +115,19 @@ class WorldView:
     stability:        numerical count stability evidence.
     drive_complete:   IF only — the instruction head reports the route drive is finished
                       (arrived at the terminal, or exhausted with no replan budget left).
-                      Read by the DRIVE_OUT state to decide when to stop driving and go
-                      DONE (IF-F4). Meaningless / False for NUMERICAL and OR.
+                      Read by the DRIVE_OUT state alongside legs_visited to decide when
+                      to stop driving and go DONE (IF-F4). Meaningless / False for
+                      NUMERICAL and OR.
+    legs_visited:     IF only — issue #183: the instruction head reports every route leg
+                      has been individually confirmed reached (an ordered visit of each
+                      leg's own goal within the rubric-relevant tolerance), or the route
+                      has no legs. drive_complete can fire on a looser signal (a
+                      capsule-forced recovery path, or a spent H11 replan budget) that
+                      does not itself guarantee every leg was reached — DRIVE_OUT exits
+                      only once BOTH drive_complete and legs_visited are true (or the
+                      watchdog floor overrides). Meaningless / True (vacuously "nothing
+                      left unvisited") for NUMERICAL and OR, and defaults True so an
+                      unconfigured/stub probe never blocks a pre-#183 caller.
     """
 
     scene: SceneIndex | None = None
@@ -116,6 +135,7 @@ class WorldView:
     ungrounded_subgoals: int = 0
     stability: StabilitySignal = field(default_factory=StabilitySignal)
     drive_complete: bool = False
+    legs_visited: bool = True
 
 
 # Injected callables ---------------------------------------------------------
@@ -361,17 +381,26 @@ class QuestionController:
         advance the heads every tick — the instruction head streams the next breadcrumb,
         re-grounds late-appearing anchors, extends the route over newly grounded legs, and
         replans on stalls — via the same explore callable used during EXPLORE_EXECUTE. We
-        leave DRIVE_OUT for DONE only when the head reports the drive complete (arrival, or
-        exhausted with no replan budget). The watchdog overlay (checked before this handler
-        every tick) remains the hard backstop: if the drive hangs, the >=540 s floor forces
-        DONE regardless — this state cannot shadow or delay it.
+        leave DRIVE_OUT for DONE only when the head reports BOTH the drive complete
+        (arrival, or exhausted with no replan budget) AND every leg individually visited
+        in order (issue #183: world.legs_visited — a drive_complete report alone can fire
+        on a capsule-forced recovery path or a spent H11 replan budget without every
+        ordered leg goal actually having been reached; while that gap remains and budget
+        is left, the head reinvests it into a bounded re-drive of the unvisited legs
+        rather than the FSM ending the question — see InstructionHead._redrive). This
+        applies identically whether DRIVE_OUT was entered via the #181 early-answer gate
+        or the ordinary explore-budget exit. The watchdog overlay (checked before this
+        handler every tick) remains the hard backstop: if the drive hangs, the >=540 s
+        floor forces DONE regardless — this state cannot shadow or delay it, and a
+        re-drive that finishes early (every leg visited before the floor) is free to end
+        the question right then, with no forced idle wait.
         """
         _safe_explore(self._explore, io, self.plan, self.world, self._note_swallowed)
         # Re-read the world AFTER driving this tick so completion is observed the moment it
         # happens (the top-of-tick probe reflects the PRE-drive state), rather than lagging a
         # tick and emitting one crumb past arrival.
         self.world = _safe_probe(self._probe, io, self._note_swallowed)
-        if self.world.drive_complete:
+        if self.world.drive_complete and self.world.legs_visited:
             self._to(State.DONE, "route drive complete")
 
     _HANDLERS: dict[State, Callable[["QuestionController", RobotIO], None]] = {
