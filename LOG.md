@@ -2485,3 +2485,17 @@ happens server-side in the chain gap with no session alive.
 
 **Next:** decide keep-vs-revert for the gate (recommendation: keep,
 fix reinvestment); 713819/713820 land this evening.
+
+---
+
+## 2026-08-05 (evening) — #183 merged: re-drive unvisited legs in DRIVE_OUT
+
+**Done:** merged the #183 re-drive (edb7cbc). The head re-drives
+unvisited legs with a bounded separate budget; DRIVE_OUT exits only
+on drive_complete AND legs_visited. Full gate green. The fresh
+verifier CONFIRMED all five adversarial claims: the vacuous-true
+default cannot bank an exit (single producer, AND with
+drive_complete=False), the watchdog overlay precedes the handler so
+no deadlock exists, clean runs are unchanged (386 tests), the
+re-drive plans over the same stamped costmap, and the gate log holds
+zero failures. Next: re-measure IF on the same matrices (if7).
