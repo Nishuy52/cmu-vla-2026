@@ -340,6 +340,15 @@ def test_invalid_qtype_raises_schema_error():
     assert "'not_a_real_qtype'" in str(exc_info.value)
 
 
+def test_direct_construction_with_non_qtype_member_raises_schema_error():
+    """#182: Plan(qtype=...) built directly (not via from_json) must also assert
+    QType membership -- a bad value here would bind no instruction head downstream."""
+    with pytest.raises(PlanSchemaError) as exc_info:
+        Plan(qtype="not_a_real_qtype", question_raw="x")
+    assert "'qtype'" in str(exc_info.value)
+    assert "'not_a_real_qtype'" in str(exc_info.value)
+
+
 def test_invalid_route_kind_raises_schema_error():
     bad = json.dumps(
         {
