@@ -317,3 +317,71 @@ def test_already_correct_selection_is_unchanged_by_the_fix():
     head = ObjectRefHead(plan=plan)
     head.advance(sc)
     assert head.best_candidate.instance_id == 1  # unchanged: the near-lamp table wins
+
+
+# --------------------------------------------------------------------------- post-#184
+# correction: relaxation-aware fall-open (merge-verifier repro)
+
+
+def test_established_category_only_loses_to_clause_satisfying_raw_candidate():
+    """Regression (merge-verifier repro): ``resolve()``'s OWN internal relaxation ladder
+    can rescue an EMPTY established-only pool by dropping the clause entirely
+    (category_only), silently returning every established candidate UNFILTERED -- none of
+    which actually satisfy the clause. Meanwhile an unestablished candidate the
+    established view excluded genuinely satisfies it. Pre-#184 (and pre-this-fix), the
+    established, clause-FAILING chairs would win outright (their non-empty
+    ``candidates_ranked`` short-circuits the #184 fall-open, which only ever checks
+    "is it empty"). A clause-failing established candidate must never beat a
+    clause-satisfying candidate -- the head must notice the established pool needed a
+    severe relaxation and prefer the raw pool's genuinely clause-satisfying survivor."""
+    table = inst(10, "table", n_obs=5, centroid=(0.0, 0.0, 0.0))
+    far_established_1 = inst(1, "chair", n_obs=5, centroid=(20.0, 0.0, 0.0))
+    far_established_2 = inst(2, "chair", n_obs=5, centroid=(25.0, 0.0, 0.0))
+    near_unestablished = inst(3, "chair", n_obs=1, centroid=(0.3, 0.0, 0.0))
+    sc = scene(table, far_established_1, far_established_2, near_unestablished)
+
+    plan = object_plan("chair", clauses=[near_clause("table")])
+    head = ObjectRefHead(plan=plan)
+    head.advance(sc)
+
+    assert head.best_candidate is not None
+    assert head.best_candidate.instance_id == 3  # the clause-satisfying chair wins
+    # the winning pool (raw) is surfaced in the audit trail; the returned audit reflects
+    # the WINNING pool's own (empty, unrelaxed) history plus the pool-choice note, not the
+    # established pool's internal category_only step -- confirmed separately below.
+    assert any(r.step == "established_gate_pool_choice" for r in head._result.audit)
+    assert "raw pool selected" in head._result.audit[-1].detail
+
+    # sanity: the established-only pool genuinely DID need category_only (confirms the
+    # test fixture actually reproduces the reported mechanism, not a vacuous setup).
+    from core.heads.scene_established import EstablishedView
+
+    established_only = EstablishedView(sc, floor=ESTABLISH_N_OBS)
+    established_result = resolve(
+        object_plan("chair", clauses=[near_clause("table")]).target,
+        established_only,
+        DEFAULT_THRESHOLDS,
+    )
+    assert any(r.step == "category_only" for r in established_result.audit)
+    assert {c.instance_id for c in established_result.candidates_ranked} == {1, 2}
+
+
+def test_equal_severity_relaxation_keeps_the_established_pool():
+    """Control: when BOTH the established and raw pools need the SAME severity of
+    relaxation (here: the anchor class is wholly absent from the scene, so ``near(table)``
+    is unevaluable for every candidate in either pool alike, and both bottom out at
+    category_only), the established pool still wins -- preserving #184's own intent of
+    preferring established tracks when the clause evidence does not distinguish the two
+    pools."""
+    established_1 = inst(1, "chair", n_obs=5, centroid=(0.0, 0.0, 0.0))
+    established_2 = inst(2, "chair", n_obs=5, centroid=(1.0, 0.0, 0.0))
+    unestablished = inst(3, "chair", n_obs=1, centroid=(2.0, 0.0, 0.0))
+    sc = scene(established_1, established_2, unestablished)  # no 'table' in the scene at all
+
+    plan = object_plan("chair", clauses=[near_clause("table")])
+    head = ObjectRefHead(plan=plan)
+    head.advance(sc)
+
+    assert head.best_candidate is not None
+    assert head.best_candidate.n_obs >= ESTABLISH_N_OBS  # established candidate, not id 3
+    assert any(r.step == "established_gate_pool_choice" for r in head._result.audit)

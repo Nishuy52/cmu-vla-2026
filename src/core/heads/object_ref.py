@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import inspect
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from core.interfaces import InstanceRecord, MarkerBox, QType, SceneIndex
@@ -28,6 +28,7 @@ from core.fsm.floors import PartialResults
 from core.geometry.toolbox import (
     DEFAULT_THRESHOLDS,
     PredResult,
+    Relaxation,
     ResolveResult,
     Thresholds,
     resolve,
@@ -46,6 +47,37 @@ from core.perception.dimension_priors import clamp_record_marker
 #: (its default equals REOBS_MIN_N_OBS) plus a peak-score floor, so OR-F8's guarantee still
 #: holds. Kept as a named constant for the docstring/rationale trail.
 REOBS_MIN_N_OBS: int = 2
+
+#: (#184 correction) Severity ordering of ``resolve()``'s own internal relaxation ladder
+#: (see its docstring: "relax attributes -> drop weakest relation -> category-only"),
+#: used by :meth:`ObjectRefHead._resolve` to decide whether the established-only pool's
+#: result is trustworthy or must be compared against the raw-scene result. Only the THREE
+#: steps of that literal candidate-filtering ladder are ranked here -- every other
+#: ``Relaxation`` step the toolbox records (``drop_disambiguator``,
+#: ``superlative_anchor_missing``, ``superlative_tie_unresolved``, ...) concerns an
+#: ANCHOR's own resolution, not whether the target's own clause was enforced against the
+#: candidate pool, so those are deliberately excluded from this severity count.
+#:
+#: ``relax_attributes`` (1) is ranked strictly below ``drop_relation``/``category_only``
+#: (2/3) on the evidence: it only softens an ATTRIBUTE match (colour/size adjectives),
+#: never a relation predicate (``near``/``on``/``between``/``closest_to``/...), so it
+#: cannot itself produce this issue's failure mode (a clause-failing candidate beating a
+#: clause-satisfying one) -- only ``drop_relation``/``category_only`` unenforce a relation
+#: clause. It is still counted (not treated as zero) because a relaxed attribute is real
+#: evidence of a less-confident match, and severity 1 still loses to a raw pool that
+#: needed no relaxation at all (severity 0).
+_LADDER_SEVERITY: dict[str, int] = {
+    "relax_attributes": 1,
+    "drop_relation": 2,
+    "category_only": 3,
+}
+
+
+def _ladder_severity(audit: list[Relaxation]) -> int:
+    """Worst (highest) candidate-filtering-ladder severity recorded in ``audit``; 0 if the
+    ladder was never engaged (the clause(s) were fully enforced, or there were none)."""
+    return max((_LADDER_SEVERITY.get(r.step, 0) for r in audit), default=0)
+
 
 # Legacy narrow per-clause verifier (backward compat):
 #     (plan, candidate_summary, pass_matrix_text) -> keep-winner bool
@@ -139,13 +171,55 @@ class ObjectRefHead:
            ``NumericalHead._count``'s own fall-open tiers 2-3 (#151): the established view
            only ever narrows toward more plausible instances, never publishes nothing where
            the raw pool had a candidate.
+
+        Relaxation-aware fall-open (post-#184 correction): ``resolve()`` has its OWN
+        internal relaxation ladder (relax_attributes -> drop_relation -> category_only,
+        see its docstring) that can rescue an EMPTY established-only pool by silently
+        DROPPING the clause that emptied it, rather than by finding a genuine survivor.
+        That result still has a non-empty ``candidates_ranked`` (so tier 2 above never
+        triggers) even though the clause the question actually asked for was never
+        enforced against it -- e.g. every established 'chair' sits far from 'the table',
+        so ``near(table)`` empties the established pool and category_only falls back to
+        ALL established chairs, unfiltered, while one genuinely near-table chair sits in
+        the (unestablished) raw pool the established view excluded. A clause-failing
+        established candidate must never beat a clause-satisfying raw one. So: if the
+        established result needed ANY clause-weakening relaxation
+        (:func:`_ladder_severity`), ALSO resolve the raw scene and keep whichever result
+        needed the LESS severe relaxation -- an unrelaxed (or less-relaxed) raw result
+        beats a more-relaxed established one; equal severity keeps the established result
+        (preserving #184's own intent: prefer established tracks when the clause evidence
+        does not distinguish the two pools). The winning pool is recorded as a trailing
+        ``Relaxation`` entry on the returned result's audit so callers can see which pool
+        won and why.
         """
         target = self.plan.target
         established = EstablishedView(scene, floor=ESTABLISH_N_OBS)
         filtered = resolve(target, established, self.thresholds)
-        if filtered.candidates_ranked:
-            return filtered
-        return resolve(target, scene, self.thresholds)
+        if not filtered.candidates_ranked:
+            return resolve(target, scene, self.thresholds)
+
+        established_severity = _ladder_severity(filtered.audit)
+        if established_severity == 0:
+            return filtered  # clause(s) fully enforced against the established pool
+
+        raw = resolve(target, scene, self.thresholds)
+        if not raw.candidates_ranked:
+            return filtered  # never regress to nothing over a severity comparison
+
+        raw_severity = _ladder_severity(raw.audit)
+        if raw_severity < established_severity:
+            note = (
+                f"raw pool selected: needed a less severe relaxation "
+                f"(severity {raw_severity}) than the established pool "
+                f"(severity {established_severity})"
+            )
+            return replace(raw, audit=raw.audit + [Relaxation("established_gate_pool_choice", note)])
+
+        note = (
+            f"established pool kept: raw relaxation was no less severe "
+            f"(established {established_severity} vs raw {raw_severity})"
+        )
+        return replace(filtered, audit=filtered.audit + [Relaxation("established_gate_pool_choice", note)])
 
     def publish_partial(self, partial: PartialResults) -> None:
         """Stamp the current best candidate/marker into the shared PartialResults."""
