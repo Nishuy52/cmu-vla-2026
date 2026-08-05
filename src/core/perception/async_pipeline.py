@@ -22,14 +22,47 @@ reads that same index. ``BasicSceneIndex`` guards its own state with an internal
 ``RLock`` (see its docstring), so each individual index call from either thread is
 atomic; this module only needs to serialize frame submission into the pipeline
 itself (one writer thread, one pipeline instance), not index access.
+
+Worker liveness (issue #174): the frame-wait loop (:meth:`_run`) blocks on
+``Condition.wait()`` with NO timeout, so an arbitrarily long gap between two
+submitted frames at boot (measured on a live loft run: keyframe 0 -> 1 arriving
+7.1s apart on a slot whose keyframe flow then stopped forever, vs 0.5s apart on a
+sibling slot that survived) never by itself ends the loop or the thread — the wait
+simply keeps blocking until the next :meth:`submit`. The mechanism that DID kill a
+worker was narrower: ``_run`` only guarded ``pipeline.process()`` with
+``except Exception``; the ``on_error`` callback invocation lived *inside* that
+except block but outside any guard of its own. On a live cluster run ``on_error``
+calls into ``rclpy``'s logger, which can itself raise (the adapter logs show a
+"benign teardown RCLError" alongside every dead loft slot); that second exception
+then escaped ``_run`` entirely, silently ending the worker thread with no
+traceback anywhere reachable in the captured log, and nothing detected the death
+or ever picked up another frame — matching the observed signature exactly
+(keyframe flow processes 1-4 frames then stops forever; ``submit()`` keeps being
+called every tick but nobody is listening). Two fixes close this: (1) every path
+inside :meth:`_run`, including the ``on_error`` callback itself, is now guarded —
+nothing can escape and end the thread from a single frame's fault; (2)
+:meth:`submit` is now a supervisor as well as a producer — it checks worker
+liveness on every call and restarts a dead thread (bounded, see
+``max_restarts``), logging loudly with the triggering exception, instead of
+silently dropping every future frame.
 """
 from __future__ import annotations
 
+import logging
 import threading
+import traceback
 from typing import Callable
 
 from core.interfaces import LidarScan, PanoFrame
 from core.perception.tracker import PerceptionPipeline
+
+_LOGGER = logging.getLogger(__name__)
+
+#: Bounded restart budget (issue #174): a worker thread that ends for any reason
+#: (not just the guarded per-frame exception path — anything unforeseen in the
+#: loop scaffolding itself) is restarted this many times before the pipeline
+#: gives up and leaves the last-known state in place rather than restart forever.
+DEFAULT_MAX_RESTARTS = 3
 
 
 class AsyncPerceptionWorker:
@@ -39,44 +72,77 @@ class AsyncPerceptionWorker:
     pass — it latches the frame and returns immediately, replacing any not-yet-
     processed pending frame. A single background thread wakes on each submission,
     picks up the latest frame, and runs it through ``pipeline.process()``.
+
+    Issue #174: :meth:`submit` also supervises the worker thread — if it finds the
+    thread dead, it logs loudly and restarts a fresh one (bounded by
+    ``max_restarts``), so a worker fault degrades to "restarted, frame dropped"
+    instead of "every future frame silently discarded forever".
     """
 
     def __init__(
         self,
         pipeline: PerceptionPipeline,
         on_error: Callable[[Exception], None] | None = None,
+        max_restarts: int = DEFAULT_MAX_RESTARTS,
     ) -> None:
         self._pipeline = pipeline
         self._on_error = on_error
+        self._max_restarts = max_restarts
         self._cv = threading.Condition()
         self._pending: tuple[PanoFrame, LidarScan] | None = None
         self._stopped = False
         self._processed_count = 0
         self._submitted_count = 0
-        self._thread = threading.Thread(
+        self._restart_count = 0
+        self._last_error: BaseException | None = None
+        self._thread = self._spawn_thread()
+
+    def _spawn_thread(self) -> threading.Thread:
+        thread = threading.Thread(
             target=self._run, name="vla-perception-worker", daemon=True
         )
-        self._thread.start()
+        thread.start()
+        return thread
 
     def submit(self, pano: PanoFrame, scan: LidarScan) -> None:
         """Non-blocking: latch ``(pano, scan)`` as the next frame to process.
 
         Overwrites any frame the worker has not yet picked up (drop-stale-frames
-        policy, issue #88). No-op after :meth:`stop`.
+        policy, issue #88). No-op after :meth:`stop`. Also supervises the worker
+        thread (issue #174): if it died, restart it (bounded, see
+        ``max_restarts``) before latching the new frame, instead of letting every
+        future submit silently vanish into a dead thread.
         """
         with self._cv:
             if self._stopped:
                 return
+            self._restart_if_dead_locked()
             self._pending = (pano, scan)
             self._submitted_count += 1
             self._cv.notify()
+
+    def _restart_if_dead_locked(self) -> None:
+        """Restart the worker thread if it ended. Caller must hold ``self._cv``."""
+        if self._thread.is_alive():
+            return
+        if self._restart_count >= self._max_restarts:
+            return  # budget exhausted — leave state as-is; counters stay readable
+        self._restart_count += 1
+        _LOGGER.error(
+            "AsyncPerceptionWorker: worker thread %r ended unexpectedly "
+            "(restart %d/%d); last error: %r",
+            self._thread.name, self._restart_count, self._max_restarts,
+            self._last_error,
+        )
+        self._thread = self._spawn_thread()
 
     def stop(self, timeout: float = 2.0) -> None:
         """Signal the worker to exit and join it. Safe to call more than once."""
         with self._cv:
             self._stopped = True
             self._cv.notify()
-        self._thread.join(timeout=timeout)
+            thread = self._thread  # snapshot under lock — submit() may not restart
+        thread.join(timeout=timeout)
 
     @property
     def processed_count(self) -> int:
@@ -94,6 +160,26 @@ class AsyncPerceptionWorker:
     def is_alive(self) -> bool:
         return self._thread.is_alive()
 
+    @property
+    def restart_count(self) -> int:
+        """How many times :meth:`submit` has restarted a dead worker thread."""
+        with self._cv:
+            return self._restart_count
+
+    @property
+    def keyframes_processed(self) -> int:
+        """The underlying pipeline's own keyframe counter (issue #174).
+
+        Reads ``pipeline._keyframe_idx`` directly off the (still-live) pipeline
+        object rather than anything the worker thread maintains, so it stays a
+        readable ``int`` — never ``None`` — for as long as this
+        ``AsyncPerceptionWorker`` (and the pipeline it wraps) exists, independent
+        of whether the worker thread itself is currently alive, dead, or
+        mid-restart. ``getattr`` with a default guards against a pipeline stub
+        that has no such attribute at all (e.g. a test double).
+        """
+        return int(getattr(self._pipeline, "_keyframe_idx", 0))
+
     def _run(self) -> None:
         while True:
             with self._cv:
@@ -106,7 +192,35 @@ class AsyncPerceptionWorker:
             try:
                 self._pipeline.process(pano, scan)
             except Exception as exc:  # a perception glitch must never kill the worker
-                if self._on_error is not None:
-                    self._on_error(exc)
+                self._last_error = exc
+                _LOGGER.error(
+                    "AsyncPerceptionWorker: pipeline.process() raised %r; frame "
+                    "dropped, worker continues.\n%s",
+                    exc, traceback.format_exc(),
+                )
+                self._safe_on_error(exc)
             with self._cv:
                 self._processed_count += 1
+
+    def _safe_on_error(self, exc: Exception) -> None:
+        """Call the caller's ``on_error`` hook without letting IT kill the worker.
+
+        Issue #174 root cause: the pre-fix ``_run`` called ``self._on_error(exc)``
+        from inside the ``except`` block with no guard of its own. On a live
+        cluster run that callback logs through ``rclpy``, which can itself raise
+        (a "benign teardown RCLError" observed in the adapter log on every dead
+        loft slot) — that second, unguarded exception then escaped ``_run``
+        entirely and silently ended the thread. Guarding the callback call here
+        closes that specific escape hatch; the bounded-restart supervisor in
+        :meth:`submit` is the backstop for any other way the thread might end.
+        """
+        if self._on_error is None:
+            return
+        try:
+            self._on_error(exc)
+        except Exception:
+            _LOGGER.error(
+                "AsyncPerceptionWorker: on_error callback itself raised; "
+                "suppressed so it cannot end the worker thread.\n%s",
+                traceback.format_exc(),
+            )
