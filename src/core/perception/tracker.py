@@ -174,6 +174,23 @@ class TrackerConfig:
     # own footprint to the union (issue #161's two TVs at 0.65 m spacing grow the
     # union's width by 0.65 m, far past this), so this never masks that case.
     extent_growth_tol: float = 0.25
+    # Issue #180: neither waiver above caps CUMULATIVE growth. The #153 floor
+    # (dist <= extent_veto_min_sep) waives every check outright, no matter how
+    # large a single accepted jump is; the #176 growth branch only bounds ONE
+    # match's own contribution, not the running total across many accepted
+    # matches. A chain of individually-plausible merges can therefore walk a
+    # track's box outward without limit -- one adversarial construction does
+    # exactly this by riding the #153 floor every step. This is the backstop:
+    # regardless of which branch above would otherwise pass a match, the
+    # resulting box may never grow more than this many metres, on any axis,
+    # past the track's FIRST accepted box (tracked by :func:`associate`, kept
+    # off :class:`~core.interfaces.InstanceRecord` the same way the scene
+    # index keeps its colour tally external, issue #121). Generous enough that
+    # the realistic multi-merge growth #176's own fix chain measured (~1.15 m
+    # on a chair's long axis before the association gate itself stops it)
+    # still completes; tight enough that no chain of "individually plausible"
+    # merges can walk a box arbitrarily far.
+    extent_cumulative_growth_cap: float = 1.5
     # H15(a) track decay: an instance still at n_obs==1 that has not been re-observed
     # within this many keyframes of first sighting is a one-frame ghost and is pruned.
     # Confirmed tracks (n_obs>=2) are NEVER decayed. 0 disables decay.
@@ -254,7 +271,11 @@ def _assoc_gate(label: str, cfg: TrackerConfig) -> float:
 
 
 def _match_plausible(
-    candidate: InstanceRecord, fused: Fused3D, cfg: TrackerConfig, dist: float
+    candidate: InstanceRecord,
+    fused: Fused3D,
+    cfg: TrackerConfig,
+    dist: float,
+    first_box: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> bool:
     """Issue #94: veto a match that would blow the fused box past a plausible size
     for its class -- UNLESS (issue #153) the centroids landed within
@@ -293,15 +314,35 @@ def _match_plausible(
     distinct same-class object at typical spacing adds most of its own footprint to
     the union (issue #161's two TVs 0.65 m apart grow the union's width by 0.65 m),
     which this growth check still correctly rejects.
+
+    Issue #180: everything above judges only THIS ONE match -- neither waiver
+    caps how far a chain of individually-plausible matches walks the box over
+    many keyframes. ``first_box`` (the track's aabb at the moment it was FIRST
+    accepted, threaded in by :func:`associate`; ``None`` for any caller that
+    predates #180) is checked FIRST, ahead of and regardless of the #153/#176
+    waivers below: the union of ``first_box`` with this match's own combined
+    box may grow by at most ``cfg.extent_cumulative_growth_cap`` on any axis,
+    full stop. This is the one check in this function that a match cannot
+    talk its way around by landing close (#153) or growing little (#176) --
+    those only ever describe ONE step, never the running total.
     """
-    if dist <= cfg.extent_veto_min_sep:
-        return True
     new_min = fused.points.min(axis=0)
     new_max = fused.points.max(axis=0)
     combined_min = np.minimum(candidate.aabb_min, new_min)
     combined_max = np.maximum(candidate.aabb_max, new_max)
     combined_ext = combined_max - combined_min
     candidate_ext = candidate.aabb_max - candidate.aabb_min
+
+    if first_box is not None:
+        first_min, first_max = first_box
+        cumulative_min = np.minimum(first_min, combined_min)
+        cumulative_max = np.maximum(first_max, combined_max)
+        cumulative_growth = (cumulative_max - cumulative_min) - (first_max - first_min)
+        if not bool(np.all(cumulative_growth <= cfg.extent_cumulative_growth_cap)):
+            return False
+
+    if dist <= cfg.extent_veto_min_sep:
+        return True
     growth = combined_ext - candidate_ext
     if bool(np.all(growth <= cfg.extent_growth_tol)):
         return True
@@ -374,6 +415,23 @@ def associate(
     """
     pool: list[InstanceRecord] = list(index.all_instances())
 
+    # Issue #180: the cumulative growth cap needs each track's FIRST accepted
+    # box -- state that outlives any one associate() call, which
+    # InstanceRecord itself does not carry (frozen semantics; owned surface
+    # excludes core.interfaces). Kept on the index object instead, the same
+    # convention BasicSceneIndex already uses for its own colour tally
+    # (issue #121, kept OUTSIDE InstanceRecord) -- so it lives and dies with
+    # the index it belongs to and never leaks between independent
+    # SceneIndex instances (e.g. separate test cases, separate episodes).
+    first_boxes: dict[int, tuple[np.ndarray, np.ndarray]] = getattr(
+        index, "_tracker_first_boxes", None
+    )
+    if first_boxes is None:
+        first_boxes = {}
+        index._tracker_first_boxes = first_boxes
+    for rec in pool:
+        first_boxes.setdefault(rec.instance_id, (rec.aabb_min.copy(), rec.aabb_max.copy()))
+
     def _order_key(item: tuple[int, tuple[Detection, Fused3D]]):
         _, (det, fused) = item
         cx, cy, cz = (float(c) for c in fused.centroid)
@@ -401,7 +459,8 @@ def associate(
             dist = float(np.linalg.norm(fused.centroid - cand.centroid))
             if dist > best_dist:
                 continue
-            if not _match_plausible(cand, fused, cfg, dist):
+            first_box = first_boxes.get(cand.instance_id)
+            if not _match_plausible(cand, fused, cfg, dist, first_box=first_box):
                 continue
             best = cand
             best_dist = dist
@@ -424,6 +483,15 @@ def associate(
             rec = _fused_to_record(det, fused, instance_id=new_id)
             survivor = index.add(rec, colour_obs=obs)
             pool.append(survivor)
+            # Issue #180: only seed a first-box the FIRST time this instance_id
+            # is ever seen -- index.add() can still independently IoU-merge
+            # into an already-established instance (its own re-derivation,
+            # documented on merge_into above) rather than truly minting a new
+            # one, and that established track's real first box must not be
+            # overwritten by this later observation.
+            first_boxes.setdefault(
+                survivor.instance_id, (survivor.aabb_min.copy(), survivor.aabb_max.copy())
+            )
         touched_by_input_idx[orig_idx] = survivor.instance_id
     return [touched_by_input_idx[i] for i in range(len(fused_dets))]
 
