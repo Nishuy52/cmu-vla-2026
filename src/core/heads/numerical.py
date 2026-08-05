@@ -26,7 +26,8 @@ from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from core.fsm.controller import StabilitySignal
-from core.interfaces import InstanceRecord, IntAnswer, MatchTier, QType, SceneIndex
+from core.heads.scene_established import ESTABLISH_N_OBS, EstablishedView
+from core.interfaces import IntAnswer, QType, SceneIndex
 from core.geometry.toolbox import (
     DEFAULT_THRESHOLDS,
     Thresholds,
@@ -44,7 +45,8 @@ STABLE_MARGIN: float = 0.30  # winner_margin reported once held (> the FSM's 0.2
 # seen this many times, the class is "established" and ghosts (n_obs==1) are dropped from
 # the count; instances with n_obs>=GATE_MIN_OBS still count. Below the establish
 # threshold (cold start) every instance counts, so a genuine cold count is not starved.
-ESTABLISH_N_OBS: int = 3  # a noun is "established" once some instance reaches this
+# ESTABLISH_N_OBS itself now lives in `core.heads.scene_established` (#184: shared with
+# OBJECT_REFERENCE's candidate/anchor gating) and is re-imported above.
 GATE_MIN_OBS: int = 2     # once established, count only instances with n_obs >= this
 
 # H15(c) coverage-gated early answer: minimum exploration-coverage fraction required
@@ -96,44 +98,6 @@ DISAMBIGUATOR_RELEASE_FRAC: float = 0.85
 # `_count()` for the fail-open guarantee that a too-strict floor can only ever
 # fall back to the unfiltered count, never fabricate a zero.
 ANCHOR_ESTABLISHED_N_OBS: int = ESTABLISH_N_OBS
-
-
-@dataclass(frozen=True)
-class _AnchorEstablishedView:
-    """(#151) SceneIndex wrapper narrowing relation-clause ANCHOR lookups to
-    established instances, while leaving the TARGET noun's own lookups untouched.
-
-    Scoped to exactly one `counting()` call; never mutates the underlying index.
-    `by_label`/`by_label_tiered` are the only `SceneIndex` methods the toolbox's
-    clause-evaluation path (`_match_noun` / `_match_anchor_noun` / `_resolve_anchor`
-    / `_eval_clause`) reaches, so wrapping just those two is sufficient to gate
-    every anchor a clause resolves through the SAME toolbox machinery
-    object_reference uses -- no toolbox code is modified or duplicated.
-
-    A query for `target_noun` itself (the class being counted) is passed straight
-    through: the target pool keeps its own, separate min_obs gate
-    (`NumericalHead._answer_min_obs`); this view only tightens the ANCHOR side.
-    """
-
-    inner: SceneIndex
-    target_noun: str
-    floor: int
-
-    def _gate(self, noun: str, recs):
-        if noun == self.target_noun:
-            return recs
-        return [r for r in recs if r.n_obs >= self.floor]
-
-    def by_label(self, noun: str) -> list[InstanceRecord]:
-        return self._gate(noun, list(self.inner.by_label(noun)))
-
-    def by_label_tiered(self, noun: str) -> list[tuple[InstanceRecord, MatchTier]]:
-        if noun == self.target_noun:
-            return list(self.inner.by_label_tiered(noun))
-        return [(r, t) for r, t in self.inner.by_label_tiered(noun) if r.n_obs >= self.floor]
-
-    def all_instances(self):
-        return self.inner.all_instances()
 
 
 @dataclass
@@ -219,7 +183,8 @@ class NumericalHead:
            issue -- a single unfiltered `counting()` call, byte-identical to the
            pre-#151 path.
         2. A question WITH a clause counts first against the established-anchor
-           view (`_AnchorEstablishedView`): the clause's toolbox predicate
+           view (`core.heads.scene_established.EstablishedView`, `exempt_noun` set to
+           the target noun): the clause's toolbox predicate
            (``on``/``above``/``near``/``with``/...) evaluated only against
            anchor instances seen `ANCHOR_ESTABLISHED_N_OBS` times, so a
            single-frame ghost detection cannot inflate the count (#151's own
@@ -241,7 +206,9 @@ class NumericalHead:
         if not target.clauses:
             return counting(target, scene, min_obs=min_obs, th=self.thresholds)
 
-        established = _AnchorEstablishedView(scene, target.noun, ANCHOR_ESTABLISHED_N_OBS)
+        established = EstablishedView(
+            scene, floor=ANCHOR_ESTABLISHED_N_OBS, exempt_noun=target.noun
+        )
         filtered = counting(target, established, min_obs=min_obs, th=self.thresholds)
         if filtered.count > 0:
             return filtered

@@ -216,27 +216,44 @@ def test_cp4_reresolve_unparseable_constraint_keeps_winner_or_f5():
 # ---------------------------------------------------- OR-F8: provisional never published
 def test_cp4_provisional_only_winner_not_published_or_f8():
     """OR-F8: a provisional-only winner (n_obs=1, a CP2 hallucination-recovery instance) is
-    never committed as the published marker. verify() falls to the next re-observed
-    candidate."""
+    never committed as the published marker.
+
+    (#184) The established-instance gate (``ObjectRefHead._resolve``,
+    ``core.heads.scene_established.ESTABLISH_N_OBS``) now already ranks the
+    established (n_obs>=3) candidate ahead of the n_obs=1 ghost at advance() time, so
+    the winner is real from the start here -- OR-F8's own verify()-time
+    eligibility fallthrough is not even the deciding mechanism for THIS n_obs=1 case
+    any more (it stays load-bearing for a low-SCORE winner instead -- see
+    ``test_cp4_low_score_winner_not_published_falls_through`` below, unaffected since
+    the established gate only looks at n_obs). The guarantee this test protects
+    (a provisional-only instance is never the published marker) still holds, just
+    enforced earlier."""
     sc = scene(
         inst(1, "bowl", n_obs=1, centroid=(0, 0, 0)),   # provisional (CP2 hit)
         inst(2, "bowl", n_obs=3, centroid=(5, 0, 0)),   # real, re-observed
     )
     head = _orhead(sc, object_plan("bowl"))
-    assert head.best_candidate.instance_id == 1  # ranks first by id
+    assert head.best_candidate.instance_id == 2  # (#184) established gate already prefers it
     m = head.verify()
     assert m is not None
-    assert head.best_candidate.instance_id == 2  # provisional refused, fell through
+    assert head.best_candidate.instance_id == 2  # provisional never published
 
 
-def test_cp4_all_provisional_publishes_nothing_or_f8():
-    """OR-F8: when every ranked candidate is provisional-only, verify() refuses to publish a
-    confident wrong box and returns None."""
+def test_cp4_all_provisional_falls_back_to_relaxed_target_185():
+    """(#185, supersedes the pre-#185 OR-F8 "publishes nothing" verdict) When every
+    ranked candidate is provisional-only, verify() no longer refuses to publish:
+    returning None here would force the FSM floor to fall through to an ANCHOR-class
+    instance instead of the TARGET class (``core.fsm.floors.FloorAnswers.
+    _object_reference`` rung 4 -- issue #185's 'trash can for a bowl question'
+    defect). Both candidates are equally provisional (n_obs=1, below both the
+    established floor and the answer-eligibility floor), so the deterministic
+    top-ranked one is published -- provisional, but still the TARGET class, which is
+    strictly better than a wrong-class floor answer."""
     sc = scene(inst(1, "bowl", n_obs=1), inst(2, "bowl", n_obs=1, centroid=(5, 0, 0)))
     head = _orhead(sc, object_plan("bowl"))
     m = head.verify()
-    assert m is None
-    assert head.best_candidate is None
+    assert m is not None
+    assert head.best_candidate.instance_id == 1  # deterministic top rank, never silence
 
 
 # ------------------------------------------------------- issue #43a answer eligibility
@@ -256,16 +273,19 @@ def test_cp4_low_score_winner_not_published_falls_through():
     assert head.best_candidate.instance_id == 2  # low-score winner refused, fell through
 
 
-def test_cp4_all_low_score_publishes_nothing():
-    """Every ranked candidate under the score floor -> verify() refuses to publish."""
+def test_cp4_all_low_score_falls_back_to_relaxed_target_185():
+    """(#185) Every ranked candidate under the score floor -> verify() no longer
+    refuses to publish (see ``test_cp4_all_provisional_falls_back_to_relaxed_target_185``
+    for the full rationale): both candidates are established (n_obs=3), so #184's gate
+    is a no-op here -- this isolates #185's OR-F8 relaxation on its own."""
     sc = scene(
         inst(1, "bowl", n_obs=3, score=0.10),
         inst(2, "bowl", n_obs=3, score=0.29, centroid=(5, 0, 0)),
     )
     head = _orhead(sc, object_plan("bowl"))
     m = head.verify()
-    assert m is None
-    assert head.best_candidate is None
+    assert m is not None
+    assert head.best_candidate.instance_id == 1  # deterministic top rank, never silence
 
 
 # --------------------------------------------------------------------------- backward compat

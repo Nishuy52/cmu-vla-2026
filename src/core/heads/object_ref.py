@@ -32,6 +32,7 @@ from core.geometry.toolbox import (
     Thresholds,
     resolve,
 )
+from core.heads.scene_established import ESTABLISH_N_OBS, EstablishedView
 from core.parsing.regex_tier import _REL_TOKENS  # read-only: relation-token -> Pred map
 from core.plan_schema import Anchor, Clause, Plan, Pred, TargetSpec
 from core.perception.detector import is_answer_eligible
@@ -107,11 +108,44 @@ class ObjectRefHead:
         if scene is None or self.plan is None or self.plan.target is None:
             return
         self._scene = scene
-        res = resolve(self.plan.target, scene, self.thresholds)
+        res = self._resolve(scene)
         self._result = res
         if res.candidates_ranked:
             self.best_candidate = res.candidates_ranked[0]
             self.best_marker = clamp_record_marker(self.best_candidate)
+
+    def _resolve(self, scene: SceneIndex) -> ResolveResult:
+        """(#184) Extends the #151 established-instance gate (see
+        ``core.heads.scene_established.EstablishedView``) from NUMERICAL's relation-clause
+        anchor filtering to OBJECT_REFERENCE's own candidate ranking and anchor resolution.
+
+        The #118 mechanism table shows phantom same-class tracks (single/few-observation
+        detector noise, e.g. windows 31-vs-GT-1, lamps 92-vs-GT-3) deterministically win a
+        relation clause, a candidate rank, or a superlative anchor pick over the real,
+        well-observed instance, because :func:`core.geometry.toolbox.resolve` ranks and
+        resolves anchors over EVERY tracked instance with no observation-count floor of its
+        own. Two-tier fall-open, so a stricter filter can only ever move the pick toward the
+        truth and can never fabricate an empty result from a filtering failure:
+
+        1. Rank/resolve first against the established view (``EstablishedView`` with no
+           ``exempt_noun`` -- unlike NUMERICAL, OBJECT_REFERENCE has no separate target-side
+           gate of its own, so BOTH the candidate pool (``_match_noun``) and every anchor
+           pool a clause or superlative resolves through (``_resolve_anchor``) are gated
+           identically): single/few-observation ghosts cannot win a candidate rank or stand
+           in as "the" anchor for a superlative.
+        2. If that comes back with nothing ranked, fall back to the toolbox's plain,
+           unfiltered-by-establishment ``resolve()`` result -- the target/anchor class may
+           simply not be established YET (cold start), not genuinely absent. This mirrors
+           ``NumericalHead._count``'s own fall-open tiers 2-3 (#151): the established view
+           only ever narrows toward more plausible instances, never publishes nothing where
+           the raw pool had a candidate.
+        """
+        target = self.plan.target
+        established = EstablishedView(scene, floor=ESTABLISH_N_OBS)
+        filtered = resolve(target, established, self.thresholds)
+        if filtered.candidates_ranked:
+            return filtered
+        return resolve(target, scene, self.thresholds)
 
     def publish_partial(self, partial: PartialResults) -> None:
         """Stamp the current best candidate/marker into the shared PartialResults."""
@@ -128,11 +162,19 @@ class ObjectRefHead:
         fails verification, demote to the runner-up (and try it too). Deterministic and
         total when llm_verify is None.
 
-        Provisional-commit guard (OR-F8): a winner that is provisional-only — fewer than
-        ``REOBS_MIN_N_OBS`` distinct observations, e.g. a CP2 hallucination-recovery
-        instance (n_obs=1) — is never committed as the published marker. We fall through to
-        the next non-provisional ranked candidate; if none qualifies, we publish nothing
-        (return None) rather than a confident wrong box on empty space.
+        Provisional-commit guard (OR-F8, relaxed by #185): a winner that is
+        provisional-only — fewer than ``REOBS_MIN_N_OBS`` distinct observations, e.g. a
+        CP2 hallucination-recovery instance (n_obs=1) — is not committed AS THE WINNER;
+        we fall through to the next non-provisional ranked candidate first. If NONE
+        qualify, we no longer publish nothing: returning None here means the target
+        class has zero eligible detections, and (issue #185) that forces the caller to
+        the FSM floor, which falls through anchor-clause nouns
+        (``core.fsm.floors.FloorAnswers._object_reference`` rung 4) when the target
+        noun itself is empty at that rung too — publishing an ANCHOR-class instance
+        (e.g. 'trash can' for a 'bowl' query) rather than the target class. Publishing
+        the best-ranked (still target-class, just provisional/low-score) candidate is
+        strictly closer to correct than a wrong-class floor answer, so
+        ``_first_committable`` now falls open to it — see there.
         """
         res = self._result
         if res is None or not res.candidates_ranked:
@@ -155,15 +197,29 @@ class ObjectRefHead:
         self, winner: InstanceRecord, res: ResolveResult
     ) -> InstanceRecord | None:
         """Return the winner if answer-eligible, else the first answer-eligible ranked
-        candidate after it, else None (OR-F8 provisional-commit guard; issue #43a
+        candidate after it (OR-F8 provisional-commit guard; issue #43a
         answer-eligibility gate — n_obs + peak score, see
-        ``core.perception.detector.is_answer_eligible``)."""
+        ``core.perception.detector.is_answer_eligible``).
+
+        (#185) If NO ranked candidate is answer-eligible, fall open to the top-ranked
+        candidate anyway rather than returning None. ``res.candidates_ranked`` is
+        guaranteed non-empty here (``verify()`` already checked before calling this),
+        so this candidate is always a genuine TARGET-class instance from the relaxed
+        (unestablished / low-score) pool — provisional, but never the wrong class. The
+        alternative (returning None) forces the FSM floor to publish an ANCHOR-class
+        instance instead (e.g. 'trash can' for an all-ineligible 'bowl' pool — see
+        ``core.fsm.floors.FloorAnswers._object_reference`` rung 4), which is strictly
+        worse: wrong object entirely, not merely low-confidence. Only a genuinely EMPTY
+        ``candidates_ranked`` (target class absent from the scene altogether) still
+        falls through to the floor untouched — ``verify()``'s early return already
+        covers that case before ``_first_committable`` is ever called.
+        """
         if winner is not None and is_answer_eligible(winner):
             return winner
         for cand in res.candidates_ranked:
             if is_answer_eligible(cand):
                 return cand
-        return None
+        return res.candidates_ranked[0] if res.candidates_ranked else None
 
     # -------------------------------------------------------------- rich CP4 seam
     def _cp4_winner(self, res: ResolveResult) -> InstanceRecord:
