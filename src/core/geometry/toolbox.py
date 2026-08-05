@@ -1347,7 +1347,14 @@ def resolve(
     if sup is not None and survivors:
         anchor_recs = _resolve_anchor(sup.anchors[0], index, th, audit)
         if anchor_recs:
-            anchor = anchor_recs[0]  # salience: first (index order); deterministic
+            # #186: `anchor_recs[0]` was a raw index-order pick (annotation/detection
+            # order carries no physical meaning -- the same #151 lesson
+            # `_select_sub_anchor` already encodes for disambiguator sub-anchors).
+            # A superlative's own anchor pool has the identical shape (several
+            # same-noun candidates, at most one of them the real object the
+            # question means), so it is resolved the same evidence-grounded way:
+            # nearest to the pool actually being ranked > score > n_obs > id.
+            anchor = _select_sub_anchor(anchor_recs, survivors)
             ranked = (
                 closest_to(survivors, anchor, th)
                 if sup.pred is Pred.CLOSEST_TO
@@ -1685,11 +1692,19 @@ def _tier_priority_order(
         }
     if not tier_by_id and not score_by_id:
         return _stable_by_id(recs)
+    # #186: once tier and clause-score both genuinely tie (e.g. `near()` saturates
+    # to 1.0 for several established candidates), falling straight to ascending
+    # instance_id crowns whichever survivor happens to have the lowest id --
+    # detection-order luck, not evidence. `n_obs` (distinct keyframe observations)
+    # is real physical evidence of how robustly re-observed a track is, so it goes
+    # ahead of id as a secondary tie-break; id is kept only as the last-resort,
+    # never-reached-in-practice tie-break that makes the order total (#111/#151).
     return sorted(
         recs,
         key=lambda r: (
             tier_by_id.get(r.instance_id, worst),
             -score_by_id.get(r.instance_id, 0.0),
+            -r.n_obs,
             r.instance_id,
         ),
     )

@@ -42,6 +42,49 @@ clause for the same question:
   set any higher would be tuning to this issue's own sample, against the generalization
   protocol). See ``test_bedside_table_farthest_established_gate_is_a_documented_no_op``
   for the verified (not fabricated) before/after and the follow-up recommendation.
+
+Issue #186 (this module's characterization tests, updated) closes both `toolbox.py`
+ranking gaps the paragraphs above flagged as follow-ups:
+
+* ``_tier_priority_order``'s final tie-break now ranks same-tier/same-clause-score
+  survivors by DESCENDING ``n_obs`` before falling to ascending ``instance_id`` (the
+  never-reached-in-practice last resort, unchanged) -- the same "identity only as a
+  final tiebreak" discipline ``_select_sub_anchor`` (#151) already applies.
+* ``resolve()``'s superlative anchor pick now calls ``_select_sub_anchor`` itself
+  (nearest to the ranked pool > score > n_obs > id) instead of ``anchor_recs[0]``.
+
+VERIFIED (not assumed) effect on both archived rows, recomputed against this exact
+fixture data after the fix:
+
+* Flowers-near-window: the established n_obs-descending winner is instance 5 (n_obs=59),
+  not instance 2 (the old id-ascending winner) NOR instance 82 (the GT-nearest
+  candidate an earlier analysis of this issue expected). Instance 5 is itself near
+  (AABB gap 0.00 m, `near()` saturates to 1.0) an ESTABLISHED window (id 48, n_obs=21)
+  that is NOT the real GT window (~7.5 m away) -- a second, independently-established
+  ghost pair that also saturates `near()`, and that carries both higher `n_obs` (59 vs
+  38) AND higher detector `score` (0.57 vs 0.28) than the GT-nearest candidate (id 82).
+  No per-candidate evidence signal available on `InstanceRecord` (score, n_obs, or the
+  unclamped `near()` margin, which is numerically IDENTICAL -- gap 0.00 m, margin
+  1.2 -- for both ties) can tell these two established, `near()`-saturated pairs
+  apart without GT. This is a real, narrower residual gap than #184 left (a
+  ghost-vs-ghost tie among ESTABLISHED, non-index-order-selected candidates, caused by
+  `near()`'s own AABB-gap saturation admitting more than one truly-independent
+  candidate/anchor pair at score 1.0) -- documented here, not silently papered over,
+  and filed as a follow-up rather than fixed by changing `near()`'s scoring semantics
+  (out of this issue's stated scope).
+* Bedside-table-farthest-from-window: the new evidence-based anchor pick selects
+  window id 148 (n_obs=7, nearest among established windows to the established
+  bedside-table pool) instead of id 26 (index-order pick); ranking established bedside
+  tables by distance from that anchor now picks instance 45 (n_obs=3) -- phantom
+  instance 116 (the old winner) no longer wins. id 148 is not itself the single
+  closest established window to the real GT window position (see
+  ``test_bedside_table_farthest_established_gate_is_a_documented_no_op`` for the full
+  verified before/after), so this remains an evidence-based, deterministic, but not
+  provably GT-optimal pick -- the anchor pool is genuinely noisy detector output and no
+  purely local (score/n_obs/distance-to-pool) signal recovers the literal GT window
+  from it in every case. What #186 guarantees is that the pick is no longer an
+  index-order artifact and that a genuinely well-observed phantom no longer wins by
+  construction.
 """
 from __future__ import annotations
 
@@ -208,27 +251,39 @@ _HOTELROOM1_WINDOWS = [
 
 
 def test_flowers_near_window_raw_resolve_reproduces_the_live_bug():
-    """Baseline: the toolbox's own ranking, applied directly with no establishment gate
-    (byte-identical to the pre-#184 ``ObjectRefHead.advance()`` path), reproduces the
-    archived live pick -- instance 0, n_obs=2, a single/few-frame ghost."""
+    """(#186) The toolbox's own ranking, applied directly with no establishment gate,
+    no longer reproduces the archived live pick (instance 0, n_obs=2, a single/few-frame
+    ghost) once `_tier_priority_order`'s final tie-break prefers higher `n_obs` over
+    ascending `instance_id`: among the many candidates tied at `near()` == 1.0, instance
+    5 (n_obs=59) is the most-observed, so it now wins even with NO establishment floor
+    applied. This still moves the raw pick off the id-ascending artifact (id 0) -- the
+    module docstring's #186 section documents why it does not reach the GT-nearest
+    candidate (id 82) either; #186 fixed the id-order tie-break, not `near()`'s own
+    AABB-gap saturation."""
     target = TargetSpec(noun="flowers", raw="flowers", attributes=[], clauses=[near_clause("window")])
     sc = scene(*_HOTELROOM2_FLOWERS, *_HOTELROOM2_WINDOWS)
     raw = resolve(target, sc, DEFAULT_THRESHOLDS)
-    assert raw.candidates_ranked[0].instance_id == 0
-    assert raw.candidates_ranked[0].n_obs == 2  # the live-reported ghost
+    assert raw.candidates_ranked[0].instance_id == 5
+    assert raw.candidates_ranked[0].n_obs == 59  # most-observed among the near()==1.0 tie
 
 
 def test_flowers_near_window_excludes_the_ghost():
-    """(#184) Post-fix, ``ObjectRefHead`` no longer publishes the n_obs=2 ghost (instance
-    0): the established view excludes every candidate under ``ESTABLISH_N_OBS`` from the
-    ranked pool before the toolbox even applies its own (id-based) tie-break, so the
-    published winner is always genuinely re-observed."""
+    """(#184 gate + #186 tie-break) Post-fix, ``ObjectRefHead`` no longer publishes the
+    n_obs=2 ghost (instance 0): the established view excludes every candidate under
+    ``ESTABLISH_N_OBS`` from the ranked pool, and `_tier_priority_order`'s n_obs-descending
+    tie-break (#186) picks the most-observed established survivor among the `near()`==1.0
+    tie -- instance 5 (n_obs=59), never an id-ascending accident. See the module docstring
+    for why this is not the GT-nearest established candidate (id 82): both are genuinely
+    established, `near()`-saturated picks, and no per-candidate evidence signal
+    distinguishes them without ground truth -- documented as a residual gap, not silently
+    papered over."""
     target = TargetSpec(noun="flowers", raw="flowers", attributes=[], clauses=[near_clause("window")])
     winner = _head_winner(
         target, "Find the flowers near the window.", *_HOTELROOM2_FLOWERS, *_HOTELROOM2_WINDOWS
     )
     assert winner.instance_id != 0  # the ghost no longer wins
     assert winner.n_obs >= ESTABLISH_N_OBS  # the winner is always established now
+    assert winner.instance_id == 5  # most-observed (n_obs=59) survivor of the near()==1.0 tie
 
 
 def _farthest_from_window_target(noun: str) -> TargetSpec:
@@ -239,28 +294,33 @@ def _farthest_from_window_target(noun: str) -> TargetSpec:
 
 
 def test_bedside_table_farthest_raw_resolve_reproduces_the_live_bug():
-    """Baseline: the toolbox's own ranking reproduces the archived live pick -- instance
-    116, the farthest bedside table from whichever window `resolve()`'s superlative anchor
-    step happens to pick first (index order)."""
+    """(#186) The toolbox's own ranking no longer reproduces the archived live pick
+    (instance 116) once `resolve()`'s superlative anchor pick uses `_select_sub_anchor`
+    (nearest to the ranked pool > score > n_obs > id) instead of `anchor_recs[0]`
+    (index order). Over the FULL raw (unfiltered) window pool the nearest-to-the-
+    bedside-table-pool window is id 54 (n_obs=2, itself a low-observation detection --
+    the raw/no-establishment path has no floor to exclude it, same as before #184);
+    ranking the raw bedside-table pool by distance from that anchor now picks instance
+    91."""
     target = _farthest_from_window_target("bedside table")
     sc = scene(*_HOTELROOM1_BEDSIDE_TABLES, *_HOTELROOM1_WINDOWS)
     raw = resolve(target, sc, DEFAULT_THRESHOLDS)
-    assert raw.candidates_ranked[0].instance_id == 116
+    assert raw.candidates_ranked[0].instance_id == 91
+    assert raw.candidates_ranked[0].instance_id != 116  # the old anchor_recs[0] winner
 
 
 def test_bedside_table_farthest_established_gate_is_a_documented_no_op():
-    """(#184) Verified, not assumed: for THIS archived row, the established gate does not
-    change the published winner. The superlative anchor pick (`resolve()`'s
-    `anchor_recs[0]`, "salience: first (index order)") lands on window id 26, which
-    already carries exactly `ESTABLISH_N_OBS` (3) observations -- already "established" by
-    this issue's own reused threshold, so filtering by observation count alone cannot
-    exclude it. The candidate pool narrows (established bedside tables are a strict
-    subset of all 22), but instance 116 (n_obs=35, itself genuinely well-observed) remains
-    the farthest-from-id-26 survivor either way. This is a real, separate defect --
-    `resolve()`'s own "first index-order" anchor-salience choice, not an observation-count
-    problem -- and fixing it needs a `core/geometry/toolbox.py` ranking change, outside
-    #184's stated SceneIndex-view-only scope. Recorded here as a characterization test
-    (not silently dropped) with a companion GitHub issue filed for the follow-up."""
+    """(#184 gate + #186 anchor pick) Verified, not assumed: `ObjectRefHead` narrows both
+    the candidate and anchor pools to established (n_obs >= ESTABLISH_N_OBS) instances,
+    then `resolve()`'s new evidence-based anchor pick (#186, `_select_sub_anchor` instead
+    of `anchor_recs[0]`) selects window id 148 (n_obs=7, nearest among established windows
+    to the established bedside-table pool) rather than the old index-order pick (id 26).
+    Ranking established bedside tables by distance from that anchor now picks instance 45
+    (n_obs=3) -- phantom instance 116 no longer wins. id 148 is not itself provably the
+    single closest established window to the real GT window position (see the module
+    docstring's #186 section): the anchor pool is genuinely noisy detector output, and
+    #186 guarantees the pick is evidence-based and deterministic, not that it is
+    GT-optimal in every archived row."""
     target = _farthest_from_window_target("bedside table")
     winner = _head_winner(
         target,
@@ -268,7 +328,8 @@ def test_bedside_table_farthest_established_gate_is_a_documented_no_op():
         *_HOTELROOM1_BEDSIDE_TABLES,
         *_HOTELROOM1_WINDOWS,
     )
-    assert winner.instance_id == 116  # documented residual gap, see module docstring
+    assert winner.instance_id != 116  # the phantom no longer wins
+    assert winner.instance_id == 45
     assert winner.n_obs >= ESTABLISH_N_OBS  # not itself a low-observation ghost
 
 

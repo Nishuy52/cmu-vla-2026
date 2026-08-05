@@ -1035,6 +1035,130 @@ def test_sub_anchor_selection_is_order_invariant_synthetic():
     assert counts == {2}, f"count varied across shuffles: {counts}"
 
 
+# --------------------------------------------------------------------------- issue #186:
+# ``_tier_priority_order``'s final tie-break must prefer evidence (``n_obs``) over
+# ascending ``instance_id``, and ``resolve()``'s superlative anchor pick must be
+# evidence-based (``_select_sub_anchor``) rather than ``anchor_recs[0]`` (index order).
+
+
+def _near_wall_clause() -> Clause:
+    return Clause(Pred.NEAR, [Anchor(noun="wall")])
+
+
+def _wall_and_chairs(lo_n_obs: int, hi_n_obs: int):
+    # A shared "wall" anchor both chairs overlap identically (near() saturates to
+    # 1.0 for both) -- a genuine tie on the (tier, -clause_score) prefix, isolating
+    # n_obs as the only remaining discriminator.
+    wall = rec(1, "wall", (0, 0, 1.0), (20.0, 0.2, 2.0))
+    lo_id_lo_obs = rec(2, "chair", (0, 0, 1.0), (0.4, 0.4, 0.5), n_obs=lo_n_obs)
+    hi_id_hi_obs = rec(9, "chair", (5, 0, 1.0), (0.4, 0.4, 0.5), n_obs=hi_n_obs)
+    return wall, lo_id_lo_obs, hi_id_hi_obs
+
+
+def test_tier_priority_order_prefers_higher_n_obs_over_lower_id():
+    # Same tier (bare noun, no tier signal), same clause score (both near() == 1.0) --
+    # once genuinely tied, the more-observed candidate wins, never the lower id.
+    wall, lo_id_lo_obs, hi_id_hi_obs = _wall_and_chairs(lo_n_obs=3, hi_n_obs=40)
+    idx = FakeIndex([wall, lo_id_lo_obs, hi_id_hi_obs])
+    ordered = T._tier_priority_order(
+        [lo_id_lo_obs, hi_id_hi_obs], idx, "chair", [_near_wall_clause()], T.DEFAULT_THRESHOLDS
+    )
+    assert [r.instance_id for r in ordered] == [9, 2]
+
+
+def test_tier_priority_order_falls_back_to_id_only_on_an_exact_n_obs_tie():
+    # id is still the total order's last-resort tiebreak once n_obs also ties.
+    wall, a, b = _wall_and_chairs(lo_n_obs=5, hi_n_obs=5)
+    a = rec(9, "chair", (0, 0, 1.0), (0.4, 0.4, 0.5), n_obs=5)
+    b = rec(2, "chair", (5, 0, 1.0), (0.4, 0.4, 0.5), n_obs=5)
+    idx = FakeIndex([wall, a, b])
+    ordered = T._tier_priority_order(
+        [a, b], idx, "chair", [_near_wall_clause()], T.DEFAULT_THRESHOLDS
+    )
+    assert [r.instance_id for r in ordered] == [2, 9]
+
+
+def test_resolve_superlative_anchor_pick_is_evidence_based_not_index_order():
+    # Two "window" anchors tied on nothing but position/list-order: window_far sits
+    # at index 0 (would win under the old anchor_recs[0] pick) but window_near is the
+    # one actually near the survivor pool -- _select_sub_anchor's own "nearest to the
+    # ranked pool" evidence signal, mirroring the disambiguator sub-anchor precedent.
+    window_far = rec(1, "window", (50.0, 50.0, 1.5), (0.2, 2.0, 2.0))
+    window_near = rec(2, "window", (0.0, 5.0, 1.5), (0.2, 2.0, 2.0))
+    table_1 = rec(10, "table", (0.0, 0.0, 0.4), (0.6, 0.6, 0.8))
+    table_2 = rec(11, "table", (0.0, 3.0, 0.4), (0.6, 0.6, 0.8))
+    idx = FakeIndex([window_far, window_near, table_1, table_2])
+    spec = _spec(
+        "table", clauses=[Clause(Pred.FARTHEST_FROM, [Anchor(noun="window")])]
+    )
+    res = T.resolve(spec, idx)
+    # farthest from window_near (the evidence-grounded anchor) is table_1, not
+    # whatever the index-order anchor (window_far) would have picked.
+    assert res.candidates_ranked[0].instance_id == 10
+
+
+def test_resolve_superlative_anchor_pick_breaks_ties_by_n_obs_then_id():
+    # Both windows equidistant from the survivor pool (a dead tie on
+    # _select_sub_anchor's primary "nearest to pool" key) -- score, then n_obs,
+    # then id decide, exactly mirroring _select_sub_anchor's own key order.
+    window_lo = rec(1, "window", (-5.0, 0.0, 1.5), (0.2, 2.0, 2.0), n_obs=2, score=0.3)
+    window_hi = rec(2, "window", (5.0, 0.0, 1.5), (0.2, 2.0, 2.0), n_obs=30, score=0.3)
+    table = rec(10, "table", (0.0, 0.0, 0.4), (0.6, 0.6, 0.8))
+    idx = FakeIndex([window_lo, window_hi, table])
+    spec = _spec(
+        "table", clauses=[Clause(Pred.FARTHEST_FROM, [Anchor(noun="window")])]
+    )
+    anchor_recs = T._resolve_anchor(Anchor(noun="window"), idx, T.DEFAULT_THRESHOLDS)
+    picked = T._select_sub_anchor(anchor_recs, [table])
+    assert picked.instance_id == 2  # higher n_obs wins the exact-tie
+
+
+def test_tier_priority_order_n_obs_tiebreak_is_input_order_invariant():
+    # #171 shape, #186 signal: shuffling insertion order (and so PYTHONHASHSEED-driven
+    # dict/set iteration upstream) must never change which n_obs-tied-on-score survivor
+    # wins.
+    import random
+
+    wall, lo, hi = _wall_and_chairs(lo_n_obs=3, hi_n_obs=40)
+    idx = FakeIndex([wall, lo, hi])
+    rng = random.Random(186)
+    orders = set()
+    for _ in range(25):
+        shuffled = [lo, hi]
+        rng.shuffle(shuffled)
+        ordered = T._tier_priority_order(
+            shuffled, idx, "chair", [_near_wall_clause()], T.DEFAULT_THRESHOLDS
+        )
+        orders.add(tuple(r.instance_id for r in ordered))
+    assert orders == {(9, 2)}, f"order varied across shuffles: {orders}"
+
+
+def test_resolve_superlative_anchor_pick_is_input_order_invariant():
+    # Same fixture as test_resolve_superlative_anchor_pick_is_evidence_based_not_index_order,
+    # but every shuffle of the underlying record list (and so every possible
+    # PYTHONHASHSEED-driven scene-index iteration order) must resolve to the same
+    # winner -- same discipline as the existing #151/#168/#169 invariance tests above.
+    import random
+
+    window_far = rec(1, "window", (50.0, 50.0, 1.5), (0.2, 2.0, 2.0))
+    window_near = rec(2, "window", (0.0, 5.0, 1.5), (0.2, 2.0, 2.0))
+    table_1 = rec(10, "table", (0.0, 0.0, 0.4), (0.6, 0.6, 0.8))
+    table_2 = rec(11, "table", (0.0, 3.0, 0.4), (0.6, 0.6, 0.8))
+    records = [window_far, window_near, table_1, table_2]
+    spec = _spec(
+        "table", clauses=[Clause(Pred.FARTHEST_FROM, [Anchor(noun="window")])]
+    )
+    rng = random.Random(1860)
+    orders = set()
+    for _ in range(25):
+        shuffled = list(records)
+        rng.shuffle(shuffled)
+        idx = FakeIndex(shuffled)
+        res = T.resolve(spec, idx)
+        orders.add(tuple(c.instance_id for c in res.candidates_ranked))
+    assert orders == {(10, 11)}, f"order varied across shuffles: {orders}"
+
+
 # --------------------------------------------------------------------------- #171:
 # resolve()'s tie-break chain must be independent of detection/insertion order --
 # the same property that makes it independent of PYTHONHASHSEED (any hash-order-
