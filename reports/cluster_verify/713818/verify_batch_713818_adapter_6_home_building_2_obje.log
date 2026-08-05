@@ -1,0 +1,40 @@
+[WARN] [1785914253.832199376] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785914253.852156262] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785914253.857527419] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785914253.860401623] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785914253.863290514] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785914282.484043309] [vla_ai_module]: question latched: 'Find the lamp on the nightstand that has the photo on it.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785914297.100231194] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785914297.101769684] [vla_ai_module]: idle->parsing question received
+[INFO] [1785914303.098533380] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/113 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/113 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785914303.236563677] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785914333.327940231] [vla_ai_module]: published 138 waypoints since latch
+[INFO] [1785914342.704653160] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785914363.361919055] [vla_ai_module]: published 177 waypoints since latch
+[INFO] [1785914394.452986780] [vla_ai_module]: published 198 waypoints since latch
+[INFO] [1785914426.911182907] [vla_ai_module]: published 206 waypoints since latch
+[INFO] [1785914457.654777078] [vla_ai_module]: published 210 waypoints since latch
+[INFO] [1785914490.187143992] [vla_ai_module]: published 212 waypoints since latch
+[INFO] [1785914551.548473308] [vla_ai_module]: published 214 waypoints since latch
+[INFO] [1785914551.711689103] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785914587.547533375] [vla_ai_module]: published 215 waypoints since latch
+[INFO] [1785914589.357753743] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785914589.697384419] [vla_ai_module]: published marker answer: label='lamp' centroid=(3.20, -0.85, 0.83)
+[INFO] [1785914589.702646204] [vla_ai_module]: answer->done answered
+[INFO] [1785914589.709028056] [vla_ai_module]: controller DONE; last 9 events: 14.6:idle:question_latched:object_reference: 'Find the lamp on the nightstand that has the photo on it.' | 14.6:idle:transition:idle->parsing question received | 20.6:parsing:parsed:tier=api | 20.6:parsing:transition:parsing->orient parse attempted | 60.2:orient:transition:orient->explore_execute orientation window closed | 269.2:explore_execute:transition:explore_execute->verify explore budget spent | 306.9:verify:transition:verify->answer verify complete | 307.2:answer:published:MarkerBox via answer_state | 307.2:answer:transition:answer->done answered

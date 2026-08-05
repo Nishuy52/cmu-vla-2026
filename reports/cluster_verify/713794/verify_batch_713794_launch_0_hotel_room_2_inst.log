@@ -1,0 +1,443 @@
+[INFO] [launch]: All log files can be found below /tmp/roslog-713794/2026-08-05-01-54-13-956096-xgpe1-280139
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [localPlanner-1]: process started with pid [280144]
+[INFO] [pathFollower-2]: process started with pid [280145]
+[INFO] [static_transform_publisher-3]: process started with pid [280146]
+[INFO] [static_transform_publisher-4]: process started with pid [280147]
+[INFO] [terrainAnalysis-5]: process started with pid [280148]
+[INFO] [terrainAnalysisExt-6]: process started with pid [280149]
+[INFO] [default_server_endpoint-7]: process started with pid [280150]
+[INFO] [sim_image_repub-8]: process started with pid [280151]
+[INFO] [sensorScanGeneration-9]: process started with pid [280152]
+[INFO] [waypointConverter-10]: process started with pid [280153]
+[INFO] [visualizationTools-11]: process started with pid [280154]
+[INFO] [joy_node-12]: process started with pid [280155]
+[INFO] [vehicleSimulator-13]: process started with pid [280156]
+[static_transform_publisher-3] [WARN] [1785866054.920190071] []: Old-style arguments are deprecated; see --help for new-style arguments
+[static_transform_publisher-4] [WARN] [1785866054.924616745] []: Old-style arguments are deprecated; see --help for new-style arguments
+[static_transform_publisher-3] [INFO] [1785866054.940961545] [vehicleTransPublisher]: Spinning until stopped - publishing transform
+[static_transform_publisher-3] translation: ('-0.000000', '-0.000000', '0.000000')
+[static_transform_publisher-3] rotation: ('0.000000', '0.000000', '0.000000', '1.000000')
+[static_transform_publisher-3] from '/sensor' to '/vehicle'
+[static_transform_publisher-4] [INFO] [1785866054.946168866] [sensorTransPublisher]: Spinning until stopped - publishing transform
+[static_transform_publisher-4] translation: ('0.000000', '0.000000', '0.100000')
+[static_transform_publisher-4] rotation: ('-0.500000', '0.500000', '-0.500000', '0.500000')
+[static_transform_publisher-4] from '/sensor' to '/camera'
+[localPlanner-1] [INFO] [1785866054.959104678] [localPlanner]: Reading path files.
+[vehicleSimulator-13] [INFO] [1785866055.015015538] [vehicleSimulator]: Simulation started.
+[default_server_endpoint-7] /home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py:878: UserWarning: MultiThreadedExecutor is used with a single thread.
+[default_server_endpoint-7] Use the SingleThreadedExecutor instead.
+[default_server_endpoint-7]   warnings.warn(
+[default_server_endpoint-7] [INFO] [1785866055.614157781] [endpoint]: Starting server on 0.0.0.0:10000
+[localPlanner-1] [INFO] [1785866056.057761595] [localPlanner]: Initialization complete.
+[default_server_endpoint-7] [INFO] [1785866056.550835095] [endpoint]: Connection from 127.0.0.1
+[default_server_endpoint-7] [WARN] [1785866056.660748077] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785866056.738825844] [endpoint]: RegisterSubscriber(/unity_sim/set_model_state, <class 'geometry_msgs.msg._pose_stamped.PoseStamped'>) OK
+[default_server_endpoint-7] [WARN] [1785866056.751015955] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785866056.836212767] [endpoint]: RegisterSubscriber(/tf, <class 'tf2_msgs.msg._tf_message.TFMessage'>) OK
+[default_server_endpoint-7] [WARN] [1785866057.165933564] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785866057.253197776] [endpoint]: RegisterPublisher(/registered_scan, <class 'sensor_msgs.msg._point_cloud2.PointCloud2'>) OK
+[default_server_endpoint-7] [WARN] [1785866057.254180037] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785866057.298057124] [endpoint]: RegisterPublisher(camera/image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[default_server_endpoint-7] [WARN] [1785866057.300021239] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785866057.379706367] [endpoint]: RegisterPublisher(camera/semantic_image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[default_server_endpoint-7] [ERROR] [1785866057.684392008] [endpoint]: Exception [Errno 32] Broken pipe
+[default_server_endpoint-7] [ERROR] [1785866057.693718730] [endpoint]: Exception: No more data available
+[default_server_endpoint-7] [INFO] [1785866057.724651807] [endpoint]: Connection from 127.0.0.1
+[default_server_endpoint-7] [WARN] [1785866057.730484696] [rcl.logging_rosout]: Publisher already registered for node name: 'endpoint'. If this is due to multiple nodes with the same name then all logs for the logger named 'endpoint' will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[default_server_endpoint-7] [INFO] [1785866057.811704113] [endpoint]: Disconnected from 127.0.0.1
+[default_server_endpoint-7] [INFO] [1785866057.860824246] [endpoint]: RegisterSubscriber(/unity_sim/set_model_state, <class 'geometry_msgs.msg._pose_stamped.PoseStamped'>) OK
+[default_server_endpoint-7] [INFO] [1785866057.976241396] [endpoint]: RegisterSubscriber(/tf, <class 'tf2_msgs.msg._tf_message.TFMessage'>) OK
+[default_server_endpoint-7] [INFO] [1785866058.050159953] [endpoint]: RegisterPublisher(/registered_scan, <class 'sensor_msgs.msg._point_cloud2.PointCloud2'>) OK
+[default_server_endpoint-7] [INFO] [1785866058.118487035] [endpoint]: RegisterPublisher(camera/image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[default_server_endpoint-7] [INFO] [1785866058.203993768] [endpoint]: RegisterPublisher(camera/semantic_image/compressed, <class 'sensor_msgs.msg._compressed_image.CompressedImage'>) OK
+[waypointConverter-10] [INFO] [1785866162.235824680] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866205.255412270] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866205.475370906] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866231.975740034] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866242.235676601] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866251.355759169] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866260.695522389] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866269.835412455] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866279.345681036] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866288.485600636] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866297.645386998] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866310.125598207] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866322.175423134] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866322.925415196] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866323.655562428] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866324.815485467] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866325.545491851] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866326.385833917] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866327.245511018] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866328.105388148] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866328.855586334] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866329.805531603] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866330.525593195] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866331.267961822] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866332.105715740] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866332.845403850] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866333.675662858] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866334.537303178] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866335.278253330] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866336.215530917] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866337.055596807] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866337.805738381] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866338.545668100] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866339.705479219] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866341.405541949] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866342.355705857] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866343.625563580] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866344.565753669] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866346.375567090] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866347.215565257] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866348.075550129] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866348.915444854] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866349.755760339] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866350.605686451] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866351.545810303] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866352.375405208] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866353.215776659] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866353.945709694] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866354.695419505] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866355.645719505] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866356.375386704] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866357.215812243] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866358.075545816] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866358.835823061] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866359.585718666] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866360.345400958] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866361.196763286] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866362.025766037] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866362.855373965] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866363.595535977] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866364.455395356] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866365.305474193] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866367.025700871] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866368.275631384] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866369.645765407] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866370.615526367] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866372.625736439] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866373.375435929] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866374.215400094] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866374.958346331] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866375.905735624] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866376.635696925] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866377.585725028] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866378.325674142] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866379.166899261] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866380.015788803] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866380.765422651] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866381.605591443] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866382.555508673] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866383.306023853] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866384.035710103] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866384.875425249] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866385.645696042] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866386.487760365] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866387.325747323] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866388.165730747] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866389.025560799] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866389.775571793] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866390.615569839] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866391.365398460] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866392.825564463] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866394.425532116] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866395.405711242] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866396.687830094] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866397.625682963] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866399.305483622] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866400.155471894] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866400.265458011] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866401.105422056] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866401.945428591] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866402.795703474] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866403.535556091] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866404.385717247] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866405.145688232] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866405.895652844] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866406.735428597] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866407.705767510] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866408.445722999] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866409.285754420] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866410.025546106] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866410.755624036] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866411.505744517] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866412.355894806] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866413.105735018] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866413.865801102] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866414.715488959] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866415.455707688] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866416.395574675] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866417.145673387] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866418.215531898] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866419.895704207] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866420.835551331] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866422.005383592] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866422.865517815] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866424.555442652] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866425.835507516] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866426.695656092] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866427.435689638] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866428.185544922] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866429.035529577] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866430.085472842] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866430.925780625] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866431.675580345] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866432.495692827] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866433.245366756] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866434.085769030] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866435.045718242] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866435.875475988] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866436.725554708] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866437.565819092] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866438.315582167] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866439.185425148] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866440.136364300] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866440.995747351] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866441.735689417] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866442.485682897] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866443.225557169] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866443.965486887] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866445.145573376] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866446.845396594] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866447.905480776] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866449.065764467] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866450.015605350] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866452.345425330] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866453.175605728] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866453.915773144] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866454.765426407] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866455.615724179] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866456.545487500] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866457.405574252] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866458.155475706] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866458.995582138] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866459.735469280] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866460.565695092] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866461.506972195] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866462.345776948] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866463.095739763] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866463.825847920] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866464.565786427] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866465.415595009] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866466.155675808] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866466.885676322] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866467.735486268] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866468.585468474] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866469.325728689] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866470.065600566] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866470.805390581] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866472.595634151] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866473.646796063] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866474.595791064] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866475.765705587] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866476.735411000] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866478.535684941] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866479.385794938] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866480.235657826] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866481.085797789] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866481.816098284] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866482.655683427] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866483.495692590] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866484.335689343] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866485.085896927] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866485.805706251] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866486.655507902] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866487.395666312] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866488.465682781] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866489.205722050] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866489.935591736] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866490.665774936] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866491.605453024] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866492.335395723] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866493.275682207] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866494.025546246] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866494.865695277] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866495.725559952] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866496.575554840] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866497.315687917] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866498.176049256] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866499.845696833] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866501.105721084] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866502.055909469] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866503.225479638] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866504.055680913] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866505.925484133] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866506.865753622] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866507.695763357] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866508.435421608] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866509.175556869] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866509.995736481] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866510.845566609] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866511.825535461] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866512.575642974] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866513.325707870] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866514.055715658] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866514.795427932] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866515.525751383] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866516.575598316] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866517.315639472] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866518.145809457] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866519.005635856] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866519.845415659] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866520.475591257] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866521.315723029] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866522.175715182] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866522.937321884] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866523.666243941] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866524.515386640] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866525.355494988] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866527.155627635] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866528.635677455] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866529.585781421] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866530.765530468] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866531.496675372] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866533.385813966] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866534.445717646] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866535.365784725] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866536.095411503] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866536.935698445] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866537.775670078] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866538.725796990] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866539.675788226] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866540.525434723] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866541.255465206] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866542.095514405] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866542.835699359] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866543.775566084] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866544.625723815] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866545.455528783] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866546.195733876] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866546.935590792] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866547.777426866] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866548.525496752] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866549.265696544] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866550.105550269] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866550.865395609] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866551.605848515] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866552.455776963] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866553.195581908] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866553.955770362] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866555.135747422] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866556.825463814] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866557.875485585] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866559.245773997] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866560.195819216] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866562.186467939] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866563.045579274] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866563.875900175] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866564.625421100] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866565.365757322] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866566.115397620] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866567.175555645] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866568.125522706] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866568.855660089] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866569.595550409] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866570.425382256] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866571.385754170] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866572.335442601] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866572.975557515] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866573.725404438] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866574.555552161] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866575.395496588] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866576.115509584] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866576.945445708] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866577.797885738] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866578.555428008] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866579.285725617] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866580.115390638] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866580.865420663] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866582.025683557] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866583.805518836] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866584.755532825] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866586.115568132] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866586.955433855] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866588.835990814] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866589.695535617] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866590.435732774] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866591.175675998] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866591.935772505] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866592.785489046] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866593.735463365] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866594.475765168] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866595.205692282] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866595.955575482] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866596.795635231] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866597.655536096] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866598.507072037] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866599.345759233] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866600.095544063] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866600.925424753] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866601.775455184] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866602.615471408] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866603.365668836] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866604.195514411] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866605.035712766] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866605.885451448] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866606.605657194] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866607.455567691] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866608.295602265] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866609.575577690] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866610.965634100] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866611.915432882] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866613.165850635] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866614.027036387] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866616.055471320] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866617.215667418] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866617.955550738] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866618.695643298] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866619.545557320] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866620.385467343] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866621.345532629] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866622.095420492] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866622.925715426] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866623.755469212] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866624.696888942] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866625.735582378] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866626.475499437] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866627.215796214] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866627.945723290] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866628.895832158] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866629.625437596] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866630.465452383] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866631.325938696] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866631.965754707] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866632.805376095] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866633.545470132] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866634.385726516] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866635.535731989] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866637.315692174] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866638.355696067] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866639.515699913] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866640.355554954] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866642.055604783] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866643.125768133] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866643.965698761] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866644.695417853] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866645.535645602] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866646.385544177] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866647.467885909] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866648.315555972] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866649.065722664] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866649.885422731] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866650.745450124] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866651.785859703] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866652.645749784] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866653.605683810] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866654.545816331] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866655.385718765] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866656.215472784] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866656.955804124] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866657.675568857] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866658.515602792] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866659.365444515] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866660.205690657] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866660.945453488] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866661.805740595] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866662.856232515] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866664.525383092] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866665.485651576] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866666.435408522] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866667.275401725] [waypointConverter]: Waypoint reached.
+[waypointConverter-10] [INFO] [1785866668.755532263] [waypointConverter]: Waypoint reached.

@@ -1,0 +1,2327 @@
+{
+  "generated_utc": "2026-08-05T08:36:54.485382+00:00",
+  "n_runs": 10,
+  "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+  "rows": [
+    {
+      "scene": "livingroom_4",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "First, go near the fireplace, then go to the window closest to the bookcase, and stop at the chair farthest from the mirror.",
+      "run_dir": "reports/cluster_verify/713795/captures/1_livingroom_4_inst/livingroom_4/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165158
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.007,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.3333,
+        "ordered_leg_credit": 0.3333,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 1,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              -1.2270001062362663,
+              -3.7253693548825257
+            ]
+          ],
+          [
+            "goto",
+            [
+              -4.886213391308062,
+              -1.3349409741564022
+            ]
+          ],
+          [
+            "goto",
+            [
+              -3.1787361152243747,
+              0.718774603998762
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              -1.2270001062362663,
+              -3.7253693548825257
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.8071
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              -4.886213391308062,
+              -1.3349409741564022
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.4877
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              -3.1787361152243747,
+              0.718774603998762
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              -1.2270001062362663,
+              -3.7253693548825257
+            ],
+            "our_instance_id": [
+              112
+            ],
+            "min_dist_driven_to_goal_m": 0.4247,
+            "dist_goal_to_gt_traj_m": 0.0045
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              -4.886213391308062,
+              -1.3349409741564022
+            ],
+            "our_instance_id": [
+              77
+            ],
+            "min_dist_driven_to_goal_m": 4.5018,
+            "dist_goal_to_gt_traj_m": 1.2759
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              -3.1787361152243747,
+              0.718774603998762
+            ],
+            "our_instance_id": [
+              48
+            ],
+            "min_dist_driven_to_goal_m": 2.7596,
+            "dist_goal_to_gt_traj_m": 0.1102
+          }
+        ],
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 235,
+        "driven_n_poses_raw": 165158,
+        "frechet_m": 5.785343405042052,
+        "coverage_1m": 0.3521,
+        "if_question_index": 1,
+        "headline": 0.3333,
+        "rubric_excluded": false,
+        "note": "legs=1/3"
+      },
+      "headline_live": 0.3333,
+      "offline": {
+        "scene": "livingroom_4",
+        "qtype": "instruction_following",
+        "question": "First, go near the fireplace, then go to the window closest to the bookcase, and stop at the chair farthest from the mirror.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 3,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 48,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              -1.2270001062362663,
+              -3.725469354882526
+            ]
+          ],
+          [
+            "goto",
+            [
+              -4.886113391308062,
+              -1.3349409741564022
+            ]
+          ],
+          [
+            "goto",
+            [
+              -3.1786361152243745,
+              0.718874603998762
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              -1.2270001062362663,
+              -3.725469354882526
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.5656
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              -4.886113391308062,
+              -1.3349409741564022
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.2462
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              -3.1786361152243745,
+              0.718874603998762
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              -1.2270001062362663,
+              -3.725469354882526
+            ],
+            "our_instance_id": [
+              112
+            ],
+            "min_dist_driven_to_goal_m": 0.6964,
+            "dist_goal_to_gt_traj_m": 0.6883
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              -4.886113391308062,
+              -1.3349409741564022
+            ],
+            "our_instance_id": [
+              77
+            ],
+            "min_dist_driven_to_goal_m": 0.7848,
+            "dist_goal_to_gt_traj_m": 0.7147
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              -3.1786361152243745,
+              0.718874603998762
+            ],
+            "our_instance_id": [
+              48
+            ],
+            "min_dist_driven_to_goal_m": 0.3203,
+            "dist_goal_to_gt_traj_m": 0.3529
+          }
+        ],
+        "frechet_m": 0.35430825505980135,
+        "coverage_1m": 1.0,
+        "our_n_waypoints": 48,
+        "gt_n_waypoints": 889,
+        "frame_aligned": true,
+        "fit_residual_m": 0.6917,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 1.0,
+      "delta": -0.6667,
+      "note": "legs=1/3"
+    },
+    {
+      "scene": "livingroom_4",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "Go near the chair closest to the bookcase and stop at the table with the flowers on it.",
+      "run_dir": "reports/cluster_verify/713795/captures/0_livingroom_4_inst/livingroom_4/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165158
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.007,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 1,
+        "n_legs_reached_in_order": 1,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              -1.1720001679490375,
+              -0.6393080776159515
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              -1.1720001679490375,
+              -0.6393080776159515
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              -1.1720001679490375,
+              -0.6393080776159515
+            ],
+            "our_instance_id": [
+              67
+            ],
+            "min_dist_driven_to_goal_m": 0.3208,
+            "dist_goal_to_gt_traj_m": 0.1111
+          }
+        ],
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 95,
+        "driven_n_poses_raw": 165158,
+        "frechet_m": 2.251580923963105,
+        "coverage_1m": 0.5509,
+        "if_question_index": 0,
+        "headline": 1.0,
+        "rubric_excluded": false,
+        "note": "legs=1/1"
+      },
+      "headline_live": 1.0,
+      "offline": {
+        "scene": "livingroom_4",
+        "qtype": "instruction_following",
+        "question": "Go near the chair closest to the bookcase and stop at the table with the flowers on it.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 2,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 32,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              -3.1786361152243745,
+              1.370465389459943
+            ]
+          ],
+          [
+            "goto",
+            [
+              -1.1720001679490375,
+              -0.6394080776159515
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              -3.1786361152243745,
+              1.370465389459943
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.1276
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              -1.1720001679490375,
+              -0.6394080776159515
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              -3.1786361152243745,
+              1.370465389459943
+            ],
+            "our_instance_id": [
+              48
+            ],
+            "min_dist_driven_to_goal_m": 1.2315,
+            "dist_goal_to_gt_traj_m": 0.7364
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              -1.1720001679490375,
+              -0.6394080776159515
+            ],
+            "our_instance_id": [
+              67
+            ],
+            "min_dist_driven_to_goal_m": 0.1154,
+            "dist_goal_to_gt_traj_m": 0.0928
+          }
+        ],
+        "frechet_m": 0.948551781433,
+        "coverage_1m": 1.0,
+        "our_n_waypoints": 32,
+        "gt_n_waypoints": 521,
+        "frame_aligned": true,
+        "fit_residual_m": 0.6917,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 1.0,
+      "delta": 0.0,
+      "note": "legs=1/1"
+    },
+    {
+      "scene": "loft",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.",
+      "run_dir": "reports/cluster_verify/713795/captures/3_loft_inst/loft/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165158
+      },
+      "capture_issues": [
+        "perception built zero instances (None keyframes processed) \u2014 capture-completeness failure (#158)"
+      ],
+      "frame_fit_residual_m": 0.0109,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.6667,
+        "ordered_leg_credit": 0.6667,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 2,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              -1.2788777261708641,
+              0.9700002957901653
+            ]
+          ],
+          [
+            "via_near",
+            [
+              -0.12726312924759464,
+              -0.316929289683928
+            ]
+          ],
+          [
+            "goto",
+            [
+              6.877113061233509,
+              -2.356122383177902
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              -1.2788777261708641,
+              0.9700002957901653
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.6325
+          },
+          {
+            "i": 1,
+            "kind": "via_near",
+            "goal": [
+              -0.12726312924759464,
+              -0.316929289683928
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 3.1358
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              6.877113061233509,
+              -2.356122383177902
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              -1.2788777261708641,
+              0.9700002957901653
+            ],
+            "our_instance_id": [
+              12
+            ],
+            "min_dist_driven_to_goal_m": 1.1024,
+            "dist_goal_to_gt_traj_m": 0.1945
+          },
+          {
+            "i": 1,
+            "kind": "via_near",
+            "our_goal": [
+              -0.12726312924759464,
+              -0.316929289683928
+            ],
+            "our_instance_id": [
+              69
+            ],
+            "min_dist_driven_to_goal_m": 0.1482,
+            "dist_goal_to_gt_traj_m": 0.3333
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              6.877113061233509,
+              -2.356122383177902
+            ],
+            "our_instance_id": [
+              56
+            ],
+            "min_dist_driven_to_goal_m": 5.3247,
+            "dist_goal_to_gt_traj_m": 1.6585
+          }
+        ],
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 411,
+        "driven_n_poses_raw": 165158,
+        "frechet_m": 5.241064714622478,
+        "coverage_1m": 0.5772,
+        "if_question_index": 1,
+        "headline": 0.6667,
+        "rubric_excluded": false,
+        "note": "legs=2/3"
+      },
+      "headline_live": 0.6667,
+      "offline": {
+        "scene": "loft",
+        "qtype": "instruction_following",
+        "question": "Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 3,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 57,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              -1.2789777261708641,
+              0.9700002957901653
+            ]
+          ],
+          [
+            "via_near",
+            [
+              -0.12716312924759465,
+              -0.316929289683928
+            ]
+          ],
+          [
+            "goto",
+            [
+              6.877113061233509,
+              -2.3560223831779017
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              -1.2789777261708641,
+              0.9700002957901653
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.391
+          },
+          {
+            "i": 1,
+            "kind": "via_near",
+            "goal": [
+              -0.12716312924759465,
+              -0.316929289683928
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 3.8943
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              6.877113061233509,
+              -2.3560223831779017
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              -1.2789777261708641,
+              0.9700002957901653
+            ],
+            "our_instance_id": [
+              12
+            ],
+            "min_dist_driven_to_goal_m": 1.0216,
+            "dist_goal_to_gt_traj_m": 0.7482
+          },
+          {
+            "i": 1,
+            "kind": "via_near",
+            "our_goal": [
+              -0.12716312924759465,
+              -0.316929289683928
+            ],
+            "our_instance_id": [
+              69
+            ],
+            "min_dist_driven_to_goal_m": 0.0828,
+            "dist_goal_to_gt_traj_m": 0.0872
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              6.877113061233509,
+              -2.3560223831779017
+            ],
+            "our_instance_id": [
+              56
+            ],
+            "min_dist_driven_to_goal_m": 0.9064,
+            "dist_goal_to_gt_traj_m": 0.9449
+          }
+        ],
+        "frechet_m": 1.4785003343241856,
+        "coverage_1m": 1.0,
+        "our_n_waypoints": 57,
+        "gt_n_waypoints": 771,
+        "frame_aligned": true,
+        "fit_residual_m": 0.2953,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 1.0,
+      "delta": -0.3333,
+      "note": "legs=2/3"
+    },
+    {
+      "scene": "loft",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "Go to the cup near the TV remote and avoid the path near the cabinet.",
+      "run_dir": "reports/cluster_verify/713795/captures/2_loft_inst/loft/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165273
+      },
+      "capture_issues": [
+        "perception built zero instances (None keyframes processed) \u2014 capture-completeness failure (#158)"
+      ],
+      "frame_fit_residual_m": 0.0109,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.0,
+        "ordered_leg_credit": 0.0,
+        "n_legs": 1,
+        "n_legs_reached_in_order": 0,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              6.397701579560302,
+              2.9134213075068547
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              6.397701579560302,
+              2.9134213075068547
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              6.397701579560302,
+              2.9134213075068547
+            ],
+            "our_instance_id": [
+              108
+            ],
+            "min_dist_driven_to_goal_m": 2.9523,
+            "dist_goal_to_gt_traj_m": 0.1074
+          }
+        ],
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 184,
+        "driven_n_poses_raw": 165273,
+        "frechet_m": 4.322517540609096,
+        "coverage_1m": 0.4858,
+        "if_question_index": 0,
+        "headline": 0.0,
+        "rubric_excluded": false,
+        "note": "legs=0/1"
+      },
+      "headline_live": 0.0,
+      "offline": {
+        "scene": "loft",
+        "qtype": "instruction_following",
+        "question": "Go to the cup near the TV remote and avoid the path near the cabinet.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 0.0,
+        "ordered_leg_credit": 0.0,
+        "n_legs": 1,
+        "n_legs_reached_in_order": 0,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 47,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              6.397601579560302,
+              2.9133213075068545
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              6.397601579560302,
+              2.9133213075068545
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              6.397601579560302,
+              2.9133213075068545
+            ],
+            "our_instance_id": [
+              108
+            ],
+            "min_dist_driven_to_goal_m": 2.4677,
+            "dist_goal_to_gt_traj_m": 0.606
+          }
+        ],
+        "frechet_m": 3.54948012637015,
+        "coverage_1m": 0.3802,
+        "our_n_waypoints": 47,
+        "gt_n_waypoints": 739,
+        "frame_aligned": true,
+        "fit_residual_m": 0.2953,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 0.0,
+      "delta": 0.0,
+      "note": "legs=0/1"
+    },
+    {
+      "scene": "office_1",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "First, go near the potted plant on the shelf, then take the path between the two tables, and stop at the bench closest to the map wall decal.",
+      "run_dir": "reports/cluster_verify/713795/captures/5_office_1_inst/office_1/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165158
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.0029,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 3,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              0.195298081355875,
+              1.2023996840234783
+            ]
+          ],
+          [
+            "corridor_between",
+            [
+              0.05164762282551416,
+              -1.8544735488669049
+            ]
+          ],
+          [
+            "goto",
+            [
+              1.5929961037235056,
+              -3.8635330089732864
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              0.195298081355875,
+              1.2023996840234783
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.2208
+          },
+          {
+            "i": 1,
+            "kind": "corridor_between",
+            "goal": [
+              0.05164762282551416,
+              -1.8544735488669049
+            ],
+            "reached_in_order": true,
+            "threaded": true,
+            "pass_by": false,
+            "tol_used": 1.7463
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              1.5929961037235056,
+              -3.8635330089732864
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              0.195298081355875,
+              1.2023996840234783
+            ],
+            "our_instance_id": [
+              11
+            ],
+            "min_dist_driven_to_goal_m": 1.0748,
+            "dist_goal_to_gt_traj_m": 1.1552
+          },
+          {
+            "i": 1,
+            "kind": "corridor_between",
+            "our_goal": [
+              0.05164762282551416,
+              -1.8544735488669049
+            ],
+            "our_instance_id": [
+              50,
+              53
+            ],
+            "min_dist_driven_to_goal_m": 0.6184,
+            "dist_goal_to_gt_traj_m": 0.4167
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              1.5929961037235056,
+              -3.8635330089732864
+            ],
+            "our_instance_id": [
+              99
+            ],
+            "min_dist_driven_to_goal_m": 0.2516,
+            "dist_goal_to_gt_traj_m": 0.1807
+          }
+        ],
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 515,
+        "driven_n_poses_raw": 165158,
+        "frechet_m": 4.755788779533112,
+        "coverage_1m": 1.0,
+        "if_question_index": 1,
+        "headline": 1.0,
+        "rubric_excluded": false,
+        "note": "legs=3/3"
+      },
+      "headline_live": 1.0,
+      "offline": {
+        "scene": "office_1",
+        "qtype": "instruction_following",
+        "question": "First, go near the potted plant on the shelf, then take the path between the two tables, and stop at the bench closest to the map wall decal.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 3,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 27,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              0.19519808135587502,
+              1.2024996840234783
+            ]
+          ],
+          [
+            "corridor_between",
+            [
+              0.05164762282551416,
+              -1.8544735488669049
+            ]
+          ],
+          [
+            "goto",
+            [
+              1.5929961037235056,
+              -3.8636330089732867
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              0.19519808135587502,
+              1.2024996840234783
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.9793
+          },
+          {
+            "i": 1,
+            "kind": "corridor_between",
+            "goal": [
+              0.05164762282551416,
+              -1.8544735488669049
+            ],
+            "reached_in_order": true,
+            "threaded": true,
+            "pass_by": false,
+            "tol_used": 1.7463
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              1.5929961037235056,
+              -3.8636330089732867
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              0.19519808135587502,
+              1.2024996840234783
+            ],
+            "our_instance_id": [
+              11
+            ],
+            "min_dist_driven_to_goal_m": 1.6981,
+            "dist_goal_to_gt_traj_m": 1.5026
+          },
+          {
+            "i": 1,
+            "kind": "corridor_between",
+            "our_goal": [
+              0.05164762282551416,
+              -1.8544735488669049
+            ],
+            "our_instance_id": [
+              50,
+              53
+            ],
+            "min_dist_driven_to_goal_m": 0.0241,
+            "dist_goal_to_gt_traj_m": 0.3197
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              1.5929961037235056,
+              -3.8636330089732867
+            ],
+            "our_instance_id": [
+              99
+            ],
+            "min_dist_driven_to_goal_m": 0.7851,
+            "dist_goal_to_gt_traj_m": 0.7635
+          }
+        ],
+        "frechet_m": 0.4138336126235009,
+        "coverage_1m": 1.0,
+        "our_n_waypoints": 27,
+        "gt_n_waypoints": 458,
+        "frame_aligned": true,
+        "fit_residual_m": 0.4494,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 1.0,
+      "delta": 0.0,
+      "note": "legs=3/3"
+    },
+    {
+      "scene": "office_1",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.",
+      "run_dir": "reports/cluster_verify/713795/captures/4_office_1_inst/office_1/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165158
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.0029,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.5,
+        "ordered_leg_credit": 0.5,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 1,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              4.810982454591655,
+              1.1367215711234822
+            ]
+          ],
+          [
+            "goto",
+            [
+              -3.3616334855512515,
+              -4.279957401503226
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              4.810982454591655,
+              1.1367215711234822
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.6012
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              -3.3616334855512515,
+              -4.279957401503226
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              4.810982454591655,
+              1.1367215711234822
+            ],
+            "our_instance_id": [
+              67
+            ],
+            "min_dist_driven_to_goal_m": 0.895,
+            "dist_goal_to_gt_traj_m": 0.16
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              -3.3616334855512515,
+              -4.279957401503226
+            ],
+            "our_instance_id": [
+              23
+            ],
+            "min_dist_driven_to_goal_m": 4.8581,
+            "dist_goal_to_gt_traj_m": 0.1425
+          }
+        ],
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 217,
+        "driven_n_poses_raw": 165158,
+        "frechet_m": 8.48140209219474,
+        "coverage_1m": 0.714,
+        "if_question_index": 0,
+        "headline": 0.5,
+        "rubric_excluded": false,
+        "note": "legs=1/2"
+      },
+      "headline_live": 0.5,
+      "offline": {
+        "scene": "office_1",
+        "qtype": "instruction_following",
+        "question": "Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 2,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 71,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              4.811082454591655,
+              1.1368215711234821
+            ]
+          ],
+          [
+            "goto",
+            [
+              -3.3617334855512517,
+              -4.279957401503226
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              4.811082454591655,
+              1.1368215711234821
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.3597
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              -3.3617334855512517,
+              -4.279957401503226
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              4.811082454591655,
+              1.1368215711234821
+            ],
+            "our_instance_id": [
+              67
+            ],
+            "min_dist_driven_to_goal_m": 1.5993,
+            "dist_goal_to_gt_traj_m": 1.5751
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              -3.3617334855512517,
+              -4.279957401503226
+            ],
+            "our_instance_id": [
+              23
+            ],
+            "min_dist_driven_to_goal_m": 0.1194,
+            "dist_goal_to_gt_traj_m": 0.0632
+          }
+        ],
+        "frechet_m": 0.6246556982365182,
+        "coverage_1m": 1.0,
+        "our_n_waypoints": 71,
+        "gt_n_waypoints": 1339,
+        "frame_aligned": true,
+        "fit_residual_m": 0.4494,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 1.0,
+      "delta": -0.5,
+      "note": "legs=1/2"
+    },
+    {
+      "scene": "office_2",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "First, go to the trash can near the cabinet, then go to the folder on the cabinet closest to the whiteboard, and finally, to the door near the exit sign.",
+      "run_dir": "reports/cluster_verify/713795/captures/7_office_2_inst/office_2/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165158
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.0029,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.6667,
+        "ordered_leg_credit": 0.6667,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 2,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              2.265083421047661,
+              -0.3412515446111707
+            ]
+          ],
+          [
+            "goto",
+            [
+              5.126743535795336,
+              3.0869056209039716
+            ]
+          ],
+          [
+            "goto",
+            [
+              6.608073839211711,
+              -0.890637615553873
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              2.265083421047661,
+              -0.3412515446111707
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.3087
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              5.126743535795336,
+              3.0869056209039716
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.1205
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              6.608073839211711,
+              -0.890637615553873
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              2.265083421047661,
+              -0.3412515446111707
+            ],
+            "our_instance_id": [
+              16
+            ],
+            "min_dist_driven_to_goal_m": 1.003,
+            "dist_goal_to_gt_traj_m": 0.0065
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              5.126743535795336,
+              3.0869056209039716
+            ],
+            "our_instance_id": [
+              70
+            ],
+            "min_dist_driven_to_goal_m": 4.6886,
+            "dist_goal_to_gt_traj_m": 0.0115
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              6.608073839211711,
+              -0.890637615553873
+            ],
+            "our_instance_id": [
+              81
+            ],
+            "min_dist_driven_to_goal_m": 1.7444,
+            "dist_goal_to_gt_traj_m": 1.4767
+          }
+        ],
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 188,
+        "driven_n_poses_raw": 165158,
+        "frechet_m": 4.953174139635304,
+        "coverage_1m": 0.3927,
+        "if_question_index": 1,
+        "headline": 0.6667,
+        "rubric_excluded": false,
+        "note": "legs=2/3"
+      },
+      "headline_live": 0.6667,
+      "offline": {
+        "scene": "office_2",
+        "qtype": "instruction_following",
+        "question": "First, go to the trash can near the cabinet, then go to the folder on the cabinet closest to the whiteboard, and finally, to the door near the exit sign.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 3,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 71,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              2.265183421047661,
+              -0.3413515446111707
+            ]
+          ],
+          [
+            "goto",
+            [
+              5.126843535795336,
+              3.139529553765287
+            ]
+          ],
+          [
+            "goto",
+            [
+              6.607973839211711,
+              -0.890737615553873
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              2.265183421047661,
+              -0.3413515446111707
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.0672
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              5.126843535795336,
+              3.139529553765287
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.8791
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              6.607973839211711,
+              -0.890737615553873
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              2.265183421047661,
+              -0.3413515446111707
+            ],
+            "our_instance_id": [
+              16
+            ],
+            "min_dist_driven_to_goal_m": 0.198,
+            "dist_goal_to_gt_traj_m": 0.0612
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              5.126843535795336,
+              3.139529553765287
+            ],
+            "our_instance_id": [
+              69
+            ],
+            "min_dist_driven_to_goal_m": 0.6154,
+            "dist_goal_to_gt_traj_m": 0.0678
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              6.607973839211711,
+              -0.890737615553873
+            ],
+            "our_instance_id": [
+              81
+            ],
+            "min_dist_driven_to_goal_m": 1.0242,
+            "dist_goal_to_gt_traj_m": 0.7017
+          }
+        ],
+        "frechet_m": 1.172884676081748,
+        "coverage_1m": 0.978,
+        "our_n_waypoints": 71,
+        "gt_n_waypoints": 1454,
+        "frame_aligned": true,
+        "fit_residual_m": 0.3851,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 1.0,
+      "delta": -0.3333,
+      "note": "legs=2/3"
+    },
+    {
+      "scene": "office_2",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "Go near the potted plant on the cabinet and stop at the window closest to the clock.",
+      "run_dir": "reports/cluster_verify/713795/captures/6_office_2_inst/office_2/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165158
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.0029,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.5,
+        "ordered_leg_credit": 0.5,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 1,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              4.518149887612028,
+              0.21006259745818678
+            ]
+          ],
+          [
+            "goto",
+            [
+              4.905480373619802,
+              4.574800501050688
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              4.518149887612028,
+              0.21006259745818678
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.1396
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              4.905480373619802,
+              4.574800501050688
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              4.518149887612028,
+              0.21006259745818678
+            ],
+            "our_instance_id": [
+              30
+            ],
+            "min_dist_driven_to_goal_m": 0.9227,
+            "dist_goal_to_gt_traj_m": 0.1512
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              4.905480373619802,
+              4.574800501050688
+            ],
+            "our_instance_id": [
+              44
+            ],
+            "min_dist_driven_to_goal_m": 4.2065,
+            "dist_goal_to_gt_traj_m": 1.161
+          }
+        ],
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 233,
+        "driven_n_poses_raw": 165158,
+        "frechet_m": 5.8852975583636935,
+        "coverage_1m": 0.5879,
+        "if_question_index": 0,
+        "headline": 0.5,
+        "rubric_excluded": false,
+        "note": "legs=1/2"
+      },
+      "headline_live": 0.5,
+      "offline": {
+        "scene": "office_2",
+        "qtype": "instruction_following",
+        "question": "Go near the potted plant on the cabinet and stop at the window closest to the clock.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 2,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 51,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              4.518049887612028,
+              0.2099625974581868
+            ]
+          ],
+          [
+            "goto",
+            [
+              4.905480373619802,
+              4.574700501050688
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              4.518049887612028,
+              0.2099625974581868
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.8981
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              4.905480373619802,
+              4.574700501050688
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              4.518049887612028,
+              0.2099625974581868
+            ],
+            "our_instance_id": [
+              30
+            ],
+            "min_dist_driven_to_goal_m": 0.917,
+            "dist_goal_to_gt_traj_m": 0.5256
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              4.905480373619802,
+              4.574700501050688
+            ],
+            "our_instance_id": [
+              44
+            ],
+            "min_dist_driven_to_goal_m": 0.7261,
+            "dist_goal_to_gt_traj_m": 0.7814
+          }
+        ],
+        "frechet_m": 1.7859771464620784,
+        "coverage_1m": 0.9885,
+        "our_n_waypoints": 51,
+        "gt_n_waypoints": 694,
+        "frame_aligned": true,
+        "fit_residual_m": 0.3851,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 1.0,
+      "delta": -0.5,
+      "note": "legs=1/2"
+    },
+    {
+      "scene": "studio",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "First, go to the vase closest to the easel, then, take the path between the couch and the table and stop at the window closest to the couch.",
+      "run_dir": "reports/cluster_verify/713795/captures/9_studio_inst/studio/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165158
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.0043,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.3333,
+        "ordered_leg_credit": 0.6667,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 2,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              1.2770053990345342,
+              1.5856816559139137
+            ]
+          ],
+          [
+            "corridor_between",
+            [
+              3.49502793844907,
+              -1.0710465554295425
+            ]
+          ],
+          [
+            "goto",
+            [
+              3.2990000511605535,
+              -3.9284173722462645
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              1.2770053990345342,
+              1.5856816559139137
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.2559
+          },
+          {
+            "i": 1,
+            "kind": "corridor_between",
+            "goal": [
+              3.49502793844907,
+              -1.0710465554295425
+            ],
+            "reached_in_order": false,
+            "threaded": false,
+            "pass_by": false,
+            "tol_used": 1.7463
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              3.2990000511605535,
+              -3.9284173722462645
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              1.2770053990345342,
+              1.5856816559139137
+            ],
+            "our_instance_id": [
+              27
+            ],
+            "min_dist_driven_to_goal_m": 1.0553,
+            "dist_goal_to_gt_traj_m": 0.1012
+          },
+          {
+            "i": 1,
+            "kind": "corridor_between",
+            "our_goal": [
+              3.49502793844907,
+              -1.0710465554295425
+            ],
+            "our_instance_id": [
+              16,
+              63
+            ],
+            "min_dist_driven_to_goal_m": 1.8364,
+            "dist_goal_to_gt_traj_m": 0.0835
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              3.2990000511605535,
+              -3.9284173722462645
+            ],
+            "our_instance_id": [
+              5
+            ],
+            "min_dist_driven_to_goal_m": 0.5993,
+            "dist_goal_to_gt_traj_m": 0.2721
+          }
+        ],
+        "n_threading_violations": 1,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 497,
+        "driven_n_poses_raw": 165158,
+        "frechet_m": 4.603084705328237,
+        "coverage_1m": 0.7314,
+        "if_question_index": 1,
+        "headline": 0.3333,
+        "rubric_excluded": false,
+        "note": "legs=2/3; leg 1: threading: trajectory never crossed the gate segment"
+      },
+      "headline_live": 0.3333,
+      "offline": {
+        "scene": "studio",
+        "qtype": "instruction_following",
+        "question": "First, go to the vase closest to the easel, then, take the path between the couch and the table and stop at the window closest to the couch.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 3,
+        "n_legs_reached_in_order": 3,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 38,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              1.866602298584871,
+              1.5857816559139137
+            ]
+          ],
+          [
+            "corridor_between",
+            [
+              3.49502793844907,
+              -1.0710465554295425
+            ]
+          ],
+          [
+            "goto",
+            [
+              3.2990000511605535,
+              -3.9285173722462647
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              1.866602298584871,
+              1.5857816559139137
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 2.0144
+          },
+          {
+            "i": 1,
+            "kind": "corridor_between",
+            "goal": [
+              3.49502793844907,
+              -1.0710465554295425
+            ],
+            "reached_in_order": true,
+            "threaded": true,
+            "pass_by": false,
+            "tol_used": 1.7463
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "goal": [
+              3.2990000511605535,
+              -3.9285173722462647
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              1.866602298584871,
+              1.5857816559139137
+            ],
+            "our_instance_id": [
+              27
+            ],
+            "min_dist_driven_to_goal_m": 0.5269,
+            "dist_goal_to_gt_traj_m": 1.2598
+          },
+          {
+            "i": 1,
+            "kind": "corridor_between",
+            "our_goal": [
+              3.49502793844907,
+              -1.0710465554295425
+            ],
+            "our_instance_id": [
+              16,
+              63
+            ],
+            "min_dist_driven_to_goal_m": 0.2718,
+            "dist_goal_to_gt_traj_m": 1.7332
+          },
+          {
+            "i": 2,
+            "kind": "goto",
+            "our_goal": [
+              3.2990000511605535,
+              -3.9285173722462647
+            ],
+            "our_instance_id": [
+              5
+            ],
+            "min_dist_driven_to_goal_m": 0.0434,
+            "dist_goal_to_gt_traj_m": 0.2274
+          }
+        ],
+        "frechet_m": 2.4627524446432267,
+        "coverage_1m": 0.3057,
+        "our_n_waypoints": 38,
+        "gt_n_waypoints": 566,
+        "frame_aligned": true,
+        "fit_residual_m": 0.5586,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 1.0,
+      "delta": -0.6667,
+      "note": "legs=2/3; leg 1: threading: trajectory never crossed the gate segment"
+    },
+    {
+      "scene": "studio",
+      "qdir": "inst",
+      "qtype": "instruction_following",
+      "question": "Go to the vases on the cabinet below the TV and stop at the guitar near the couch.",
+      "run_dir": "reports/cluster_verify/713795/captures/8_studio_inst/studio/inst",
+      "capture_topic_counts": {
+        "/challenge_question": 823,
+        "/state_estimation": 165158
+      },
+      "capture_issues": [],
+      "frame_fit_residual_m": 0.0043,
+      "frame_available": true,
+      "live": {
+        "rubric_score": 0.0,
+        "ordered_leg_credit": 0.0,
+        "n_legs": 1,
+        "n_legs_reached_in_order": 0,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              3.705153064797375,
+              2.9197288022605496
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              3.705153064797375,
+              2.9197288022605496
+            ],
+            "reached_in_order": false,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              3.705153064797375,
+              2.9197288022605496
+            ],
+            "our_instance_id": [
+              24
+            ],
+            "min_dist_driven_to_goal_m": 1.8182,
+            "dist_goal_to_gt_traj_m": 1.3767
+          }
+        ],
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses_decimated": 483,
+        "driven_n_poses_raw": 165158,
+        "frechet_m": 3.7575577105713367,
+        "coverage_1m": 0.7726,
+        "if_question_index": 0,
+        "headline": 0.0,
+        "rubric_excluded": false,
+        "note": "legs=0/1"
+      },
+      "headline_live": 0.0,
+      "offline": {
+        "scene": "studio",
+        "qtype": "instruction_following",
+        "question": "Go to the vases on the cabinet below the TV and stop at the guitar near the couch.",
+        "our_count": null,
+        "gt_count_pipeline": null,
+        "exact_match": null,
+        "gt_count_independent": null,
+        "independent_source": "",
+        "gt_count_scenegraph": null,
+        "scenegraph_source": "",
+        "annotated_targets_of_class": null,
+        "csv_instances_of_class": null,
+        "gt_answer_true": null,
+        "true_match": null,
+        "true_source": "",
+        "iou": null,
+        "gt_target_id": null,
+        "our_target_id": null,
+        "target_source": "",
+        "match_method": "",
+        "rubric_score": 1.0,
+        "ordered_leg_credit": 1.0,
+        "n_legs": 2,
+        "n_legs_reached_in_order": 2,
+        "n_threading_violations": 0,
+        "n_avoid_violations": 0,
+        "driven_n_poses": 32,
+        "leg_goals": [
+          [
+            "goto",
+            [
+              3.705153064797375,
+              2.9196288022605494
+            ]
+          ],
+          [
+            "goto",
+            [
+              3.435125147081184,
+              -2.016314008785369
+            ]
+          ]
+        ],
+        "leg_outcomes": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "goal": [
+              3.705153064797375,
+              2.9196288022605494
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": true,
+            "tol_used": 1.8591
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "goal": [
+              3.435125147081184,
+              -2.016314008785369
+            ],
+            "reached_in_order": true,
+            "threaded": null,
+            "pass_by": false,
+            "tol_used": 1.7463
+          }
+        ],
+        "leg_probe": [
+          {
+            "i": 0,
+            "kind": "goto",
+            "our_goal": [
+              3.705153064797375,
+              2.9196288022605494
+            ],
+            "our_instance_id": [
+              24
+            ],
+            "min_dist_driven_to_goal_m": 1.6169,
+            "dist_goal_to_gt_traj_m": 2.1728
+          },
+          {
+            "i": 1,
+            "kind": "goto",
+            "our_goal": [
+              3.435125147081184,
+              -2.016314008785369
+            ],
+            "our_instance_id": [
+              48
+            ],
+            "min_dist_driven_to_goal_m": 0.9841,
+            "dist_goal_to_gt_traj_m": 1.1053
+          }
+        ],
+        "frechet_m": 1.6951481363611272,
+        "coverage_1m": 0.8165,
+        "our_n_waypoints": 32,
+        "gt_n_waypoints": 752,
+        "frame_aligned": true,
+        "fit_residual_m": 0.5586,
+        "note": "",
+        "parse_notes": ""
+      },
+      "offline_baseline_source": "reports/gt_battery_main_post_carve/gt_battery_results.json",
+      "headline_offline": 1.0,
+      "delta": -1.0,
+      "note": "legs=0/1"
+    }
+  ]
+}

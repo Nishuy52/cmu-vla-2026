@@ -1,0 +1,42 @@
+[WARN] [1785889947.212865169] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785889947.237031323] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785889947.242869105] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785889947.245934223] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785889947.248695394] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785889975.907913569] [vla_ai_module]: question latched: 'Go near the magazine on the ottoman, then go to the potted plant on the dressing table.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785889990.605372868] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785889990.606723756] [vla_ai_module]: idle->parsing question received
+[INFO] [1785889996.943035212] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/112 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/112 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785889997.082685814] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785890028.393568227] [vla_ai_module]: published 135 waypoints since latch
+[INFO] [1785890036.042791403] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785890058.362941915] [vla_ai_module]: published 218 waypoints since latch
+[INFO] [1785890089.396513483] [vla_ai_module]: published 254 waypoints since latch
+[INFO] [1785890121.419994758] [vla_ai_module]: published 286 waypoints since latch
+[INFO] [1785890151.743216587] [vla_ai_module]: published 324 waypoints since latch
+[INFO] [1785890182.157548461] [vla_ai_module]: published 367 waypoints since latch
+[INFO] [1785890212.305568870] [vla_ai_module]: published 409 waypoints since latch
+[INFO] [1785890242.568379688] [vla_ai_module]: published 452 waypoints since latch
+[INFO] [1785890245.913427672] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785890246.633699401] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785890246.718237534] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1785890273.103302077] [vla_ai_module]: published 489 waypoints since latch
+[INFO] [1785890303.223770104] [vla_ai_module]: published 522 waypoints since latch
+[INFO] [1785890321.295978719] [vla_ai_module]: drive_out->done route drive complete
+[INFO] [1785890321.297009347] [vla_ai_module]: controller DONE; last 10 events: 14.7:idle:transition:idle->parsing question received | 21.0:parsing:parsed:tier=api | 21.0:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 270.0:explore_execute:transition:explore_execute->verify explore budget spent | 270.7:verify:transition:verify->answer verify complete | 270.8:answer:answer_from_floor:verify yielded nothing | 270.8:answer:published:WaypointCmd via answer_state | 270.8:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 345.4:drive_out:transition:drive_out->done route drive complete

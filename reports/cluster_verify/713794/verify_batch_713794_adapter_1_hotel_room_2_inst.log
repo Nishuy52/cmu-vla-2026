@@ -1,0 +1,48 @@
+[WARN] [1785867015.646473408] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785867015.668882999] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785867015.673202373] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785867015.678233510] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785867015.680947374] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785867043.948957668] [vla_ai_module]: question latched: 'First, go to the picture closest to the door, then take the path between the TV cabinet and the bed, and stop by the curtain closest to the TV.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785867058.138875054] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785867058.140189471] [vla_ai_module]: idle->parsing question received
+[INFO] [1785867065.944690062] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/110 vocab noun(s) to stay within the 256-token budget: ['table', 'tea table', 'trash can', 'tray', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/110 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'table', 'tea table', 'trash can', 'tray', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785867066.119052818] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785867096.208758273] [vla_ai_module]: published 142 waypoints since latch
+[INFO] [1785867104.710549346] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785867126.438632429] [vla_ai_module]: published 238 waypoints since latch
+[INFO] [1785867157.276317730] [vla_ai_module]: published 277 waypoints since latch
+[INFO] [1785867187.338560417] [vla_ai_module]: published 308 waypoints since latch
+[INFO] [1785867217.547410806] [vla_ai_module]: published 340 waypoints since latch
+[INFO] [1785867247.886465938] [vla_ai_module]: published 369 waypoints since latch
+[INFO] [1785867278.950069469] [vla_ai_module]: published 399 waypoints since latch
+[INFO] [1785867309.528258545] [vla_ai_module]: published 432 waypoints since latch
+[INFO] [1785867314.273346904] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785867315.521652433] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785867315.651741124] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1785867339.620287332] [vla_ai_module]: published 460 waypoints since latch
+[INFO] [1785867370.187082817] [vla_ai_module]: published 492 waypoints since latch
+[INFO] [1785867400.812151951] [vla_ai_module]: published 522 waypoints since latch
+[INFO] [1785867431.638976386] [vla_ai_module]: published 554 waypoints since latch
+[INFO] [1785867462.441541313] [vla_ai_module]: published 586 waypoints since latch
+[INFO] [1785867493.272418248] [vla_ai_module]: published 616 waypoints since latch
+[INFO] [1785867523.751654141] [vla_ai_module]: published 646 waypoints since latch
+[INFO] [1785867553.987844196] [vla_ai_module]: published 677 waypoints since latch
+[INFO] [1785867560.181093988] [vla_ai_module]: drive_out->done route drive complete
+[INFO] [1785867560.195655273] [vla_ai_module]: controller DONE; last 10 events: 14.2:idle:question_latched:instruction_following: 'First, go to the picture closest to the door, then take the path between the TV cabinet and the bed, and stop by the curtain closest to the TV.' | 14.2:idle:transition:idle->parsing question received | 22.0:parsing:parsed:tier=api | 22.0:parsing:transition:parsing->orient parse attempted | 60.8:orient:transition:orient->explore_execute orientation window closed | 270.3:explore_execute:transition:explore_execute->verify explore budget spent | 271.6:verify:transition:verify->answer verify complete | 271.7:answer:published:WaypointCmd via answer_state | 271.7:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 516.2:drive_out:transition:drive_out->done route drive complete

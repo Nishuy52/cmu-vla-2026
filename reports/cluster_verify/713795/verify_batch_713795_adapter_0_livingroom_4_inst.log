@@ -1,0 +1,40 @@
+[WARN] [1785875269.228971853] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785875269.261084118] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785875269.269012817] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785875269.273781075] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785875269.279319207] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785875297.900867788] [vla_ai_module]: question latched: 'Go near the chair closest to the bookcase and stop at the table with the flowers on it.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785875312.883020717] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785875312.884471093] [vla_ai_module]: idle->parsing question received
+[INFO] [1785875319.170999919] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 15/113 vocab noun(s) to stay within the 256-token budget: ['tea table', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 15/113 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'tea table', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785875319.312249700] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785875349.315272646] [vla_ai_module]: published 140 waypoints since latch
+[INFO] [1785875358.034068852] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785875379.338011215] [vla_ai_module]: published 200 waypoints since latch
+[INFO] [1785875409.480654898] [vla_ai_module]: published 302 waypoints since latch
+[INFO] [1785875439.992872578] [vla_ai_module]: published 411 waypoints since latch
+[INFO] [1785875469.967765255] [vla_ai_module]: published 511 waypoints since latch
+[INFO] [1785875500.059378937] [vla_ai_module]: published 629 waypoints since latch
+[INFO] [1785875530.232710240] [vla_ai_module]: published 744 waypoints since latch
+[INFO] [1785875560.402644445] [vla_ai_module]: published 863 waypoints since latch
+[INFO] [1785875568.059950771] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785875568.322523757] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785875568.334227808] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1785875568.663929821] [vla_ai_module]: drive_out->done route drive complete
+[INFO] [1785875568.669813387] [vla_ai_module]: controller DONE; last 10 events: 15.0:idle:question_latched:instruction_following: 'Go near the chair closest to the bookcase and stop at the table with the flowers on it.' | 15.0:idle:transition:idle->parsing question received | 21.3:parsing:parsed:tier=api | 21.3:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 270.2:explore_execute:transition:explore_execute->verify explore budget spent | 270.4:verify:transition:verify->answer verify complete | 270.4:answer:published:WaypointCmd via answer_state | 270.4:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 270.8:drive_out:transition:drive_out->done route drive complete

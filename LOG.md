@@ -2460,3 +2460,28 @@ the 713411-713413 A/B when it lands tonight.
 g4-g5 and nume g6 (second sample on the post-#176 tree). Each job
 self-syncs ~/vla/src from ~/vla_p3_stage at start, so the tree swap
 happens server-side in the chain gap with no session alive.
+
+---
+
+## 2026-08-05 — P3 A/B harvested: the gate fires, the recovered time is wasted
+
+**Done:**
+- Harvested and scored the full overnight chain: Arm A 713793-713795
+  (IF baseline, tree b2b4852), Arm B 713815-713817 (IF, P3 tree
+  0db0be2), 713818 (OR g4, P3 tree). All full counts, 0 DEGRADED.
+  Arm A integrity holds by custody (content proven at 23:20, no live
+  actor until the logged self-sync at 06:59:34); P3 tree rcn-proofed 0.
+- **#181 A/B (matched clean n=26): the gate fired on 10/30 Arm B
+  slots at t=61-242 s (Arm A: 0/30).** Mean 0.5192 -> 0.4551; legs
+  32/53 -> 25/53. Attribution: four of five down questions sit on
+  budget-exit slots the gate never touched (office_2, studio,
+  home_building_1 — the known repeat-flappers); the one fired-slot
+  loss (office_1) has byte-identical leg goals across arms and lost
+  leg 2 to drive execution, not grounding.
+- **The structural finding: 5 of 10 fired slots hit 'route drive
+  complete' seconds after answering and threw away 200-400 s of
+  recovered budget.** The gate's premise held (routes fully ground
+  early); the reinvestment does not exist. Filed as a new issue.
+
+**Next:** decide keep-vs-revert for the gate (recommendation: keep,
+fix reinvestment); 713819/713820 land this evening.
