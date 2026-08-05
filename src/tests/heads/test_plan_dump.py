@@ -145,8 +145,11 @@ def test_dump_plan_numerical_aggregate_candidate_counts(monkeypatch, tmp_path):
     cand = rec["candidates"]
     assert cand["noun"] == "chair"
     assert cand["before_any_filter"] == 3
-    # no table in scene -> the near(table) clause can never be satisfied -> 0
-    assert cand["after_all_filters"] == 0
+    # (#151) no table in scene at all -> near(table) is UNEVALUABLE, not genuinely
+    # zero: the head falls back to the unfiltered target count rather than
+    # fabricate a 0 from a clause it could never check (never-undercount-by-
+    # overfiltering guarantee -- see NumericalHead._count).
+    assert cand["after_all_filters"] == 3
     assert cand["granularity"] == "whole_target_aggregate"
 
 
