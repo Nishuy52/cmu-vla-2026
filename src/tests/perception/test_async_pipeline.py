@@ -228,3 +228,143 @@ def test_scene_index_concurrent_read_write_does_not_raise():
         th.join(timeout=3.0)
         assert not th.is_alive()
     assert errors == []
+
+
+# --------------------------------------------------------------------- liveness (#174)
+
+
+class _RecordingPipeline:
+    """Records every processed frame's pano.t; never raises on its own."""
+
+    def __init__(self) -> None:
+        self.calls: list[float] = []
+        self._lock = threading.Lock()
+
+    def process(self, pano: PanoFrame, scan: LidarScan) -> list[int]:
+        with self._lock:
+            self.calls.append(pano.t)
+        return []
+
+
+def test_worker_survives_a_long_boot_gap_between_the_first_two_frames():
+    """Issue #174: a slow SECOND keyframe at boot must not end the worker.
+
+    Reproduces the measured discriminator from the loft investigation: a dead
+    slot got keyframes 0 and 1 arriving 7.1s apart, then keyframe flow stopped
+    forever; a surviving sibling slot got them 0.5s apart and kept going. The
+    frame-wait loop (``Condition.wait()`` with no timeout) has no fixed bound to
+    exceed, so this is a regression guard: an arbitrary gap between submissions
+    must never leave frames submitted-but-never-processed.
+    """
+    pipeline = _RecordingPipeline()
+    worker = AsyncPerceptionWorker(pipeline)
+    try:
+        worker.submit(_pano(0.0), _scan(0.0))
+        time.sleep(0.1)  # let the worker pick up and finish frame 0
+        # A long inter-keyframe gap at boot (bigger than the measured 7.1s death
+        # gap would be, scaled down so the test stays fast) — during this whole
+        # window the worker has nothing pending and is parked on cv.wait().
+        time.sleep(1.5)
+        # More frames now arrive, exactly like the surviving loft slot's later
+        # 5-10s cadence resuming after the gap.
+        worker.submit(_pano(1.0, x=1.0), _scan(1.0))
+        time.sleep(0.1)
+        worker.submit(_pano(2.0, x=2.0), _scan(2.0))
+        time.sleep(0.1)
+        worker.submit(_pano(3.0, x=3.0), _scan(3.0))
+        time.sleep(0.2)
+    finally:
+        worker.stop(timeout=3.0)
+    assert pipeline.calls == [0.0, 1.0, 2.0, 3.0], (
+        "keyframe flow stopped after the boot gap instead of resuming: %r" % pipeline.calls
+    )
+    assert worker.is_alive is False  # cleanly stopped, not crashed
+    assert worker.restart_count == 0  # no fault occurred — nothing to restart
+
+
+def test_worker_crash_triggers_bounded_restart_and_counter_stays_readable(monkeypatch):
+    """Issue #174: if the worker thread ends for ANY reason, ``submit`` detects it,
+    logs loudly, and restarts it (bounded), and ``keyframes_processed`` never goes
+    unreadable in the meantime.
+
+    ``_run`` is monkeypatched at the class level so the very first spawned thread
+    simulates a fatal, unguarded fault that ends the thread outright (standing in
+    for whatever unforeseen fault the per-frame try/except doesn't cover — the
+    restart supervisor is the backstop for those, not just for ordinary
+    ``pipeline.process()`` exceptions, which never kill the thread at all). Every
+    later (re)spawn runs the real loop.
+    """
+    pipeline = _RecordingPipeline()
+    calls = {"n": 0}
+    real_run = AsyncPerceptionWorker._run
+
+    def flaky_then_real_run(self: AsyncPerceptionWorker) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            with self._cv:
+                self._last_error = RuntimeError("simulated fatal worker fault")
+            return  # thread ends immediately, as if it had crashed
+        real_run(self)
+
+    monkeypatch.setattr(AsyncPerceptionWorker, "_run", flaky_then_real_run)
+
+    worker = AsyncPerceptionWorker(pipeline)
+    try:
+        # keyframes_processed must be a readable int even while the very first
+        # (crashed) worker thread is dead and no restart has happened yet.
+        assert worker.keyframes_processed == 0
+        assert isinstance(worker.keyframes_processed, int)
+
+        deadline = time.monotonic() + 3.0
+        while worker.is_alive and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not worker.is_alive, "simulated crash did not end the first thread"
+
+        # submit() must notice the dead thread and restart it.
+        worker.submit(_pano(0.0), _scan(0.0))
+        time.sleep(0.3)
+        assert worker.restart_count == 1
+        assert worker.is_alive
+
+        # keyframes_processed stays readable throughout — never None.
+        assert isinstance(worker.keyframes_processed, int)
+
+        worker.submit(_pano(1.0, x=1.0), _scan(1.0))
+        time.sleep(0.2)
+    finally:
+        worker.stop(timeout=3.0)
+
+    assert pipeline.calls == [0.0, 1.0], (
+        "restarted worker did not resume processing frames: %r" % pipeline.calls
+    )
+    assert worker.restart_count == 1
+
+
+def test_worker_restart_is_bounded():
+    """Issue #174: restarts stop after ``max_restarts`` — the worker does not spin
+    forever, and ``keyframes_processed`` remains a readable int even once the
+    restart budget is exhausted and the thread is left dead."""
+    pipeline = _RecordingPipeline()
+
+    def always_dies(self: AsyncPerceptionWorker) -> None:
+        return  # every spawn "crashes" immediately
+
+    worker = AsyncPerceptionWorker(pipeline, max_restarts=2)
+    worker._run = always_dies.__get__(worker, AsyncPerceptionWorker)  # type: ignore[method-assign]
+    # Re-spawn using the patched _run (the constructor already started a thread
+    # bound to the real _run before we could patch the instance).
+    worker._thread = worker._spawn_thread()
+
+    deadline = time.monotonic() + 2.0
+    while worker.is_alive and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not worker.is_alive
+
+    for _ in range(5):  # far more submits than the restart budget allows
+        worker.submit(_pano(0.0), _scan(0.0))
+        deadline = time.monotonic() + 1.0
+        while worker.is_alive and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    assert worker.restart_count == 2, "restart count exceeded max_restarts=2"
+    assert isinstance(worker.keyframes_processed, int)
