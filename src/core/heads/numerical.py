@@ -22,14 +22,15 @@ Units: metres/`map` frame throughout (inherited from the toolbox).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from core.fsm.controller import StabilitySignal
-from core.interfaces import IntAnswer, QType, SceneIndex
+from core.interfaces import InstanceRecord, IntAnswer, MatchTier, QType, SceneIndex
 from core.geometry.toolbox import (
     DEFAULT_THRESHOLDS,
     Thresholds,
+    CountResult,
     counting,
     has_unresolved_disambiguator,
 )
@@ -75,6 +76,64 @@ COVERAGE_MIN_FRAC: float = 0.5
 # reasoned constant, not fit to any sample from this issue's own evidence -- flagged as
 # thin evidence should it ever need reconsideration for NUMERICAL specifically.
 DISAMBIGUATOR_RELEASE_FRAC: float = 0.85
+
+# (#151) Anchor-established observation floor for relation-clause filtering. The
+# toolbox's clause evaluation (`counting()` -> `_filter_and` -> `_eval_clause` ->
+# `_resolve_anchor`) is EXISTENTIAL over every resolved anchor instance: a
+# candidate passes if the relation holds against ANY of them. That is correct
+# when the anchor noun genuinely has several real instances (several sofas, say)
+# but is exactly wrong when most of the "anchor" pool is single-frame detector
+# noise: replaying the live 713413 archive (reports/cluster_verify/713413/debug)
+# shows livingroom_3's 'tv cabinet' resolves to 19 instances for a scene with one
+# physical TV cabinet, most with n_obs<=3 and scattered across the whole room --
+# "on(any of 19)" is then satisfied by nearly every photo in the scene (24 pool
+# -> 9 counted, true answer 2). The target side already has exactly this
+# established/ghost distinction (ESTABLISH_N_OBS/_answer_min_obs, H15(b)); this
+# constant applies the SAME notion to the ANCHOR side of a relation clause,
+# reusing the existing threshold rather than fitting a new one to this issue's
+# own sample (generalization protocol) -- an anchor instance participates in
+# clause matching only once it has been seen ESTABLISH_N_OBS times. See
+# `_count()` for the fail-open guarantee that a too-strict floor can only ever
+# fall back to the unfiltered count, never fabricate a zero.
+ANCHOR_ESTABLISHED_N_OBS: int = ESTABLISH_N_OBS
+
+
+@dataclass(frozen=True)
+class _AnchorEstablishedView:
+    """(#151) SceneIndex wrapper narrowing relation-clause ANCHOR lookups to
+    established instances, while leaving the TARGET noun's own lookups untouched.
+
+    Scoped to exactly one `counting()` call; never mutates the underlying index.
+    `by_label`/`by_label_tiered` are the only `SceneIndex` methods the toolbox's
+    clause-evaluation path (`_match_noun` / `_match_anchor_noun` / `_resolve_anchor`
+    / `_eval_clause`) reaches, so wrapping just those two is sufficient to gate
+    every anchor a clause resolves through the SAME toolbox machinery
+    object_reference uses -- no toolbox code is modified or duplicated.
+
+    A query for `target_noun` itself (the class being counted) is passed straight
+    through: the target pool keeps its own, separate min_obs gate
+    (`NumericalHead._answer_min_obs`); this view only tightens the ANCHOR side.
+    """
+
+    inner: SceneIndex
+    target_noun: str
+    floor: int
+
+    def _gate(self, noun: str, recs):
+        if noun == self.target_noun:
+            return recs
+        return [r for r in recs if r.n_obs >= self.floor]
+
+    def by_label(self, noun: str) -> list[InstanceRecord]:
+        return self._gate(noun, list(self.inner.by_label(noun)))
+
+    def by_label_tiered(self, noun: str) -> list[tuple[InstanceRecord, MatchTier]]:
+        if noun == self.target_noun:
+            return list(self.inner.by_label_tiered(noun))
+        return [(r, t) for r, t in self.inner.by_label_tiered(noun) if r.n_obs >= self.floor]
+
+    def all_instances(self):
+        return self.inner.all_instances()
 
 
 @dataclass
@@ -139,7 +198,7 @@ class NumericalHead:
             return
         self._index_empty = False
         min_obs = self._answer_min_obs(scene)
-        result = counting(self.plan.target, scene, min_obs=min_obs, th=self.thresholds)
+        result = self._count(scene, min_obs)
         n, ids = result.count, result.ids
         self.count = n
         self.contrib_min_obs = self._min_obs(scene, ids)
@@ -149,6 +208,50 @@ class NumericalHead:
         else:
             self._run_count = n
             self._run_len = 1
+
+    def _count(self, scene: SceneIndex, min_obs: int) -> CountResult:
+        """(#151) Count against the live instance index, filtering the ANCHOR side
+        of any relation clause to established instances, with a three-tier
+        fall-open so a stricter filter can only ever shrink the count toward the
+        truth and can never fabricate a zero from a filtering failure:
+
+        1. A question with NO relation clause counts exactly as before this
+           issue -- a single unfiltered `counting()` call, byte-identical to the
+           pre-#151 path.
+        2. A question WITH a clause counts first against the established-anchor
+           view (`_AnchorEstablishedView`): the clause's toolbox predicate
+           (``on``/``above``/``near``/``with``/...) evaluated only against
+           anchor instances seen `ANCHOR_ESTABLISHED_N_OBS` times, so a
+           single-frame ghost detection cannot inflate the count (#151's own
+           evidence: 19 mostly-single-observation 'tv cabinet' detections
+           scattered across a room otherwise satisfy on() for nearly every
+           photo in the scene).
+        3. If that comes back empty, fall back to the toolbox's plain,
+           unfiltered-by-established-floor `counting()` result -- the anchor may
+           simply not be established YET (cold start), not genuinely absent.
+        4. If THAT is also empty, the clause is unevaluable against this scene
+           (anchor class wholly absent, or every candidate fails a predicate the
+           head cannot second-guess): per spec, fall all the way back to the
+           target's raw category count with the clause dropped entirely, rather
+           than answer 0 for a relation that could not be checked at all -- the
+           pre-#151 undercount-by-overfiltering failure mode is impossible by
+           construction.
+        """
+        target = self.plan.target
+        if not target.clauses:
+            return counting(target, scene, min_obs=min_obs, th=self.thresholds)
+
+        established = _AnchorEstablishedView(scene, target.noun, ANCHOR_ESTABLISHED_N_OBS)
+        filtered = counting(target, established, min_obs=min_obs, th=self.thresholds)
+        if filtered.count > 0:
+            return filtered
+
+        raw = counting(target, scene, min_obs=min_obs, th=self.thresholds)
+        if raw.count > 0:
+            return raw
+
+        unclaused = replace(target, clauses=[])
+        return counting(unclaused, scene, min_obs=min_obs, th=self.thresholds)
 
     def _answer_min_obs(self, scene: SceneIndex) -> int:
         """H15(b): the observation floor to count at, given how established the noun is.
