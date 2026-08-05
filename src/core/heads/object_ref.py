@@ -32,6 +32,7 @@ from core.geometry.toolbox import (
     Thresholds,
     resolve,
 )
+from core.heads.scene_established import ESTABLISH_N_OBS, EstablishedView
 from core.parsing.regex_tier import _REL_TOKENS  # read-only: relation-token -> Pred map
 from core.plan_schema import Anchor, Clause, Plan, Pred, TargetSpec
 from core.perception.detector import is_answer_eligible
@@ -107,11 +108,44 @@ class ObjectRefHead:
         if scene is None or self.plan is None or self.plan.target is None:
             return
         self._scene = scene
-        res = resolve(self.plan.target, scene, self.thresholds)
+        res = self._resolve(scene)
         self._result = res
         if res.candidates_ranked:
             self.best_candidate = res.candidates_ranked[0]
             self.best_marker = clamp_record_marker(self.best_candidate)
+
+    def _resolve(self, scene: SceneIndex) -> ResolveResult:
+        """(#184) Extends the #151 established-instance gate (see
+        ``core.heads.scene_established.EstablishedView``) from NUMERICAL's relation-clause
+        anchor filtering to OBJECT_REFERENCE's own candidate ranking and anchor resolution.
+
+        The #118 mechanism table shows phantom same-class tracks (single/few-observation
+        detector noise, e.g. windows 31-vs-GT-1, lamps 92-vs-GT-3) deterministically win a
+        relation clause, a candidate rank, or a superlative anchor pick over the real,
+        well-observed instance, because :func:`core.geometry.toolbox.resolve` ranks and
+        resolves anchors over EVERY tracked instance with no observation-count floor of its
+        own. Two-tier fall-open, so a stricter filter can only ever move the pick toward the
+        truth and can never fabricate an empty result from a filtering failure:
+
+        1. Rank/resolve first against the established view (``EstablishedView`` with no
+           ``exempt_noun`` -- unlike NUMERICAL, OBJECT_REFERENCE has no separate target-side
+           gate of its own, so BOTH the candidate pool (``_match_noun``) and every anchor
+           pool a clause or superlative resolves through (``_resolve_anchor``) are gated
+           identically): single/few-observation ghosts cannot win a candidate rank or stand
+           in as "the" anchor for a superlative.
+        2. If that comes back with nothing ranked, fall back to the toolbox's plain,
+           unfiltered-by-establishment ``resolve()`` result -- the target/anchor class may
+           simply not be established YET (cold start), not genuinely absent. This mirrors
+           ``NumericalHead._count``'s own fall-open tiers 2-3 (#151): the established view
+           only ever narrows toward more plausible instances, never publishes nothing where
+           the raw pool had a candidate.
+        """
+        target = self.plan.target
+        established = EstablishedView(scene, floor=ESTABLISH_N_OBS)
+        filtered = resolve(target, established, self.thresholds)
+        if filtered.candidates_ranked:
+            return filtered
+        return resolve(target, scene, self.thresholds)
 
     def publish_partial(self, partial: PartialResults) -> None:
         """Stamp the current best candidate/marker into the shared PartialResults."""
