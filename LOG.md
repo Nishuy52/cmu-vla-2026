@@ -2499,3 +2499,23 @@ drive_complete=False), the watchdog overlay precedes the handler so
 no deadlock exists, clean runs are unchanged (386 tests), the
 re-drive plans over the same stamped costmap, and the gate log holds
 zero failures. Next: re-measure IF on the same matrices (if7).
+
+---
+
+## 2026-08-05 (night) — Batch 2 shipped: #151, #180, #174 guards
+
+**Done:** merged three parallel fixes after per-branch verification:
+#151 (numerical anchors gate to established instances; the fallback
+ladder cannot fabricate a zero), #180 (cumulative box-growth cap
+ahead of both veto waivers; the #176 chain still collapses 25/25),
+#174 (async worker survives boot gaps and callback failures; bounded
+restarts; the keyframe counter stays readable). One full gate green.
+The fresh verifier CONFIRMED all five claims. #179 re-scoped to the
+detector/vocabulary surface on tracker evidence. Archived-replay
+counts for #151: photos 9 -> 3 (GT 2), cups 7 -> 4 (GT 2), chairs
+9-10 -> 7 (GT 6). Process note: the g5 report push carried the batch
+before the verifier verdict; the verdict landed CONFIRMED after the
+fact. Check the unpushed stack before every push.
+
+**Next:** the nume group on this tree proves #151 live. The if7
+groups judge #181+#183 tomorrow morning.
