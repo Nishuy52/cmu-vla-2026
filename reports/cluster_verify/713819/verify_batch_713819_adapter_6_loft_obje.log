@@ -1,0 +1,38 @@
+[WARN] [1785920439.700352094] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785920439.719893629] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785920439.724998278] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785920439.726894187] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785920439.728569768] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785920468.108026395] [vla_ai_module]: question latched: 'The blue chair that is closest to the cup of coffee.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785920481.343732227] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785920481.345135543] [vla_ai_module]: idle->parsing question received
+[INFO] [1785920486.724914005] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 16/115 vocab noun(s) to stay within the 256-token budget: ['table', 'tea table', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 16/115 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'table', 'tea table', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785920486.851038817] [vla_ai_module]: published 1 waypoints since latch
+[INFO] [1785920516.984444001] [vla_ai_module]: published 153 waypoints since latch
+[INFO] [1785920528.178875257] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785920547.169911956] [vla_ai_module]: published 304 waypoints since latch
+[INFO] [1785920577.194367408] [vla_ai_module]: published 454 waypoints since latch
+[INFO] [1785920607.359369063] [vla_ai_module]: published 605 waypoints since latch
+[INFO] [1785920637.387746878] [vla_ai_module]: published 755 waypoints since latch
+[INFO] [1785920667.398715722] [vla_ai_module]: published 905 waypoints since latch
+[INFO] [1785920697.590996831] [vla_ai_module]: published 1056 waypoints since latch
+[INFO] [1785920708.187321833] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785920708.388447228] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785920708.529716647] [vla_ai_module]: published marker answer: label='' centroid=(0.00, 0.00, 0.00)
+[INFO] [1785920708.530800875] [vla_ai_module]: answer->done answered
+[INFO] [1785920708.531991240] [vla_ai_module]: controller DONE; last 10 events: 13.2:idle:question_latched:object_reference: 'The blue chair that is closest to the cup of coffee.' | 13.2:idle:transition:idle->parsing question received | 18.6:parsing:parsed:tier=api | 18.6:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 240.1:explore_execute:transition:explore_execute->verify explore budget spent | 240.3:verify:transition:verify->answer verify complete | 240.4:answer:answer_from_floor:verify yielded nothing | 240.4:answer:published:MarkerBox via answer_state | 240.4:answer:transition:answer->done answered
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/c/cyuhsin/vla/src/ros_adapter/adapter_node.py", line 1169, in main
+    rclpy.shutdown()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 134, in shutdown
+    _shutdown(context=context)
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/utilities.py", line 82, in shutdown
+    context.shutdown()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/context.py", line 129, in shutdown
+    self.__context.shutdown()
+rclpy._rclpy_pybind11.RCLError: failed to shutdown: rcl_shutdown already called on the given context, at ./src/rcl/init.c:333
