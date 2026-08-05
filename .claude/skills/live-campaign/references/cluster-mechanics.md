@@ -62,6 +62,43 @@ rsync -rcn --exclude=__pycache__ --exclude=.pytest_cache \
 
 Only when no job runs. `-c` compares content; mtime comparisons lie here.
 
+## Multi-tree chains: stage dirs and self-sync (proven 5 Aug 2026)
+
+To chain jobs that measure DIFFERENT trees, do not time an `~/vla/src`
+rsync into a chain gap. Give each tree its own stage:
+
+1. `rsync` the pin to `xlogin:vla_<tag>_stage/src/` (safe while jobs
+   run — the stage is inert until a job reads it). Prove with `-rcn`.
+2. Make an sbatch variant that self-syncs at job start:
+   `sed "s|vla_p3_stage|vla_<tag>_stage|g" ~/cluster_verify_batch_p3.sbatch
+   > ~/cluster_verify_batch_<tag>.sbatch` (the p3 variant carries the
+   self-sync block; each job resets `~/vla/src` from its stage before
+   the first question).
+3. Submit that variant. The tree swap happens server-side with no
+   session alive.
+
+Rules: NEVER update a stage while a job that reads it is PENDING (it
+syncs at start — it would measure the wrong tree). Updating after that
+job STARTED or ended is safe. After any self-sync job runs, a late
+`-rcn` check of `~/vla/src` against an EARLIER group's pin reads false
+drift; assert earlier groups by the self-sync marker line
+(`tree self-synced from vla_..._stage`) in each later job's `.out`,
+plus in-run-window mtimes, not by post-hoc content diff.
+
+## Push discipline
+
+Before EVERY `git push`, read `git log origin/main..HEAD --oneline`.
+A reports-only commit rides on top of everything below it — one push
+once shipped an unverified merge batch because a harvest commit sat
+above it. The fresh-verifier verdict gates the whole unpushed stack,
+not the top commit.
+
+## Watcher launch
+
+Run a harvest watcher as the DIRECT command of a background Bash call.
+Do not nest it behind `&` inside a wrapper — the wrapper's exit can
+orphan or kill the child, and liveness then needs a manual `ps` check.
+
 ## Harvest
 
 ```bash
