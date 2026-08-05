@@ -2519,3 +2519,21 @@ fact. Check the unpushed stack before every push.
 
 **Next:** the nume group on this tree proves #151 live. The if7
 groups judge #181+#183 tomorrow morning.
+
+---
+
+## 2026-08-05 (late) — Batch 3 shipped: OR selection stack #184/#185/#186
+
+**Done:** merged the OR selection stack after one refutation cycle.
+#184 gates OR candidate and anchor pools to established instances;
+the verifier refuted the first cut (the toolbox relaxation ladder
+rescued a clause-failing established pool) and the fix makes the
+fall-open relaxation-aware with a proven tie rule. #185 makes the OR
+fallback publish the target class, never the anchor class. #186
+ranks tied candidates and superlative anchors by evidence, not id or
+index order, hash-seed invariant. Filed #187 (persistent ghosts
+saturate near()) and #188 (superlative anchors escape severity).
+Gate green twice; the verifier CONFIRMED with its own reproduction.
+The nume second sample (713820) confirms the #176 collapse is stable
+(MAE 3.3 vs 7.8 pre-fix). Live proof for this stack rides the next
+OR resubmission.
