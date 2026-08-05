@@ -103,6 +103,22 @@ class Plan:
     notes: str = ""  # escape hatch: anything the parser couldn't encode; verification reads this
     parse_tier: str = "api"  # "api" | "api2" | "local" | "regex" — audit provenance
 
+    def __post_init__(self) -> None:
+        """Assert ``qtype`` is a genuine QType member (issue #182).
+
+        A Plan built with a non-member qtype (e.g. a raw string, or a value from an
+        unrelated enum) would bind no instruction head downstream (HeadState.bind's
+        elif-chain), silently leaving the plan-not-None but head-not-bound state that
+        the #181 guard did not anticipate. Catching it here, at construction time,
+        keeps that state unreachable instead of pushing the check into every
+        downstream consumer.
+        """
+        if not isinstance(self.qtype, QType):
+            valid = ", ".join(m.value for m in QType)
+            raise PlanSchemaError(
+                f"field 'qtype': invalid value {self.qtype!r} (valid: {valid})"
+            )
+
     # ---------------------------------------------------------------- validation
 
     def validate(self) -> list[str]:

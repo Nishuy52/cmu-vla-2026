@@ -1045,3 +1045,32 @@ def test_if_never_early_when_parse_failed_and_plan_is_none():
     clk.set(budget_s + 1.0)
     ctrl.tick(io)
     assert ctrl.state in (State.VERIFY, State.ANSWER, State.DRIVE_OUT, State.DONE)
+
+
+def test_if_never_early_when_plan_qtype_is_not_a_qtype_member():
+    """#182: a bound plan whose qtype is not a genuine QType member must never open
+    the #181 early-answer gate, even when WorldView.ungrounded_subgoals reads 0 (the
+    assembler's default, since a non-QType qtype binds no instruction head). The
+    sanctioned constructor (core.plan_schema.Plan) rejects this at __post_init__, so
+    forge the bad state directly on the bound plan to exercise the controller's
+    defensive mirror of that assert."""
+    clk = FakeClock(0.0)
+    world = WorldView(
+        scene=FakeScene([]),
+        ungrounded_subgoals=0,  # the default -- no head exists to report otherwise
+    )
+    ctrl, _ = build_controller(qtype=QType.INSTRUCTION_FOLLOWING, world=world)
+    io = FakeRobotIO(clk, q_of(QType.INSTRUCTION_FOLLOWING))
+    ctrl.tick(io)  # -> PARSING; binds a plan via the stub parser
+    assert ctrl.plan is not None
+    ctrl.plan.qtype = "not_a_real_qtype"  # forge the schema-unreachable state
+    ctrl.state = State.EXPLORE_EXECUTE
+
+    from core.interfaces import EXPLORE_BUDGET_S
+
+    budget_s = EXPLORE_BUDGET_S[QType.INSTRUCTION_FOLLOWING]
+    for t in (10.0, 20.0, 50.0, 100.0, 200.0, budget_s - 1.0):
+        clk.set(t)
+        ctrl.tick(io)
+        assert ctrl.state is State.EXPLORE_EXECUTE, f"early-answered with bad qtype at t={t}"
+        assert ctrl._if_grounded_streak == 0

@@ -459,6 +459,17 @@ class QuestionController:
             # 5 Aug 2026) instead of exploring the budget as before #181.
             self._if_grounded_streak = 0
             return False
+        if not isinstance(self.plan.qtype, QType):
+            # #182: schema-level construction now asserts QType membership (see
+            # core.plan_schema.Plan.__post_init__), so this is unreachable through any
+            # sanctioned constructor. Kept as a defensive mirror of that assert: a plan
+            # whose qtype is not a genuine QType member would bind no instruction head
+            # (HeadState.bind's elif-chain), leaving WorldView.ungrounded_subgoals at
+            # the assembler's default zero rather than the head's real report -- the
+            # same #181 hole, reopened one layer down. Reset the streak like the
+            # plan-None branch above so a flicker cannot bank a stale count.
+            self._if_grounded_streak = 0
+            return False
         if self.world.ungrounded_subgoals != 0:
             self._if_grounded_streak = 0
             return False
