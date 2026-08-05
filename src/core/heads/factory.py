@@ -515,6 +515,7 @@ def _assemble_worldview(state: HeadState) -> WorldView:
     ungrounded = 0
     stability = None
     drive_complete = False
+    legs_visited = True
 
     if state.numerical is not None:
         partial.count = state.numerical.count
@@ -530,12 +531,17 @@ def _assemble_worldview(state: HeadState) -> WorldView:
         # DRIVE_OUT state can stop driving once the route is finished (arrival, or
         # exhausted with no replan budget). Read-only.
         drive_complete = state.instruction.drive_complete()
+        # Issue #183: the stricter per-leg ordered-visit signal DRIVE_OUT's exit gate
+        # pairs drive_complete with (core.fsm.controller._tick_drive_out) — see
+        # InstructionHead.all_legs_visited for why drive_complete alone is not enough.
+        legs_visited = state.instruction.all_legs_visited()
 
     wv = WorldView(
         scene=state.scene,
         partial=partial,
         ungrounded_subgoals=ungrounded,
         drive_complete=drive_complete,
+        legs_visited=legs_visited,
     )
     if stability is not None:
         wv.stability = stability

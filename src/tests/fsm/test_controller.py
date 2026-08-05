@@ -905,6 +905,115 @@ def test_if_drive_out_watchdog_floor_terminates_a_hung_drive():
     assert io.publish_count == 1  # the ANSWER waypoint; watchdog publish is a latched no-op
 
 
+# --------------------------------------------------------------------------- #183
+
+
+def _redrive_controller(
+    *, complete_after: int, visited_after: int | None, qtype=QType.INSTRUCTION_FOLLOWING
+):
+    """Like ``_drive_out_controller`` but the stub explore flips ``drive_complete`` and
+    ``legs_visited`` independently, so the two-signal DRIVE_OUT exit gate (#183) can be
+    pinned directly without a real InstructionHead/planner.
+
+    ``visited_after=None`` means legs_visited never flips (the redrive never finishes
+    inside the tick budget) -- only the watchdog floor can end the question.
+    """
+    clk = FakeClock(0.0)
+    calls = {"explore": 0, "verify": 0}
+    scene = FakeScene([make_instance(1, "chair")])
+    verify_answer = WaypointCmd(5.0, 5.0)
+    state = {"drive_out_ticks": 0}
+    the_world = WorldView(scene=scene, legs_visited=False)
+
+    def parse(q):
+        return make_plan(qtype)
+
+    def explore(io, plan, w):
+        calls["explore"] += 1
+        if ctrl.state is State.DRIVE_OUT:
+            state["drive_out_ticks"] += 1
+            if state["drive_out_ticks"] >= complete_after:
+                the_world.drive_complete = True
+            if visited_after is not None and state["drive_out_ticks"] >= visited_after:
+                the_world.legs_visited = True
+
+    def verify(io, plan, w):
+        calls["verify"] += 1
+        return verify_answer
+
+    def probe(io):
+        return the_world
+
+    ctrl = QuestionController(parse=parse, explore=explore, verify=verify, probe=probe)
+    io = FakeRobotIO(clk, q_of(qtype))
+    return ctrl, io, clk, calls, state, the_world
+
+
+def test_if_drive_out_does_not_exit_on_drive_complete_while_legs_unvisited():
+    """Issue #183: a head report of drive_complete=True is NOT enough on its own to end
+    DRIVE_OUT while legs_visited stays False (the ordered visit is unfinished) and
+    budget remains — the FSM must keep ticking the heads (reinvesting the budget) rather
+    than discard it the moment the looser drive_complete signal fires."""
+    # drive_complete flips almost immediately (mirrors the live #181/#183 evidence: an
+    # early-fired slot's route already reads drive_complete seconds after answering);
+    # legs_visited never flips inside this tick budget -- only the watchdog can end it.
+    ctrl, io, clk, calls, state, world = _redrive_controller(complete_after=1, visited_after=None)
+    ctrl.tick(io)  # intake -> PARSING
+    ctrl.state = State.EXPLORE_EXECUTE
+    clk.set(300.0)
+    saw_drive_out = False
+    for _ in range(10):
+        ctrl.tick(io)
+        if ctrl.state is State.DRIVE_OUT:
+            saw_drive_out = True
+        clk.advance(0.5)
+        if ctrl.state is State.DONE:
+            break
+    assert saw_drive_out
+    # drive_complete fired long ago but legs_visited never did — the FSM must still be
+    # driving, not DONE, well before the watchdog floor.
+    assert ctrl.state is State.DRIVE_OUT
+    assert world.drive_complete is True
+    assert world.legs_visited is False
+    assert state["drive_out_ticks"] > 5  # kept reinvesting the budget, not idling out
+
+    # The watchdog floor is still the unconditional hard backstop: it forces DONE
+    # regardless of legs_visited ever completing.
+    clk.set(ctrl._watchdog_floor_s + 1.0)
+    ctrl.tick(io)
+    assert ctrl.state is State.DONE
+    assert io.publish_count == 1  # the ANSWER waypoint; watchdog publish is a latched no-op
+
+
+def test_if_drive_out_exits_once_ordered_visit_finishes():
+    """Issue #183: once the head reports BOTH drive_complete AND legs_visited (the
+    reinvest redrive finished visiting every leg in order), DRIVE_OUT ends right away —
+    it does not force the question to idle out to the watchdog floor."""
+    # legs_visited flips a few ticks after drive_complete, mirroring a redrive pass that
+    # takes a few extra ticks to thread the remaining leg(s) after the loose
+    # drive_complete signal first fires.
+    ctrl, io, clk, calls, state, world = _redrive_controller(complete_after=2, visited_after=5)
+    ctrl.tick(io)  # intake -> PARSING
+    ctrl.state = State.EXPLORE_EXECUTE
+    clk.set(300.0)
+    saw_drive_out = False
+    for _ in range(20):
+        ctrl.tick(io)
+        if ctrl.state is State.DRIVE_OUT:
+            saw_drive_out = True
+        clk.advance(0.5)
+        if ctrl.state is State.DONE:
+            break
+    assert saw_drive_out
+    assert ctrl.state is State.DONE
+    assert world.drive_complete is True
+    assert world.legs_visited is True
+    # Ended well before the watchdog floor — a finished redrive is not forced to idle.
+    assert clk.now() < ctrl._watchdog_floor_s
+    trail = "|".join(r.detail for r in ctrl.flight_recording() if r.event == "transition")
+    assert "drive_out->done" in trail
+
+
 def test_if_never_early_when_parse_failed_and_plan_is_none():
     """#181 regression (verifier repro, 5 Aug 2026): a failed parse leaves plan None
     and the instruction head unbuilt, so WorldView.ungrounded_subgoals carries the
