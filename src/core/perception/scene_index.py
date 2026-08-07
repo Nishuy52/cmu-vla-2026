@@ -4,7 +4,8 @@ Provides typo/plural/synonym-tolerant label lookup (used by the toolbox and answ
 heads) plus the add/merge API that real perception uses to fuse cross-frame
 detections: same-label instances overlapping in 3D (IoU > MERGE_IOU) are fused —
 points concatenated, AABB recomputed as the per-axis 2nd/98th-percentile trimmed
-box, ``n_obs`` incremented, ``score`` kept as the max.
+box, ``n_obs`` incremented (and ``n_views``, issue #191's separate distinct-
+viewpoint counter), ``score`` kept as the max.
 
 Label matching ladder (higher tier wins; :meth:`by_label` returns higher tiers
 first, and :meth:`by_label_tiered` surfaces which tier each hit came from):
@@ -80,7 +81,8 @@ def dump_instance_index(
     ``total_instances``, ``by_class`` (label -> count), and ``instances`` — one entry
     per instance with ``id``/``label``/``position`` (rounded centroid)/``score``/
     ``n_obs``, exactly the fields #84/#89 need to compare live recall and instance
-    counts against ground truth. ``extra`` is merged into the top-level record as-is
+    counts against ground truth, plus ``n_views`` (issue #191's separate distinct-
+    viewpoint counter). ``extra`` is merged into the top-level record as-is
     (e.g. a caller-specific qtype/answer value) when given.
 
     Issue #101: each instance entry also carries ``aabb_min``/``aabb_max`` (rounded
@@ -131,6 +133,11 @@ def dump_instance_index(
                     "aabb_max": [round(float(c), 3) for c in rec.aabb_max],
                     "score": round(float(rec.score), 4),
                     "n_obs": int(rec.n_obs),
+                    # Issue #191: distinct-viewpoint count, separate from n_obs's
+                    # dwell count -- see InstanceRecord.n_views. Dumped alongside
+                    # n_obs so future diagnoses can see both without needing the
+                    # live pipeline's in-memory index.
+                    "n_views": int(rec.n_views),
                     # Issue #121: colour bins + caption, so a replay dump alone lets
                     # tools/perception_eval.py-style consumers audit colour coverage
                     # and accuracy without needing the live pipeline's in-memory index.
@@ -787,6 +794,7 @@ class BasicSceneIndex:
                         points=rec.points,
                         caption=rec.caption,
                         aliases=rec.aliases,
+                        n_views=rec.n_views,  # issue #191
                     )
                 self._next_id = max(self._next_id, rec.instance_id + 1)
                 self._instances.append(rec)
@@ -879,7 +887,8 @@ class BasicSceneIndex:
         colour_obs: ColourTally | None = None,
     ) -> None:
         """Fuse ``other`` into ``target`` in place: concat points, recompute the
-        trimmed AABB and centroid, bump n_obs, keep max score.
+        trimmed AABB and centroid, bump n_obs (and n_views, issue #191), keep max
+        score.
 
         Issue #121: ``colour_obs`` (this observation's raw pixel-colour tally, if
         any) is folded into ``target``'s running :class:`ColourTally` — ACCUMULATED
@@ -926,6 +935,12 @@ class BasicSceneIndex:
         target.aabb_max = hi
         target.centroid = (lo + hi) / 2.0
         target.n_obs += other.n_obs
+        # Issue #191: n_views is a SEPARATE counter from n_obs -- the tracker's
+        # associate() already decided whether this observation counts toward it
+        # (0 on `other.n_views` when the pose gate vetoed it, 1 otherwise) before
+        # calling merge_into/add; this just accumulates that decision the same
+        # way n_obs accumulates its own count, unconditionally.
+        target.n_views += other.n_views
         target.score = max(target.score, other.score)
         if other.aliases:
             merged_aliases = list(target.aliases)

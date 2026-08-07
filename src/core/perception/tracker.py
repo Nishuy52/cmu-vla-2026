@@ -416,22 +416,27 @@ def associate(
     untouched, unchanged behaviour.
 
     ``odom`` (issue #191): the vehicle pose this batch of detections was taken
-    from. ``n_obs`` is meant to count DISTINCT-VIEWPOINT observations (the
-    ``InstanceRecord.n_obs`` docstring), but every frame is a keyframe
-    (``KeyframeConfig.every_k == 1``), so a parked robot re-firing an
-    identical box each tick was inflating ``n_obs`` on dwell time alone
-    (measured: a single stationary pose driving n_obs into the dozens). When
-    ``odom`` is given, an observation that matches an EXISTING instance only
-    counts toward ``n_obs`` if the pose has moved >= ``keyframe_cfg.
-    min_translation`` or turned >= ``keyframe_cfg.min_rotation`` since that
-    instance's last COUNTED pose -- reusing the same two keyframe-gate
-    constants, not a new tunable. Fusion (points/AABB/score) still updates on
-    EVERY accepted detection regardless; only the ``n_obs`` increment is
-    gated. A brand-new instance's first observation always counts (nothing to
-    compare against yet). ``None`` (the default, and every pre-#191 caller,
+    from, used ONLY to maintain ``InstanceRecord.n_views`` -- a second,
+    purely-additive counter alongside ``n_obs``. A live-replay measurement
+    (5 slots, 94 GT-matched real instances) REFUTED an earlier version of
+    this fix that gated ``n_obs`` itself on pose: every MIN_GROUND_OBS/
+    ESTABLISH_N_OBS threshold in the codebase (#151/#184/#186) was calibrated
+    against dwell-counted n_obs, so gating n_obs broke 51% of real instances
+    out of those gates in one step (n_obs>=3 pass rate 56% -> 5%). ``n_obs``
+    therefore keeps its exact pre-#191 dwell semantics here, completely
+    unaffected by ``odom`` -- every existing gate/threshold sees identical
+    behaviour to main. ``n_views`` is the new, separate signal: an
+    observation that matches an EXISTING instance counts toward ``n_views``
+    only if the pose has moved >= ``keyframe_cfg.min_translation`` or turned
+    >= ``keyframe_cfg.min_rotation`` since that instance's last COUNTED
+    viewpoint -- reusing the same two keyframe-gate constants, not a new
+    tunable. A brand-new instance's first observation always counts (nothing
+    to compare against yet). Nothing in this codebase reads ``n_views`` yet
+    (ranking consumers are a separate, later change); it exists purely to be
+    computed and dumped. ``None`` (the default, and every pre-#191 caller,
     including every test that calls ``associate()`` without a pose) leaves
-    this ungated -- unchanged prior behaviour, one observation counted per
-    accepted detection.
+    ``n_views`` ungated too -- it then just tracks ``n_obs`` exactly (one
+    counted per accepted detection), since there is no pose to gate against.
     """
     pool: list[InstanceRecord] = list(index.all_instances())
 
@@ -453,11 +458,12 @@ def associate(
         first_boxes.setdefault(rec.instance_id, (rec.aabb_min.copy(), rec.aabb_max.copy()))
 
     # Issue #191: per-instance "last pose an observation of THIS instance was
-    # actually counted from" -- the same external-state convention as
-    # `first_boxes` above (and the index's own colour tally, #121): it has to
-    # outlive any one associate() call and must never leak between independent
-    # SceneIndex instances, so it lives on the index object, not on the
-    # (frozen-semantics) InstanceRecord.
+    # last counted toward n_views from" -- the same external-state convention
+    # as `first_boxes` above (and the index's own colour tally, #121): it has
+    # to outlive any one associate() call and must never leak between
+    # independent SceneIndex instances, so it lives on the index object, not
+    # on the (frozen-semantics) InstanceRecord. Feeds ONLY n_views -- n_obs is
+    # never gated by this (see the `odom` docstring above for why).
     last_counted_pose: dict[int, OdomState] = getattr(
         index, "_tracker_last_counted_pose", None
     )
@@ -467,7 +473,7 @@ def associate(
 
     def _pose_advanced(iid: int) -> bool:
         """True if ``odom`` has moved/turned enough since ``iid``'s last
-        COUNTED observation to count this one too (issue #191)."""
+        n_views-COUNTED observation to count this one too (issue #191)."""
         if odom is None:
             return True  # no pose given -- ungated, matches pre-#191 behaviour
         prev = last_counted_pose.get(iid)
@@ -513,15 +519,17 @@ def associate(
             best_dist = dist
         if best is not None:
             rec = _fused_to_record(det, fused, instance_id=best.instance_id)
-            # Issue #191: this detection matched an EXISTING instance -- gate the
-            # n_obs increment on whether the pose has actually moved since the
-            # last COUNTED observation of that instance. Geometry/score fusion
-            # below (merge_into -> _fuse) always runs regardless; only the count
-            # is gated, by zeroing it on `rec` before fusion (_fuse does
-            # `target.n_obs += other.n_obs`).
+            # Issue #191: this detection matched an EXISTING instance -- gate
+            # ONLY the n_views increment on whether the pose has actually moved
+            # since the last n_views-COUNTED observation of that instance.
+            # n_obs (rec.n_obs, still 1 from _fused_to_record) is left exactly
+            # alone -- it fuses via _fuse's unconditional `target.n_obs +=
+            # other.n_obs`, byte-identical to pre-#191/main. Geometry/score
+            # fusion below (merge_into -> _fuse) always runs regardless of
+            # either counter.
             counted = _pose_advanced(best.instance_id)
             if not counted:
-                rec.n_obs = 0
+                rec.n_views = 0
             elif odom is not None:
                 last_counted_pose[best.instance_id] = odom
             # Issue #89/#84: trust THIS association's own match decision (alias-bridged
@@ -551,11 +559,11 @@ def associate(
                 survivor.instance_id, (survivor.aabb_min.copy(), survivor.aabb_max.copy())
             )
             # Issue #191: same setdefault-only precedent as first_boxes just
-            # above -- seed the pose this instance's first COUNTED observation
-            # (n_obs==1, from _fused_to_record) came from, without
-            # clobbering an already-established track's real first pose if
-            # index.add() actually folded this into one via its own IoU
-            # re-derivation instead of truly minting `new_id`.
+            # above -- seed the pose this instance's first n_views-COUNTED
+            # observation (n_views==1, from _fused_to_record) came from,
+            # without clobbering an already-established track's real first
+            # pose if index.add() actually folded this into one via its own
+            # IoU re-derivation instead of truly minting `new_id`.
             if odom is not None:
                 last_counted_pose.setdefault(survivor.instance_id, odom)
         touched_by_input_idx[orig_idx] = survivor.instance_id
