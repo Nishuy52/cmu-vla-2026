@@ -1,0 +1,45 @@
+[WARN] [1785962759.310068754] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785962759.327812345] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785962759.331603156] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785962759.334573429] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785962759.336217527] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785962788.038223976] [vla_ai_module]: question latched: 'How many potted plants are on a table?'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785962802.983750118] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785962802.984701156] [vla_ai_module]: idle->parsing question received
+[INFO] [1785962808.516702688] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/114 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/114 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785962808.660698151] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785962838.847058057] [vla_ai_module]: published 149 waypoints since latch
+[INFO] [1785962848.194249214] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785962870.289222915] [vla_ai_module]: published 258 waypoints since latch
+[INFO] [1785962901.060183625] [vla_ai_module]: published 357 waypoints since latch
+[INFO] [1785962931.820132589] [vla_ai_module]: published 456 waypoints since latch
+[INFO] [1785962963.718123506] [vla_ai_module]: published 558 waypoints since latch
+[INFO] [1785962994.051098269] [vla_ai_module]: published 660 waypoints since latch
+[INFO] [1785963025.068422405] [vla_ai_module]: published 761 waypoints since latch
+[INFO] [1785963055.185623124] [vla_ai_module]: published 864 waypoints since latch
+[INFO] [1785963086.129736875] [vla_ai_module]: published 963 waypoints since latch
+[INFO] [1785963116.554695570] [vla_ai_module]: published 1053 waypoints since latch
+[INFO] [1785963147.309843333] [vla_ai_module]: published 1155 waypoints since latch
+[INFO] [1785963177.416536517] [vla_ai_module]: published 1258 waypoints since latch
+[INFO] [1785963208.913727456] [vla_ai_module]: published 1357 waypoints since latch
+[INFO] [1785963238.142233980] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785963238.233777730] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785963238.340580868] [vla_ai_module]: published int answer: 2
+[INFO] [1785963238.342090983] [vla_ai_module]: answer->done answered
+[INFO] [1785963238.343421279] [vla_ai_module]: controller DONE; last 9 events: 14.9:idle:question_latched:numerical: 'How many potted plants are on a table?' | 14.9:idle:transition:idle->parsing question received | 20.5:parsing:parsed:tier=api | 20.5:parsing:transition:parsing->orient parse attempted | 60.2:orient:transition:orient->explore_execute orientation window closed | 450.1:explore_execute:transition:explore_execute->verify explore budget spent | 450.2:verify:transition:verify->answer verify complete | 450.3:answer:published:IntAnswer via answer_state | 450.3:answer:transition:answer->done answered
