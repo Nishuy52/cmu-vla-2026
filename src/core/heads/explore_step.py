@@ -625,7 +625,10 @@ def _plan_nouns(plan: Plan | None) -> list[str]:
     look for it.
 
     Deliberately excludes ``plan.avoid`` anchors (use :func:`_plan_avoid_nouns` for
-    those). This return value feeds BOTH GroundingDINO caption passes
+    those) — this function is also used, unchanged, for the affinity/frontier bias
+    (issue #173's diagnosis: the IF frontier bias deliberately uses leg nouns only,
+    excluding avoid nouns, at :meth:`ExploreHead`'s call sites around line 389/469 of
+    this module). This return value feeds BOTH GroundingDINO caption passes
     (``core.perception.detector``) as ``refresh_prompt``'s ``question_nouns`` argument:
     the short question-noun-only pass ("target recall") and, via ``question_nouns``'
     priority slot, the full question+vocab pass ("scene-index breadth"). The short
@@ -634,10 +637,18 @@ def _plan_nouns(plan: Plan | None) -> list[str]:
     specifically because a ~2-phrase prompt carries far less token-position score
     dilution — detector.py's own probe found a 117-phrase caption decodes ZERO
     'teapot' at any threshold where a 2-phrase caption decodes it in 194/211
-    keyframes), so only nouns that belong in the SHORT pass go here. Avoid anchors are
-    breadth, not the target being grounded — they route separately (issue #108) via
-    :func:`_plan_avoid_nouns` into ``refresh_prompt``'s ``full_only_nouns`` argument,
-    which joins the full caption only.
+    keyframes).
+
+    Issue #173: avoid anchors ALSO now reach the short pass — see
+    :meth:`core.heads.factory.HeadState.bind`, which appends :func:`_plan_avoid_nouns`'
+    output onto this function's return value before calling ``refresh_prompt``, rather
+    than changing this function itself (this function stays avoid-free because the
+    affinity/frontier callers above must not gain avoid-noun bias). Issue #108's
+    original routing put avoid nouns in the full caption only; that measured zero live
+    detections for a two-word avoid-anchor class across two IF runs (the full caption
+    dilutes any one phrase toward zero — see this module's ``_plan_avoid_nouns``
+    docstring), so #173 additionally folds them into the short pass while leaving the
+    full-caption route intact.
     """
     if plan is None:
         return []
@@ -655,10 +666,25 @@ def _plan_avoid_nouns(plan: Plan | None) -> list[str]:
 
     Issue #108: avoid anchors are objects the robot must locate so navigation can
     penalise their region — breadth, not the target being grounded — so they belong in
-    the full question+vocab GroundingDINO caption only, never the short
-    question-noun-only caption (see :func:`_plan_nouns`'s docstring for why the short
-    pass must stay tiny). Feed this return value to ``refresh_prompt``'s
-    ``full_only_nouns`` argument, never to its ``question_nouns`` argument.
+    the full question+vocab GroundingDINO caption (feed this return value to
+    ``refresh_prompt``'s ``full_only_nouns`` argument, which :meth:`HeadState.bind`
+    still does, additively).
+
+    Issue #173: #108's "never the short caption" half did not survive contact with the
+    full caption's own token-count dilution — a caption with ~100 phrases decodes an
+    avoid-anchor phrase at recall zero (the same effect detector.py's own docstring
+    documents for 'teapot': 117 phrases -> 0/211 keyframes decoded, 2 phrases -> 194/211).
+    Measured live: an avoid anchor ('folding screen') routed only into the full caption
+    got zero raw detections across 94-132 full-caption ticks in two IF runs, while the
+    identical phrase, present in another run's question caption, scored 175 raw
+    detections on the same class in the same scene. :meth:`core.heads.factory
+    .HeadState.bind` now ALSO appends this function's output onto ``_plan_nouns``'
+    return value before it reaches ``refresh_prompt``'s ``question_nouns`` argument, so
+    avoid nouns reach the short, low-threshold, every-tick pass too. This does not
+    reintroduce what #108 fixed (the total *absence* of avoid nouns from the detector
+    prompt, and the risk of overflowing the full caption's 256-token budget): the short
+    caption stays tiny (target + a couple of anchors, nowhere near #108's 117-phrase
+    concern) and the full-caption route is untouched.
     """
     if plan is None:
         return []
