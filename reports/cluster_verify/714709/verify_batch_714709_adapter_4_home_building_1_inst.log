@@ -1,0 +1,42 @@
+[WARN] [1785933786.444767733] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785933786.469048537] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785933786.473314662] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785933786.475680656] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785933786.477409627] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785933815.250084679] [vla_ai_module]: question latched: 'Go to the coffee table with the kettle on it and stop at the dining table near the big picture.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785933829.810965235] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785933829.812386932] [vla_ai_module]: idle->parsing question received
+[WARN] [1785933849.821911737] [vla_ai_module]: seam 'parse' swallowed exception (occurrence 1): TimeoutError('chat call exceeded 20s timeout')
+Traceback (most recent call last):
+  File "/home/c/cyuhsin/vla/src/core/fsm/controller.py", line 577, in _safe_call
+    return fn(*args)
+           ^^^^^^^^^
+  File "/home/c/cyuhsin/vla/src/core/llm/timeout.py", line 99, in _wrapped
+    return call_with_timeout(lambda: fn(*args, **kwargs), timeout_s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/c/cyuhsin/vla/src/core/llm/timeout.py", line 56, in call_with_timeout
+    raise TimeoutError(
+TimeoutError: chat call exceeded 20s timeout
+
+[INFO] [1785933849.823184169] [vla_ai_module]: parsing->orient parse attempted
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1785933875.279007801] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785934085.348919064] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785934085.477890360] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785934085.769336826] [vla_ai_module]: published 1 waypoints since latch
+[INFO] [1785934085.773033873] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1785934355.352115393] [vla_ai_module]: drive_out->done watchdog_floor>=540s
+[INFO] [1785934355.354259295] [vla_ai_module]: controller DONE; last 10 events: 14.6:idle:transition:idle->parsing question received | 34.6:parsing:transition:parsing->orient parse attempted | 60.0:orient:transition:orient->explore_execute orientation window closed | 270.1:explore_execute:transition:explore_execute->verify explore budget spent | 270.2:verify:transition:verify->answer verify complete | 270.5:answer:answer_from_floor:verify yielded nothing | 270.5:answer:published:WaypointCmd via answer_state | 270.5:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 540.1:drive_out:publish_suppressed:already published; watchdog_floor>=540s | 540.1:drive_out:transition:drive_out->done watchdog_floor>=540s

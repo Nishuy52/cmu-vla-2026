@@ -1,0 +1,37 @@
+[WARN] [1785951237.182988913] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1785951237.208542257] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1785951237.213664296] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1785951237.216669776] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1785951237.219445235] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1785951265.839597174] [vla_ai_module]: question latched: 'Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785951279.365673240] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1785951279.366518526] [vla_ai_module]: idle->parsing question received
+[INFO] [1785951285.001809002] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/112 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/112 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1785951285.172989519] [vla_ai_module]: published 1 waypoints since latch
+[INFO] [1785951315.283381176] [vla_ai_module]: published 152 waypoints since latch
+[INFO] [1785951325.866393807] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1785951345.286779357] [vla_ai_module]: published 302 waypoints since latch
+[INFO] [1785951375.311266953] [vla_ai_module]: published 452 waypoints since latch
+[INFO] [1785951405.469268001] [vla_ai_module]: published 603 waypoints since latch
+[INFO] [1785951435.499065451] [vla_ai_module]: published 753 waypoints since latch
+[INFO] [1785951465.686146486] [vla_ai_module]: published 904 waypoints since latch
+[INFO] [1785951495.881540453] [vla_ai_module]: published 1055 waypoints since latch
+[INFO] [1785951526.077529741] [vla_ai_module]: published 1206 waypoints since latch
+[INFO] [1785951535.877512066] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1785951536.068669629] [vla_ai_module]: verify->answer verify complete
+[INFO] [1785951536.218409831] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1785951556.288061236] [vla_ai_module]: published 1357 waypoints since latch
+[INFO] [1785951586.487856332] [vla_ai_module]: published 1508 waypoints since latch
+[INFO] [1785951616.670604257] [vla_ai_module]: published 1659 waypoints since latch
+[INFO] [1785951646.677990309] [vla_ai_module]: published 1809 waypoints since latch
+[INFO] [1785951676.883291764] [vla_ai_module]: published 1960 waypoints since latch
+[INFO] [1785951707.093231339] [vla_ai_module]: published 2111 waypoints since latch
+[INFO] [1785951737.093580487] [vla_ai_module]: published 2261 waypoints since latch
+[INFO] [1785951767.279043482] [vla_ai_module]: published 2412 waypoints since latch
+[INFO] [1785951797.285024703] [vla_ai_module]: published 2562 waypoints since latch
+[INFO] [1785951806.018762164] [vla_ai_module]: drive_out->done watchdog_floor>=540s
+[INFO] [1785951806.020042929] [vla_ai_module]: controller DONE; last 10 events: 19.2:parsing:parsed:tier=api | 19.2:parsing:transition:parsing->orient parse attempted | 60.0:orient:transition:orient->explore_execute orientation window closed | 270.0:explore_execute:transition:explore_execute->verify explore budget spent | 270.2:verify:transition:verify->answer verify complete | 270.4:answer:answer_from_floor:verify yielded nothing | 270.4:answer:published:WaypointCmd via answer_state | 270.4:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 540.2:drive_out:publish_suppressed:already published; watchdog_floor>=540s | 540.2:drive_out:transition:drive_out->done watchdog_floor>=540s
