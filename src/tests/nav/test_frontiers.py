@@ -172,10 +172,22 @@ def test_disconnection_repro_reroot_reaches_frontiers():
 def test_degenerate_threshold_boundary_pocket_at_threshold_no_reroot():
     """Pocket size == DEGENERATE_POCKET_CELLS (not <) must NOT re-root, even next
     to a much larger separate FREE component -- the far component's frontiers stay
-    stamped unreachable, and the vehicle-rooted distances are untouched."""
+    stamped unreachable, and the vehicle-rooted distances are untouched.
+
+    The gap between the two components is a genuine OBSTACLE wall (not UNKNOWN,
+    see issue #197): a #197-style UNKNOWN-only gap would make the far component
+    reachable via the unknown-crossing fallback regardless of reroot, which is
+    not what this test is pinning -- this test is about the reroot decision, so
+    the far component must stay unreachable by construction (a real wall) to
+    isolate that."""
     grid = _direct_grid(shape=(40, 40))
     grid.state[0:5, 0:10] = FREE  # exactly DEGENERATE_POCKET_CELLS (50) cells
-    grid.state[10:25, 0:20] = FREE  # a separate 300-cell component (gap rows 5-9)
+    # Wall spans the FULL grid width (not just under the far component) -- a
+    # partial wall would leave an UNKNOWN detour around its ends that the #197
+    # crossing fallback could legitimately find, which would defeat the point of
+    # this test (isolating the reroot decision, not the crossing fallback).
+    grid.state[5:10, :] = OBSTACLE  # wall, not an UNKNOWN gap
+    grid.state[10:25, 0:20] = FREE  # a separate 300-cell component
     vehicle_xy = grid.cell_to_world(2, 5)  # inside the 50-cell pocket
 
     frontiers = detect_frontiers(grid, vehicle_xy, min_cluster_size=1)
@@ -185,15 +197,20 @@ def test_degenerate_threshold_boundary_pocket_at_threshold_no_reroot():
     # Threshold is a strict '<': at-threshold skips the (expensive) full-grid
     # component scan entirely.
     assert info["largest_component_cells"] is None
-    # The far, disconnected component's frontier(s) are still stamped unreachable.
+    # The far, wall-separated component's frontier(s) are still stamped unreachable.
     assert any(f.path_distance >= 1e6 for f in frontiers)
+    assert info["unknown_crossing"] is False
 
 
 def test_degenerate_ratio_boundary_insufficient_ratio_no_reroot():
     """Pocket small enough to qualify, but the largest other component is under
-    DEGENERATE_POCKET_RATIO x its size -- must NOT re-root."""
+    DEGENERATE_POCKET_RATIO x its size -- must NOT re-root.
+
+    The gap is a genuine OBSTACLE wall (see #197 note on the sibling test above)
+    so the far component stays unreachable regardless of the reroot decision."""
     grid = _direct_grid(shape=(40, 40))
     grid.state[0:2, 0:5] = FREE  # 10-cell vehicle pocket
+    grid.state[2:10, :] = OBSTACLE  # full-width wall, not an UNKNOWN gap
     grid.state[10:17, 0:5] = FREE  # a separate 35-cell component (< 4x10 = 40)
     vehicle_xy = grid.cell_to_world(0, 2)
 
@@ -204,3 +221,136 @@ def test_degenerate_ratio_boundary_insufficient_ratio_no_reroot():
     assert 35 < DEGENERATE_POCKET_RATIO * 10
     assert info["bfs_reroot"] is False
     assert any(f.path_distance >= 1e6 for f in frontiers)
+    assert info["unknown_crossing"] is False
+
+
+# --------------------------------------------------------------------------- #197
+# A remote FREE component -- not degenerate, not around the vehicle -- separated
+# from the vehicle's component by UNKNOWN cells only must become reachable (its
+# frontiers must survive SYS-F9); the same shape separated by an OBSTACLE wall
+# must NOT (the base autonomy stack still must never be told to plan through a
+# wall). See core.heads.explore_step._frontier_unreachable for the SYS-F9 gate
+# these tests import read-only (owned by the heads surface, not touched here).
+from core.heads.explore_step import UNREACHABLE_PD, _frontier_unreachable  # noqa: E402
+
+
+def _find_frontier_near(frontiers, xy: tuple[float, float], tol: float = 1.5):
+    for f in frontiers:
+        if abs(f.xy[0] - xy[0]) <= tol and abs(f.xy[1] - xy[1]) <= tol:
+            return f
+    return None
+
+
+def test_remote_pocket_separated_by_unknown_becomes_reachable():
+    """A FREE pocket well away from the vehicle, not degenerate (so the #83
+    re-root never fires for the vehicle's own -- already large -- pocket), joined
+    to the vehicle's component only by a stretch of UNKNOWN cells: the #197
+    mechanism. Must come back with a finite path_distance and survive SYS-F9."""
+    grid = _direct_grid(shape=(40, 40))
+    grid.state[0:10, 0:10] = FREE  # 100-cell vehicle component -- not degenerate
+    # rows/cols 10:20 stay UNKNOWN: the seam. No OBSTACLE anywhere in the grid.
+    grid.state[20:25, 20:30] = FREE  # 50-cell remote pocket, holds the frontiers
+    vehicle_xy = grid.cell_to_world(5, 5)
+    vehicle_cell = grid.world_to_cell(*vehicle_xy)
+
+    # Pre-fix semantics: the FREE-only wavefront never crosses the UNKNOWN seam.
+    raw_dist = _bfs_distances(grid, vehicle_cell)
+    assert int(np.isfinite(raw_dist).sum()) == 100  # only the vehicle's own block
+
+    frontiers = detect_frontiers(grid, vehicle_xy, min_cluster_size=1)
+    info = last_call_info()
+    assert info["bfs_reroot"] is False  # vehicle's own pocket is not degenerate
+    assert info["unknown_crossing"] is True
+
+    remote = _find_frontier_near(frontiers, grid.cell_to_world(22, 25))
+    assert remote is not None
+    assert remote.path_distance < UNREACHABLE_PD
+    assert not _frontier_unreachable(remote)  # SYS-F9 must not drop it
+
+
+def test_remote_pocket_separated_by_obstacle_wall_stays_unreachable():
+    """Same shape as above, but the seam is a genuine OBSTACLE wall spanning the
+    full grid width -- not UNKNOWN. The remote pocket must stay unreachable: the
+    fix must never route the vehicle through a wall."""
+    grid = _direct_grid(shape=(40, 40))
+    grid.state[0:10, 0:10] = FREE  # 100-cell vehicle component
+    grid.state[10:20, :] = OBSTACLE  # full-width wall, not an UNKNOWN gap
+    grid.state[20:25, 20:30] = FREE  # 50-cell remote pocket, walled off
+    vehicle_xy = grid.cell_to_world(5, 5)
+
+    frontiers = detect_frontiers(grid, vehicle_xy, min_cluster_size=1)
+    info = last_call_info()
+    assert info["bfs_reroot"] is False
+    assert info["unknown_crossing"] is False
+
+    remote = _find_frontier_near(frontiers, grid.cell_to_world(22, 25))
+    assert remote is not None
+    assert remote.path_distance >= UNREACHABLE_PD
+    assert _frontier_unreachable(remote)  # SYS-F9 must still drop it
+
+
+def test_office_2_shaped_remote_pocket_recovers():
+    """A grid proportioned after the live office_2 G3/slot7 costmap (the 200-of-297
+    rejects cited in #197): reports/cluster_verify/714719/debug/7_office_2_inst/
+    explore_debug_455284.jsonl, final record -- shape [196, 224], free 3145,
+    unknown 39755, obstacle 1004, reachable_pocket_cells 2921 (i.e. 224 of 3145
+    FREE cells, ~7%, never joined the vehicle-rooted FREE-only component, for 50
+    ticks straight). The dump carries only those aggregate per-tick counts, not
+    per-cell grid state, so the exact office_2 geometry cannot be reconstructed
+    from it -- this grid is SYNTHETIC, sized (70x80, matching the 196:224 aspect
+    ratio) and proportioned (free/obstacle fraction, and an UNKNOWN-only remote
+    pocket sized to roughly the same ~7% unreachable-free share) to match those
+    stats qualitatively, not a literal replay."""
+    grid = _direct_grid(shape=(70, 80))
+    grid.state[5:25, 5:24] = FREE  # main room, ~380 cells
+    grid.state[10:15, 10:15] = OBSTACLE  # furniture-like clutter inside the room
+    grid.state[50:55, 50:56] = FREE  # remote pocket, ~30 cells -- reached only
+    # through rows/cols 25:50 UNKNOWN, no OBSTACLE anywhere in the seam.
+    vehicle_xy = grid.cell_to_world(7, 7)
+    vehicle_cell = grid.world_to_cell(*vehicle_xy)
+
+    raw_dist = _bfs_distances(grid, vehicle_cell)
+    pocket_cells = int(np.isfinite(raw_dist).sum())
+    assert pocket_cells >= DEGENERATE_POCKET_CELLS  # main room is not degenerate
+
+    frontiers = detect_frontiers(grid, vehicle_xy, min_cluster_size=1)
+    info = last_call_info()
+    assert info["bfs_reroot"] is False  # not the #83 mechanism -- main room is fine
+    assert info["unknown_crossing"] is True  # the #197 mechanism is what fires
+
+    remote = _find_frontier_near(frontiers, grid.cell_to_world(52, 53))
+    assert remote is not None
+    assert remote.path_distance < UNREACHABLE_PD
+    assert not _frontier_unreachable(remote)
+
+
+def test_197_does_not_regress_83_degenerate_vehicle_pocket():
+    """The #83 mechanism (a degenerate pocket AROUND THE VEHICLE re-roots the BFS
+    off a much larger separate FREE component) must behave exactly as before the
+    #197 fallback was added -- same repro shape as
+    test_disconnection_repro_reroot_reaches_frontiers, with the #197 diagnostics
+    asserted too so a future change can't silently swap which mechanism did the
+    rescuing."""
+    rows = [
+        "      ......",
+        "      ......",
+        "      ......",
+        ".     ......",
+        "      ......",
+        "      ......",
+    ]
+    grid = OccupancyGrid(cell_m=0.1)
+    grid.integrate_patch(patch_from_ascii(rows, cell_m=0.1))
+    vehicle_xy = (0.05, 0.25)
+
+    frontiers = detect_frontiers(grid, vehicle_xy, min_cluster_size=1)
+    info = last_call_info()
+    # The #83 re-root is what reconnects the big block -- unchanged from before.
+    assert info["bfs_reroot"] is True
+    assert info["pocket_cells"] == 1
+    assert info["largest_component_cells"] == 36
+    assert frontiers
+    big_block_frontier = _find_frontier_near(frontiers, grid.cell_to_world(2, 9), tol=0.6)
+    assert big_block_frontier is not None
+    assert big_block_frontier.path_distance < UNREACHABLE_PD
+    assert not _frontier_unreachable(big_block_frontier)

@@ -24,16 +24,33 @@ its own local obstacle avoidance and drives the robot regardless of what this
 frontier scorer thinks is "reachable" -- so a degenerate vehicle-rooted pocket
 must not stamp every frontier with the unreachable sentinel and park the robot
 forever. See ``last_call_info()`` for whether/why a given call re-rooted.
+
+Issue #197 -- unknown-seam crossing for a remote FREE pocket: the #83 re-root only
+fires for a small pocket AROUND THE VEHICLE. A FREE component that is itself
+large (so the vehicle's own pocket is not "degenerate") but is separated from the
+vehicle's component by a seam of UNKNOWN cells (never an OBSTACLE) stays
+disconnected under the FREE-only wavefront above forever, even though the real
+planner could drive there: `core.nav.planner.astar` already treats UNKNOWN cells
+as traversable (at UNKNOWN_COST_MULT), only OBSTACLE is a hard block. That made
+the frontier reachability check strictly MORE conservative than the planner it
+feeds -- a self-inflicted inconsistency, not a real navigation limit. When a
+cluster is still unreachable after the (optional) #83 re-root, `detect_frontiers`
+retries with `_weighted_distances`, a Dijkstra that mirrors the planner's own
+crossing rule (FREE steps cost 1, UNKNOWN steps cost UNKNOWN_COST_MULT, OBSTACLE
+is impassable). A component genuinely walled off by OBSTACLE cells stays
+unreachable under this too -- it never crosses a wall, only unknown space.
 """
 from __future__ import annotations
 
+import heapq
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import numpy as np
 
-from core.nav.occupancy import FREE, UNKNOWN, OccupancyGrid
+from core.nav.occupancy import FREE, OBSTACLE, UNKNOWN, OccupancyGrid
+from core.nav.planner import UNKNOWN_COST_MULT
 
 # --------------------------------------------------------------------------- tunables
 MIN_CLUSTER_SIZE: int = 5  # frontier clusters smaller than this are noise
@@ -64,6 +81,7 @@ _LAST_CALL_INFO: dict[str, Any] = {
     "bfs_reroot": False,
     "pocket_cells": 0,
     "largest_component_cells": None,
+    "unknown_crossing": False,
 }
 
 
@@ -75,6 +93,10 @@ def last_call_info() -> dict[str, Any]:
     BFS-reachable FREE cell count. ``largest_component_cells``: the largest FREE
     connected component's size, or None if the pocket wasn't small enough to make
     that expensive full-grid computation worth doing (see detect_frontiers).
+    ``unknown_crossing``: whether that call's reachability distances were widened
+    (issue #197) by the UNKNOWN-crossing Dijkstra fallback -- i.e. at least one
+    cluster that the FREE-only wavefront stamped unreachable turned out to be
+    reachable only through UNKNOWN cells, not through an OBSTACLE wall.
     """
     return dict(_LAST_CALL_INFO)
 
@@ -208,6 +230,53 @@ def _bfs_distances(grid: OccupancyGrid, start: tuple[int, int]) -> np.ndarray:
     return dist
 
 
+def _weighted_distances(
+    grid: OccupancyGrid,
+    start: tuple[int, int],
+    *,
+    unknown_cost_mult: float = UNKNOWN_COST_MULT,
+) -> np.ndarray:
+    """Dijkstra distance from `start` (grid cell, assumed already FREE), crossing
+    FREE cells at 1.0/king-move and UNKNOWN cells at `unknown_cost_mult`/king-move;
+    OBSTACLE cells are impassable. See the issue #197 module docstring section.
+
+    This is the FREE-only `_bfs_distances` wavefront's more expensive sibling: it
+    is only invoked (by `detect_frontiers`) as a fallback for clusters the cheap
+    FREE-only pass already stamped unreachable, to test whether an UNKNOWN-only
+    seam -- not an OBSTACLE wall -- is what separates them from the root. Costs on
+    a FREE-only path are identical to `_bfs_distances` (both charge 1.0/step for a
+    king move into a FREE cell), so this dominates it: `_weighted_distances(...) <=
+    _bfs_distances(...)` cell-for-cell, never worse, only cells reachable purely
+    through UNKNOWN pick up a smaller-than-inf value they didn't have before.
+    """
+    h, w = grid.shape
+    dist = np.full((h, w), np.inf, dtype=np.float64)
+    sr, sc = start
+    if not (0 <= sr < h and 0 <= sc < w):
+        return dist
+    state = grid.state
+    passable = state != OBSTACLE
+    if not passable[sr, sc]:
+        return dist
+
+    dist[sr, sc] = 0.0
+    heap: list[tuple[float, int, int]] = [(0.0, sr, sc)]
+    while heap:
+        d, r, c = heapq.heappop(heap)
+        if d > dist[r, c]:
+            continue  # stale heap entry, a shorter path already settled this cell
+        for dr, dc in _NEIGH8:
+            nr, nc = r + dr, c + dc
+            if not (0 <= nr < h and 0 <= nc < w) or not passable[nr, nc]:
+                continue
+            step = unknown_cost_mult if state[nr, nc] == UNKNOWN else 1.0
+            nd = d + step
+            if nd < dist[nr, nc]:
+                dist[nr, nc] = nd
+                heapq.heappush(heap, (nd, nr, nc))
+    return dist
+
+
 def detect_frontiers(
     grid: OccupancyGrid,
     vehicle_xy: tuple[float, float],
@@ -255,11 +324,38 @@ def detect_frontiers(
             dist = _bfs_distances(grid, reroot_cell)
             reroot = True
 
+    # issue #197: a cluster still entirely unreachable under the FREE-only `dist`
+    # (raw or #83-rerooted) may only be cut off by an UNKNOWN seam, not an
+    # OBSTACLE wall -- the real planner could cross that seam. Retry with the
+    # weighted (UNKNOWN-crossing) Dijkstra, rooted at the same cell `dist` used
+    # (recovered from its own zero), only when at least one cluster needs it: the
+    # common/healthy case (everything already reachable) skips the extra pass.
+    unknown_crossing = False
+    unreachable_clusters = [
+        comp for comp in clusters
+        if not np.any(np.isfinite(dist[[p[0] for p in comp], [p[1] for p in comp]]))
+    ]
+    if unreachable_clusters:
+        root = np.argwhere(dist == 0.0)
+        if root.size:
+            root_cell = (int(root[0, 0]), int(root[0, 1]))
+            weighted = _weighted_distances(grid, root_cell)
+            # Only count it as a crossing "rescue" if it actually reconnects a
+            # frontier-bearing cluster -- not merely some dead-end UNKNOWN cell
+            # that leads nowhere (e.g. open UNKNOWN space past a genuine wall).
+            unknown_crossing = any(
+                np.any(np.isfinite(weighted[[p[0] for p in comp], [p[1] for p in comp]]))
+                for comp in unreachable_clusters
+            )
+            if unknown_crossing:
+                dist = np.minimum(dist, weighted)
+
     _LAST_CALL_INFO.clear()
     _LAST_CALL_INFO.update(
         bfs_reroot=reroot,
         pocket_cells=pocket_cells,
         largest_component_cells=largest_component_cells,
+        unknown_crossing=unknown_crossing,
     )
 
     if not clusters:
