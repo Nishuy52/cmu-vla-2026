@@ -1633,8 +1633,13 @@ class GroundingDinoDetector:
         dets: list[Detection] = []
         for i in keep:
             posmap = item_logits[i] > self.text_threshold
-            phrase = get_phrases_from_posmap(posmap, tokenized, tokenizer).replace(".", "").strip()
-            if not phrase or CAPTION_JOIN_MARKER in phrase:
+            raw_phrase = get_phrases_from_posmap(posmap, tokenized, tokenizer)
+            # Issue #192: test the marker BEFORE stripping "." -- CAPTION_JOIN_MARKER
+            # is " . " (detector.py:1146), so testing the post-strip phrase (the old
+            # order) can never match and the #172 guard was dead on this path,
+            # letting span-bleed labels like "bedside table nightstand" through.
+            phrase = raw_phrase.replace(".", "").strip()
+            if not phrase or CAPTION_JOIN_MARKER in raw_phrase:
                 coarse_posmap = item_logits[i] > self.box_threshold
                 coarse_phrase = get_phrases_from_posmap(
                     coarse_posmap, tokenized, tokenizer
