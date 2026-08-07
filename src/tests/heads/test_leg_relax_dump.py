@@ -107,6 +107,11 @@ def test_dump_writes_jsonl_record(monkeypatch, tmp_path):
     assert leg1["anchors"][0]["relax_steps"] == ["relax_attributes"]
     assert leg1["anchors"][0]["candidate_count"] == 2
     assert leg1["anchors"][0]["tie_break_group_size"] == 2
+    # Issue #198: the pick itself (not just the resolve process) is recorded.
+    assert leg0["picked_instance_id"] == 1
+    assert leg0["goal_xy"] == [0.0, 0.0]
+    assert leg1["picked_instance_id"] in (2, 3)
+    assert leg1["goal_xy"] is not None
 
 
 def test_dump_appends_across_calls(monkeypatch, tmp_path):

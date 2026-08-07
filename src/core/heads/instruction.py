@@ -191,6 +191,21 @@ class AnchorAudit:
     position_collision: bool = False
 
 
+def _leg_goal_xy(leg: "_GroundedLeg") -> list[float] | None:
+    """Issue #198 -- the single (x, y) point ``leg.geom`` resolved to, for the
+    diagnostic dump. GOTO/VIA_NEAR geometry already IS that point; CORRIDOR_BETWEEN
+    geometry is the gate's two crossing points, so the reported goal is their
+    midpoint (matches the route-continuity reference ``_ground_legs`` threads
+    forward for the same leg kind -- see its issue #115 docstring)."""
+    geom = leg.geom
+    if geom is None:
+        return None
+    if isinstance(geom[0], tuple):
+        (x0, y0), (x1, y1) = geom
+        return [(x0 + x1) / 2.0, (y0 + y1) / 2.0]
+    return [float(geom[0]), float(geom[1])]
+
+
 def dump_leg_relaxations(plan: "Plan | None", legs: list["_GroundedLeg"]) -> None:
     """Append one JSONL record of each leg's anchor relaxation audit, if
     :data:`ENV_LEG_RELAX_DUMP_PATH` is set. No-op (no I/O at all) when unset.
@@ -198,6 +213,16 @@ def dump_leg_relaxations(plan: "Plan | None", legs: list["_GroundedLeg"]) -> Non
     Issue #98: makes a leg grounded only via a dropped disambiguator + same-label
     tie-break visible as such, instead of looking identical to a genuinely grounded
     leg in every other artifact.
+
+    Issue #198: the head never recorded which instance it actually PICKED for a leg,
+    or the goal point that pick produced -- every field above describes the resolve
+    PROCESS (which rungs fired, how big the tied pool was), not its OUTCOME, so
+    diagnosing a wrong-goal leg required inferring the pick from index geometry, tie
+    sizes, and driven-distance concordance after the fact. ``picked_instance_id``
+    (the primary anchor's resolved ``InstanceRecord.instance_id``, ``None`` when the
+    leg never grounded any candidate) and ``goal_xy`` (see :func:`_leg_goal_xy`) turn
+    that inference into a lookup. Diagnostic-only, additive fields -- no behaviour
+    change: nothing here is read by any scoring/geometry/drive logic.
     """
     path = os.environ.get(ENV_LEG_RELAX_DUMP_PATH)
     if not path:
@@ -213,6 +238,8 @@ def dump_leg_relaxations(plan: "Plan | None", legs: list["_GroundedLeg"]) -> Non
                     "nouns": list(leg.nouns),
                     "grounded": leg.grounded,
                     "provisional": leg.provisional,
+                    "picked_instance_id": getattr(leg.record, "instance_id", None),
+                    "goal_xy": _leg_goal_xy(leg),
                     "anchors": [
                         {
                             "relax_steps": list(a.steps),
