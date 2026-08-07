@@ -79,6 +79,28 @@ def _ladder_severity(audit: list[Relaxation]) -> int:
     return max((_LADDER_SEVERITY.get(r.step, 0) for r in audit), default=0)
 
 
+#: (#188) The two ANCHOR-side relaxation steps ``_ladder_severity`` deliberately excludes
+#: (see its docstring: they concern an anchor's own resolution, not the target's clause
+#: enforcement) -- ``resolve()`` records one of these on ``audit`` when a superlative
+#: clause's own anchor (e.g. "the vase closest to the SHELF") could not be grounded
+#: against the pool it was resolved through: either the anchor noun has no instances at
+#: all (``superlative_anchor_missing``) or every survivor tied even after the dropped-
+#: clause tiebreak (``superlative_tie_unresolved``, see ``_ungrounded_superlative_order``).
+#: Severity 0 there is correct AS FAR AS THE LADDER GOES (no candidate-filtering clause was
+#: relaxed), but it also means an established-pool superlative whose anchor never grounds
+#: sails through `_resolve`'s existing severity==0 short-circuit without ever comparing
+#: against the raw pool -- even when the raw pool grounds that SAME anchor cleanly and
+#: ranks a genuinely different (correct) winner. See ``_resolve``'s superlative-anchor
+#: compare-both-audits branch.
+_SUPERLATIVE_ANCHOR_STEPS: frozenset[str] = frozenset(
+    {"superlative_anchor_missing", "superlative_tie_unresolved"}
+)
+
+
+def _has_superlative_anchor_relaxation(audit: list[Relaxation]) -> bool:
+    return any(r.step in _SUPERLATIVE_ANCHOR_STEPS for r in audit)
+
+
 # Legacy narrow per-clause verifier (backward compat):
 #     (plan, candidate_summary, pass_matrix_text) -> keep-winner bool
 LlmVerifyFn = Callable[[Plan, str, str], bool]
@@ -191,6 +213,20 @@ class ObjectRefHead:
         does not distinguish the two pools). The winning pool is recorded as a trailing
         ``Relaxation`` entry on the returned result's audit so callers can see which pool
         won and why.
+
+        Superlative-anchor compare-both-audits rule (#188): ``_ladder_severity`` counts
+        only the candidate-filtering ladder by design (see its docstring) -- a superlative
+        clause whose OWN anchor never grounds (``superlative_anchor_missing`` /
+        ``superlative_tie_unresolved``, recorded by ``resolve()``'s ``_ungrounded_
+        superlative_order`` path) reads severity 0 even though the established pool never
+        actually resolved the superlative at all. Left alone, that empty-anchor case would
+        sail through the severity==0 short-circuit above and the raw pool would never even
+        be consulted, no matter how cleanly it grounds the SAME anchor. So an established
+        result carrying either of those two steps ALSO triggers the raw-pool comparison
+        (even at severity 0), and raw wins outright whenever it grounds the anchor the
+        established pool could not -- independent of the ladder-severity comparison, which
+        still governs every other case (including when BOTH pools fail to ground the
+        anchor, where neither carries new evidence and the existing severity rule decides).
         """
         target = self.plan.target
         established = EstablishedView(scene, floor=ESTABLISH_N_OBS)
@@ -199,14 +235,31 @@ class ObjectRefHead:
             return resolve(target, scene, self.thresholds)
 
         established_severity = _ladder_severity(filtered.audit)
-        if established_severity == 0:
-            return filtered  # clause(s) fully enforced against the established pool
+        established_superlative_relaxed = _has_superlative_anchor_relaxation(filtered.audit)
+        if established_severity == 0 and not established_superlative_relaxed:
+            return filtered  # clause(s) fully enforced, superlative anchor (if any) grounded
 
         raw = resolve(target, scene, self.thresholds)
         if not raw.candidates_ranked:
             return filtered  # never regress to nothing over a severity comparison
 
         raw_severity = _ladder_severity(raw.audit)
+
+        # (#188) Compare-both-audits rule: an established-pool superlative whose OWN
+        # anchor never grounded (severity 0 by the ladder's own design -- see
+        # `_SUPERLATIVE_ANCHOR_STEPS`) still needs comparing against the raw pool,
+        # because the established anchor pool being empty says nothing about whether
+        # the RAW anchor pool is empty too. Prefer raw iff it resolves the SAME
+        # superlative WITHOUT that anchor-side relaxation -- a raw pool that also
+        # failed to ground the anchor carries no new evidence, so falls through to the
+        # existing severity rule below instead of winning by default.
+        if established_superlative_relaxed and not _has_superlative_anchor_relaxation(raw.audit):
+            note = (
+                "raw pool selected: grounded the superlative anchor the established "
+                "pool could not resolve at all"
+            )
+            return replace(raw, audit=raw.audit + [Relaxation("established_gate_pool_choice", note)])
+
         if raw_severity < established_severity:
             note = (
                 f"raw pool selected: needed a less severe relaxation "
