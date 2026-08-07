@@ -25,9 +25,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
+import numpy as np
+
 from core.fsm.controller import StabilitySignal
 from core.heads.scene_established import ESTABLISH_N_OBS, EstablishedView
-from core.interfaces import IntAnswer, QType, SceneIndex
+from core.interfaces import InstanceRecord, IntAnswer, MatchTier, QType, SceneIndex
 from core.geometry.toolbox import (
     DEFAULT_THRESHOLDS,
     Thresholds,
@@ -35,6 +37,7 @@ from core.geometry.toolbox import (
     counting,
     has_unresolved_disambiguator,
 )
+from core.perception.dimension_priors import prior_for
 from core.plan_schema import Plan
 
 STABLE_TICKS: int = 3  # consecutive equal counts required before firing early
@@ -98,6 +101,114 @@ DISAMBIGUATOR_RELEASE_FRAC: float = 0.85
 # `_count()` for the fail-open guarantee that a too-strict floor can only ever
 # fall back to the unfiltered count, never fabricate a zero.
 ANCHOR_ESTABLISHED_N_OBS: int = ESTABLISH_N_OBS
+
+# (#189) A single established anchor instance can still under-approximate the true
+# object it tracks -- the perception under-approximation dimension_priors.py already
+# documents (single-viewpoint AABBs only see the observed faces). Live evidence
+# (714757's hotel_room_1: "How many pillows are on the bed?" fell 8 -> 1, GT 4)
+# traced to exactly this: the surviving n_obs>=3 bed anchor's own footprint sits a
+# few tenths of a metre short of the true bed extent on one axis, so pillows that
+# really do sit on the bed fail the support test's footprint-overlap gate against
+# every established anchor, not because the on() predicate is wrong but because the
+# anchor BOX it is evaluated against is too small.
+#
+# Fix: before the support test, rescue only the X/Y (footprint) axes of an
+# established anchor that are MILDLY undersized relative to the anchor's own class
+# dimension prior (core.perception.dimension_priors, read-only) -- i.e. below the
+# class's 10th-percentile MIN extent, so a modest, expected sizing gap, but not so
+# far below it (< ANCHOR_RESCUE_MILDNESS_FLOOR * min) that the box reads as a
+# degenerate/mislabelled detection a real rescue would only compound (verified live:
+# office_2's control fixture carries an established "table" instance with a 4 cm
+# x-extent -- an obviously broken box, not a fragmented table -- and unconditionally
+# inflating ANY below-class-min axis toward the class median flips a previously-
+# correct exact answer). Rescued ranks jump to the class's TYPICAL (median) extent,
+# not merely up to the min floor: the min floor alone (already applied elsewhere via
+# core.perception.dimension_priors.clamp_extents) measured too small a nudge to
+# close the archived hotel_room_1 gap in the same experiment.
+#
+# The Z axis is NEVER touched: the support test's vertical gate (on()'s upper-z-band
+# check, core.geometry.toolbox.on) is a near-miss-sensitive tolerance, not a
+# footprint-overlap gate, and letting a Z rescue quietly re-open it risks pulling in
+# an established anchor a genuinely absent relation should not resolve against (this
+# generalises past the training sample: 714757's home_building_1 "sofa" anchor pool
+# fails the support test on a 3 cm Z near-miss for one candidate -- padding Z there
+# would trade a defensible, unaffected fallback-tier answer for a strictly worse
+# established-tier one; XY-only rescue leaves that row untouched, exactly preserving
+# its current, evidence-ceiling behaviour).
+#
+# Scoped to NUMERICAL's relation-clause anchor filtering only (this module), not the
+# shared `core.heads.scene_established.EstablishedView`/#160 toolbox clustering used
+# by OBJECT_REFERENCE (#184): rescuing footprints is a support-test-specific
+# correction, not a general anchor-resolution behaviour change.
+ANCHOR_RESCUE_MILDNESS_FLOOR: float = 0.5  # only rescue a rank >= this fraction of class-min
+
+
+def _rescue_undersized_anchor_footprint(record: InstanceRecord) -> InstanceRecord:
+    """(#189) Inflate an established anchor's X/Y extent toward its class TYPICAL
+    value, but only on ranks that are mildly undersized relative to the class's own
+    10th-percentile MIN extent (>= :data:`ANCHOR_RESCUE_MILDNESS_FLOOR` of it, < it).
+    Ranks already at/above class-min, and ranks far enough below it to look like a
+    broken/degenerate detection rather than an ordinary sizing gap, are left exactly
+    as measured. The Z axis is never touched (see the module note above). Fails open
+    (returns ``record`` unchanged) when the class has no dimension prior, or when no
+    rank actually qualifies.
+    """
+    prior = prior_for(record.label)
+    if prior is None:
+        return record
+    ext = record.extents
+    order = np.argsort(ext, kind="stable")
+    sorted_ext = ext[order]
+    mildly_undersized = (sorted_ext < prior.min_ext) & (
+        sorted_ext >= ANCHOR_RESCUE_MILDNESS_FLOOR * prior.min_ext
+    )
+    if not np.any(mildly_undersized):
+        return record
+    adjusted = np.where(mildly_undersized, prior.typ_ext, sorted_ext)
+    out = ext.copy()
+    for rank, axis in enumerate(order):
+        out[axis] = adjusted[rank]
+    out[2] = ext[2]  # never touch Z -- see module note
+    if np.allclose(out, ext):
+        return record
+    centre = (record.aabb_min + record.aabb_max) / 2.0
+    lo = centre - out / 2.0
+    hi = centre + out / 2.0
+    lo[2] = record.aabb_min[2]
+    hi[2] = record.aabb_max[2]
+    return replace(record, aabb_min=lo, aabb_max=hi)
+
+
+@dataclass(frozen=True)
+class _FootprintRescuedAnchorView:
+    """(#189) Wraps an :class:`EstablishedView` so ANCHOR-side lookups additionally
+    run :func:`_rescue_undersized_anchor_footprint`; the exempt (target) noun passes
+    through untouched, exactly mirroring ``EstablishedView``'s own exemption. A
+    thin, NUMERICAL-local wrapper rather than a new ``EstablishedView`` option: this
+    behaviour is specific to the support-clause anchor-filtering path (#151/#189),
+    not something OBJECT_REFERENCE's (#184) shared use of ``EstablishedView`` should
+    also pick up.
+    """
+
+    inner: EstablishedView
+
+    def _passthrough(self, noun: str) -> bool:
+        return self.inner.exempt_noun is not None and noun == self.inner.exempt_noun
+
+    def by_label(self, noun: str) -> list[InstanceRecord]:
+        recs = self.inner.by_label(noun)
+        if self._passthrough(noun):
+            return recs
+        return [_rescue_undersized_anchor_footprint(r) for r in recs]
+
+    def by_label_tiered(self, noun: str) -> list[tuple[InstanceRecord, MatchTier]]:
+        hits = self.inner.by_label_tiered(noun)
+        if self._passthrough(noun):
+            return hits
+        return [(_rescue_undersized_anchor_footprint(r), t) for r, t in hits]
+
+    def all_instances(self) -> list[InstanceRecord]:
+        return self.inner.all_instances()
 
 
 @dataclass
@@ -209,7 +320,8 @@ class NumericalHead:
         established = EstablishedView(
             scene, floor=ANCHOR_ESTABLISHED_N_OBS, exempt_noun=target.noun
         )
-        filtered = counting(target, established, min_obs=min_obs, th=self.thresholds)
+        rescued = _FootprintRescuedAnchorView(established)
+        filtered = counting(target, rescued, min_obs=min_obs, th=self.thresholds)
         if filtered.count > 0:
             return filtered
 
