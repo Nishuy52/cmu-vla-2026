@@ -94,6 +94,7 @@ from core.perception.scene_index import BasicSceneIndex
 from core.perception.tracker import PerceptionPipeline
 from core.perception.vision_encode import resolve_encode_fn
 from ros_adapter.cloud_packing import pack_colored_cloud
+from ros_adapter.frame_watchdog import FrameWatchdog
 from core.replay.bag_reader import (
     TOPIC_CAMERA,
     TOPIC_ODOM,
@@ -319,6 +320,9 @@ class AdapterNode(Node):
         self._terrain_ext: TerrainPatch | None = None
         self._odom: OdomState | None = None
         self._question: Question | None = None
+        # issue #174: frame-arrival watchdog — pure observability, no recovery. Baselines
+        # at construction so a slot whose camera never starts also ages out and warns.
+        self._frame_watchdog = FrameWatchdog(clock=time.monotonic)
         # NOTE: must NOT be named `self._clock` — rclpy.node.Node.__init__ already sets
         # `self._clock = ROSClock()` and Node.get_clock() / several internal rclpy methods
         # (e.g. declare_parameter's _set_parameters_atomically_common) read that exact
@@ -583,6 +587,9 @@ class AdapterNode(Node):
         return self.get_clock().now().nanoseconds
 
     def _on_image(self, msg: Image) -> None:
+        # issue #174: mark frame arrival first — every raw or decoded-compressed frame
+        # (both paths funnel through here) resets the quiet-feed clock.
+        self._frame_watchdog.on_frame()
         # Attach the latest odom so PanoFrame.odom is populated (mirrors BagSource.frames()).
         with self._lock:
             odom = self._odom
@@ -709,6 +716,23 @@ class AdapterNode(Node):
         except Exception as exc:  # perception must never crash the drive loop
             self.get_logger().error("perception error: %s" % exc)
 
+    # ------------------------------------------------------------------ observability (issue #174)
+    def _check_frame_watchdog(self) -> None:
+        """Log a loud, rate-limited warning when the camera feed has gone quiet while a
+        question is active. Pure observability (no restart/resubscribe attempt) — see
+        ros_adapter.frame_watchdog for the split-tree evidence. Never raises (a dead
+        adapter must not crash the node).
+        """
+        try:
+            question_active = self._question is not None and (
+                self._controller is None or self._controller.state is not State.DONE
+            )
+            msg = self._frame_watchdog.check(question_active)
+            if msg is not None:
+                self.get_logger().warning(msg)
+        except Exception as exc:  # a watchdog glitch must never disturb the drive loop
+            self.get_logger().error("frame watchdog error: %s" % exc)
+
     # ------------------------------------------------------------------ observability (issue #60)
     def _controller_logger(self, level: str, msg: str) -> None:
         """QuestionController's injected logger callback: transitions INFO, swallowed WARN."""
@@ -743,6 +767,7 @@ class AdapterNode(Node):
             # Perception runs every tick (independent of the question) so the live index is
             # already populated by the time the controller starts resolving.
             self._maybe_process_perception()
+            self._check_frame_watchdog()
             if self._controller is None:
                 if self.question() is None:
                     return  # no question yet — nothing to drive
