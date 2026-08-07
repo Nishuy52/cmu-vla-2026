@@ -148,11 +148,30 @@ class HeadState:
         if plan is None or self.plan is not None:
             return
         self.plan = plan
+        # Issue #173: avoid-anchor nouns must also reach the SHORT question-noun-only
+        # caption, not only the full caption's full_only_nouns slot (issue #108's
+        # original routing). A long (~100-phrase) full caption dilutes a phrase's
+        # decode score toward zero (detector.py's own probe: 117 phrases decode zero
+        # 'teapot' where 2 phrases decode it in 194/211 keyframes); the full caption
+        # also only refreshes every 3rd tick at the higher 0.35 threshold, so an avoid
+        # anchor routed there alone measured zero live detections across two IF runs
+        # while the same phrase, present in another run's question caption, scored
+        # 175 raw detections. Folding the avoid nouns into `question_nouns` here (a
+        # 4- to ~6-phrase list) puts them in both: `refresh_prompt` derives
+        # `.question_prompt` from `question_nouns` alone, and `question_nouns` is also
+        # the top-priority (never-budget-dropped) slice of the full caption. This
+        # preserves #108's intent -- avoid nouns still reach the full caption's breadth
+        # pass (kept via `full_only_nouns` below, additive/unchanged) -- while fixing
+        # the actual defect #108 didn't anticipate: the short pass's own low threshold
+        # and tiny-caption calibration is exactly what avoid anchors need too, and the
+        # short list stays small (target + a couple of anchors), nowhere near the
+        # 117-phrase regime #108's docstring warns about.
+        avoid_nouns = _plan_avoid_nouns(plan)
         refresh_prompt(
             self.detector,
-            _plan_nouns(plan),
+            [*_plan_nouns(plan), *avoid_nouns],
             _STANDING_VOCAB_NOUNS,
-            full_only_nouns=_plan_avoid_nouns(plan),
+            full_only_nouns=avoid_nouns,
         )
         if plan.qtype is QType.NUMERICAL:
             self.numerical = NumericalHead(

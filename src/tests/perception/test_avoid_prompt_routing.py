@@ -1,19 +1,32 @@
-"""Issue #108: avoid-anchor nouns route into the FULL GDINO caption only.
+"""Issue #108: avoid-anchor nouns route into the full GDINO caption.
+Issue #173: avoid-anchor nouns route into the short question caption too.
 
 ``_plan_nouns`` (core.heads.explore_step) feeds ``refresh_prompt``'s ``question_nouns``
 argument -- both the short question-noun-only caption and (as the top priority slice of)
-the full question+vocab caption. Before this fix there was no way to route a noun into
-the full caption without it also reaching the short one, so ``plan.avoid`` anchors were
-dropped from both passes entirely (see the pre-fix ``_plan_nouns`` docstring, issue #95).
+the full question+vocab caption. Before #108 there was no way to route a noun into the
+full caption without it also reaching the short one, so ``plan.avoid`` anchors were
+dropped from both passes entirely (see the pre-#108 ``_plan_nouns`` docstring, issue #95).
 
-This file covers the new ``full_only_nouns`` category end to end:
-* ``core.perception.detector.refresh_prompt`` accepts it and keeps it out of
-  ``.question_prompt``.
+#108 fixed that by adding a ``full_only_nouns`` category that reaches the full caption
+only. That routing was live-measured (#173) to fail in practice: the full caption runs
+every 3rd tick at a higher box threshold and its ~100-phrase length dilutes any one
+phrase's decode score toward zero (detector.py's own probe: a 117-phrase caption decodes
+zero 'teapot' where a 2-phrase caption decodes it in 194/211 keyframes) -- an avoid
+anchor routed there alone got zero raw detections across two full IF runs. #173 makes
+``core.heads.factory.HeadState.bind`` ALSO fold avoid nouns into ``question_nouns``, so
+they reach the short, low-threshold, every-tick pass, while the full-caption route stays
+exactly as #108 left it (additive, not replaced).
+
+This file covers:
+* ``core.perception.detector.refresh_prompt``'s ``full_only_nouns`` category (unchanged
+  by #173: a caller can still route a noun into the full caption only if it explicitly
+  chooses to, by not also including it in ``question_nouns``).
 * ``core.heads.explore_step._plan_avoid_nouns`` walks ``plan.avoid`` recursively via
   ``core.plan_walk.iter_avoid_anchors`` (including nested disambiguators).
-* ``core.heads.factory.HeadState.bind`` wires the two together.
-* Priority order in the budgeted full caption is question nouns > avoid nouns >
-  standing vocab.
+* ``core.heads.factory.HeadState.bind`` wires avoid nouns into BOTH the short caption
+  (``question_nouns``, #173) and the full caption (``full_only_nouns``, #108).
+* Priority order in the budgeted full caption is question nouns (now including avoid
+  nouns) > avoid-only priority slice > standing vocab.
 """
 from __future__ import annotations
 
@@ -112,9 +125,11 @@ def test_plan_avoid_nouns_none_plan_is_empty():
 
 
 def test_plan_nouns_still_excludes_avoid_anchors():
-    # _plan_nouns itself is unchanged by #108 -- it still feeds the SHORT caption via
-    # question_nouns, so avoid nouns must stay out of it; they route through the new,
-    # separate _plan_avoid_nouns -> full_only_nouns path instead.
+    # _plan_nouns itself stays avoid-free even after #173 -- it is also the affinity/
+    # frontier-bias noun source (core.heads.explore_step), which must NOT gain avoid-
+    # noun bias. #173 routes avoid nouns into the detector's question caption by
+    # appending _plan_avoid_nouns' output onto _plan_nouns' return value at the
+    # HeadState.bind call site (core.heads.factory), not by changing this function.
     p = _instruction_plan(
         [RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="door")])],
         avoid=[AvoidSpec(near=Anchor(noun="fireplace"))],
@@ -125,7 +140,15 @@ def test_plan_nouns_still_excludes_avoid_anchors():
 # --------------------------------------------------------- HeadState.bind wiring (factory)
 
 
-def test_headstate_bind_routes_avoid_nouns_into_full_caption_only():
+def test_headstate_bind_routes_avoid_nouns_into_both_captions():
+    # Issue #173 (was: "...into_full_caption_only", asserting avoid nouns stayed OUT of
+    # .question_prompt -- the #108 routing this pins away from). Live measurement
+    # (#173) found an avoid anchor routed into the full caption alone gets zero raw
+    # detections across 94-132 full-caption ticks in real IF runs (the ~100-phrase full
+    # caption dilutes recall toward zero), while the same phrase present in a question
+    # caption scores 175 raw detections. HeadState.bind now folds avoid nouns into the
+    # short question caption too, so the detector is actually asked to look for them at
+    # the low threshold, every tick -- not just every 3rd tick in a diluted caption.
     scene = BasicSceneIndex([])
     fake = FakeDetector()
     state = HeadState(scene=scene, detector=fake)
@@ -135,8 +158,28 @@ def test_headstate_bind_routes_avoid_nouns_into_full_caption_only():
     )
     state.bind(plan)
     assert "fireplace" in _kept_phrases(fake.prompt)
-    assert "fireplace" not in _kept_phrases(fake.question_prompt)
+    assert "fireplace" in _kept_phrases(fake.question_prompt)
     assert "door" in _kept_phrases(fake.question_prompt)
+
+
+def test_headstate_bind_avoid_between_nouns_reach_question_caption():
+    # Issue #173 regression, mirroring the chinese_room live case: a `between` avoid
+    # clause naming two anchors ("avoiding the path between the chair and the folding
+    # screen") -- both nouns must reach the question-caption phrase list, and the full
+    # caption must still carry them (#108's route, left additive/unchanged).
+    scene = BasicSceneIndex([])
+    fake = FakeDetector()
+    state = HeadState(scene=scene, detector=fake)
+    plan = _instruction_plan(
+        [RouteLeg(kind=LegKind.GOTO, anchors=[Anchor(noun="tea table")])],
+        avoid=[AvoidSpec(between=[Anchor(noun="chair"), Anchor(noun="folding screen")])],
+    )
+    state.bind(plan)
+    question_phrases = _kept_phrases(fake.question_prompt)
+    full_phrases = _kept_phrases(fake.prompt)
+    assert {"chair", "folding screen"} <= question_phrases
+    assert {"chair", "folding screen"} <= full_phrases
+    assert "tea table" in question_phrases
 
 
 # ------------------------------------------------------ priority order under the budget
