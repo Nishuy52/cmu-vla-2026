@@ -1629,9 +1629,9 @@ class InstructionHead:
         return self._redrives < MAX_REDRIVE_PASSES
 
     def _redrive(self, reason: str, scene) -> bool:
-        """Issue #183 — reinvest the remaining question budget: rebuild the FULL route
-        (every leg of the plan, not just the previously-committed prefix) from the
-        CURRENT pose and re-drive it in order.
+        """Issue #183 — reinvest the remaining question budget: rebuild the route over
+        every currently RESOLVABLE leg (not just the previously-committed prefix) from
+        the CURRENT pose and re-drive it in order.
 
         Reuses the exact same waypoint/planning machinery ``_replan`` uses --
         ``_build_route`` -> ``_stamp_ground_plan`` -> ``_refresh_costmap_and_geometry``
@@ -1641,6 +1641,17 @@ class InstructionHead:
         violation the first pass would not already have created -- it is the same
         hard-capsule-respecting planner call, just re-invoked from wherever the vehicle
         now sits instead of the original start pose.
+
+        Issue #196 — the rebuilt prefix is capped at ``_committable_prefix_len()``, NOT
+        forced to the full plan length: ``_build_route`` bails out (builds nothing) the
+        moment ANY leg in its requested prefix has no geometry at all, so blindly
+        requesting every leg would waste a bounded redrive pass whenever a later leg
+        never resolved. Capping at the committable prefix means a redrive fired for
+        "one leg is grounded-but-below-MIN_GROUND_OBS, another leg is wholly
+        unresolved" (``_redrive_worth_attempting``'s relaxed gate) still spends its
+        pass productively on the legs that ARE resolvable — the unresolved legs stay
+        open, exactly as before, and only the watchdog/pass-count backstop still ends
+        the question if they never resolve.
 
         Bounded by MAX_REDRIVE_PASSES, independent of ``_can_replan()``'s H11 cap (see
         that constant's docstring for why the two budgets are kept separate). Only ever
@@ -1659,17 +1670,18 @@ class InstructionHead:
         )
         _LOG.info(
             "IF redrive #%d (reason=%s): reinvesting remaining budget, rebuilding the "
-            "full route from pose %s (#183 -- legs not yet individually confirmed: %s).",
+            "resolvable route from pose %s (#183 -- legs not yet individually "
+            "confirmed: %s).",
             self._redrives,
             reason,
             self._pose,
             unvisited,
         )
-        n_legs = len(self.plan.route)
+        prefix_len = min(len(self.plan.route), self._committable_prefix_len())
         self._follower = None
         self._driven_prefix = 0
         self._in_capsule = False  # recomputed against the new plan next tick
-        self._build_route(self._pose, scene, n_legs)
+        self._build_route(self._pose, scene, prefix_len)
         return self._follower is not None
 
     def redrive_events(self) -> list[str]:
@@ -1751,7 +1763,7 @@ class InstructionHead:
                 if (
                     wp is None
                     and not fully_visited
-                    and self._route_covers_plan()
+                    and self._redrive_worth_attempting()
                     and self._can_redrive()
                 ):
                     if self._redrive("follower_exhausted_legs_unvisited", self._scene):
@@ -1885,6 +1897,33 @@ class InstructionHead:
             and self._driven_prefix >= n_legs
             and self.ungrounded_subgoals() == 0
         )
+
+    def _redrive_worth_attempting(self) -> bool:
+        """Issue #196 — relaxed sibling of ``_route_covers_plan`` gating the #183
+        reinvest redrive specifically (``drive_complete``'s own use of
+        ``_route_covers_plan`` is UNCHANGED — "the question is genuinely finished"
+        must still demand the full MIN_GROUND_OBS floor on every leg).
+
+        ``_route_covers_plan`` requires EVERY leg to clear ``MIN_GROUND_OBS`` before a
+        redrive is allowed at all — which structurally excludes the exact slots the
+        redrive exists for (#103): a leg parked below ``MIN_GROUND_OBS`` (resolved, but
+        ``grounded=False``) or never resolved at all makes the WHOLE route ineligible,
+        even when other legs in the same route ARE resolvable and still unvisited (14
+        of 16 watchdog-parked slots in the archived diagnosis).
+
+        Relaxed condition: at least one leg is currently COMMITTABLE
+        (``_committable_prefix_len() > 0`` — geometry resolved and past the #33
+        ``MIN_COMMIT_OBS`` floor, the same bar the head's own route-build already uses;
+        this is what admits a leg "grounded but below MIN_GROUND_OBS") and the route is
+        not already fully visited. ``_redrive`` itself only ever rebuilds THAT
+        committable prefix (see its own ``prefix_len`` computation) — a leg with no
+        geometry at all stays open/unresolved, never forced into a route it cannot
+        legally cover. This is strictly wider than ``_route_covers_plan``: whenever the
+        old condition held, ``_committable_prefix_len()`` already equals ``n_legs`` (the
+        driven route was built from it), so every previously-eligible slot stays
+        eligible — this only OPENS new ones.
+        """
+        return self._committable_prefix_len() > 0 and not self.all_legs_visited()
 
     def first_anchor_pt(self):
         """(x, y) of the best-grounded first leg goal, for the floor. None if unknown."""
