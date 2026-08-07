@@ -361,6 +361,8 @@ def associate(
     index: BasicSceneIndex,
     cfg: TrackerConfig = DEFAULT_TRACKER_CONFIG,
     colour_obs: list[ColourTally | None] | None = None,
+    odom: OdomState | None = None,
+    keyframe_cfg: KeyframeConfig = DEFAULT_KEYFRAME_CONFIG,
 ) -> list[int]:
     """Sequential nearest-plausible associate fused detections to instances.
 
@@ -412,6 +414,24 @@ def associate(
     canonicalisation above cannot pair a tally with a different detection's
     instance. ``None`` (the default, and every pre-#121 caller) leaves colour
     untouched, unchanged behaviour.
+
+    ``odom`` (issue #191): the vehicle pose this batch of detections was taken
+    from. ``n_obs`` is meant to count DISTINCT-VIEWPOINT observations (the
+    ``InstanceRecord.n_obs`` docstring), but every frame is a keyframe
+    (``KeyframeConfig.every_k == 1``), so a parked robot re-firing an
+    identical box each tick was inflating ``n_obs`` on dwell time alone
+    (measured: a single stationary pose driving n_obs into the dozens). When
+    ``odom`` is given, an observation that matches an EXISTING instance only
+    counts toward ``n_obs`` if the pose has moved >= ``keyframe_cfg.
+    min_translation`` or turned >= ``keyframe_cfg.min_rotation`` since that
+    instance's last COUNTED pose -- reusing the same two keyframe-gate
+    constants, not a new tunable. Fusion (points/AABB/score) still updates on
+    EVERY accepted detection regardless; only the ``n_obs`` increment is
+    gated. A brand-new instance's first observation always counts (nothing to
+    compare against yet). ``None`` (the default, and every pre-#191 caller,
+    including every test that calls ``associate()`` without a pose) leaves
+    this ungated -- unchanged prior behaviour, one observation counted per
+    accepted detection.
     """
     pool: list[InstanceRecord] = list(index.all_instances())
 
@@ -431,6 +451,33 @@ def associate(
         index._tracker_first_boxes = first_boxes
     for rec in pool:
         first_boxes.setdefault(rec.instance_id, (rec.aabb_min.copy(), rec.aabb_max.copy()))
+
+    # Issue #191: per-instance "last pose an observation of THIS instance was
+    # actually counted from" -- the same external-state convention as
+    # `first_boxes` above (and the index's own colour tally, #121): it has to
+    # outlive any one associate() call and must never leak between independent
+    # SceneIndex instances, so it lives on the index object, not on the
+    # (frozen-semantics) InstanceRecord.
+    last_counted_pose: dict[int, OdomState] = getattr(
+        index, "_tracker_last_counted_pose", None
+    )
+    if last_counted_pose is None:
+        last_counted_pose = {}
+        index._tracker_last_counted_pose = last_counted_pose
+
+    def _pose_advanced(iid: int) -> bool:
+        """True if ``odom`` has moved/turned enough since ``iid``'s last
+        COUNTED observation to count this one too (issue #191)."""
+        if odom is None:
+            return True  # no pose given -- ungated, matches pre-#191 behaviour
+        prev = last_counted_pose.get(iid)
+        if prev is None:
+            return True  # never counted before -- nothing to compare against
+        moved = np.hypot(odom.x - prev.x, odom.y - prev.y)
+        turned = abs(float(np.arctan2(
+            np.sin(odom.yaw - prev.yaw), np.cos(odom.yaw - prev.yaw),
+        )))
+        return moved >= keyframe_cfg.min_translation or turned >= keyframe_cfg.min_rotation
 
     def _order_key(item: tuple[int, tuple[Detection, Fused3D]]):
         _, (det, fused) = item
@@ -466,6 +513,17 @@ def associate(
             best_dist = dist
         if best is not None:
             rec = _fused_to_record(det, fused, instance_id=best.instance_id)
+            # Issue #191: this detection matched an EXISTING instance -- gate the
+            # n_obs increment on whether the pose has actually moved since the
+            # last COUNTED observation of that instance. Geometry/score fusion
+            # below (merge_into -> _fuse) always runs regardless; only the count
+            # is gated, by zeroing it on `rec` before fusion (_fuse does
+            # `target.n_obs += other.n_obs`).
+            counted = _pose_advanced(best.instance_id)
+            if not counted:
+                rec.n_obs = 0
+            elif odom is not None:
+                last_counted_pose[best.instance_id] = odom
             # Issue #89/#84: trust THIS association's own match decision (alias-bridged
             # label compatibility + gate + extent-plausibility, all already checked
             # above) and fuse directly into `best` — do NOT hand off to index.add(),
@@ -492,6 +550,14 @@ def associate(
             first_boxes.setdefault(
                 survivor.instance_id, (survivor.aabb_min.copy(), survivor.aabb_max.copy())
             )
+            # Issue #191: same setdefault-only precedent as first_boxes just
+            # above -- seed the pose this instance's first COUNTED observation
+            # (n_obs==1, from _fused_to_record) came from, without
+            # clobbering an already-established track's real first pose if
+            # index.add() actually folded this into one via its own IoU
+            # re-derivation instead of truly minting `new_id`.
+            if odom is not None:
+                last_counted_pose.setdefault(survivor.instance_id, odom)
         touched_by_input_idx[orig_idx] = survivor.instance_id
     return [touched_by_input_idx[i] for i in range(len(fused_dets))]
 
@@ -643,7 +709,13 @@ class PerceptionPipeline:
                 elif dump_raw:
                     raw_records.append([det, GATE_NO_LIDAR_CLUSTER, None])
 
-        touched = associate(fused_dets, self.index, self.tracker_cfg, colour_obs=colour_obs)
+        # Issue #191: thread this frame's pose through so associate() can gate
+        # n_obs on distinct viewpoints instead of dwell (see associate()'s
+        # `odom` docstring) -- the live/replay path always has a pose here.
+        touched = associate(
+            fused_dets, self.index, self.tracker_cfg, colour_obs=colour_obs,
+            odom=odom, keyframe_cfg=self.keyframe_cfg,
+        )
 
         if dump_raw:
             # Back-fill the instance id each accepted detection landed in: associate()
