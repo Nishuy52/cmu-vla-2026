@@ -9,7 +9,9 @@ from core.perception.detector import Detection
 from core.perception.fusion import (
     DEFAULT_FUSION_CONFIG,
     FusionConfig,
+    _bbox_map_frustum,
     fuse_detection,
+    robust_core_mask,
 )
 
 
@@ -17,6 +19,30 @@ def _front_detection(tile_id=0):
     spec = T.tile_specs()[tile_id]
     bb = (spec.cx - 60, spec.cy - 120, spec.cx + 60, spec.cy + 60)
     return Detection(tile_id=tile_id, bbox_xyxy=bb, label="sofa", score=0.9)
+
+
+def _lamp_detection(tile_id=0):
+    spec = T.tile_specs()[tile_id]
+    # a tall-ish box so its elevation span comfortably covers both ranges' rays
+    bb = (spec.cx - 40, spec.cy - 100, spec.cx + 40, spec.cy + 20)
+    return Detection(tile_id=tile_id, bbox_xyxy=bb, label="lamp", score=0.9)
+
+
+def _ray_cloud(apex, bearing, elevation, range_m, half=0.12, n=30, seed=0):
+    """A compact point cluster centred on the ray (bearing, elevation, range_m)
+    from ``apex`` -- lets a test place two candidate clusters at the SAME angular
+    position but different depths, exactly the ceiling-luminaire-vs-table-lamp
+    ambiguity issue #199 fixes."""
+    rng = np.random.default_rng(seed)
+    cx = apex[0] + range_m * np.cos(elevation) * np.cos(bearing)
+    cy = apex[1] + range_m * np.cos(elevation) * np.sin(bearing)
+    cz = apex[2] + range_m * np.sin(elevation)
+    pts = np.column_stack([
+        cx + rng.uniform(-half, half, n),
+        cy + rng.uniform(-half, half, n),
+        cz + rng.uniform(-half, half, n),
+    ])
+    return pts.astype(np.float32)
 
 
 def _box_cloud(cx, cy, cz, half=0.2, n=40, seed=0):
@@ -242,3 +268,122 @@ def test_apex_offset_by_odom_position():
     fused = fuse_detection(det, LidarScan(t=0.0, points=cloud), _odom(x=2.0, y=2.0))
     assert fused is not None
     assert np.allclose(fused.centroid[:2], [5.0, 2.0], atol=0.2)
+
+
+# ------------------------------------------------------ depth plausibility (#199)
+
+
+def _lamp_frustum():
+    """Centre bearing/elevation + angular span of :func:`_lamp_detection`'s frustum
+    (vehicle at the map origin, yaw 0), for placing on-ray synthetic clusters."""
+    det = _lamp_detection()
+    bearing_lo, span, el_lo, el_hi = _bbox_map_frustum(
+        det, 0.0, T.DEFAULT_N_TILES, T.DEFAULT_TILE_HFOV, T.DEFAULT_TILE_VFOV
+    )
+    centre_bearing = bearing_lo + span / 2.0
+    centre_elevation = (el_lo + el_hi) / 2.0
+    angular_span = max(span, el_hi - el_lo)
+    return det, centre_bearing, centre_elevation, angular_span
+
+
+def test_ceiling_luminaire_component_rejected_for_wrong_depth():
+    """Issue #199: two components share ONE detection's frustum -- a near, correct
+    'lamp' cluster (table-height range) sitting slightly off the box's centre ray,
+    and a far cluster sitting exactly ON the centre ray at a range that implies a
+    physically implausible size for the class (the ceiling-luminaire mechanism:
+    same bbox, wrong depth slab). Pure angular-deviation voting (pre-#199) would
+    pick the far, angularly-dead-centre cluster; the depth-plausibility gate must
+    reject it and keep the near, correctly-sized one even though it deviates more
+    from the centre ray."""
+    det, centre_bearing, centre_elevation, angular_span = _lamp_frustum()
+    apex = np.zeros(3)
+
+    near_range = 3.0  # implied size 3.0 * angular_span ~= 1.79 m -- plausible for lamp (typ long axis 0.863 m)
+    far_range = 9.0  # implied size ~= 5.37 m -- far past 2.5x the typical long axis
+
+    near_true = _ray_cloud(
+        apex, centre_bearing + 0.05, centre_elevation, near_range, half=0.1, n=25, seed=21,
+    )
+    far_decoy = _ray_cloud(
+        apex, centre_bearing, centre_elevation, far_range, half=0.1, n=25, seed=22,
+    )
+    scan = LidarScan(t=0.0, points=np.vstack([near_true, far_decoy]).astype(np.float32))
+
+    fused = fuse_detection(det, scan, _odom())
+    assert fused is not None
+    assert fused.range_m < 5.0  # picked the near cluster, not the far one
+    assert abs(fused.centroid[2] - near_true[:, 2].mean()) < 0.3
+
+    # Disabling the depth gate (an enormous factor) reproduces the pre-#199 bug --
+    # the far, angularly-central cluster wins on deviation alone. This documents
+    # the mechanism the gate closes, the same way test_lateral_clustering_tightens_
+    # box_vs_old_cone_slab documents its own old-vs-new comparison.
+    no_gate_cfg = FusionConfig(depth_size_factor=1e9)
+    fused_no_gate = fuse_detection(det, scan, _odom(), no_gate_cfg)
+    assert fused_no_gate is not None
+    assert fused_no_gate.range_m > 7.0  # the old bug: picked the far decoy
+
+
+def test_depth_gate_fails_open_with_no_class_prior():
+    """A class absent from dimension_priors must not be second-guessed by the
+    depth gate -- the far cluster, exactly on the centre ray, still wins on
+    angular deviation exactly as before #199."""
+    det, centre_bearing, centre_elevation, angular_span = _lamp_frustum()
+    det = Detection(tile_id=det.tile_id, bbox_xyxy=det.bbox_xyxy, label="not-a-real-class", score=0.9)
+    apex = np.zeros(3)
+
+    near_true = _ray_cloud(apex, centre_bearing + 0.05, centre_elevation, 3.0, half=0.1, n=25, seed=23)
+    far_decoy = _ray_cloud(apex, centre_bearing, centre_elevation, 9.0, half=0.1, n=25, seed=24)
+    scan = LidarScan(t=0.0, points=np.vstack([near_true, far_decoy]).astype(np.float32))
+
+    fused = fuse_detection(det, scan, _odom())
+    assert fused is not None
+    assert fused.range_m > 7.0  # no prior -> gate fails open, deviation alone decides
+
+
+# ------------------------------------------------------ robust outlier core (#199)
+
+
+def test_robust_core_mask_leaves_clean_uniform_cluster_untouched():
+    """A clean, bounded uniform cluster (this module's own fixture shape) must
+    never be trimmed by the MAD-normalized core filter -- unlike a percentile-rank
+    trim, which always clips some fixed fraction of points regardless of whether
+    they are genuine outliers."""
+    cloud = _box_cloud(3.0, 0.0, 0.5, half=0.2, n=200, seed=99)
+    mask = robust_core_mask(cloud, k=DEFAULT_FUSION_CONFIG.outlier_k, min_mad=DEFAULT_FUSION_CONFIG.outlier_min_mad)
+    assert mask.all()
+
+
+def test_robust_core_mask_drops_a_genuine_outlier():
+    cloud = _box_cloud(3.0, 0.0, 0.5, half=0.15, n=30, seed=98)
+    outlier = np.array([[3.0, 0.0, 4.0]], dtype=np.float32)  # 3.5 m off in z alone
+    pts = np.vstack([cloud, outlier])
+    mask = robust_core_mask(pts, k=DEFAULT_FUSION_CONFIG.outlier_k, min_mad=DEFAULT_FUSION_CONFIG.outlier_min_mad)
+    assert mask.sum() == 30
+    assert not mask[-1]
+
+
+def test_fuse_detection_drops_outlier_and_recentres_on_synthetic_bug_geometry():
+    """A component picked up a few stray background points via the lateral
+    union-find (issue #199's other failure mode: extent/centroid quality, not
+    identity) -- the returned centroid and point set must reflect the clean
+    core, not be pulled/inflated by the stray points."""
+    det = _front_detection()
+    core = _box_cloud(3.0, 0.0, 0.5, half=0.15, n=40, seed=25)
+    # a couple of straggler points within cluster_radius chain distance of the
+    # core (so they join the SAME lateral component) but well outside the core's
+    # own spread -- the MAD test catches these; a percentile-rank trim's fixed 2%
+    # cutoff might not, at this sample size.
+    stragglers = np.array(
+        [[3.6, 0.55, 0.5], [3.55, -0.5, 0.9]], dtype=np.float32,
+    )
+    scan = LidarScan(t=0.0, points=np.vstack([core, stragglers]).astype(np.float32))
+
+    loose_cfg = FusionConfig(cluster_radius=0.6)  # bridges core+stragglers into one component
+    fused = fuse_detection(det, scan, _odom(), loose_cfg)
+    assert fused is not None
+    assert fused.n_points == 40  # the 2 stragglers were dropped by the core filter
+    assert np.allclose(fused.centroid, [3.0, 0.0, 0.5], atol=0.1)
+    # extent (proxy for downstream AABB volume, see tracker._fused_to_record) is
+    # tight to the core, not stretched toward the stragglers
+    assert fused.points[:, 1].max() - fused.points[:, 1].min() < 0.5

@@ -3,9 +3,9 @@
 Provides typo/plural/synonym-tolerant label lookup (used by the toolbox and answer
 heads) plus the add/merge API that real perception uses to fuse cross-frame
 detections: same-label instances overlapping in 3D (IoU > MERGE_IOU) are fused —
-points concatenated, AABB recomputed as the per-axis 2nd/98th-percentile trimmed
-box, ``n_obs`` incremented (and ``n_views``, issue #191's separate distinct-
-viewpoint counter), ``score`` kept as the max.
+points concatenated, AABB recomputed as a robust-core-then-per-axis 2nd/98th-
+percentile trimmed box (issue #199), ``n_obs`` incremented (and ``n_views``,
+issue #191's separate distinct-viewpoint counter), ``score`` kept as the max.
 
 Label matching ladder (higher tier wins; :meth:`by_label` returns higher tiers
 first, and :meth:`by_label_tiered` surfaces which tier each hit came from):
@@ -170,6 +170,13 @@ MERGE_IOU: float = 0.3  # 3D IoU threshold for fusing same-label instances
 TYPO_MAX_DIST: int = 2  # max Levenshtein distance for the longest length band
 TRIM_LO_PCT: float = 2.0
 TRIM_HI_PCT: float = 98.0
+# Issue #199: robust-core pre-filter ahead of the percentile trim above -- see
+# _trimmed_aabb. Mirrors core.perception.fusion.FusionConfig.outlier_k/
+# outlier_min_mad (not wired to the same FusionConfig instance since _fuse's
+# merge path is not itself a FusionConfig consumer; kept numerically identical
+# on purpose).
+OUTLIER_K: float = 4.5
+OUTLIER_MIN_MAD: float = 0.02
 
 
 def _typo_budget(query: str, candidate: str) -> int:
@@ -585,9 +592,29 @@ def _aabb_iou_3d(min_a, max_a, min_b, max_b) -> float:
 
 
 def _trimmed_aabb(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-axis 2nd/98th-percentile trimmed AABB of an (M, 3) cloud."""
-    lo = np.percentile(points, TRIM_LO_PCT, axis=0)
-    hi = np.percentile(points, TRIM_HI_PCT, axis=0)
+    """Robust-core + per-axis 2nd/98th-percentile trimmed AABB of an (M, 3) cloud.
+
+    Issue #199: a merge accumulates points from every re-observation, so a genuine
+    outlier return (a stray background point one fuse chained in, or a far corner
+    surviving from a bad component pick before this issue's fusion-side fixes)
+    can still reach this function. :func:`~core.perception.fusion.robust_core_mask`
+    (median +/- ``OUTLIER_K`` MADs per axis) drops it FIRST, without touching a
+    clean cluster (see that function's docstring for why a MAD test, not a
+    percentile-rank one, leaves a well-bounded cloud untouched); the percentile
+    trim then runs on the surviving points exactly as before, so a genuinely large
+    but clean cluster (e.g. the deliberate #104 accumulated-walk fixture) is
+    unaffected. Falls back to the full point set if the core would drop it below
+    2 points (a percentile trim needs at least that many to be meaningful).
+    """
+    from core.perception.fusion import robust_core_mask
+
+    core = points
+    if len(points) >= 2:
+        mask = robust_core_mask(points, OUTLIER_K, OUTLIER_MIN_MAD)
+        if mask.sum() >= 2:
+            core = points[mask]
+    lo = np.percentile(core, TRIM_LO_PCT, axis=0)
+    hi = np.percentile(core, TRIM_HI_PCT, axis=0)
     return lo.astype(float), hi.astype(float)
 
 
