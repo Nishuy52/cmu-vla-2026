@@ -204,6 +204,20 @@ def test_default_tile_dims_match_projection_formula():
     assert (tile_w, tile_h) == (480, 640)
 
 
+# --------------------------------------------------------------------- frame watchdog (#174)
+
+
+def test_frame_watchdog_wired(src: str):
+    # issue #174: the camera-frame-source-quiet residual — the watchdog itself is tested
+    # behaviourally in test_frame_watchdog.py (pure Python, no rclpy); this only guards that
+    # the adapter node actually constructs and drives it every tick.
+    assert "from ros_adapter.frame_watchdog import FrameWatchdog" in src
+    assert "self._frame_watchdog = FrameWatchdog(clock=time.monotonic)" in src
+    assert "self._frame_watchdog.on_frame()" in src
+    assert "def _check_frame_watchdog(" in src
+    assert "self._check_frame_watchdog()" in src
+
+
 # --------------------------------------------------------------------- real import (Ubuntu)
 
 
