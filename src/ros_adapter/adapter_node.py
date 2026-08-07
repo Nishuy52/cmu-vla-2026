@@ -85,11 +85,12 @@ from core.interfaces import (
 )
 from core.fsm.controller import QuestionController, State
 from core.heads import build_callables
+from core.heads.factory import _STANDING_VOCAB_NOUNS
 from core.llm.config import build_chat_fns_with_tiers, load_config
 from core.parsing import ladder as parse_ladder
 from core.perception.async_pipeline import AsyncPerceptionWorker
 from core.perception.colored_map import ColoredVoxelMap
-from core.perception.detector import GroundingDinoDetector
+from core.perception.detector import GroundingDinoDetector, refresh_prompt
 from core.perception.scene_index import BasicSceneIndex
 from core.perception.tracker import PerceptionPipeline
 from core.perception.vision_encode import resolve_encode_fn
@@ -495,6 +496,30 @@ class AdapterNode(Node):
             self._perception = PerceptionPipeline(detector, index=BasicSceneIndex([]))
             # The controller sees the pipeline's LIVE index (mutated in place as frames fuse).
             self._scene_index = self._perception.index
+            # issue #200 "detector cold start": _maybe_process_perception is driven from the
+            # very first tick (below, at self._timer construction), independent of question
+            # latch — but the detector itself is constructed with an empty .prompt ("" ==
+            # zero detections on every __call__, see refresh_prompt's docstring) until
+            # something refreshes it. Before this fix that first refresh only happened inside
+            # build_callables() (core/heads/factory.py), which _build_controller_callables
+            # only calls once the QuestionController is built AT QUESTION LATCH — so every
+            # keyframe ticked between node start and latch (median 26.8 s; the orientation
+            # sweep runs 47.8-87.0 s) ran the detector blind. Priming the SAME standing
+            # 114-noun vocabulary here, at construction, closes that window: the live
+            # detector instance grounds on the boot vocabulary from the first keyframe,
+            # persisting its instances into this same self._scene_index (never recreated,
+            # see below), and build_callables' own boot-vocab refresh plus HeadState.bind's
+            # question-latch refresh (unchanged) still fire exactly as before once a
+            # question arrives. Pure string assignment (no camera/lidar/torch dependency),
+            # so this cannot fail on missing sensor readiness; wrapped defensively anyway so
+            # a detector-construction quirk can never abort node boot (H14 boot-safety
+            # pattern used throughout this file).
+            try:
+                refresh_prompt(self._detector, (), _STANDING_VOCAB_NOUNS)
+            except Exception as exc:  # boot priming must never crash node construction
+                self.get_logger().error(
+                    "perception boot-vocab priming error: %s" % exc
+                )
             # issue #84: stash a debug-only backref so core.heads.explore_debug can read
             # the pipeline's keyframe counter off the index it already holds, without new
             # plumbing through ExploreHead. Only set while the debug dump is enabled —
