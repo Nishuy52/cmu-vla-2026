@@ -2045,6 +2045,46 @@ def test_decode_batch_item_no_plausible_noun_is_dropped(monkeypatch, tmp_path):
     assert dets == []  # dropped -- never the raw caption
 
 
+def test_decode_batch_item_span_bleed_phrase_recovers_single_noun(monkeypatch, tmp_path):
+    """Issue #192: get_phrases_from_posmap can decode a phrase that SPANS a caption
+    boundary -- adjacent tokens straddling two prompt nouns yield a raw phrase like
+    "bedside table . nightstand" instead of an empty one. The #172 guard exists to
+    catch exactly this (a phrase still containing CAPTION_JOIN_MARKER) and route it
+    through the same single-noun recovery as an empty phrase -- never emit the
+    two-noun span-bled string itself as a label.
+
+    Before the fix, the guard tested the phrase AFTER ``.replace(".", "").strip()``
+    had already removed every period, so CAPTION_JOIN_MARKER (" . ") could never be
+    found there and this span-bled label reached the index untouched (measured live:
+    'bedside table nightstand', 'door door frame')."""
+    caption = "bedside table . nightstand . lamp ."
+    import sys
+    import types
+
+    def fake_get_phrases(posmap, tokenized, tokenizer):
+        if posmap.thresh == 0.25:
+            return "bedside table . nightstand"
+        assert posmap.thresh == 0.18
+        return "nightstand"
+
+    monkeypatch.setitem(
+        sys.modules, "groundingdino.util.utils",
+        types.SimpleNamespace(get_phrases_from_posmap=fake_get_phrases),
+    )
+    det = _decode_batch_item_detector(tmp_path, box_threshold=0.18, text_threshold=0.25, prompt=caption)
+
+    item_logits = _FakeItemLogits([0.19])
+    item_boxes = [(0.5, 0.5, 0.1, 0.1)]
+    tile = np.zeros((100, 100, 3), dtype=np.uint8)
+
+    dets = det._decode_batch_item(0, tile, item_logits, item_boxes)
+
+    assert len(dets) == 1
+    assert dets[0].label == "nightstand"
+    assert CAPTION_JOIN_MARKER not in dets[0].label
+    assert dets[0].label != "bedside table nightstand"
+
+
 def _call_per_tile_detector(tmp_path, *, prompt: str):
     import contextlib
 

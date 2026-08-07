@@ -157,6 +157,14 @@ class InstanceRecord:
     instance_id: int
     label: str  # canonical noun, lowercase singular
     score: float  # detector confidence, max over observations
+    # Issue #191: despite the name, this counts one increment per ACCEPTED
+    # DETECTION fused into the instance (dwell), not per distinct viewpoint --
+    # every keyframe-gate threshold in the codebase (MIN_GROUND_OBS,
+    # ESTABLISH_N_OBS, #151/#184/#186) was calibrated against exactly that dwell
+    # signal, so its semantics are kept unchanged here. Use ``n_views`` below for
+    # "how many distinct viewpoints actually saw this" -- the #187 finding is
+    # that dwell is the WRONG signal for ranking real objects over loitering
+    # ghosts, which is what n_views is for.
     n_obs: int  # distinct keyframe observations (>=3 required for confident answers)
     centroid: np.ndarray  # (3,) float
     aabb_min: np.ndarray  # (3,) float — trimmed (2nd pct per axis)
@@ -179,6 +187,17 @@ class InstanceRecord:
     obb_center: np.ndarray | None = None  # (3,) float
     obb_extents: np.ndarray | None = None  # (3,) float, full xyz lengths
     obb_heading: float = 0.0  # radians, rotation about +Z
+    #: Issue #191: distinct-VIEWPOINT observation count -- a separate counter from
+    #: ``n_obs`` (dwell). Incremented at most once per keyframe per instance, and
+    #: only when the observing pose moved >= ``KeyframeConfig.min_translation`` or
+    #: turned >= ``min_rotation`` since THIS instance's own last counted viewpoint
+    #: (:func:`core.perception.tracker.associate`). A parked robot re-firing an
+    #: identical box every tick leaves ``n_views`` at 1 while ``n_obs`` climbs
+    #: unbounded -- the #187 ghost signature. This is purely additive: nothing
+    #: reads it yet (no gate/threshold depends on it), so every existing n_obs
+    #: consumer is unaffected. Starts at 1 (an instance's first observation is
+    #: always a first viewpoint, gated or not).
+    n_views: int = 1
 
     @property
     def extents(self) -> np.ndarray:
