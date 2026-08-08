@@ -86,9 +86,15 @@ class _DeadFollower:
 def _stall_the_follower(head: InstructionHead) -> None:
     """Simulate the drive having mechanically stalled: swap in a dead follower and spend
     the H11 replan cap, mirroring the live #181/#183 scenario where the stall/no-LOS
-    replans fired during exploration already spent the cap before DRIVE_OUT began."""
+    replans fired during exploration already spent the cap before DRIVE_OUT began.
+
+    Issue #208: ``_can_replan`` now gates on ``_replans_since_progress`` (which resets on
+    real vehicle motion), not the raw ``_replans`` counter — set both so this helper still
+    spends the cap exactly as before regardless of which one gates it.
+    """
     head._follower = _DeadFollower()
     head._replans = MAX_REPLANS_PER_QUESTION
+    head._replans_since_progress = MAX_REPLANS_PER_QUESTION
 
 
 @pytest.mark.slow

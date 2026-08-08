@@ -41,7 +41,7 @@ from core.interfaces import RobotIO, WaypointCmd
 from core.geometry import toolbox as TB
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.groundtruth.arrival import NOMINAL_ARRIVAL_TOL_M
-from core.nav.breadcrumbs import BreadcrumbFollower, ensure_base_clearance
+from core.nav.breadcrumbs import STALL_MOVE_M, BreadcrumbFollower, ensure_base_clearance
 from core.nav.costmap import VEHICLE_RADIUS_M, Costmap
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
 from core.nav import planner as _planner
@@ -123,7 +123,34 @@ MIN_COMMIT_OBS: int = 2
 # H11 / IF-F8 / SYS-F10: cap re-plans per question so a pathological stall/violation loop
 # cannot burn the whole budget replanning every tick. Each replan trigger (stall, no-LOS,
 # follower-exhausted-not-arrived, capsule tripwire) counts against this.
+#
+# Issue #208 — this cap now gates ``_replans_since_progress`` (a counter that RESETS to 0
+# once the vehicle has actually moved STALL_MOVE_M since the last reset — see
+# ``_note_pose_progress``), not the raw attempt count. A replan that fires from the SAME
+# frozen pose as the previous one (the vehicle never moved between them) is a FAILED
+# recovery, not progress, and used to burn this same budget in ~30 s flat (#205's finding:
+# ``_replan`` rebuilds the follower with empty history, so the 10 s stall window restarts
+# each attempt) — after which the wedged crumb republished at 4-5 Hz for the rest of the
+# question with no code path left to change it. Resetting on real motion means a question
+# that keeps making progress is never penalised for an EARLIER, already-resolved stall,
+# while three replans in a row with zero net motion still exhausts the budget exactly as
+# before. ``_replans`` itself (the raw attempt count, unbounded reset) is kept as a
+# monotonic flight-recorder counter and gated separately by MAX_REPLANS_HARD_CAP below —
+# the "keep a hard bound so a pathological run cannot replan forever" backstop the issue
+# asks for, independent of how much the vehicle moves in between.
 MAX_REPLANS_PER_QUESTION: int = 3
+#: Issue #208 — absolute ceiling on total replan attempts this question, regardless of how
+#: many times ``_replans_since_progress`` has been reset by motion. Set well above
+#: MAX_REPLANS_PER_QUESTION (which resets on progress and so could otherwise fire many
+#: times over a long drive) so it only bites a truly pathological run — the watchdog
+#: (>= 540 s floor, core.fsm.controller) remains the final, unconditional exit.
+MAX_REPLANS_HARD_CAP: int = 20
+#: Issue #208 — a replan is judged "progress" once the vehicle has moved at least this far
+#: since the last progress reset. Reuses ``breadcrumbs.STALL_MOVE_M`` (the SAME movement
+#: floor the follower's own stall detector already uses to call a pose "not moving") so
+#: the replan budget and the stall detector agree on what counts as motion, rather than
+#: importing a second, unrelated distance concept.
+REPLAN_PROGRESS_MOVE_M: float = STALL_MOVE_M
 
 # Issue #183 — reinvest budget: a separate, bounded allowance of FULL-ROUTE re-drive
 # passes, spent only when the drive has mechanically stalled (the follower exhausted its
@@ -377,10 +404,27 @@ class InstructionHead:
     #: objects), retained so the per-tick runtime tripwire can test the pose/next-crumb
     #: against them via ``toolbox.capsule_violated`` (read-only) without re-deriving them.
     _stamped_capsules: list[object] = field(default_factory=list)
-    #: H11 (IF-F8/SYS-F10) — count of re-plans this question + a flight-recorder-visible
-    #: log of why each fired. Capped at MAX_REPLANS_PER_QUESTION.
+    #: H11 (IF-F8/SYS-F10) — count of re-plans this question (monotonic, flight-recorder
+    #: only) + a flight-recorder-visible log of why each fired. Capped at
+    #: MAX_REPLANS_HARD_CAP (issue #208 — the raw attempt count is no longer what gates
+    #: ``_can_replan``; see ``_replans_since_progress``).
     _replans: int = 0
     _replan_events: list[str] = field(default_factory=list)
+    #: Issue #208 — replan attempts since the vehicle last made REPLAN_PROGRESS_MOVE_M of
+    #: real progress. THIS is what MAX_REPLANS_PER_QUESTION gates (``_can_replan``); reset
+    #: to 0 by ``_note_pose_progress`` whenever the pose has moved far enough since
+    #: ``_progress_pose`` was last recorded, so a stall the vehicle has since driven clear
+    #: of does not pre-spend the budget for a LATER, unrelated stall.
+    _replans_since_progress: int = 0
+    #: Issue #208 — pose ``_note_pose_progress`` last reset ``_replans_since_progress``
+    #: against; None until the first tick observes a pose.
+    _progress_pose: tuple[float, float] | None = None
+    #: Issue #208 — the crumb (x, y) the MOST RECENT stall/no-LOS replan produced, and the
+    #: pose it was planned from, so the NEXT such replan can detect "the vehicle hasn't
+    #: moved since that attempt" and plan from a recovery pose instead of reproducing the
+    #: same refused goal (see ``_replan``'s ``reason == "stall_or_no_los"`` branch).
+    _last_stall_goal: tuple[float, float] | None = None
+    _last_stall_pose: tuple[float, float] | None = None
     #: Issue #183 — count of reinvest FULL-ROUTE re-drive passes this question + a
     #: flight-recorder-visible log of why each fired. Capped at MAX_REDRIVE_PASSES,
     #: deliberately separate from ``_replans``/MAX_REPLANS_PER_QUESTION (see that
@@ -1595,35 +1639,84 @@ class InstructionHead:
         return True
 
     # ------------------------------------------------------------------ replanning
+    def _note_pose_progress(self, pose: tuple[float, float]) -> None:
+        """Issue #208 — reset ``_replans_since_progress`` once the vehicle has actually
+        moved ``REPLAN_PROGRESS_MOVE_M`` since the last reset.
+
+        Called every ``_drive`` tick (before ``_can_replan`` is consulted this tick) so
+        the replan budget tracks REAL motion, not attempt count: three replans that each
+        fire from a materially different pose (the vehicle drove on between them) never
+        exhausts the same-stall budget a single frozen pose would exhaust in ~30 s.
+        """
+        if self._progress_pose is None or _dist(pose, self._progress_pose) >= REPLAN_PROGRESS_MOVE_M:
+            self._progress_pose = pose
+            self._replans_since_progress = 0
+
     def _can_replan(self) -> bool:
-        return self._replans < MAX_REPLANS_PER_QUESTION
+        return (
+            self._replans_since_progress < MAX_REPLANS_PER_QUESTION
+            and self._replans < MAX_REPLANS_HARD_CAP
+        )
 
     def _replan(self, reason: str, scene) -> bool:
         """Rebuild the costmap from the current grid snapshot, re-stamp avoids, and
-        re-plan the committed prefix from the CURRENT pose (H11 / IF-F8 / SYS-F10).
+        re-plan the committed prefix (H11 / IF-F8 / SYS-F10).
 
-        Bounded by ``MAX_REPLANS_PER_QUESTION``; each fire is recorded to
-        ``_replan_events`` (flight-recorder-visible) with its reason. Returns True iff a
-        re-plan was actually performed.
+        Bounded by ``MAX_REPLANS_PER_QUESTION`` (issue #208: gated on
+        ``_replans_since_progress``, which resets on real motion — see
+        ``_note_pose_progress``) and by ``MAX_REPLANS_HARD_CAP`` (absolute ceiling). Each
+        fire is recorded to ``_replan_events`` (flight-recorder-visible) with its reason.
+        Returns True iff a re-plan was actually performed.
+
+        Issue #208(a) — a stall/no-LOS replan whose starting pose has not moved since the
+        PREVIOUS stall/no-LOS replan is about to re-plan the exact same route over the
+        exact same (unchanged) costmap: A* is deterministic, so it reproduces the SAME
+        first crumb, which is the one that was just refused (#207) or otherwise could not
+        be reached — not a replan in any useful sense. When that repeat is detected we
+        plan from a RECOVERY pose instead of the frozen one: the nearest point that clears
+        ``BASE_OBSTACLE_CLEARANCE_M`` of every nearby obstacle (the same search
+        ``ensure_base_clearance`` uses), which sits off the exact line that produced the
+        stuck crumb. The vehicle's real, physical pose is untouched — only the PLANNING
+        start point moves — so the resulting path's early crumbs are computed against a
+        different local geometry and can differ from the refused one, giving the follower
+        a genuinely new target instead of repeating the goal that just failed.
         """
         if not self._can_replan() or self._follower is None:
             return False
         self._replans += 1
+        self._replans_since_progress += 1
+        plan_pose = self._pose
+        if (
+            reason == "stall_or_no_los"
+            and self._last_stall_pose is not None
+            and _dist(self._pose, self._last_stall_pose) < REPLAN_PROGRESS_MOVE_M
+            and self._costmap is not None
+        ):
+            recovery = self._costmap.nearest_clear_point(*self._pose)
+            if recovery is not None and _dist(recovery, self._pose) > 1e-9:
+                plan_pose = recovery
         self._replan_events.append(
-            f"replan #{self._replans} @pose={self._pose} reason={reason}"
+            f"replan #{self._replans} @pose={self._pose} plan_pose={plan_pose} reason={reason}"
         )
         _LOG.info(
-            "IF replan #%d (reason=%s): rebuilding costmap + re-planning from pose %s.",
+            "IF replan #%d (reason=%s): rebuilding costmap + re-planning from pose %s "
+            "(plan start %s).",
             self._replans,
             reason,
             self._pose,
+            plan_pose,
         )
         prefix_len = max(self._driven_prefix, 1)
         self._follower = None
         self._driven_prefix = 0
         self._in_capsule = False  # recomputed against the new plan next tick
-        self._build_route(self._pose, scene, prefix_len)
-        return self._follower is not None
+        self._build_route(plan_pose, scene, prefix_len)
+        ok = self._follower is not None
+        if reason == "stall_or_no_los":
+            nxt = self._follower.current(self._pose) if ok else None
+            self._last_stall_goal = (float(nxt.x), float(nxt.y)) if nxt is not None else None
+            self._last_stall_pose = self._pose
+        return ok
 
     def _can_redrive(self) -> bool:
         return self._redrives < MAX_REDRIVE_PASSES
@@ -1729,6 +1822,10 @@ class InstructionHead:
         """
         if self._follower is None:
             return False
+        # Issue #208 — reset the replan-progress budget BEFORE it's consulted this tick,
+        # so a stall this tick is judged against how far the vehicle has driven since the
+        # last reset, not against every replan ever fired this question.
+        self._note_pose_progress(pose)
         wp = self._follower.advance(pose, t)
         self._mark_arrivals(pose)
 
