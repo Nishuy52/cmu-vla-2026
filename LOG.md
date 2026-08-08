@@ -2576,3 +2576,39 @@ resolution quality.
 
 **Next:** #205 diagnosis, #199 centroid merge, #206 (swap the #186
 n_obs tie-break for n_views), then one proof sweep.
+
+---
+
+## 2026-08-08 (later) — The vehicle wedge: the largest lever found and fixed
+
+**Diagnosis (#205).** The vehicle stops driving after 40 to 200 s of a
+780 s budget in 13 of 20 slot-runs, then republishes one waypoint at
+4 to 5 Hz until the watchdog. One mechanism: our costmap inflates
+obstacles 0.4 m, but the base stack refuses any waypoint nearer than
+0.75 m to a terrain obstacle. We publish crumbs it silently declines;
+it commands zero speed; our follower cannot advance past them; the
+stall detector fires correctly but the replan cap is spent in about
+30 s, each attempt regenerating the same crumb from the same frozen
+pose.
+
+**The measured prize:** 23 of 36 ordered legs unreached, all 2.1 to
+13.9 m away, with 220 to 740 s idle at 0.10 to 0.12 m/s. The two
+measured groups' headline goes 0.1667 to 0.7222 and 0.3704 to 0.8148
+with no change to grounding or resolution.
+
+**Fixes.** #207 matches the base's own clearance rule at publish time
+only. A global 0.75 m inflation would seal every doorway: the
+narrowest door frame in the scene set measures 0.90 m. #208 replans
+from a recovery pose instead of the frozen pose, and gates the cap on
+progress rather than attempts, with a hard ceiling of 20 and the
+watchdog unchanged. #199 lands with two corrections found by
+verification: depth plausibility now votes by majority, and the
+outlier core is disabled below 40 points where the estimator trimmed
+clean data in 27 to 39 percent of trials.
+
+**Variance.** Two repeated groups changed 7 of 18 questions between
+runs of the same matrix. The wedge is the likely source. The
+prediction on #202 is explicit: the next repeat must show a higher
+mean AND churn below 7 of 18, or the variance has another source.
+
+**Next:** the proof sweep on this tree.
