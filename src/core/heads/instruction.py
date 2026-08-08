@@ -41,7 +41,7 @@ from core.interfaces import RobotIO, WaypointCmd
 from core.geometry import toolbox as TB
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.groundtruth.arrival import NOMINAL_ARRIVAL_TOL_M
-from core.nav.breadcrumbs import BreadcrumbFollower
+from core.nav.breadcrumbs import BreadcrumbFollower, ensure_base_clearance
 from core.nav.costmap import VEHICLE_RADIUS_M, Costmap
 from core.nav.occupancy import OccupancyGrid, integrate_scan_overhead_decimated
 from core.nav import planner as _planner
@@ -1769,7 +1769,11 @@ class InstructionHead:
                     if self._redrive("follower_exhausted_legs_unvisited", self._scene):
                         wp = self._follower.advance(pose, t) if self._follower else None
             if wp is None and self._terminal_xy is not None:
-                wp = WaypointCmd(float(self._terminal_xy[0]), float(self._terminal_xy[1]))
+                # Issue #207 -- the raw terminal coordinate bypasses the follower's
+                # crumb selection (it is published directly, not via _select_crumb),
+                # so it needs the SAME base-clearance floor applied here.
+                tx, ty = ensure_base_clearance(self._costmap, self._terminal_xy, pose)
+                wp = WaypointCmd(float(tx), float(ty))
         if wp is not None:
             io.publish_waypoint(wp)
             self._last_wp = wp

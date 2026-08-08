@@ -47,6 +47,30 @@ from core.nav.occupancy import FREE, OBSTACLE, UNKNOWN, OccupancyGrid
 
 # --------------------------------------------------------------------------- tunables
 VEHICLE_RADIUS_M: float = 0.4  # inflation radius (half footprint + margin)
+#: Issue #207 -- the base stack's own waypoint-snap clearance rule, confirmed from
+#: upstream source: ``waypointConverter.cpp`` (the `waypointAdj` branch, ~line 210-233)
+#: only accepts a traversable-area candidate point as a valid snap target when its
+#: planar (x, y) distance to EVERY point in the terrain `obstacleArea` cloud is
+#: `>= obstacleDisThre` (squared-distance compare: `disX3*disX3 + disY3*disY3 <
+#: obstacleDisThre * obstacleDisThre` disqualifies the candidate). The launch file
+#: (`waypoint_converter.launch`) sets `obstacleDisThre = 0.75`. Our own planning
+#: inflation (`VEHICLE_RADIUS_M = 0.4`) is 0.35 m short of this: we route and publish
+#: crumbs the base then refuses to snap onto, and it freezes (#205/#207). This constant
+#: is a PUBLISH-time clearance floor, deliberately kept separate from
+#: `VEHICLE_RADIUS_M` (the A*-planning inflation): raising the planning inflation to
+#: 0.75 m globally would make any corridor/doorway narrower than 1.5 m clear
+#: unplannable everywhere along a route, not just at the final published crumb (see
+#: `Costmap.obstacle_clearance_m`/`nearest_clear_point` docstrings and
+#: ``breadcrumbs.ensure_base_clearance``, which apply this floor only to the point
+#: actually handed to the base).
+BASE_OBSTACLE_CLEARANCE_M: float = 0.75
+#: Search window (issue #207) ``nearest_clear_point`` scans around a rejected crumb
+#: for a nearby alternative that clears ``BASE_OBSTACLE_CLEARANCE_M``. Kept small
+#: (well under the base's own 5.0 m ``searchDisThre``) so a nudge stays LOCAL to the
+#: rejected point (never substitutes a distant, unrelated part of the map) — the
+#: caller (``breadcrumbs.ensure_base_clearance``) also re-checks line-of-sight from
+#: the vehicle pose before adopting a nudged point.
+LOOKAHEAD_CLEARANCE_SEARCH_M: float = 1.5
 #: Cost multiplier A* pays to cross a SOFT-overhead cell, relative to a FREE cell.
 #: The applied per-cell penalty on the A* path is `planner.UNKNOWN_COST_MULT` (the
 #: only per-cell cost seam A* reads without a planner change); this constant records
@@ -285,6 +309,89 @@ class Costmap:
         d2 = (reachable[:, 0] - gr) ** 2 + (reachable[:, 1] - gc) ** 2
         br, bc = reachable[int(np.argmin(d2))]
         return self.grid.cell_to_world(int(br), int(bc))
+
+    # ------------------------------------------------------------- issue #207 clearance
+    def obstacle_clearance_m(
+        self, x: float, y: float, search_radius_m: float = 2.0
+    ) -> float:
+        """Planar distance (m) from ``(x, y)`` to the nearest RAW (uninflated)
+        obstacle cell -- our best proxy for the base stack's own ``obstacleArea``
+        clearance check (see ``BASE_OBSTACLE_CLEARANCE_M``). Bounded local-window
+        search (not a whole-grid transform): cheap enough to call per candidate
+        crumb. Returns ``search_radius_m`` (i.e. "at least this clear") when no
+        raw-obstacle cell falls inside the search window.
+        """
+        r0, c0 = self.grid.world_to_cell(x, y)
+        r_cells = int(np.ceil(search_radius_m / self.cell_m))
+        h, w = self.raw_blocked.shape
+        r_lo, r_hi = max(0, r0 - r_cells), min(h, r0 + r_cells + 1)
+        c_lo, c_hi = max(0, c0 - r_cells), min(w, c0 + r_cells + 1)
+        if r_lo >= r_hi or c_lo >= c_hi:
+            return search_radius_m
+        window = self.raw_blocked[r_lo:r_hi, c_lo:c_hi]
+        if not window.any():
+            return search_radius_m
+        rr, cc = np.nonzero(window)
+        dr = (rr + r_lo) - r0
+        dc = (cc + c_lo) - c0
+        d2 = dr * dr + dc * dc
+        return float(np.sqrt(d2.min()) * self.cell_m)
+
+    def nearest_clear_point(
+        self,
+        x: float,
+        y: float,
+        min_clearance_m: float = BASE_OBSTACLE_CLEARANCE_M,
+        search_radius_m: float = LOOKAHEAD_CLEARANCE_SEARCH_M,
+    ) -> tuple[float, float] | None:
+        """Nearest PASSABLE cell to ``(x, y)`` within ``search_radius_m`` whose
+        ``obstacle_clearance_m`` is ``>= min_clearance_m`` (mirrors the base's own
+        "search nearby traversable points, keep the closest one far enough from
+        every obstacle" rule -- see ``BASE_OBSTACLE_CLEARANCE_M``). Returns ``None``
+        if no such cell exists in the window (a genuinely tight passage narrower
+        than ``2 * min_clearance_m`` -- e.g. sub-1.5 m doorway -- has no interior
+        point that clears 0.75 m from both sides; the caller then keeps the
+        original point rather than diverge onto an unrelated part of the map).
+        """
+        r0, c0 = self.grid.world_to_cell(x, y)
+        h, w = self.base_blocked.shape
+        cand_r_cells = int(np.ceil(search_radius_m / self.cell_m))
+        cr_lo, cr_hi = max(0, r0 - cand_r_cells), min(h, r0 + cand_r_cells + 1)
+        cc_lo, cc_hi = max(0, c0 - cand_r_cells), min(w, c0 + cand_r_cells + 1)
+        if cr_lo >= cr_hi or cc_lo >= cc_hi:
+            return None
+        cand_blocked = (
+            self.base_blocked[cr_lo:cr_hi, cc_lo:cc_hi]
+            | self.capsule_blocked[cr_lo:cr_hi, cc_lo:cc_hi]
+        )
+        cand_r, cand_c = np.nonzero(~cand_blocked)
+        if cand_r.size == 0:
+            return None
+        cand_r = cand_r + cr_lo
+        cand_c = cand_c + cc_lo
+
+        # Obstacle search window: wide enough that every candidate's full
+        # min_clearance_m neighbourhood is covered.
+        obs_r_cells = cand_r_cells + int(np.ceil(min_clearance_m / self.cell_m)) + 1
+        or_lo, or_hi = max(0, r0 - obs_r_cells), min(h, r0 + obs_r_cells + 1)
+        oc_lo, oc_hi = max(0, c0 - obs_r_cells), min(w, c0 + obs_r_cells + 1)
+        obs_r, obs_c = np.nonzero(self.raw_blocked[or_lo:or_hi, oc_lo:oc_hi])
+        min_clear_cells2 = (min_clearance_m / self.cell_m) ** 2
+        if obs_r.size == 0:
+            ok_r, ok_c = cand_r, cand_c
+        else:
+            obs_r = obs_r + or_lo
+            obs_c = obs_c + oc_lo
+            dr = cand_r[:, None] - obs_r[None, :]
+            dc = cand_c[:, None] - obs_c[None, :]
+            min_obs_d2 = (dr * dr + dc * dc).min(axis=1)
+            ok = min_obs_d2 >= min_clear_cells2
+            if not ok.any():
+                return None
+            ok_r, ok_c = cand_r[ok], cand_c[ok]
+        d2_to_query = (ok_r - r0) ** 2 + (ok_c - c0) ** 2
+        i = int(np.argmin(d2_to_query))
+        return self.grid.cell_to_world(int(ok_r[i]), int(ok_c[i]))
 
     def _nearest_passable_cell(self, r0: int, c0: int):
         h, w = self.grid.shape

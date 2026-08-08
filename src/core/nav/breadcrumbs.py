@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from core.interfaces import WaypointCmd
-from core.nav.costmap import Costmap
+from core.nav.costmap import BASE_OBSTACLE_CLEARANCE_M, Costmap
 
 # --------------------------------------------------------------------------- tunables
 LOOKAHEAD_M: float = 2.5  # farthest a crumb may sit ahead of the vehicle
@@ -101,6 +101,37 @@ def line_of_sight(
         if e2 < dc:
             err += dc
             r += sr
+
+
+def ensure_base_clearance(
+    costmap: Costmap,
+    point: tuple[float, float],
+    pose: tuple[float, float],
+    min_clearance_m: float = BASE_OBSTACLE_CLEARANCE_M,
+) -> tuple[float, float]:
+    """Issue #207 -- never hand back a crumb closer than the base's own
+    ``obstacleDisThre`` to an obstacle (see ``core.nav.costmap.BASE_OBSTACLE_CLEARANCE_M``).
+
+    ``waypointConverter`` on the base refuses to snap a waypoint onto any point nearer
+    than 0.75 m to its terrain ``obstacleArea`` cloud; a crumb we publish inside that
+    margin is one the base silently refuses, and the vehicle freezes (#205/#207). If
+    ``point`` already clears ``min_clearance_m`` it is returned unchanged. Otherwise we
+    search LOCALLY (``Costmap.nearest_clear_point``) for the nearest passable point that
+    DOES clear it; the nudge is only adopted if it also stays in line-of-sight of
+    ``pose`` (never substitute a point the vehicle would have to see through a wall to
+    reach). If no such point exists nearby -- a genuinely tight passage wider than the
+    vehicle but narrower than ``2 * min_clearance_m`` (e.g. a sub-1.5 m doorway) has no
+    interior point that clears 0.75 m from both jambs -- ``point`` is returned as-is:
+    the base's own rule forecloses ANY snap target inside such a passage regardless of
+    what we publish, so nudging would only walk the crumb away from the doorway the
+    route legitimately needs to thread, trading one stall for a worse one.
+    """
+    if costmap.obstacle_clearance_m(point[0], point[1], search_radius_m=min_clearance_m) >= min_clearance_m:
+        return point
+    nudged = costmap.nearest_clear_point(point[0], point[1], min_clearance_m=min_clearance_m)
+    if nudged is None or not line_of_sight(costmap, pose, nudged):
+        return point
+    return nudged
 
 
 @dataclass
@@ -270,6 +301,8 @@ class BreadcrumbFollower:
                 self.replan_flag = True
                 chosen, nearest_idx = self.path[self._idx], self._idx
             self._last_crumb_idx = nearest_idx
+        # Issue #207 -- never hand back a crumb the base's own snap rule would refuse.
+        chosen = ensure_base_clearance(self.costmap, chosen, pose)
         return WaypointCmd(x=float(chosen[0]), y=float(chosen[1]))
 
     def _nearest_reachable_point(
