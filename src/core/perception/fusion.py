@@ -24,10 +24,24 @@ Approach (pure numpy, deterministic):
    ray is kept — not merely the nearest in range — since the 2D detector's box is
    centred on the object it saw, so the real object's points should cluster near that
    ray more tightly than incidental background/clutter caught at the cone's padded
-   edges.
+   edges. Issue #199: a component is first checked for *depth plausibility* — its
+   mean range times the bbox's own angular span is the physical size the object
+   would have to be if it truly sat at that range; a component implying a size far
+   past the class's dimension-prior typical scale (e.g. a ceiling luminaire caught
+   deep in the same padded cone as a near table lamp) is dropped from the running
+   before the angular-deviation vote, so a correct near component is never out-voted
+   by a large, angularly-central background surface. Fails open (no candidate
+   filtered) for classes with no prior, or when every candidate would be dropped.
 5. **Accept / reject.** If the winning component has < ``min_points`` (default 5)
-   points, the detection is rejected (``None``). Otherwise return the component's
-   centroid and its point set.
+   points, the detection is rejected (``None``). Otherwise its point set is passed
+   through a robust per-axis core filter (median +/- ``cfg.outlier_k`` MADs, issue
+   #199) that drops genuine outlier returns (a stray background point chained into
+   the component by the union-find radius) without touching a clean, tightly-bounded
+   cluster — a percentile-rank trim would clip the extreme points of even a clean
+   cluster; a MAD-normalized deviation does not. The core's mean is returned as the
+   centroid (robust centre, not swayed by an asymmetric outlier tail) and the core
+   points are what the caller AABBs, which is what fixes the ~4x volume inflation on
+   brand-new (single-observation) instances downstream.
 
 The vehicle position is the frustum apex; lidar arrives already in the ``map`` frame
 (``/registered_scan``), so we only need odom to place the apex and (via the ray helper)
@@ -75,6 +89,43 @@ class FusionConfig:
                                    # spacing at <= max_range=15 m for this lidar's density.
                                    # Known limitation: sparse far-range surfaces can still
                                    # exceed this spacing and over-segment (see report).
+    depth_size_factor: float = 2.5  # issue #199: a POINT is depth-implausible for its
+                                     # class when its own range * bbox_angular_span
+                                     # exceeds this many multiples of the class's
+                                     # dimension-prior typical long axis -- the physical
+                                     # size the object would have to be at that range,
+                                     # measured against a known-plausible scale. 2.5x
+                                     # gives generous headroom over normal prior spread
+                                     # (typical/min ratios in dimension_priors run
+                                     # 1.1-3.2x) while still rejecting a background
+                                     # surface many multiples too large to be the object.
+    depth_plausible_frac: float = 0.5  # issue #199 (post-review fix): a COMPONENT is
+                                        # depth-plausible when at least this fraction of
+                                        # its OWN points are individually depth-plausible
+                                        # -- a majority vote, not unanimity. The original
+                                        # cut used the component's MEAN range, which a
+                                        # verifier reproduced failing on a real object
+                                        # component carrying a small minority of stray
+                                        # points chained in by the lateral union-find at
+                                        # an implausible range: those few points still
+                                        # disqualified the whole (mostly-plausible)
+                                        # component, handing the win to a fully-uniform
+                                        # decoy. 0.5 is the plain-majority default; the
+                                        # ceiling-luminaire battery (every point of the
+                                        # decoy implausible, fraction 0.0) and the
+                                        # stray-point regression (fraction ~0.9 plausible)
+                                        # both clear with a wide margin either side of 0.5,
+                                        # so the threshold is not fine-tuned to one case.
+    outlier_k: float = 4.5        # issue #199: per-axis median +/- k*MAD core filter
+                                   # applied to the winning component before it is
+                                   # returned. A clean bounded cluster's max deviation
+                                   # normalizes to ~2 MADs (verified for the uniform
+                                   # synthetic fixtures this module's tests use), so 3.5
+                                   # leaves such clusters untouched while still dropping
+                                   # genuine outlier returns chained in by the lateral
+                                   # union-find.
+    outlier_min_mad: float = 0.02  # m; MAD floor so a near-planar axis (real MAD ~0)
+                                    # cannot make the filter hypersensitive to noise.
 
 
 DEFAULT_FUSION_CONFIG = FusionConfig()
@@ -200,6 +251,72 @@ def _lateral_components(points: np.ndarray, radius: float) -> np.ndarray:
     return labels
 
 
+def robust_core_mask(points: np.ndarray, k: float, min_mad: float) -> np.ndarray:
+    """Per-axis median +/- ``k`` MADs core mask (issue #199).
+
+    Unlike a percentile-rank trim (which always clips some fixed fraction of
+    points regardless of whether they are genuine outliers), a MAD-normalized
+    deviation test leaves a clean, tightly-bounded cluster untouched — its points
+    never exceed a few MADs from the median — while still dropping a stray point
+    (or handful of points) chained onto the component by the lateral union-find
+    from a background surface. ``min_mad`` floors the per-axis MAD so a
+    near-planar axis (true spread ~0) cannot make the test hypersensitive to
+    float noise. Returns an all-``True`` mask (points, 3) -> (points,) unchanged
+    if ``points`` is empty.
+    """
+    if len(points) == 0:
+        return np.zeros(0, dtype=bool)
+    med = np.median(points, axis=0)
+    mad = np.median(np.abs(points - med[None, :]), axis=0)
+    mad = np.maximum(mad, min_mad)
+    dev = np.abs(points - med[None, :]) / mad[None, :]
+    return np.all(dev <= k, axis=1)
+
+
+def _depth_plausible_mask(
+    labels: np.ndarray,
+    cand_ranges: np.ndarray,
+    angular_span: float,
+    prior_long_axis: float | None,
+    size_factor: float,
+    min_frac: float,
+) -> np.ndarray:
+    """True for a component whose points are MAJORITY depth-plausible (issue #199,
+    fixed post-review after a verifier reproduction).
+
+    Plausibility starts per POINT, not per component: ``point_range * angular_span``
+    is the physical footprint an object would need to fill the detection bbox's own
+    angular width if it truly sat at that point's own range — a point many multiples
+    past the class's dimension-prior typical long axis is very likely a background
+    return (e.g. a ceiling luminaire caught deep in the same padded cone as a near
+    table lamp), not the detected object.
+
+    A component is then plausible when at least ``min_frac`` of ITS OWN points are
+    individually plausible — a majority vote, not unanimity. The original version of
+    this gate collapsed straight to a per-component mean-range test (mathematically
+    close to a unanimity test in practice: a small minority of far outlier points,
+    exactly the kind the lateral union-find can chain in — see fuse_detection's own
+    outlier-core step just below component selection — could still pull a mostly-
+    plausible component's aggregate over the threshold and disqualify it outright,
+    handing the win to a worse-fitting but internally-uniform decoy). Scoring each
+    point independently and voting fixes that: a component carrying a small stray
+    minority stays plausible on the strength of its majority.
+
+    Fails open (all ``True``) when the class carries no prior.
+    """
+    n = len(labels)
+    if prior_long_axis is None or prior_long_axis <= 0.0:
+        return np.ones(n, dtype=bool)
+    point_implied_size = cand_ranges * angular_span
+    point_plausible = point_implied_size <= size_factor * prior_long_axis
+    plausible = np.ones(n, dtype=bool)
+    for label in np.unique(labels):
+        idx = np.nonzero(labels == label)[0]
+        frac_plausible = float(point_plausible[idx].mean())
+        plausible[idx] = frac_plausible >= min_frac
+    return plausible
+
+
 def _select_component(
     cand_pts: np.ndarray,
     cand_ranges: np.ndarray,
@@ -208,6 +325,8 @@ def _select_component(
     centre_bearing: float,
     centre_elevation: float,
     min_points: int,
+    *,
+    depth_plausible: np.ndarray | None = None,
 ) -> np.ndarray | None:
     """Pick the component whose points sit closest to the detection's centre ray.
 
@@ -215,9 +334,21 @@ def _select_component(
     ``(centre_bearing, centre_elevation)`` — direction-based, not range-based, so a
     background wall caught at the padded cone edge loses to the real object even
     when the wall happens to be nearer. Ties (to float precision) fall back to
-    nearer range. Components below ``min_points`` are ignored. Returns local
-    indices (into ``cand_pts``) of the winning component, or ``None`` if no
-    component clears ``min_points``.
+    nearer range. Components below ``min_points`` are ignored.
+
+    ``depth_plausible`` (issue #199), a per-point boolean mask aligned with
+    ``cand_pts``/``cand_ranges``, already carries each COMPONENT's majority-vote
+    depth-plausibility broadcast onto its own points (see
+    :func:`_depth_plausible_mask` — every point of a given component reads the
+    same value, so ``.all()``/``.any()`` over one component's slice agree; ``.all()``
+    is used here as the plain "read this component's own verdict" idiom).
+    Implausible components are preferred against ONLY when at least one plausible
+    component also clears ``min_points`` — this fails open, so a class with no
+    prior (mask all-``True``) or a scene where every candidate reads implausible
+    (e.g. a very large real object) behaves exactly as before.
+
+    Returns local indices (into ``cand_pts``) of the winning component, or
+    ``None`` if no component clears ``min_points``.
     """
     rel = cand_pts - apex[None, :]
     dx, dy, dz = rel[:, 0], rel[:, 1], rel[:, 2]
@@ -228,17 +359,19 @@ def _select_component(
     delevation = np.abs(elevation - centre_elevation)
     deviation = np.sqrt(dbearing ** 2 + delevation ** 2)
 
-    best_idx = None
-    best_key = None
+    candidates = []  # (idx, deviation_mean, range_mean, plausible)
     for label in np.unique(labels):
         idx = np.nonzero(labels == label)[0]
         if len(idx) < min_points:
             continue
-        key = (round(float(deviation[idx].mean()), 6), float(cand_ranges[idx].mean()))
-        if best_key is None or key < best_key:
-            best_key = key
-            best_idx = idx
-    return best_idx
+        plausible = bool(depth_plausible[idx].all()) if depth_plausible is not None else True
+        candidates.append((idx, round(float(deviation[idx].mean()), 6), float(cand_ranges[idx].mean()), plausible))
+    if not candidates:
+        return None
+
+    pool = [c for c in candidates if c[3]] or candidates
+    best = min(pool, key=lambda c: (c[1], c[2]))
+    return best[0]
 
 
 def fuse_detection(
@@ -276,19 +409,49 @@ def fuse_detection(
     labels = _lateral_components(cand_pts, cfg.cluster_radius)
     centre_bearing = wrap_pi(bearing_lo + bearing_span / 2.0)
     centre_elevation = (el_lo + el_hi) / 2.0
+
+    # Issue #199: depth-plausibility gate ahead of the angular-deviation vote --
+    # a component whose points are majority far past the class's typical scale at
+    # their own range (a ceiling luminaire deep in the same padded cone as a near
+    # table lamp) is de-preferred so it cannot out-vote a smaller, correctly-sized
+    # component on angular centrality alone. Voted per-point-then-majority (not a
+    # component mean), so a small minority of stray points chained in by the
+    # lateral union-find cannot disqualify an otherwise-plausible component (the
+    # post-review fix — see _depth_plausible_mask). Read-only use of
+    # dimension_priors; fails open for classes with no prior.
+    from core.perception.dimension_priors import prior_for  # deferred: avoid import cost when unused
+
+    prior = prior_for(det.label)
+    prior_long_axis = float(prior.typ_ext[-1]) if prior is not None else None
+    angular_span = max(bearing_span, el_hi - el_lo, 1e-6)
+    depth_plausible = _depth_plausible_mask(
+        labels, cand_ranges, angular_span, prior_long_axis, cfg.depth_size_factor,
+        cfg.depth_plausible_frac,
+    )
+
     local = _select_component(
         cand_pts, cand_ranges, labels, apex, centre_bearing, centre_elevation, cfg.min_points,
+        depth_plausible=depth_plausible,
     )
     if local is None:
         return None
     cluster_idx = cand_idx[local]
 
     cluster_pts = points[cluster_idx]
+    # Issue #199: robust per-axis core filter -- drops genuine outlier returns
+    # (e.g. a stray background point chained in by the lateral union-find) without
+    # touching a clean, tightly-bounded cluster; see robust_core_mask. Falls back
+    # to the full component if the core would drop it below min_points (keeps the
+    # accept/reject boundary exactly as documented).
+    core_mask = robust_core_mask(cluster_pts, cfg.outlier_k, cfg.outlier_min_mad)
+    if core_mask.sum() >= cfg.min_points:
+        cluster_pts = cluster_pts[core_mask]
+
     centroid = cluster_pts.mean(axis=0)
     range_m = float(np.linalg.norm(centroid - apex))
     return Fused3D(
         centroid=centroid,
         points=cluster_pts,
-        n_points=len(cluster_idx),
+        n_points=len(cluster_pts),
         range_m=range_m,
     )
