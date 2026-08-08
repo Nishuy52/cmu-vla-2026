@@ -2537,3 +2537,42 @@ Gate green twice; the verifier CONFIRMED with its own reproduction.
 The nume second sample (713820) confirms the #176 collapse is stable
 (MAE 3.3 vs 7.8 pre-fix). Live proof for this stack rides the next
 OR resubmission.
+
+---
+
+## 2026-08-08 — Overnight campaign: eight fixes shipped, four premises corrected
+
+**Shipped:** #173 avoid-caption routing, #174 frame watchdog, #197
+unknown-seam frontiers, #200 boot-vocabulary priming, #188/#189 heads
+tail, #191 n_views instrumentation, #192 marker order, then #196
+re-drive gate and #198 pick logging. Every batch passed a full gate and
+a fresh verifier.
+
+**Diagnoses that changed direction:**
+- The instruction-following cap is not drive failure. Of 23 missed
+  legs, 14 are wrong-goal grounding; stall and planner failures are 0.
+- Object_reference selection is exhausted: an oracle over today's index
+  is worth 0.61 of 12 points. Box accuracy is worth about +5 (#199).
+- Ghosts win by dwell: one holds 80 observations from one viewpoint.
+- The score is measured for the first time: 17.95 of 51 points (35%),
+  and instruction_following carries 97% of it (#190).
+
+**Five regressions caught before shipping**, each green on its own
+tests: the parse-failure gate, the relaxation rescue, the grounding
+threshold collapse, the fragment merge, and the evidence cut.
+
+**Three of my own premises were wrong and are corrected:**
+- #195's motivating case was read from the final index snapshot, not
+  the answer-time record. The counts differ sixfold.
+- #203 (cross-label resolution) is withdrawn. leg_probe.our_instance_id
+  is a ground-truth id, not our pick (#204 renames it).
+- #202: #186 did not cause the group-mean drop. The vehicle stalling
+  did (#205).
+
+**The largest open lever is #205:** the vehicle stops driving after
+40-200 s of a 780 s budget on 8 of 10 slots and republishes one goal
+for the rest. The headline is set by where the robot stops, not by
+resolution quality.
+
+**Next:** #205 diagnosis, #199 centroid merge, #206 (swap the #186
+n_obs tie-break for n_views), then one proof sweep.
