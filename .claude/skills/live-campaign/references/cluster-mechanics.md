@@ -93,6 +93,20 @@ once shipped an unverified merge batch because a harvest commit sat
 above it. The fresh-verifier verdict gates the whole unpushed stack,
 not the top commit.
 
+## Never pipe a merge (or any gating command) into another command
+
+`git merge ... | tail -1 && cd src && pytest` runs the gate EVEN WHEN
+THE MERGE CONFLICTS: a pipeline's exit code is the LAST stage's, so
+`tail` returns 0 and hides the failure. Seen 8 Aug 2026 — the conflict
+markers landed inside a module docstring, so the tree still parsed, the
+suite still collected, and the gate reported 2113 passed on a
+half-merged tree.
+
+Run a merge as its own command, read its output, and check
+`git status` for `UU` paths before gating. After any merge, confirm
+`git log origin/main..HEAD` shows the expected merge commit — a
+conflicted merge leaves HEAD unchanged and `.git/MERGE_HEAD` present.
+
 ## Unwinding a refuted merge
 
 `git reset --hard <pushed-base>` also discards every commit stacked
