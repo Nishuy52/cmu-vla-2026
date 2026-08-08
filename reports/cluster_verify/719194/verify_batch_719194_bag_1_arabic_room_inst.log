@@ -1,0 +1,10 @@
+[WARN] [ros2bag]: Positional "topics" argument deprecated. Please use optional "--topics" argument instead.
+stdin is not a terminal device. Keyboard handling disabled.[INFO] [1786144217.432434681] [rosbag2_recorder]: Press SPACE for pausing/resuming
+[INFO] [1786144217.447594835] [rosbag2_recorder]: Listening for topics...
+[INFO] [1786144217.447621134] [rosbag2_recorder]: Event publisher thread: Starting
+[INFO] [1786144217.472324758] [rosbag2_recorder]: Subscribed to topic '/state_estimation'
+[INFO] [1786144217.486702783] [rosbag2_recorder]: Subscribed to topic '/selected_object_marker'
+[INFO] [1786144217.490856944] [rosbag2_recorder]: Subscribed to topic '/numerical_response'
+[INFO] [1786144217.491024221] [rosbag2_recorder]: Recording...
+[INFO] [1786144220.020671360] [rosbag2_recorder]: Subscribed to topic '/challenge_question'
+[INFO] [1786144220.120803511] [rosbag2_recorder]: All requested topics are subscribed. Stopping discovery...

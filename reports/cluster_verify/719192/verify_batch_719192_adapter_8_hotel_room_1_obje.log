@@ -1,0 +1,39 @@
+[WARN] [1786134865.465261850] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1786134865.491913679] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1786134865.498019967] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+[INFO] [1786134865.501507923] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1786134865.504233887] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+[INFO] [1786134894.314344026] [vla_ai_module]: question latched: 'Find the bedside table farthest from the window.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786134908.777450302] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1786134908.778371045] [vla_ai_module]: idle->parsing question received
+[INFO] [1786134914.151061887] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/114 vocab noun(s) to stay within the 256-token budget: ['tea table', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard']
+build_gdino_prompt: dropping 14/114 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'tea table', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard']
+[INFO] [1786134914.300903776] [vla_ai_module]: published 1 waypoints since latch
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1786134944.365605643] [vla_ai_module]: published 142 waypoints since latch
+[INFO] [1786134954.358115495] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1786134974.365597439] [vla_ai_module]: published 245 waypoints since latch
+[INFO] [1786135005.030200951] [vla_ai_module]: published 319 waypoints since latch
+[INFO] [1786135035.033686444] [vla_ai_module]: published 396 waypoints since latch
+[INFO] [1786135065.036190532] [vla_ai_module]: published 475 waypoints since latch
+[INFO] [1786135095.039929858] [vla_ai_module]: published 555 waypoints since latch
+[INFO] [1786135125.179426226] [vla_ai_module]: published 625 waypoints since latch
+[INFO] [1786135134.319679906] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1786135136.038745053] [vla_ai_module]: verify->answer verify complete
+[INFO] [1786135136.100707992] [vla_ai_module]: published marker answer: label='bedside table' centroid=(3.49, 0.27, 0.38)
+[INFO] [1786135136.101904708] [vla_ai_module]: answer->done answered
+[INFO] [1786135136.103380061] [vla_ai_module]: controller DONE; last 9 events: 14.5:idle:question_latched:object_reference: 'Find the bedside table farthest from the window.' | 14.5:idle:transition:idle->parsing question received | 19.8:parsing:parsed:tier=api | 19.8:parsing:transition:parsing->orient parse attempted | 60.0:orient:transition:orient->explore_execute orientation window closed | 240.0:explore_execute:transition:explore_execute->verify explore budget spent | 241.7:verify:transition:verify->answer verify complete | 241.8:answer:published:MarkerBox via answer_state | 241.8:answer:transition:answer->done answered
