@@ -93,6 +93,14 @@ once shipped an unverified merge batch because a harvest commit sat
 above it. The fresh-verifier verdict gates the whole unpushed stack,
 not the top commit.
 
+## Unwinding a refuted merge
+
+`git reset --hard <pushed-base>` also discards every commit stacked
+ABOVE the merge — including harvest/reports commits made since. Check
+`git log <base>..HEAD` first. Recover with `git cherry-pick <lost-sha>`
+(the reflog keeps it), or avoid the problem by resetting only to the
+merge's first parent, or by `git revert -m 1 <merge-sha>`.
+
 ## Watcher launch
 
 Run a harvest watcher as the DIRECT command of a background Bash call.
