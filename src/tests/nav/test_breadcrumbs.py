@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from core.interfaces import WaypointCmd
-from core.nav.breadcrumbs import BreadcrumbFollower, line_of_sight
-from core.nav.costmap import Costmap
+from core.nav.breadcrumbs import BreadcrumbFollower, ensure_base_clearance, line_of_sight
+from core.nav.costmap import BASE_OBSTACLE_CLEARANCE_M, Costmap
 from core.nav.occupancy import OccupancyGrid
 from tests.nav.helpers import patch_from_ascii
 
@@ -177,6 +177,64 @@ def test_leg_boundary_empty_list_preserves_prior_behaviour():
     wp = f.current(pose)
     d = ((wp.x - pose[0]) ** 2 + (wp.y - pose[1]) ** 2) ** 0.5
     assert 2.0 <= d <= 2.5 + 1e-6
+
+
+# --------------------------------------------------------------------------- issue #207
+# ensure_base_clearance / BASE_OBSTACLE_CLEARANCE_M: a crumb must never sit closer than
+# the base's own obstacleDisThre (0.75 m) to an obstacle when a legal alternative exists
+# nearby; a genuinely tight passage (no alternative) must be left alone, not blocked.
+
+
+def test_crumb_never_published_closer_than_base_clearance():
+    """A crumb the unconstrained farthest-within-lookahead scan would select right next
+    to an obstacle (clearance < BASE_OBSTACLE_CLEARANCE_M) is nudged to a nearby
+    alternative that clears the base's own snap-clearance floor, when room to do so
+    exists (an open area, not a doorway — see the doorway test below)."""
+    from tests.nav.helpers import make_points
+
+    grid = OccupancyGrid(cell_m=0.1)
+    grid.integrate_patch(patch_from_ascii(["." * 60 for _ in range(60)], cell_m=0.1))
+    # A single obstacle 0.3 m off the path, right where the unconstrained scan would
+    # otherwise select its farthest LOS-clear crumb (see test_crumb_is_farthest_within_lookahead).
+    grid.integrate_patch(make_points([(2.45, 3.35, 0.5)]))
+    cm = Costmap(grid, vehicle_radius_m=0.0)
+    path = [(0.3 * i + 0.05, 3.05) for i in range(20)]
+    f = BreadcrumbFollower(path=path, costmap=cm)
+    wp = f.current((0.05, 3.05))
+    assert wp is not None
+    assert cm.obstacle_clearance_m(wp.x, wp.y) >= BASE_OBSTACLE_CLEARANCE_M - 1e-9
+
+
+def test_doorway_width_crumb_still_selected_when_no_wider_alternative_exists():
+    """Doorway-safety check: inside a 0.9 m corridor (the narrowest doorway width
+    measured across the challenge scene set — see
+    ``tests.nav.test_costmap._corridor_grid``), no point clears
+    BASE_OBSTACLE_CLEARANCE_M anywhere. ``ensure_base_clearance`` must NOT block or
+    discard the crumb in that case (there is nothing better nearby to nudge to) — the
+    follower keeps threading the doorway instead of trading one stall (base clearance
+    refusal) for a worse one (our own crumb selector giving up on a legal passage)."""
+    from tests.nav.test_costmap import _corridor_grid
+
+    grid, n_cols, n_rows = _corridor_grid()
+    cm = Costmap(grid, vehicle_radius_m=0.4)
+    gap_x, _ = grid.cell_to_world(0, n_cols // 2)
+    path = [(gap_x, 0.05 + 0.1 * i) for i in range(n_rows)]  # straight down the corridor
+    f = BreadcrumbFollower(path=path, costmap=cm)
+    wp = f.current((gap_x, 0.05))
+    assert wp is not None
+    assert f.replan_flag is False
+
+
+def test_ensure_base_clearance_returns_point_unchanged_when_no_alternative_exists():
+    """Direct unit check of the fallback behaviour ``ensure_base_clearance`` relies on:
+    no clear alternative nearby -> the original point comes back untouched."""
+    from tests.nav.test_costmap import _corridor_grid
+
+    grid, n_cols, n_rows = _corridor_grid()
+    cm = Costmap(grid, vehicle_radius_m=0.4)
+    point = grid.cell_to_world(n_rows // 2, n_cols // 2)
+    out = ensure_base_clearance(cm, point, pose=point)
+    assert out == point
 
 
 def test_crumb_respects_line_of_sight():
