@@ -33,15 +33,25 @@ Approach (pure numpy, deterministic):
    by a large, angularly-central background surface. Fails open (no candidate
    filtered) for classes with no prior, or when every candidate would be dropped.
 5. **Accept / reject.** If the winning component has < ``min_points`` (default 5)
-   points, the detection is rejected (``None``). Otherwise its point set is passed
-   through a robust per-axis core filter (median +/- ``cfg.outlier_k`` MADs, issue
-   #199) that drops genuine outlier returns (a stray background point chained into
-   the component by the union-find radius) without touching a clean, tightly-bounded
-   cluster — a percentile-rank trim would clip the extreme points of even a clean
-   cluster; a MAD-normalized deviation does not. The core's mean is returned as the
-   centroid (robust centre, not swayed by an asymmetric outlier tail) and the core
-   points are what the caller AABBs, which is what fixes the ~4x volume inflation on
-   brand-new (single-observation) instances downstream.
+   points, the detection is rejected (``None``). Otherwise, IF the component has at
+   least ``cfg.outlier_min_n_for_trim`` points, it is passed through a robust
+   per-axis core filter (median +/- ``cfg.outlier_k`` MADs, issue #199) that drops
+   genuine outlier returns (a stray background point chained into the component by
+   the union-find radius) without touching a clean, tightly-bounded cluster — a
+   percentile-rank trim would clip the extreme points of even a clean cluster; a
+   MAD-normalized deviation does not, PROVIDED there are enough points for the
+   per-axis median/MAD to be a stable estimator. A post-review verifier swept 300+
+   seeds of purely uniform, zero-outlier clusters through this exact filter and
+   found it spuriously trimmed 15-40% of them at n=6-15 (up to ~0.1-0.2 m of
+   spurious centroid shift) — small samples make the MAD noisy enough that its own
+   few most-extreme points can misread as outliers. ``outlier_min_n_for_trim``
+   (measured default 40, see the constant's own comment) gates the filter off
+   below that count, leaving every point exactly as fused. Below the gate, the
+   core's mean IS the plain cluster mean (unchanged from before issue #199); at or
+   above it, the core's mean is the robust centre. Either way the returned points
+   are what the caller AABBs, which is what fixes the ~4x volume inflation on
+   brand-new (single-observation) instances downstream for clusters large enough
+   to trim safely.
 
 The vehicle position is the frustum apex; lidar arrives already in the ``map`` frame
 (``/registered_scan``), so we only need odom to place the apex and (via the ray helper)
@@ -117,15 +127,52 @@ class FusionConfig:
                                         # both clear with a wide margin either side of 0.5,
                                         # so the threshold is not fine-tuned to one case.
     outlier_k: float = 4.5        # issue #199: per-axis median +/- k*MAD core filter
-                                   # applied to the winning component before it is
-                                   # returned. A clean bounded cluster's max deviation
-                                   # normalizes to ~2 MADs (verified for the uniform
-                                   # synthetic fixtures this module's tests use), so 3.5
-                                   # leaves such clusters untouched while still dropping
-                                   # genuine outlier returns chained in by the lateral
-                                   # union-find.
+                                   # applied to the winning component (when it clears
+                                   # outlier_min_n_for_trim below) before it is returned.
+                                   # 4.5 was picked against this module's own uniform
+                                   # test fixtures at n=25-40 (worst observed deviation
+                                   # ~4.0 MADs there). It is NOT a safe margin at small n
+                                   # -- see outlier_min_n_for_trim's comment for the
+                                   # measured failure and why the fix is a count gate,
+                                   # not a still-larger k (a k safe down to n=6 would
+                                   # need to run ~15-18, which stops catching real
+                                   # outliers of any normal size at all).
     outlier_min_mad: float = 0.02  # m; MAD floor so a near-planar axis (real MAD ~0)
                                     # cannot make the filter hypersensitive to noise.
+    outlier_min_n_for_trim: int = 40  # issue #199 (post-review fix): minimum component
+                                       # point count before the robust_core_mask filter
+                                       # runs at all; below it every point is kept
+                                       # (the pre-#199 behaviour). Per-axis median/MAD is
+                                       # a noisy estimator at small n: a verifier swept
+                                       # 300-1000 seeds of purely uniform, zero-outlier
+                                       # clusters through the full fuse_detection
+                                       # pipeline at outlier_k=4.5 and measured spurious
+                                       # trimming at n=6..~50, peaking near 40% at n=7-9
+                                       # and falling roughly monotonically with n:
+                                       #   n:      6     10    15    20    25    30    35    40    50    60
+                                       #   shrunk: 28.7% 25.0% 18.0%  7.4%  3.6%  1.4%  0.9%  0.6%  0.3%  0.0%
+                                       # (first row of six from an initial 300-seed pass;
+                                       # the rest from a follow-up 1000-seed pass). 40 is
+                                       # the count at which the rate is comfortably under
+                                       # 1% (0.6%) with a real safety margin below it, not
+                                       # the exact first zero (noise never cleanly hits
+                                       # zero before ~55-70; chasing literal zero would
+                                       # gate off almost every real single-observation
+                                       # cluster, most of which this module's own tests
+                                       # and the #199 validation battery model at 20-40
+                                       # points -- exact archived per-instance point
+                                       # counts are not recoverable: the debug JSONL this
+                                       # repo archives dumps aabb/n_obs, never raw point
+                                       # counts). A larger, still-useful k for the 18-35
+                                       # "medium" band was considered instead of a flat
+                                       # gate, but the same sweep shows the WORST-CASE
+                                       # per-axis deviation needed to keep clean n=6-15
+                                       # data untouched runs 14-18 MADs -- a k that large
+                                       # would no longer catch a real outlier of any size
+                                       # normally seen, so it buys nothing over simply not
+                                       # trimming there. A graduated k across the medium
+                                       # band remains a reasonable follow-up if evidence
+                                       # later shows the 20-39-point gap matters.
 
 
 DEFAULT_FUSION_CONFIG = FusionConfig()
@@ -440,12 +487,18 @@ def fuse_detection(
     cluster_pts = points[cluster_idx]
     # Issue #199: robust per-axis core filter -- drops genuine outlier returns
     # (e.g. a stray background point chained in by the lateral union-find) without
-    # touching a clean, tightly-bounded cluster; see robust_core_mask. Falls back
-    # to the full component if the core would drop it below min_points (keeps the
-    # accept/reject boundary exactly as documented).
-    core_mask = robust_core_mask(cluster_pts, cfg.outlier_k, cfg.outlier_min_mad)
-    if core_mask.sum() >= cfg.min_points:
-        cluster_pts = cluster_pts[core_mask]
+    # touching a clean, tightly-bounded cluster; see robust_core_mask. Gated on
+    # component size (post-review fix, cfg.outlier_min_n_for_trim): per-axis
+    # median/MAD is too noisy an estimator below that count to trust (see the
+    # field's own comment for the measured spurious-trim rates), so a small
+    # component is returned exactly as clustered, matching this module's
+    # behaviour before issue #199. Falls back to the full component if the core
+    # would drop it below min_points (keeps the accept/reject boundary exactly as
+    # documented).
+    if len(cluster_pts) >= cfg.outlier_min_n_for_trim:
+        core_mask = robust_core_mask(cluster_pts, cfg.outlier_k, cfg.outlier_min_mad)
+        if core_mask.sum() >= cfg.min_points:
+            cluster_pts = cluster_pts[core_mask]
 
     centroid = cluster_pts.mean(axis=0)
     range_m = float(np.linalg.norm(centroid - apex))

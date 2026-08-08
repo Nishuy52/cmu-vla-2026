@@ -172,11 +172,17 @@ TRIM_LO_PCT: float = 2.0
 TRIM_HI_PCT: float = 98.0
 # Issue #199: robust-core pre-filter ahead of the percentile trim above -- see
 # _trimmed_aabb. Mirrors core.perception.fusion.FusionConfig.outlier_k/
-# outlier_min_mad (not wired to the same FusionConfig instance since _fuse's
-# merge path is not itself a FusionConfig consumer; kept numerically identical
-# on purpose).
+# outlier_min_mad/outlier_min_n_for_trim (not wired to the same FusionConfig
+# instance since _fuse's merge path is not itself a FusionConfig consumer; kept
+# numerically identical on purpose).
 OUTLIER_K: float = 4.5
 OUTLIER_MIN_MAD: float = 0.02
+# Issue #199 (post-review fix): below this point count, robust_core_mask is a
+# noisy per-axis median/MAD estimator that spuriously trims clean, zero-outlier
+# clusters (measured 0.6-40% at n=6-50 through the fusion.py pipeline this
+# constant mirrors -- see FusionConfig.outlier_min_n_for_trim's comment for the
+# full curve and why 40, not a lower or a still-higher count, was picked).
+OUTLIER_MIN_N: int = 40
 
 
 def _typo_budget(query: str, candidate: str) -> int:
@@ -605,11 +611,18 @@ def _trimmed_aabb(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     but clean cluster (e.g. the deliberate #104 accumulated-walk fixture) is
     unaffected. Falls back to the full point set if the core would drop it below
     2 points (a percentile trim needs at least that many to be meaningful).
+
+    Issue #199 (post-review fix): the robust-core step above only runs once the
+    cloud clears :data:`OUTLIER_MIN_N` points -- see that constant's comment.
+    Below it, the median/MAD estimator is too noisy to trust and every point
+    goes straight to the percentile trim, matching this function's behaviour
+    before issue #199 (unaffected by this fix either way, since the percentile
+    trim itself is unchanged).
     """
     from core.perception.fusion import robust_core_mask
 
     core = points
-    if len(points) >= 2:
+    if len(points) >= OUTLIER_MIN_N:
         mask = robust_core_mask(points, OUTLIER_K, OUTLIER_MIN_MAD)
         if mask.sum() >= 2:
             core = points[mask]
