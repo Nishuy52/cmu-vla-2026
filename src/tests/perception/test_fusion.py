@@ -405,6 +405,59 @@ def test_robust_core_mask_leaves_clean_uniform_cluster_untouched():
     assert mask.all()
 
 
+def test_small_clean_clusters_never_spuriously_trimmed():
+    """Post-review regression (issue #199): a verifier swept 300-1000 seeds of
+    purely uniform, zero-outlier clusters through this exact pipeline and found
+    robust_core_mask spuriously trimmed 15-40% of them at n=6-15 (up to ~0.1-0.2 m
+    of spurious centroid shift) -- the MAD estimator is too noisy at small n. The
+    fix gates the filter off below FusionConfig.outlier_min_n_for_trim (40); this
+    is the test that would have caught the original defect: for every component
+    size below the gate, EVERY seed's point count and centroid must come through
+    fuse_detection completely unchanged, not just usually.
+
+    Uses ``half=0.1`` (tighter than most of this module's other fixtures'
+    ``half=0.2``), deliberately: at ``half=0.2`` a SEPARATE, unrelated mechanism
+    (``_lateral_components``' union-find splitting a genuinely far corner point
+    into its own sub-min_points component -- correct behaviour, not this issue's
+    defect) can also shrink n_points at small n, which would make this test
+    conflate two different causes. At ``half=0.1`` the cloud's own diagonal never
+    approaches ``cluster_radius`` (0.35 m), confirmed by re-running the sweep with
+    the outlier gate forced permanently open (``outlier_min_n_for_trim=0``): the
+    same 15-40% shrink curve reproduces with zero lateral splits at every n,
+    isolating the regression to robust_core_mask specifically."""
+    det = _front_detection()
+    true_c = np.array([3.0, 0.0, 0.5])
+    n_seeds = 60  # per n -- enough to have caught a 15-40% spurious rate reliably
+    for n in range(6, 16):  # the exact band the verifier measured as worst
+        for seed in range(n_seeds):
+            cloud = _box_cloud(*true_c, half=0.1, n=n, seed=10_000 * n + seed)
+            fused = fuse_detection(det, LidarScan(t=0.0, points=cloud), _odom())
+            assert fused is not None
+            assert fused.n_points == n, (n, seed, fused.n_points)
+            assert np.allclose(fused.centroid, true_c, atol=0.15), (n, seed, fused.centroid)
+
+
+def test_gate_boundary_just_under_and_at_outlier_min_n_for_trim():
+    """Sanity on the gate's own edges: one point count just under
+    ``outlier_min_n_for_trim`` (trim skipped, all points kept) and one at it (trim
+    runs, but a clean cluster still passes through untouched -- the gate changes
+    WHETHER the filter runs, not whether a clean cluster survives it)."""
+    det = _front_detection()
+    true_c = np.array([3.0, 0.0, 0.5])
+    n_below = DEFAULT_FUSION_CONFIG.outlier_min_n_for_trim - 1
+    n_at = DEFAULT_FUSION_CONFIG.outlier_min_n_for_trim
+
+    cloud_below = _box_cloud(*true_c, half=0.1, n=n_below, seed=777)
+    fused_below = fuse_detection(det, LidarScan(t=0.0, points=cloud_below), _odom())
+    assert fused_below is not None
+    assert fused_below.n_points == n_below
+
+    cloud_at = _box_cloud(*true_c, half=0.1, n=n_at, seed=778)
+    fused_at = fuse_detection(det, LidarScan(t=0.0, points=cloud_at), _odom())
+    assert fused_at is not None
+    assert fused_at.n_points == n_at  # clean data -- the now-active filter is still a no-op
+
+
 def test_robust_core_mask_drops_a_genuine_outlier():
     cloud = _box_cloud(3.0, 0.0, 0.5, half=0.15, n=30, seed=98)
     outlier = np.array([[3.0, 0.0, 4.0]], dtype=np.float32)  # 3.5 m off in z alone
