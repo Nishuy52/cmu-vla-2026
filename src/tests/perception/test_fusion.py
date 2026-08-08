@@ -324,6 +324,57 @@ def test_ceiling_luminaire_component_rejected_for_wrong_depth():
     assert fused_no_gate.range_m > 7.0  # the old bug: picked the far decoy
 
 
+def test_stray_chained_points_do_not_disqualify_the_real_component():
+    """Post-review regression (issue #199): a verifier reproduced the depth gate
+    disqualifying a REAL object component over a small minority of stray points
+    chained in by the lateral union-find at an implausible range, handing the win
+    to a uniform, worse-angled but fully plausible decoy. Reproduces that exact
+    shape directly: a tight 20-point real cluster, a realistic continuous chain
+    (each hop < cluster_radius, so it genuinely unions into ONE component the way
+    fusion.py's own docstring warns a sparse far-range surface can) stepping out
+    to 2 individually depth-implausible points, versus a uniform, worse-angled,
+    fully depth-plausible ghost far enough away to stay its own component.
+
+    The old (pre-review) gate used the component's MEAN range -- close to a
+    unanimity test in practice. Passing ``depth_plausible_frac=1.0`` (literal
+    unanimity) reproduces the verifier's failure directly against this module's
+    own code: the real component's minority of implausible points disqualifies
+    it, so the ghost wins on being the only 'plausible' candidate. The shipped
+    default (0.5, a plain majority) must instead keep the real, better-angled
+    component -- its actual plausible fraction here is 28/30 (~0.93), so this
+    demonstrates a wide margin, not a threshold tuned to one case."""
+    det, centre_bearing, centre_elevation, _ = _lamp_frustum()
+    apex = np.zeros(3)
+
+    core = _ray_cloud(apex, centre_bearing, centre_elevation, 1.2, half=0.05, n=20, seed=11)
+    # a continuous chain, each hop 0.3 m (< cluster_radius=0.35) so it unions with
+    # the core into one component; tail 2 of 10 steps clear the ~3.615 m depth
+    # threshold for 'lamp' at this bbox's angular span, the rest stay under it.
+    chain_ranges = np.arange(1.35, 4.2, 0.3)
+    chain = np.vstack([
+        _ray_cloud(apex, centre_bearing, centre_elevation, r, half=0.02, n=1, seed=100 + i)
+        for i, r in enumerate(chain_ranges)
+    ])
+    # uniform, worse-angled ghost -- individually depth-plausible at 2.2 m, but far
+    # enough off both bearing and elevation to stay a separate component and to
+    # lose to the real object on angular deviation whenever the real object is
+    # actually in the candidate pool.
+    ghost = _ray_cloud(
+        apex, centre_bearing + 0.15, centre_elevation + 0.15, 2.2, half=0.08, n=20, seed=50,
+    )
+    scan = LidarScan(t=0.0, points=np.vstack([core, chain, ghost]).astype(np.float32))
+
+    unanimity_cfg = FusionConfig(depth_plausible_frac=1.0)  # the pre-review bug
+    fused_unanimity = fuse_detection(det, scan, _odom(), unanimity_cfg)
+    assert fused_unanimity is not None
+    assert fused_unanimity.range_m > 2.0  # reproduces the verifier's failure: picks the ghost
+
+    fused_default = fuse_detection(det, scan, _odom(), DEFAULT_FUSION_CONFIG)
+    assert fused_default is not None
+    assert fused_default.range_m < 2.0  # majority vote (0.5): keeps the real, near component
+    assert abs(fused_default.centroid[2] - core[:, 2].mean()) < 0.3
+
+
 def test_depth_gate_fails_open_with_no_class_prior():
     """A class absent from dimension_priors must not be second-guessed by the
     depth gate -- the far cluster, exactly on the centre ray, still wins on

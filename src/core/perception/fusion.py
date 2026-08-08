@@ -89,8 +89,8 @@ class FusionConfig:
                                    # spacing at <= max_range=15 m for this lidar's density.
                                    # Known limitation: sparse far-range surfaces can still
                                    # exceed this spacing and over-segment (see report).
-    depth_size_factor: float = 2.5  # issue #199: a component is depth-implausible for
-                                     # its class when mean_range * bbox_angular_span
+    depth_size_factor: float = 2.5  # issue #199: a POINT is depth-implausible for its
+                                     # class when its own range * bbox_angular_span
                                      # exceeds this many multiples of the class's
                                      # dimension-prior typical long axis -- the physical
                                      # size the object would have to be at that range,
@@ -99,6 +99,23 @@ class FusionConfig:
                                      # (typical/min ratios in dimension_priors run
                                      # 1.1-3.2x) while still rejecting a background
                                      # surface many multiples too large to be the object.
+    depth_plausible_frac: float = 0.5  # issue #199 (post-review fix): a COMPONENT is
+                                        # depth-plausible when at least this fraction of
+                                        # its OWN points are individually depth-plausible
+                                        # -- a majority vote, not unanimity. The original
+                                        # cut used the component's MEAN range, which a
+                                        # verifier reproduced failing on a real object
+                                        # component carrying a small minority of stray
+                                        # points chained in by the lateral union-find at
+                                        # an implausible range: those few points still
+                                        # disqualified the whole (mostly-plausible)
+                                        # component, handing the win to a fully-uniform
+                                        # decoy. 0.5 is the plain-majority default; the
+                                        # ceiling-luminaire battery (every point of the
+                                        # decoy implausible, fraction 0.0) and the
+                                        # stray-point regression (fraction ~0.9 plausible)
+                                        # both clear with a wide margin either side of 0.5,
+                                        # so the threshold is not fine-tuned to one case.
     outlier_k: float = 4.5        # issue #199: per-axis median +/- k*MAD core filter
                                    # applied to the winning component before it is
                                    # returned. A clean bounded cluster's max deviation
@@ -262,26 +279,41 @@ def _depth_plausible_mask(
     angular_span: float,
     prior_long_axis: float | None,
     size_factor: float,
+    min_frac: float,
 ) -> np.ndarray:
-    """True for a component whose implied physical size at its mean range is
-    plausible for the class (issue #199).
+    """True for a component whose points are MAJORITY depth-plausible (issue #199,
+    fixed post-review after a verifier reproduction).
 
-    ``mean_range * angular_span`` is the physical footprint an object would need
-    to fill the detection bbox's own angular width if it truly sat at that
-    component's range — a component many multiples past the class's dimension-
-    prior typical long axis is very likely a background surface (e.g. a ceiling
-    luminaire caught deep in the same padded cone as a near table lamp), not the
-    detected object. Fails open (all ``True``) when the class carries no prior.
+    Plausibility starts per POINT, not per component: ``point_range * angular_span``
+    is the physical footprint an object would need to fill the detection bbox's own
+    angular width if it truly sat at that point's own range — a point many multiples
+    past the class's dimension-prior typical long axis is very likely a background
+    return (e.g. a ceiling luminaire caught deep in the same padded cone as a near
+    table lamp), not the detected object.
+
+    A component is then plausible when at least ``min_frac`` of ITS OWN points are
+    individually plausible — a majority vote, not unanimity. The original version of
+    this gate collapsed straight to a per-component mean-range test (mathematically
+    close to a unanimity test in practice: a small minority of far outlier points,
+    exactly the kind the lateral union-find can chain in — see fuse_detection's own
+    outlier-core step just below component selection — could still pull a mostly-
+    plausible component's aggregate over the threshold and disqualify it outright,
+    handing the win to a worse-fitting but internally-uniform decoy). Scoring each
+    point independently and voting fixes that: a component carrying a small stray
+    minority stays plausible on the strength of its majority.
+
+    Fails open (all ``True``) when the class carries no prior.
     """
     n = len(labels)
     if prior_long_axis is None or prior_long_axis <= 0.0:
         return np.ones(n, dtype=bool)
+    point_implied_size = cand_ranges * angular_span
+    point_plausible = point_implied_size <= size_factor * prior_long_axis
     plausible = np.ones(n, dtype=bool)
     for label in np.unique(labels):
         idx = np.nonzero(labels == label)[0]
-        implied_size = float(cand_ranges[idx].mean()) * angular_span
-        if implied_size > size_factor * prior_long_axis:
-            plausible[idx] = False
+        frac_plausible = float(point_plausible[idx].mean())
+        plausible[idx] = frac_plausible >= min_frac
     return plausible
 
 
@@ -305,8 +337,11 @@ def _select_component(
     nearer range. Components below ``min_points`` are ignored.
 
     ``depth_plausible`` (issue #199), a per-point boolean mask aligned with
-    ``cand_pts``/``cand_ranges``, marks candidates whose implied physical size at
-    their range is plausible for the class (see :func:`_depth_plausible_mask`).
+    ``cand_pts``/``cand_ranges``, already carries each COMPONENT's majority-vote
+    depth-plausibility broadcast onto its own points (see
+    :func:`_depth_plausible_mask` — every point of a given component reads the
+    same value, so ``.all()``/``.any()`` over one component's slice agree; ``.all()``
+    is used here as the plain "read this component's own verdict" idiom).
     Implausible components are preferred against ONLY when at least one plausible
     component also clears ``min_points`` — this fails open, so a class with no
     prior (mask all-``True``) or a scene where every candidate reads implausible
@@ -376,11 +411,14 @@ def fuse_detection(
     centre_elevation = (el_lo + el_hi) / 2.0
 
     # Issue #199: depth-plausibility gate ahead of the angular-deviation vote --
-    # a component whose implied size at its range is far past the class's typical
-    # scale (a ceiling luminaire deep in the same padded cone as a near table lamp)
-    # is de-preferred so it cannot out-vote a smaller, correctly-sized component
-    # on angular centrality alone. Read-only use of dimension_priors; fails open
-    # for classes with no prior.
+    # a component whose points are majority far past the class's typical scale at
+    # their own range (a ceiling luminaire deep in the same padded cone as a near
+    # table lamp) is de-preferred so it cannot out-vote a smaller, correctly-sized
+    # component on angular centrality alone. Voted per-point-then-majority (not a
+    # component mean), so a small minority of stray points chained in by the
+    # lateral union-find cannot disqualify an otherwise-plausible component (the
+    # post-review fix — see _depth_plausible_mask). Read-only use of
+    # dimension_priors; fails open for classes with no prior.
     from core.perception.dimension_priors import prior_for  # deferred: avoid import cost when unused
 
     prior = prior_for(det.label)
@@ -388,6 +426,7 @@ def fuse_detection(
     angular_span = max(bearing_span, el_hi - el_lo, 1e-6)
     depth_plausible = _depth_plausible_mask(
         labels, cand_ranges, angular_span, prior_long_axis, cfg.depth_size_factor,
+        cfg.depth_plausible_frac,
     )
 
     local = _select_component(

@@ -216,9 +216,10 @@ def test_field_counts_per_subsystem():
     }
     assert counts == {
         "geometry": 19,  # +3 colour-salience knobs (issues #11/#12), +1 cluster extent-veto (#160)
-        "fusion": 9,  # +1 lateral-clustering radius knob (issue: cone-inflation fix), +3
-                      # centroid/extent-accuracy knobs: depth_size_factor, outlier_k,
-                      # outlier_min_mad (issue #199)
+        "fusion": 10,  # +1 lateral-clustering radius knob (issue: cone-inflation fix), +4
+                       # centroid/extent-accuracy knobs: depth_size_factor,
+                       # depth_plausible_frac, outlier_k, outlier_min_mad (issue #199;
+                       # depth_plausible_frac added in the post-review majority-vote fix)
         "tracker": 8,  # +3 size-aware association knobs (issues #94/#89), +1 extent-veto min-sep floor (#153), +1 extent-growth tolerance (#176), +1 cumulative extent-growth cap (#180)
         "keyframe": 3,
         "nav": 21,
