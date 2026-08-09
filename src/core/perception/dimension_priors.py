@@ -14,9 +14,10 @@ This module supplies the missing clamp: per-class minimum and typical extents, a
   * inflate the single least-observed axis toward the class-typical value, but ONLY
     when the instance signals under-observation (few observations AND a thin
     least-axis relative to the prior), and
-  * (issue #201) cap every axis at :data:`CLAMP_EXTENT_CAP_FACTOR` x the class
-    typical value, so an over-fused/oversized box is also corrected, not just an
-    under-boxed one.
+  * (issue #201) cap every axis at a PER-CLASS cap factor (:attr:`ClassPrior.cap_factor`)
+    x the class typical value, so an over-fused/oversized box is also corrected, not
+    just an under-boxed one -- but only for classes where the cap is trustworthy
+    (see below).
 A well-observed, near-typical, in-bound box is left exactly as measured, so a
 GT-perfect box passes through UNCHANGED.
 
@@ -26,8 +27,24 @@ assumption (single-viewpoint boxes are always under-approximations), but the liv
 #118 measurement found the opposite is the dominant live failure: 11 of 14 scored
 live boxes were LARGER than their GT box, median volume ~4x GT. A max-only clamp
 cannot correct that -- it can only make an already-too-large box larger still.
-The cap below is the two-sided fix; see :func:`clamp_extents` for the exact rule
-and its justification.
+
+A first attempt at the fix used ONE flat cap factor (1.5x typical) for every class.
+A fresh-context verifier REFUTED it against real GT data: real same-class size
+variance differs enormously by class (a "window" ranges from a small pane to a
+floor-to-ceiling glass wall; a "table" from a side table to a dining table), so one
+flat multiplier clips a large fraction of genuinely correct, merely-large real
+instances at the scored marker path -- measured 28.9% of real table instances and
+37.2% of real window instances exceeding a flat 1.5x on their long axis alone. The
+fix is per-class: :data:`_CAP_FACTOR` holds each data-backed class's own
+:func:`numpy.percentile` 95th/median ratio on its long (sorted-rank-2) axis,
+floored at 1.5 (never tighter than the original flat cap) and capped at 6.0 (so one
+outlier scene can't blow a class's cap out to the point of being no cap at all).
+See :func:`clamp_extents` for exactly how it is applied and :attr:`ClassPrior.cap_factor`
+for which classes get one. Classes with NO VLA-3D data behind their prior
+(:data:`_HAND_PRIORS`) or no prior at all keep the ORIGINAL grow-only behaviour --
+no upper cap, exactly as before this issue -- because there is no real-object
+distribution to justify a percentile-derived multiplier for them; guessing one would
+reintroduce the exact false-precision the flat-cap verifier already found.
 
 Extents are stored orientation-invariantly as the sorted (thin, mid, long) axis
 lengths, so a class prior applies regardless of how the instance's AABB happens to
@@ -152,7 +169,11 @@ _DATA_PRIORS: dict[str, tuple[tuple[float, float, float], tuple[float, float, fl
 # "fossil decoration" have only n=2 (single scene) -- thin support, flagged here
 # rather than hidden; still real measured GT geometry, not a guess, and consistent
 # with other single/low-n rows already in this table (e.g. "counter" n=1, "guitar"
-# n=1, "figurine" n=3).
+# n=1, "figurine" n=3). "bedside table" n=2 IS two distinct physical objects, not one
+# object measured twice: hotel_room_1_object_result.csv object_id 72 (y=0.18) and
+# object_id 85 (y=-3.70), ~3.9 m apart -- checked against the raw CSV during the
+# #201 rework, consistent with the #118/#186 evidence trail's own count of 2 real
+# bedside tables in that scene.
 _PHRASE_DATA_PRIORS: dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]] = {
     "bedside table": ((0.651, 0.795, 0.872), (0.651, 0.795, 0.872)),  # n=2, scenes=1
     "beer bottle": ((0.087, 0.088, 0.323), (0.088, 0.089, 0.324)),  # n=4, scenes=2
@@ -176,14 +197,66 @@ _HAND_PRIORS: dict[str, tuple[tuple[float, float, float], tuple[float, float, fl
 }
 
 
+# Issue #201 rework -- PER-CLASS upper-cap multiplier, one float per class whose
+# prior is DATA-backed (every _DATA_PRIORS and _PHRASE_DATA_PRIORS key; never
+# _HAND_PRIORS, which has no GT distribution to derive a percentile from). Computed
+# the same way as _DATA_PRIORS -- same fold, same CSVs -- as the ratio of the class's
+# 95th-percentile LONG (sorted-rank-2) axis extent to its median long axis extent,
+# ``np.clip(p95_long / median_long, 1.5, 6.0)``:
+#   * floored at 1.5 -- never tighter than the original flat cap a fresh verifier
+#     already found too loose for high-variance classes, so this can only ever be
+#     as-loose-or-looser than that starting point, never a NEW source of clipping
+#     for a class the flat cap already tolerated;
+#   * capped at 6.0 -- one extreme scene (e.g. a single floor-to-ceiling "window"
+#     among mostly small panes) cannot blow a class's cap out to where it stops
+#     meaning anything.
+# By construction (95th percentile), at most ~5% of a class's own GT instances sit
+# above its own cap on the long axis -- verified per class in
+# tests/perception/test_dimension_priors.py and reported in the #201 rework notes.
+# A class with n<2 GT rows falls back to the floor (1.5) -- not enough data to
+# estimate a percentile from a single point.
+_CAP_FACTOR: dict[str, float] = {
+    "ball": 2.554, "bed": 1.500, "bench": 1.500, "book": 4.635, "bookcase": 1.500,
+    "bottle": 1.500, "bowl": 1.500, "box": 1.500, "cabinet": 2.226, "can": 1.500,
+    "candle": 1.796, "chair": 2.794, "clock": 2.803, "column": 1.500,
+    "counter": 1.500, "cup": 1.500, "curtain": 1.500, "decal": 1.500,
+    "decoration": 2.719, "door": 1.500, "easel": 1.500, "figurine": 1.500,
+    "fireplace": 1.500, "floor": 2.268, "flower": 2.137, "folder": 1.886,
+    "frame": 1.679, "guitar": 1.500, "holder": 1.500, "hookah": 1.500,
+    "jar": 2.011, "kettle": 1.500, "knife": 1.500, "lamp": 5.009, "lantern": 1.500,
+    "ledge": 1.500, "magazine": 1.500, "map": 1.500, "microwave": 1.500,
+    "mirror": 1.566, "monitor": 1.500, "nightstand": 1.500, "ottoman": 1.500,
+    "painting": 1.655, "phone": 1.835, "picture": 1.756, "pillow": 1.777,
+    "plant": 2.067, "rack": 1.500, "record": 1.500, "refrigerator": 1.500,
+    "remote": 6.000, "screen": 1.500, "shelf": 2.573, "sign": 1.500, "sofa": 1.778,
+    "speaker": 1.959, "stair": 1.500, "stool": 1.500, "suitcase": 1.500,
+    "sushi": 1.500, "table": 2.098, "television": 1.500, "tray": 2.716,
+    "vase": 3.366, "wall": 1.708, "wardrobe": 1.500, "whiteboard": 1.500,
+    "window": 4.821,
+    # _PHRASE_DATA_PRIORS classes (same recipe, literal-label rows, #201 rework):
+    "bedside table": 1.500, "beer bottle": 1.500, "fossil decoration": 1.500,
+    "paper cup": 1.500, "potted plant": 2.067,
+}
+
+
 class ClassPrior:
-    """Sorted-axis (thin, mid, long) minimum and typical extents for a class."""
+    """Sorted-axis (thin, mid, long) minimum and typical extents for a class, plus
+    (issue #201) an optional per-class upper-cap multiplier."""
 
-    __slots__ = ("min_ext", "typ_ext")
+    __slots__ = ("min_ext", "typ_ext", "cap_factor")
 
-    def __init__(self, min_ext: tuple[float, float, float], typ_ext: tuple[float, float, float]) -> None:
+    def __init__(
+        self,
+        min_ext: tuple[float, float, float],
+        typ_ext: tuple[float, float, float],
+        cap_factor: float | None = None,
+    ) -> None:
         self.min_ext = np.asarray(min_ext, dtype=float)
         self.typ_ext = np.asarray(typ_ext, dtype=float)
+        # None => no data-backed distribution to derive a cap from => no upper cap
+        # (issue #201 rework): fail-open, same convention cap_fused_extent (#104)
+        # and the tracker's association/veto guards already use for no-prior classes.
+        self.cap_factor = cap_factor
 
 
 _PRIOR_CACHE: dict[str, ClassPrior] = {}
@@ -197,14 +270,22 @@ def prior_for(label: str) -> ClassPrior | None:
     intersections -- all three are keyed by the same normalised-label surface, so a
     class present in more than one table would take the more-general/older one first
     only because dict lookup order below is fixed; today no class appears twice.
+
+    Issue #201: ``cap_factor`` is set from :data:`_CAP_FACTOR` ONLY for a class found
+    in ``_DATA_PRIORS`` or ``_PHRASE_DATA_PRIORS`` (real GT extents behind it) --
+    ``_HAND_PRIORS`` classes get ``cap_factor=None`` unconditionally, deliberately,
+    however present-looking their ``_CAP_FACTOR`` entry might otherwise be (there is
+    none for hand-curated classes: no GT distribution exists to derive one from).
     """
     key = normalize_label(label)
     if key in _PRIOR_CACHE:
         return _PRIOR_CACHE[key]
+    data_backed = key in _DATA_PRIORS or key in _PHRASE_DATA_PRIORS
     row = _DATA_PRIORS.get(key) or _PHRASE_DATA_PRIORS.get(key) or _HAND_PRIORS.get(key)
     if row is None:
         return None
-    cp = ClassPrior(row[0], row[1])
+    cap_factor = _CAP_FACTOR.get(key) if data_backed else None
+    cp = ClassPrior(row[0], row[1], cap_factor)
     _PRIOR_CACHE[key] = cp
     return cp
 
@@ -358,38 +439,40 @@ def clamp_extents(
       2. clamp each ranked extent up to the class-min;
       3. if the instance is under-observed (:func:`_underobserved`), inflate the
          thinnest (least-observed) ranked axis up to the class-typical value;
-      4. (issue #201) cap each ranked extent DOWN at :data:`FUSE_EXTENT_CAP_FACTOR`
-         x the class-typical value;
+      4. (issue #201) IF the class has a per-class cap factor
+         (:attr:`ClassPrior.cap_factor` is not None), cap each ranked extent DOWN
+         at ``cap_factor x`` the class-typical value;
       5. distribute the per-rank deltas back onto the original axes.
 
     Returns ``extents`` unchanged (a copy) when no prior exists for the class. A box
-    already at/above class-min, at/below the step-4 cap, and (if under-observed)
-    already at/above class-typical on its thinnest axis is returned identical to the
-    input — the named GT-passthrough invariant.
+    already at/above class-min, at/below the step-4 cap (or the class has none), and
+    (if under-observed) already at/above class-typical on its thinnest axis is
+    returned identical to the input — the named GT-passthrough invariant.
 
     Issue #201: step 4 is new. The original clamp only ever grew a box (``np.maximum``
     against the class-min, step 2, plus the conditional inflate, step 3) -- its
     docstring assumed the dominant live error was an UNDER-box. The #118 live
     measurement found the opposite: 11 of 14 scored live boxes were LARGER than GT,
     median volume ~4x GT (a ~1.59x per-axis error if isotropic, cube-root of 4). A
-    max-only clamp cannot correct that; it can only make it worse. Step 4 caps each
-    ranked axis at the SAME multiple, :data:`FUSE_EXTENT_CAP_FACTOR` (1.5x typical),
-    that :func:`cap_fused_extent` (issue #104) already uses to backstop a fuse's
-    RESULT -- reused rather than a new constant so the same InstanceRecord is judged
-    by one consistent size rule everywhere the two-sided cap applies, not two
-    slightly-different ones layered on top of each other. That factor is itself
-    justified against the underlying VLA-3D distribution: measured across every
-    data-backed class with n>=5 instances, the per-axis ratio of the class's 90th-
-    percentile extent to its median (typical) extent has a median of ~1.4-1.6 across
-    classes (and a median max/median ratio of ~1.7-1.9) -- so 1.5x typical sits close
-    to the P90 of genuine same-class size variation: loose enough that a real,
-    legitimately-larger-than-median instance of a class is rarely clipped, tight
-    enough to decisively correct a ~4x-volume (~1.59x-per-axis) oversize fuse, the
-    exact failure #118 measured. Applied AFTER the min-clamp/inflate (steps 2-3) so
-    the two directions cannot fight (the cap is always >= the min for every class in
-    this table, since typical >= min-10th-pct by construction); a class with no prior
-    is unaffected (falls through the ``prior is None`` guard above, matching
-    :func:`cap_fused_extent`'s fail-open convention).
+    max-only clamp cannot correct that; it can only make it worse.
+
+    Step 4's cap is PER-CLASS, not a flat constant (:data:`_CAP_FACTOR`, derived
+    from the same VLA-3D GT distribution as the prior itself: the class's own P95/
+    median ratio on its long axis, floored at 1.5, capped at 6.0 -- see the module
+    docstring and :data:`_CAP_FACTOR`'s comment for the full derivation and why a
+    single flat multiplier (an earlier version of this fix) was refuted by real
+    data: real same-class size variance differs by an order of magnitude between
+    classes (a "window" legitimately spans a small pane to a floor-to-ceiling glass
+    wall; a "table" a side table to a dining table), so one flat cap either clips a
+    large fraction of genuinely correct large real instances of a high-variance
+    class, or is too loose to correct anything for a low-variance one. A class
+    without a data-backed distribution (``cap_factor is None``: :data:`_HAND_PRIORS`
+    classes, or no prior at all) is left grow-only, exactly as before this issue --
+    guessing a multiplier with nothing to measure it against would reintroduce
+    the same false-precision problem, just for classes with even less evidence.
+    Step 4 is applied AFTER the min-clamp/inflate (steps 2-3) so the two directions
+    cannot fight (every data-backed class's cap is >= its min, since a P95/median
+    ratio floored at 1.5 is always >= min-ext/typ-ext by construction).
     """
     ext = np.asarray(extents, dtype=float).copy()
     prior = prior_for(label)
@@ -403,9 +486,11 @@ def clamp_extents(
     if _underobserved(sorted_ext, prior, n_obs):
         # step 3: pull the thinnest (least-observed) axis toward typical.
         adjusted[0] = max(adjusted[0], prior.typ_ext[0])
-    # step 4: cap every ranked axis down at FUSE_EXTENT_CAP_FACTOR x typical -- the
-    # two-sided half of the clamp (issue #201).
-    adjusted = np.minimum(adjusted, FUSE_EXTENT_CAP_FACTOR * prior.typ_ext)
+    if prior.cap_factor is not None:
+        # step 4: cap every ranked axis down at the class's own cap factor x
+        # typical -- the two-sided half of the clamp (issue #201), skipped
+        # entirely (fail-open) for a class with no data-backed distribution.
+        adjusted = np.minimum(adjusted, prior.cap_factor * prior.typ_ext)
 
     # step 5: map ranked deltas back onto original axes.
     out = ext.copy()
