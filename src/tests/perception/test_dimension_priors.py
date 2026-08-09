@@ -1,5 +1,17 @@
-"""Per-class dimension priors (H12 / OR-F6): min-clamp, under-obs inflate, GT passthrough."""
+"""Per-class dimension priors (H12 / OR-F6): min-clamp, under-obs inflate, GT passthrough.
+
+Issue #201: a marker-time upper cap (grow-AND-shrink) was designed, implemented in
+three successively refined versions, measured against real GT instances each time,
+and REJECTED before shipping -- clamp_extents stays GROW-ONLY. See the module
+docstring in core.perception.dimension_priors for the full history. The recorded
+per-class per-axis cap-factor metadata (_CAP_FACTOR / ClassPrior.cap_factor) is
+kept as diagnosis data; this file both verifies that metadata loads correctly AND
+pins that nothing in the live clamp path reads it.
+"""
 from __future__ import annotations
+
+import ast
+import inspect
 
 import numpy as np
 
@@ -99,23 +111,27 @@ def test_thin_underbox_clamped_to_class_min():
 
 def test_clamp_preserves_axis_assignment():
     # thin axis is y here; after clamp the y axis (not x) should be the one grown.
-    # x=0.60 sits between every pillow class-min rank and pillow's #201 per-AXIS
-    # long-rank cap (cap_factor[-1] 1.777 x typical-long 0.528 = 0.938), so it must
-    # stay put -- only y (thin, under min) moves.
-    out = clamp_extents(np.array([0.60, 0.01, 0.50]), "pillow", n_obs=3)
+    # x=0.90 is above every pillow class-min rank, so it must stay put.
+    out = clamp_extents(np.array([0.90, 0.01, 0.50]), "pillow", n_obs=3)
     assert out[1] >= _DATA_PRIORS["pillow"][0][0] - 1e-9  # thin y axis lifted
-    assert out[0] == 0.60  # largest axis unchanged (already in [min, cap] for its rank)
+    assert out[0] == 0.90  # largest axis unchanged (already above its rank min)
 
 
-def test_oversized_axis_capped_preserves_other_axis_assignment():
-    # Issue #201: the mirror case -- x is now the OVERSIZED axis (well past
-    # pillow's own per-axis long-rank cap, 0.938 m), y is thin (under min). Both
-    # directions must apply to their own axis only.
+def test_grossly_oversized_axis_is_not_capped_grow_only_by_design():
+    # Issue #201: a marker-time upper cap (grow-AND-shrink) was built, measured
+    # against real GT instances, and REJECTED -- it clipped 10-21% of real
+    # instances on some axis for every high-variance class measured (table,
+    # window, sofa, shelf, chair) against a measured score upside of only +0.04
+    # points for the whole cap concept (see core.perception.dimension_priors's
+    # module docstring, "Issue #201" section, for the full clip-rate table and
+    # the decision). x here (1.50 m) is far past what any of the three rejected
+    # cap designs would have allowed for pillow's long rank -- it must still pass
+    # through UNTOUCHED: clamp_extents is grow-only, y (thin, under min) is the
+    # only axis that moves.
     out = clamp_extents(np.array([1.50, 0.01, 0.50]), "pillow", n_obs=3)
     prior = prior_for("pillow")
     assert out[1] >= prior.min_ext[0] - 1e-9  # thin y axis lifted toward min
-    assert out[0] < 1.50  # oversized x axis capped down
-    assert out[0] <= prior.cap_factor[-1] * prior.typ_ext[-1] + 1e-9
+    assert out[0] == 1.50  # oversized x axis passes through unchanged, NOT capped
 
 
 def test_no_prior_returns_input_unchanged():
@@ -252,30 +268,44 @@ def test_gt_record_marker_equals_raw_marker():
     assert (m.cx, m.cy, m.cz) == (raw.cx, raw.cy, raw.cz)
 
 
-# --------------------------------------------------------------- issue #201: two-sided cap
+# --------------------------------------------------------------- issue #201: upper cap
+# MEASURED AND REJECTED. clamp_extents stays GROW-ONLY.
 #
-# Rework note (round 2): a fresh verifier REFUTED TWO earlier versions of this fix
-# against real GT data. Round 1: one flat 1.5x-typical cap for every class clipped
-# 28.9% of real table instances and 37.2% of real window instances on their long
-# axis alone, because real same-class size variance differs by an order of
-# magnitude between classes. Round 2: one scalar PER CLASS (long-axis P95/median)
-# fixed that but still clipped 27.9% of real window instances on SOME axis, because
-# one axis's variance cannot bound another, independently-varying axis. The cap is
-# now PER-CLASS AND PER-AXIS (:data:`_CAP_FACTOR`, a (thin, mid, long) triple, each
-# rank's own P95/median ratio, floored 1.5, capped 6.0); see the module docstring
-# and :data:`_CAP_FACTOR`'s comment.
+# Three cap designs were built and measured against real GT instances in turn, and
+# every one clipped a material fraction of otherwise-correct real answer boxes at
+# the scored marker path, against a measured score upside (the #118 diagnosis that
+# motivated this whole issue, applying a two-sided clamp directly to the published
+# marker) of only +0.04 points:
+#
+#   design                         | worst measured any-axis real-instance clip rate
+#   ------------------------------ | -------------------------------------------------
+#   1. flat 1.5x, every class      | 48.8% (window), 36.8% (table), on the long axis
+#   2. one scalar per class        | 27.9% (window), any axis
+#   3. one triple per class+axis   | 10-21% (table/window/sofa/shelf/chair), any axis
+#
+# Negative expected value at every tier; the underlying oversize error is a FUSION
+# defect and is treated at its cause (#199's component selection and outlier-core
+# filtering), not papered over at the marker seam. See the module docstring in
+# core.perception.dimension_priors, "Issue #201" section, for the full history.
+#
+# The per-class, per-axis cap-factor RESEARCH (:data:`_CAP_FACTOR`,
+# :attr:`ClassPrior.cap_factor`) is kept as recorded diagnosis metadata for any
+# FUTURE fusion-side use -- it still loads correctly (verified below) -- but
+# :func:`clamp_extents` must never read it, which the source-inspection test below
+# pins directly against the function body, not just its observed behaviour.
 
-def test_cap_factor_loads_as_a_per_axis_triple_for_data_backed_classes():
-    # Every _DATA_PRIORS / _PHRASE_DATA_PRIORS class has a (thin, mid, long) cap
-    # factor triple, each rank in [1.5, 6.0].
+def test_cap_factor_metadata_still_loads_as_a_per_axis_triple():
+    # Recorded diagnosis data, NOT a live parameter (see section note above): every
+    # _DATA_PRIORS / _PHRASE_DATA_PRIORS class still carries a (thin, mid, long)
+    # cap factor triple, each rank in [1.5, 6.0], for any future fusion-side use.
     for label in {**_DATA_PRIORS, **_PHRASE_DATA_PRIORS}:
         prior = prior_for(label)
         assert prior.cap_factor is not None, label
         assert prior.cap_factor.shape == (3,), label
         assert np.all((1.5 <= prior.cap_factor) & (prior.cap_factor <= 6.0)), label
 
-    # _HAND_PRIORS classes (no GT distribution) get NO cap -- fail-open, exactly
-    # as the pre-#201 grow-only clamp behaved for every class.
+    # _HAND_PRIORS classes (no GT distribution) get NO cap_factor at all -- there
+    # was never a distribution to measure one from.
     for label in _HAND_PRIORS:
         prior = prior_for(label)
         assert prior.cap_factor is None, label
@@ -285,124 +315,127 @@ def test_cap_factor_loads_as_a_per_axis_triple_for_data_backed_classes():
 
 
 def test_cap_factor_table_matches_prior_for():
-    # _CAP_FACTOR is the single source of truth prior_for() reads from.
+    # _CAP_FACTOR is the single source of truth prior_for() reads the metadata from.
     for label, expected in _CAP_FACTOR.items():
         assert np.allclose(prior_for(label).cap_factor, expected), label
 
 
-def test_window_cap_factor_axes_differ_from_each_other():
-    # The whole point of the round-2 rework: window's three ranks do NOT share one
-    # ratio (thin varies far more than long) -- a single scalar could not express
-    # this, which is exactly what made round 1's per-class-scalar cap leak on
-    # window's thin/mid axes.
-    prior = prior_for("window")
-    assert prior.cap_factor[0] != prior.cap_factor[-1]
+def test_clamp_extents_never_reads_cap_factor():
+    """Source-inspection pin (issue #201): clamp_extents must NEVER apply the
+    recorded cap_factor metadata to a box, however tempting re-adding a shrink
+    step might look later. Walks clamp_extents' own AST for any ``.cap_factor``
+    attribute access -- independent of comments/docstrings, so a future edit
+    that quietly re-wires the function trips this even if nobody updates prose.
+    If this test ever needs to change, re-read the rejection history in the
+    module docstring first: a marker-time upper cap was measured at 10-21%
+    any-axis clipping of real GT instances for every high-variance class, against
+    a measured +0.04 point score upside for the whole cap concept, and rejected.
+    """
+    src = inspect.getsource(clamp_extents)
+    tree = ast.parse(src)
+    hits = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "cap_factor"
+    ]
+    assert not hits, "clamp_extents reads .cap_factor -- issue #201 rejected this design"
 
 
-def test_low_variance_class_oversized_box_still_capped_toward_typical():
-    # #118: 11 of 14 live boxes were TOO LARGE, median ~4x GT volume. nightstand is
-    # a genuinely LOW-variance class (every rank of cap_factor sits at the 1.5
-    # floor, n=12): an over-fused nightstand (each axis ~4x typical) must still be
-    # capped.
+def test_grossly_oversized_low_variance_class_box_passes_through_uncapped():
+    """A marker-time upper cap for nightstand (a genuinely LOW-variance class,
+    every rank of the recorded cap_factor sits at the 1.5 floor) was measured
+    against real GT instances and rejected along with every other class's cap
+    (see the section note above: 10-21% any-axis clip rate on high-variance
+    classes, +0.04 points total upside). #118 measured 11 of 14 live boxes too
+    LARGE (median ~4x GT volume); a grossly over-fused nightstand (each axis 4x
+    typical) is exactly that failure mode, and it now passes through
+    clamp_extents completely UNTOUCHED -- this is the deliberate, documented
+    absence of a fix, not an oversight.
+    """
     prior = prior_for("nightstand")
-    assert np.allclose(prior.cap_factor, 1.5)  # precondition: floor-capped on every rank
+    assert np.allclose(prior.cap_factor, 1.5)  # precondition: recorded floor on every rank
     typ = prior.typ_ext
     bloated = typ * 4.0
     out = clamp_extents(bloated, "nightstand", n_obs=3)
-    cap = prior.cap_factor * np.sort(typ)
-    assert np.all(np.sort(out) <= cap + 1e-9)
-    assert np.all(out < bloated)  # actually shrunk, not just left alone
+    assert np.allclose(np.sort(out), np.sort(bloated))  # unchanged -- NOT capped
 
 
-def test_high_variance_class_still_corrects_a_grossly_oversized_box():
-    # chair turned out NOT to be a low-variance class in the real data on its LONG
-    # axis (a genuine 2.93 m-long "chair"-labelled GT asset repeats 6x in
-    # home_building_1, pushing chair's long-axis P95/median to 2.794 -- higher than
-    # the flat cap this issue started from), while its thin/mid axes stay at the
-    # 1.5 floor. The per-axis cap still corrects an EXTREME oversize on every axis
-    # (well past even chair's own higher long-axis cap), just tolerates more real
-    # long-axis variance first.
+def test_grossly_oversized_high_variance_class_box_also_passes_through_uncapped():
+    """Same as above for chair -- a genuine 2.93 m-long "chair"-labelled GT asset
+    repeats 6x in home_building_1, pushing chair's recorded long-axis cap_factor
+    to 2.794 (higher than the rejected flat-1.5x design's own value). Even a box
+    8x chair's typical extent on every axis passes through UNTOUCHED: there is no
+    ceiling of any kind left in the live path, high-variance or not.
+    """
     prior = prior_for("chair")
-    assert prior.cap_factor[-1] > 2.5  # precondition: chair's long rank is NOT floor-capped
+    assert prior.cap_factor[-1] > 2.5  # precondition: chair's recorded long rank is not floor-capped
     typ = prior.typ_ext
-    bloated = typ * 8.0  # well past chair's own (higher) cap on every rank
+    bloated = typ * 8.0
     out = clamp_extents(bloated, "chair", n_obs=3)
-    cap = prior.cap_factor * np.sort(typ)
-    assert np.all(np.sort(out) <= cap + 1e-9)
-    assert np.all(out < bloated)
+    assert np.allclose(np.sort(out), np.sort(bloated))  # unchanged -- NOT capped
 
 
-def test_real_large_table_instance_passes_unclipped_on_all_three_axes():
-    # A REAL GT table instance (data/vla3d/Unity/*/*_object_result.csv, sorted
-    # (thin, mid, long) extents) that a flat 1.5x cap WOULD have clipped (its long
-    # axis is ~1.80x the class median) must now pass through clamp_extents
-    # untouched on EVERY axis -- this is exactly the case the flat-cap verifier
-    # refuted.
+def test_real_large_table_instance_passes_unclipped_regression_guard():
+    """Trivial by construction now (clamp_extents never clips anything) -- kept as
+    a regression guard, not a design proof: this is a REAL GT table instance
+    (data/vla3d/Unity/*/*_object_result.csv, sorted (thin, mid, long) extents,
+    long axis ~1.80x the class median) that every one of the three rejected cap
+    designs would have clipped to some degree. If a future change re-adds any
+    upper cap to clamp_extents and this test starts failing, that is the signal
+    to re-read the module docstring's "Issue #201" section (three designs
+    measured, 10-49% real-instance clip rates depending on tier, +0.04 points
+    total measured upside) before shipping it again.
+    """
     real_table = np.array([0.80515512, 1.10492237, 2.27493666])
-    prior = prior_for("table")
-    cap_vec = prior.cap_factor * prior.typ_ext
-    assert np.all(real_table <= cap_vec + 1e-6)  # precondition: in bound on all 3 ranks
     out = clamp_extents(real_table, "table", n_obs=3)
     assert np.allclose(np.sort(out), real_table, atol=1e-6)
 
 
-def test_real_large_window_instance_passes_unclipped_on_all_three_axes():
-    # Likewise for window, the class the round-1 (long-axis-only) cap refutation
-    # centred on: a real GT window with a long axis ~4.37x the class median (badly
-    # clipped by a flat 1.5x cap, and previously at risk from a per-class-scalar
-    # cap too) is untouched now on ALL THREE axes -- thin, mid, AND long.
+def test_real_large_window_instance_passes_unclipped_regression_guard():
+    """Same as above for window, the class the cap refutation centred on at every
+    tier (48.8% flat-cap, 27.9% per-class-scalar, 20.9% per-axis any-axis clip
+    rate on real instances). Trivial now by construction; kept as the regression
+    guard for the highest-variance class in the table. See the module docstring's
+    "Issue #201" section before re-adding any upper cap.
+    """
     real_window = np.array([0.11500040, 4.17200059, 7.22500070])
-    prior = prior_for("window")
-    cap_vec = prior.cap_factor * prior.typ_ext
-    assert np.all(real_window <= cap_vec + 1e-6)  # precondition: in bound on all 3 ranks
     out = clamp_extents(real_window, "window", n_obs=3)
     assert np.allclose(np.sort(out), real_window, atol=1e-6)
 
 
-def test_undersized_box_still_inflated_two_sided_cap_does_not_fight_it():
-    # The pre-existing under-box behaviour (steps 2-3) must be unaffected by the new
-    # upper cap: an under-observed thin pillow is still inflated toward typical.
+def test_undersized_box_inflated_with_no_upper_bound_anywhere():
+    # Grow-only means exactly that: an under-observed thin pillow is still
+    # inflated toward typical (unchanged pre-#201 behaviour), and there is no
+    # upper bound anywhere in clamp_extents to interact with it.
     prior = prior_for("pillow")
     out = clamp_extents(np.array([0.01, 0.30, 0.40]), "pillow", n_obs=1)
     assert min(out) >= prior.typ_ext[0] - 1e-9
-    assert np.all(np.sort(out) <= prior.cap_factor * prior.typ_ext + 1e-9)
 
 
-def test_in_range_box_untouched_by_two_sided_clamp():
-    # A box sitting between class-min and the class's own cap, well-observed: true
-    # no-op, same GT-passthrough invariant the min-only clamp already guaranteed.
+def test_in_range_box_untouched():
+    # A box sitting between class-min and typical, well-observed: true no-op, the
+    # named GT-passthrough invariant.
     prior = prior_for("chair")
-    mid = (prior.min_ext + prior.typ_ext) / 2.0  # between min and typical < cap
+    mid = (prior.min_ext + prior.typ_ext) / 2.0
     out = clamp_extents(mid, "chair", n_obs=5)
     assert np.allclose(np.sort(out), mid)
 
 
-def test_cap_applied_after_min_clamp_and_inflate_no_conflict():
-    # Every DATA-backed class's cap is >= its min (a P95/median ratio floored at
-    # 1.5 is always >= min-ext/typ-ext, since min <= typ by construction): the two
-    # directions of the clamp can never fight for any class in the table.
-    for label in {**_DATA_PRIORS, **_PHRASE_DATA_PRIORS}:
-        prior = prior_for(label)
-        assert np.all(prior.min_ext <= prior.cap_factor * prior.typ_ext), label
-
-
-def test_cap_fused_extent_stays_flat_1_5x_unaffected_by_the_per_class_rework():
-    # cap_fused_extent (#104, fuse time) was NOT part of the flat-cap refutation
-    # (it acts on live fused boxes mid-pipeline, not the scored answer marker) and
-    # keeps its own flat FUSE_EXTENT_CAP_FACTOR unconditionally -- verify it still
-    # does, so a reader does not assume the #201 per-class cap silently propagated
-    # there too.
+def test_cap_fused_extent_unaffected_by_the_rejected_marker_time_cap():
+    # cap_fused_extent (#104, fuse time) is a DIFFERENT function on a different
+    # part of the pipeline (live fused boxes mid-pipeline, not the scored answer
+    # marker) and was never part of the #201 refutation -- it keeps its own flat
+    # FUSE_EXTENT_CAP_FACTOR unconditionally. clamp_extents (marker time) applies
+    # NO cap at all now, so re-running it over an already fuse-capped box is
+    # always a pure no-op, for every class, regardless of that class's recorded
+    # (unused) cap_factor.
     from core.perception.dimension_priors import cap_fused_extent
 
-    typ = np.array(_DATA_PRIORS["window"][1])  # window: highest per-class cap (4.82)
+    typ = np.array(_DATA_PRIORS["window"][1])
     lo = np.array([0.0, 0.0, 0.0])
     hi = lo + typ * 5.0  # 5x typical -- well past cap_fused_extent's flat 1.5x
     capped_lo, capped_hi = cap_fused_extent(lo, hi, "window")
     capped_ext = np.sort(capped_hi - capped_lo)
     assert np.allclose(capped_ext, FUSE_EXTENT_CAP_FACTOR * np.sort(typ), atol=1e-6)
-    # ...but clamp_extents applied to that SAME result uses window's own (looser)
-    # per-class cap, so it is a true no-op here -- the fuse-time cap already left
-    # the box well inside the marker-time cap.
     reclamped = clamp_extents(capped_hi - capped_lo, "window", n_obs=3)
     assert np.allclose(np.sort(reclamped), capped_ext, atol=1e-6)
 
