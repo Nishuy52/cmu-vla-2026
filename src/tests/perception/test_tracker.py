@@ -407,6 +407,39 @@ def test_pipeline_raw_dump_records_gated_detection(monkeypatch, tmp_path):
     assert record["by_class"]["window"] == {"total": 1, "accepted": 0, "gated": 1}
 
 
+def test_raw_detections_count_multiple_records_per_one_keyframe_increment(monkeypatch, tmp_path):
+    """Issue #211 counter note: ``keyframes_processed`` (``pipe._keyframe_idx``) counts
+    PROCESSED FRAMES — it increments exactly once per ``process()`` call that passes
+    the keyframe gate — while ``dump_raw_detections`` writes one JSONL row per RAW
+    per-tile detection CANDIDATE that same call produced. A frame with several boxes
+    therefore writes several raw_detections rows against a single keyframes_processed
+    increment: the two counters diverging (raw_detections > keyframes_processed) is
+    the expected shape of frame-level vs detection-level granularity, not a dropped
+    frame or a queue bug."""
+    import json
+
+    from core.perception.detector import ENV_RAW_DETECTION_DUMP_PATH
+
+    out = tmp_path / "raw.jsonl"
+    monkeypatch.setenv(ENV_RAW_DETECTION_DUMP_PATH, str(out))
+    # Three detections (different labels, same tile/frustum) fused against the same
+    # lidar cluster -> one keyframe, three raw detection candidates.
+    dets = [_front_det("sofa"), _front_det("chair"), _front_det("lamp")]
+    pipe = PerceptionPipeline(FakeDetector(dets), keyframe_cfg=KeyframeConfig(every_k=1))
+    img = np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8)
+    scan = LidarScan(t=0.0, points=_box_cloud(3.0, 0.0, 0.5))
+
+    pipe.process(PanoFrame(0.0, img, _odom()), scan)
+    assert pipe._keyframe_idx == 1  # exactly one processed-frame increment
+
+    lines = out.read_text().strip().splitlines()
+    assert len(lines) == 1  # one dump_raw_detections call (one JSONL record) this frame
+    record = json.loads(lines[0])
+    assert record["keyframe_idx"] == 0  # the pre-increment value dump_raw_detections sees
+    assert record["total_detections"] == 3  # but THREE raw detection candidates inside it
+    assert {d["label"] for d in record["detections"]} == {"sofa", "chair", "lamp"}
+
+
 def test_pipeline_does_not_dump_raw_detections_without_env_var(monkeypatch, tmp_path):
     from core.perception.detector import ENV_RAW_DETECTION_DUMP_PATH
 

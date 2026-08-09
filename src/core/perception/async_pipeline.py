@@ -45,11 +45,33 @@ nothing can escape and end the thread from a single frame's fault; (2)
 liveness on every call and restarts a dead thread (bounded, see
 ``max_restarts``), logging loudly with the triggering exception, instead of
 silently dropping every future frame.
+
+Issue #211 "map ingestion must never wait on detection": the caller (the adapter's
+5 Hz tick, see ``ros_adapter.adapter_node._maybe_process_perception``) only ever
+calls :meth:`submit`, never anything that blocks on ``pipeline.process()`` -- so
+whatever ELSE that same tick does (waypoint publication, occupancy-grid ingestion
+from ``/terrain_map``, which lives entirely in the qtype heads and never touches
+this module or ``PerceptionPipeline``) is unaffected by how slow the detector is.
+This was already true structurally before #211 (traced and confirmed: occupancy
+ingestion is not, and was never, gated by this worker's completion); #211 adds the
+missing OBSERVABILITY half of that guarantee -- :attr:`dropped_count` and
+:attr:`in_flight_age_s` make the keep-latest / bounded-lag policy legible instead of
+only inferable, and the counter distinction below resolves #211's own "keyframes_
+processed disagrees with raw_detections record counts" question: they were never
+supposed to agree -- :attr:`keyframes_processed` (this module) / ``_keyframe_idx``
+(:class:`~core.perception.tracker.PerceptionPipeline`) counts frames that
+completed the full detect -> fuse -> associate pipeline (one increment per
+keyframe-gated ``process()`` call); ``core.perception.detector.dump_raw_detections``
+writes one JSONL row per RAW per-tile detection candidate within that SAME call
+(often several per frame -- one tile can yield multiple boxes) -- so raw_detections
+having more rows than keyframes_processed has increments is the expected shape of
+two counters at different granularities, not evidence of a queue drop.
 """
 from __future__ import annotations
 
 import logging
 import threading
+import time
 import traceback
 from typing import Callable
 
@@ -84,15 +106,29 @@ class AsyncPerceptionWorker:
         pipeline: PerceptionPipeline,
         on_error: Callable[[Exception], None] | None = None,
         max_restarts: int = DEFAULT_MAX_RESTARTS,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._pipeline = pipeline
         self._on_error = on_error
         self._max_restarts = max_restarts
+        self._clock = clock
         self._cv = threading.Condition()
         self._pending: tuple[PanoFrame, LidarScan] | None = None
+        # Issue #211: wall time (this clock's units) the worker started the forward it
+        # is CURRENTLY inside, or None while idle -- the direct answer to "how long has
+        # detection been behind" (bounded-lag visibility for the keep-latest policy).
+        # Deliberately NOT keyed off `_pending`: a new frame arrives (and overwrites
+        # `_pending`) every tick regardless of backlog, so a pending-based timestamp
+        # would reset every ~0.2s and hide a genuinely stuck forward.
+        self._in_flight_since: float | None = None
         self._stopped = False
         self._processed_count = 0
         self._submitted_count = 0
+        # Issue #211: frames overwritten by a fresher `submit()` before the worker ever
+        # started them -- the keep-latest policy's cost, made countable instead of only
+        # inferable from submitted_count - processed_count (which also includes any
+        # frame still pending or in flight).
+        self._dropped_count = 0
         self._restart_count = 0
         self._last_error: BaseException | None = None
         self._thread = self._spawn_thread()
@@ -117,6 +153,10 @@ class AsyncPerceptionWorker:
             if self._stopped:
                 return
             self._restart_if_dead_locked()
+            if self._pending is not None:
+                # A still-unpicked-up frame is being overwritten: this is the keep-
+                # latest policy actually paying its cost (issue #211 observability).
+                self._dropped_count += 1
             self._pending = (pano, scan)
             self._submitted_count += 1
             self._cv.notify()
@@ -157,6 +197,27 @@ class AsyncPerceptionWorker:
             return self._submitted_count
 
     @property
+    def dropped_count(self) -> int:
+        """Issue #211: frames overwritten in the pending slot before the worker ever
+        started them (the keep-latest policy's cost). ``submitted_count ==
+        processed_count + dropped_count + (1 if a frame is pending or in flight else
+        0)`` at any instant -- the three counters partition every submitted frame."""
+        with self._cv:
+            return self._dropped_count
+
+    @property
+    def in_flight_age_s(self) -> float | None:
+        """Issue #211: seconds since the worker started the forward it is CURRENTLY
+        running, or ``None`` while idle. This is the direct "how far behind is
+        detection" signal -- unlike a pending-frame timestamp (which a new submission
+        refreshes every tick regardless of backlog), this only changes when the worker
+        actually finishes or starts a forward, so a stuck/slow detector shows up as a
+        steadily growing value instead of being masked by tick cadence."""
+        with self._cv:
+            since = self._in_flight_since
+        return None if since is None else max(0.0, self._clock() - since)
+
+    @property
     def is_alive(self) -> bool:
         return self._thread.is_alive()
 
@@ -189,6 +250,7 @@ class AsyncPerceptionWorker:
                     return
                 pano, scan = self._pending
                 self._pending = None
+                self._in_flight_since = self._clock()
             try:
                 self._pipeline.process(pano, scan)
             except Exception as exc:  # a perception glitch must never kill the worker
@@ -201,6 +263,7 @@ class AsyncPerceptionWorker:
                 self._safe_on_error(exc)
             with self._cv:
                 self._processed_count += 1
+                self._in_flight_since = None
 
     def _safe_on_error(self, exc: Exception) -> None:
         """Call the caller's ``on_error`` hook without letting IT kill the worker.

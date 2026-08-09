@@ -2612,3 +2612,78 @@ prediction on #202 is explicit: the next repeat must show a higher
 mean AND churn below 7 of 18, or the variance has another source.
 
 **Next:** the proof sweep on this tree.
+
+---
+
+## 2026-08-10 — Issue #211: trace the map-ingestion regression
+
+**Diagnosis.** Occupancy ingestion (scan and pose into the grid) lives in
+the qtype heads (`core/heads/explore_step.py`, `core/heads/instruction.py`).
+Each head reads `io.latest_terrain()` and `io.latest_scan()` on every
+`controller.tick()` call. This path does not use
+`PerceptionPipeline` or `AsyncPerceptionWorker`. The trace shows this
+was true before and after #200: map ingestion does not wait on
+detection. The #211 report's numbers stay real; the report's proposed
+cause (map ingestion routed through the detector) is not present in
+the code.
+
+**Counter check.** `keyframes_processed` counts processed FRAMES: one
+increment per `PerceptionPipeline.process()` call that passes the
+keyframe gate. `raw_detections` writes one JSONL row per raw per-tile
+detection CANDIDATE inside that same call. A frame with several boxes
+writes several raw rows against one keyframe increment. The gap
+between the two counters (6 vs. 27 in the report) is the expected
+shape of frame-level against detection-level counting, not a dropped
+frame.
+
+**Change.** `core/perception/async_pipeline.py` gains two new,
+tested properties on `AsyncPerceptionWorker`: `dropped_count` (frames
+overwritten in the pending slot before the worker started them) and
+`in_flight_age_s` (seconds since the worker started its current
+forward pass, `None` while idle). `ros_adapter/adapter_node.py` wires
+a rate-limited `_check_perception_backlog` log line off
+`in_flight_age_s` into `_on_tick`, so a live run's detector backlog is
+visible in the node log instead of only reconstructable after the
+fact. `core/perception/tracker.py` gains a docstring note on the
+counter-granularity finding above.
+
+**Tests.** New coverage in `tests/perception/test_async_pipeline.py`,
+`tests/perception/test_tracker.py`, a new
+`tests/ros_adapter/test_ingestion_independent.py` (source-inspection
+guard: `_maybe_process_perception` must never reference
+grid/occupancy/terrain state), and a new
+`tests/heads/test_issue_211_ingestion_independent.py` (behavioural:
+`ExploreHead`'s grid gains FREE cells across ticks while a real
+`AsyncPerceptionWorker` sits permanently stuck on its first forward).
+Full fast tier: 2087 passed, 33 skipped.
+
+**Next:** confirm live, on the next cluster sweep, that explore-entry
+free-cell count returns to the pre-#200 range. If it does not, the
+regression's mechanism is not a code-level wait on detection (this
+trace found none) but CPU/GIL contention between the worker thread's
+now-from-boot GDINO forwards and the tick thread — worth a live
+profiling pass before further code changes chase it blind.
+
+**Update (same day).** Added the mitigation the CPU/GIL hypothesis
+predicts: `ros_adapter/adapter_node.py` now throttles PRE-LATCH
+detection dispatch (`PRE_LATCH_DETECT_EVERY`, `_maybe_process_
+perception`). Before the question latches, only one in N arriving
+frames reaches the perception worker; every frame still dispatches
+once latched, unchanged. N must set an interval at least as long as
+the measured 4-15 s per-forward cost, or the worker never actually
+goes idle between forwards and the throttle buys nothing — the
+original proposed N=8 (1.6 s at 5 Hz) falls short of that bar; N=50
+(10.0 s) does not. `FrameWatchdog.on_frame()` stays fed from
+`_on_image`, independent of this throttle, so a frame skipped for
+detection still counts as arrived. New tests in
+`tests/ros_adapter/test_ingestion_independent.py` check the interval
+math, the skip formula, and the watchdog independence. Full run:
+`pytest tests/perception/ tests/ros_adapter/ tests/nav/ tests/heads/`
+→ 1178 passed, 6 skipped, 20 deselected.
+
+The live sweep after merge is still the actual test of the CPU/GIL
+hypothesis: explore-entry keyframes toward 19-50, free cells toward
+the old range, and the vehicle moving again. A null result there
+means GIL contention is not the (whole) mechanism either, and the
+next step is a live profiling pass (sample the tick thread's actual
+Hz during a boot-primed run) rather than another blind mitigation.
