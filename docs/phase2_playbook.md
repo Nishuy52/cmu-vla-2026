@@ -90,6 +90,13 @@ Marker IoU tightness second, counting thresholds last.
 `instances_tracked > 0` on a live scene (Gate 4 hard gate — no empty-stub index), `VLA_DETECTOR`
 set to a real detector, and no `SUBMISSION-BLOCKER` lines in the boot log.**
 
+**Snapshot packaging (10 Aug 2026):** `SUBMISSION_SNAPSHOT.md` at the repo root records the
+pinned commit, the one-command build and smoke test, and the manual fork-push/tag/form steps
+for the final freeze push. The packaging in `docker/ai_module_fork/` was audited against this
+commit and found current — no code, dependency, or env-var gap; only two stale in-file comments
+were corrected. The `instances_tracked > 0` and `SUBMISSION-BLOCKER` checks above still need a
+live GPU sim run — packaging review alone cannot confirm them.
+
 ## If something is on fire
 
 - Stock sim broken → upstream issue, check gotchas 13 (CycloneDDS) / scene binary perms first

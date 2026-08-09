@@ -324,6 +324,20 @@ on `/numerical_response` at latch+~219 s.
 it and emits a legal answer on the matching topic). Keys unset ⇒ the parse ladder runs
 local/regex only (offline).
 
+**Submission packaging audit (10 Aug 2026, `SUBMISSION_SNAPSHOT.md`):** checked the fork
+packaging against the tree at commit `253cf3c` (the vehicle-wedge fix stack). Result: the
+Dockerfile and `sync_to_fork.sh` already copy the whole `src/` tree, so files added since 19
+Jul (`core/nav/` additions, `core/perception/fusion.py`, `ros_adapter/frame_watchdog.py`) need
+no Dockerfile change; a full import scan found no new pip dependency; `VLA_DETECTOR=grounding_dino`
+and the perception/LLM bake are already enabled, not commented out. Two stale comments were
+corrected (`src/ros_adapter/setup.py`, the Dockerfile's Ollama-prune confirm-on-Ubuntu flag).
+Dependency pins re-resolved live against PyPI with no break; the GDINO checkpoint and Ollama
+tarball URLs were confirmed live with matching sizes. A full `docker build` attempt in the
+sandbox this audit ran in stalled on container network egress (the base image's own
+`apt-get update` alone exceeded 8 minutes) and was stopped before completing — see
+`SUBMISSION_SNAPSHOT.md` for the exact command to finish the build on this machine, where
+container egress is normal.
+
 ## 8. GPU sizing note
 
 Evaluation (sim round) runs our container on the organisers' machine — plan VRAM for the RTX 4090

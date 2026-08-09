@@ -6,13 +6,14 @@ entry point ``adapter_node`` so the launch file can do ``executable='adapter_nod
 launch dir installed to share/ so ``ros2 launch vla_ai_module ai_module.launch.py`` resolves —
 the same ``ros2 launch <pkg> <file>`` shape the dummy uses.
 
-NOTE (untested draft): this package's modules are ``ros_adapter`` and ``core`` living under
-``src/`` (this dir's parent). The Docker image puts ``src/`` on PYTHONPATH (docker/ai_module/
-Dockerfile) so both ``import core`` and ``import ros_adapter`` resolve at runtime. ``colcon
-build`` from the workspace with this package produces the ``adapter_node`` console script; if
-colcon cannot see ``core`` at build time the entry point still installs (import is lazy at
-run). confirm on Ubuntu that ``ros2 run vla_ai_module adapter_node`` resolves ``core`` — if
-not, add ``src`` to PYTHONPATH in the launch file's environment or pip-install vla-core.
+This package's modules are ``ros_adapter`` and ``core`` living under
+``src/`` (this dir's parent). The submission Docker image puts ``src/`` on PYTHONPATH
+(docker/ai_module_fork/docker/Dockerfile — the fork-shaped packaging; the old
+docker/ai_module/Dockerfile is deprecated) so both ``import core`` and ``import
+ros_adapter`` resolve at runtime. ``colcon build`` from the workspace with this package
+produces the ``adapter_node`` console script; colcon does not see ``core`` at build
+time and does not need to (the entry point resolves it lazily on PYTHONPATH at run
+time) — confirmed working on Ubuntu (docs/ubuntu_setup.md §7a).
 """
 from setuptools import setup
 
