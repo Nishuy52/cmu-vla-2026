@@ -1736,11 +1736,13 @@ def _leg_probe_rows(
     driven: np.ndarray,
     gt_traj_xy: np.ndarray | None,
 ) -> list[dict]:
-    """Per-leg probe diagnostics (issue #59): OUR resolved goal/instance, how far our
-    OWN driven path fell short of that goal, and how far our goal sits from the GT
-    reference path — split failure into wrong-instance/leg-mismatch (goal far from the
-    GT path) vs stop-point/planning offset (goal is near the GT path but our own driven
-    trajectory never gets close to it).
+    """Per-leg probe diagnostics (issue #59): the RUBRIC's resolved goal/instance (built
+    over GROUND-TRUTH instances, not the system's own pick -- see issue #204; the
+    system's own pick is in the #198 relaxation_audit dump), how far our OWN driven
+    path fell short of that goal, and how far our goal sits from the GT reference path
+    — split failure into wrong-instance/leg-mismatch (goal far from the GT path) vs
+    stop-point/planning offset (goal is near the GT path but our own driven trajectory
+    never gets close to it).
     """
     rows: list[dict] = []
     for i, (kind, goal) in enumerate(leg_goals):
@@ -1749,11 +1751,19 @@ def _leg_probe_rows(
         dist_gt_path = (
             _min_dist_to_polyline(goal, gt_traj_xy) if gt_traj_xy is not None else None
         )
+        rubric_goal_xy = [float(goal[0]), float(goal[1])]
+        rubric_instance_id = list(iid) if iid is not None else None
         rows.append({
             "i": i,
             "kind": kind,
-            "our_goal": [float(goal[0]), float(goal[1])],
-            "our_instance_id": list(iid) if iid is not None else None,
+            # rubric_goal_xy/rubric_instance_id: these are the ground-truth rubric
+            # targets (issue #204), not the system's own resolved answer. our_goal/
+            # our_instance_id are kept as duplicate aliases for one release of
+            # back-compat and should not be read by new code.
+            "rubric_goal_xy": rubric_goal_xy,
+            "rubric_instance_id": rubric_instance_id,
+            "our_goal": rubric_goal_xy,
+            "our_instance_id": rubric_instance_id,
             "min_dist_driven_to_goal_m": (
                 round(dist_driven, 4) if dist_driven is not None else None
             ),

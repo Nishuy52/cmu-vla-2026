@@ -420,6 +420,10 @@ def test_score_instruction_following_run_emits_live_leg_structures(monkeypatch, 
     }
     assert len(result["leg_probe"]) == 2
     probe0 = result["leg_probe"][0]
+    # issue #204: rubric_goal_xy/rubric_instance_id are the new names; our_goal/
+    # our_instance_id are pinned too during the one-release back-compat window.
+    assert probe0["rubric_goal_xy"] == [1.0, 2.0]
+    assert probe0["rubric_instance_id"] == [11]
     assert probe0["our_goal"] == [1.0, 2.0]
     assert probe0["our_instance_id"] == [11]
     assert "min_dist_driven_to_goal_m" in probe0
