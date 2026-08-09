@@ -251,11 +251,11 @@ RUN apt-get update -qq && \
 #     the driver on both the dev 4060 and the eval 4090 (Phase-0 measured cuda_v13 selected
 #     against driver 13.2) plus the cpu fallback (so the container degrades instead of
 #     hard-failing to start if a GPU is ever unavailable at runtime). Everything else is deleted.
-#     confirm on Ubuntu (flag 4 of 4, Phase 3): this build cannot run here (GPU wedged pending
-#     reboot, per session constraint) — the `find`/`ls` line below prints the actual extracted
-#     tree to the build log specifically so the first post-reboot build can eyeball it BEFORE
-#     trusting the prune glob; if the runner directory names differ from cuda_v13/cpu*, fix the
-#     `case` pattern before relying on this layer.
+#     CONFIRMED on Ubuntu (flag 4 of 4, Phase 3, first real build 19 Jul): the extracted tree
+#     matched cuda_v13/cpu* as expected; the prune kept the right runners and the measured
+#     image size (~28.1 GB total) landed in the predicted band. The `find`/`ls` line below still
+#     prints the extracted tree to the build log so a future Ollama version bump can be checked
+#     against this same evidence before trusting the prune glob again.
 RUN mkdir -p /opt/vla/ollama && \
     curl -fSL --retry 3 -o /tmp/ollama.tar.zst \
       "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst" && \
