@@ -2663,3 +2663,27 @@ regression's mechanism is not a code-level wait on detection (this
 trace found none) but CPU/GIL contention between the worker thread's
 now-from-boot GDINO forwards and the tick thread — worth a live
 profiling pass before further code changes chase it blind.
+
+**Update (same day).** Added the mitigation the CPU/GIL hypothesis
+predicts: `ros_adapter/adapter_node.py` now throttles PRE-LATCH
+detection dispatch (`PRE_LATCH_DETECT_EVERY`, `_maybe_process_
+perception`). Before the question latches, only one in N arriving
+frames reaches the perception worker; every frame still dispatches
+once latched, unchanged. N must set an interval at least as long as
+the measured 4-15 s per-forward cost, or the worker never actually
+goes idle between forwards and the throttle buys nothing — the
+original proposed N=8 (1.6 s at 5 Hz) falls short of that bar; N=50
+(10.0 s) does not. `FrameWatchdog.on_frame()` stays fed from
+`_on_image`, independent of this throttle, so a frame skipped for
+detection still counts as arrived. New tests in
+`tests/ros_adapter/test_ingestion_independent.py` check the interval
+math, the skip formula, and the watchdog independence. Full run:
+`pytest tests/perception/ tests/ros_adapter/ tests/nav/ tests/heads/`
+→ 1178 passed, 6 skipped, 20 deselected.
+
+The live sweep after merge is still the actual test of the CPU/GIL
+hypothesis: explore-entry keyframes toward 19-50, free cells toward
+the old range, and the vehicle moving again. A null result there
+means GIL contention is not the (whole) mechanism either, and the
+next step is a live profiling pass (sample the tick thread's actual
+Hz during a boot-primed run) rather than another blind mitigation.

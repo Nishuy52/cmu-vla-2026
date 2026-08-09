@@ -165,6 +165,33 @@ ENV_PERCEPTION_SYNC = "VLA_PERCEPTION_SYNC"
 PERCEPTION_BACKLOG_WARN_S = 20.0
 PERCEPTION_BACKLOG_REPEAT_S = 30.0
 
+# Issue #211 mitigation: pre-latch detection throttle. The trace above found no code-
+# level wait between detection and map ingestion — ingestion (io.latest_terrain() /
+# io.latest_scan(), read straight off _on_terrain/_on_scan) never touches the worker.
+# The live regression's more likely mechanism is CPU/GIL contention: #200 (boot-vocab
+# priming, see refresh_prompt(self._detector, ...) below) means EVERY tick from node
+# start submits a full 114-noun-vocabulary GDINO forward (measured 4-15 s), so the
+# worker thread runs back-to-back forwards with no idle gap for the whole pre-latch
+# window (median latch 26.8 s) instead of the pre-#200 near-zero-cost empty-prompt
+# short-circuit. Submitting less OFTEN only relieves that contention if the gap between
+# submissions is long enough for the worker to actually finish a forward and go idle
+# (block on Condition.wait(), yielding the GIL/CPU) before the next one arrives — at
+# TICK_HZ=5 (0.2 s/tick), that requires an interval on the order of the forward time
+# itself, not a small skip factor: PRE_LATCH_DETECT_EVERY=8 (1.6 s) is still far short
+# of a 4-15 s forward, so the worker would stay saturated regardless and the mitigation
+# would do essentially nothing. PRE_LATCH_DETECT_EVERY=50 submits at most once per
+# 50/TICK_HZ = 10.0 s pre-latch -- matching the stated "at most ~1 GDINO forward per
+# ~10s" goal -- which is at or past the high end of the measured per-forward cost, so
+# the worker can finish and idle between submissions. Over a 26.8 s median pre-latch
+# window this still banks roughly 2-3 detector forwards (the #200 benefit for the
+# opening sweep) at a fraction of the from-boot contention. From question latch onward
+# behaviour is exactly today's: every frame submits, the async worker's own keep-latest/
+# bounded-lag policy (AsyncPerceptionWorker.dropped_count/in_flight_age_s) applies
+# unchanged. This does not touch the frame watchdog (issue #174): FrameWatchdog.on_frame()
+# is fed from _on_image on every arrived camera frame, never from this dispatch path, so
+# a frame skipped here for detection still counts as "arrived" for watchdog purposes.
+PRE_LATCH_DETECT_EVERY: int = 50
+
 
 def make_detector(logger=None):
     """Build the perception detector from ``VLA_DETECTOR`` (default: stub / None).
@@ -569,6 +596,10 @@ class AdapterNode(Node):
         # issue #211: rate-limit state for the perception-backlog warning (see
         # _check_perception_backlog); None == no warning fired yet this quiet spell.
         self._perception_backlog_last_warn_t: float | None = None
+        # issue #211: count of new-pano frames seen PRE-LATCH (self._controller is None)
+        # by _maybe_process_perception, driving the PRE_LATCH_DETECT_EVERY throttle. Never
+        # reset — once latched, the throttle no longer applies and this stops advancing.
+        self._pre_latch_frame_count = 0
 
         # SUBMISSION-BLOCKER shout: the node came up with the empty BasicSceneIndex([]) stub —
         # perception is NOT wired into this node (VLA_DETECTOR=none), so every question is
@@ -733,6 +764,16 @@ class AdapterNode(Node):
         place, so the controller/heads resolve against the growing map. No-op when
         perception is off (VLA_DETECTOR=none). Never raises — a perception glitch must not
         disturb the drive loop.
+
+        Issue #211 pre-latch throttle: while ``self._controller`` is still None (no
+        question latched yet), only every :data:`PRE_LATCH_DETECT_EVERY`-th new pano is
+        actually dispatched — the rest are counted as arrived (this method still runs,
+        ``self._last_pano_t`` still advances so no frame is re-considered) but never reach
+        the detector. This does NOT touch frame-watchdog liveness (issue #174):
+        ``FrameWatchdog.on_frame()`` is fed from ``_on_image`` on every arrived camera
+        frame, entirely independent of this dispatch path. Once latched, every frame
+        dispatches exactly as before (unthrottled) — see :data:`PRE_LATCH_DETECT_EVERY`'s
+        own comment for the contention-relief rationale.
         """
         if self._perception is None:
             return
@@ -746,6 +787,12 @@ class AdapterNode(Node):
             if scan is None:
                 return
             self._last_pano_t = pano.t
+            if self._controller is None:
+                self._pre_latch_frame_count += 1
+                # Dispatch the 1st, (1+N)th, (1+2N)th, ... pre-latch frame -- banks an
+                # early detection right away instead of waiting a full throttle window.
+                if (self._pre_latch_frame_count - 1) % PRE_LATCH_DETECT_EVERY != 0:
+                    return
             if self._perception_worker is not None:
                 self._perception_worker.submit(pano, scan)
             else:

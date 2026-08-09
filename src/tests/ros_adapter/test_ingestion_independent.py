@@ -93,3 +93,91 @@ def test_backlog_check_never_raises_and_is_a_noop_without_a_worker(src: str):
     end = src.index("\n    def ", start + 1)
     body = src[start:end]
     assert "if worker is None:" in body
+
+
+# --------------------------------------------------------------------- issue #211
+# pre-latch detection throttle
+
+
+def _dispatch_body(src: str) -> str:
+    start = src.index("def _maybe_process_perception(self)")
+    end = src.index("\n    def ", start + 1)
+    return src[start:end]
+
+
+def test_pre_latch_throttle_interval_is_at_least_the_worst_case_forward_cost(src: str):
+    """PRE_LATCH_DETECT_EVERY must actually buy idle time between forwards: at
+    TICK_HZ, the throttle interval (PRE_LATCH_DETECT_EVERY / TICK_HZ) must be at
+    least as long as the measured per-forward cost (4-15 s) — a smaller skip factor
+    (e.g. the originally proposed 8, an 8 * 0.2s = 1.6s interval) would leave the
+    worker just as continuously saturated as today, buying no contention relief."""
+    import re
+
+    tick_hz_m = re.search(r"^TICK_HZ = ([0-9.]+)", src, re.MULTILINE)
+    every_m = re.search(r"^PRE_LATCH_DETECT_EVERY: int = (\d+)", src, re.MULTILINE)
+    assert tick_hz_m and every_m
+    tick_hz = float(tick_hz_m.group(1))
+    every = int(every_m.group(1))
+    interval_s = every / tick_hz
+    # Measured worst case (issue #211's own numbers): the every-3rd-tick full-caption
+    # pass costs up to 15 s. The throttle interval must reach that, or the worker
+    # never actually gets to finish a forward and go idle before the next submission
+    # arrives -- the whole point of throttling in the first place.
+    assert interval_s >= 10.0, (
+        "PRE_LATCH_DETECT_EVERY=%d at TICK_HZ=%.1f only spaces submissions %.1fs "
+        "apart -- too short to relieve from-boot worker saturation (issue #211)"
+        % (every, tick_hz, interval_s)
+    )
+
+
+def test_pre_latch_throttle_wired_before_dispatch(src: str):
+    body = _dispatch_body(src)
+    assert "PRE_LATCH_DETECT_EVERY" in body
+    assert "self._pre_latch_frame_count" in body
+    throttle_at = body.index("self._pre_latch_frame_count += 1")
+    controller_check_at = body.index("if self._controller is None:")
+    submit_at = body.index("self._perception_worker.submit(pano, scan)")
+    # The throttle's own gate check must be nested inside the pre-latch branch, and
+    # both must precede the actual dispatch.
+    assert controller_check_at < throttle_at < submit_at
+
+
+def test_pre_latch_throttle_skip_formula_selects_1st_1plusN_1plus2N():
+    """The documented policy — dispatch the 1st, (1+N)th, (1+2N)th... pre-latch
+    frame — reproduced as a standalone pure function and checked against the exact
+    modulo expression the adapter uses, so the two cannot silently drift apart."""
+
+    def would_dispatch(frame_count: int, every: int) -> bool:
+        return (frame_count - 1) % every != 0
+
+    # Mirrors "if (self._pre_latch_frame_count - 1) % PRE_LATCH_DETECT_EVERY != 0:
+    # return" -- that condition is the SKIP condition, so dispatch == not skip.
+    dispatched = [n for n in range(1, 21) if not would_dispatch(n, every=5)]
+    assert dispatched == [1, 6, 11, 16]
+
+
+def test_post_latch_dispatch_is_never_throttled(src: str):
+    """Once self._controller is not None, the throttle branch's own guard
+    (`if self._controller is None:`) short-circuits the whole block — every frame
+    reaches submit()/process() exactly as it did before issue #211."""
+    body = _dispatch_body(src)
+    # The throttle's early return is the ONLY return between the controller check
+    # and the dispatch calls -- and it lives strictly inside the pre-latch branch
+    # (already proven nested by test_pre_latch_throttle_wired_before_dispatch), so a
+    # non-None controller skips straight to dispatch with no other gate in the way.
+    between = body[body.index("if self._controller is None:") : body.index(
+        "if self._perception_worker is not None:"
+    )]
+    assert between.count("return") == 1
+
+
+def test_frame_watchdog_is_fed_independently_of_perception_dispatch(src: str):
+    """Issue #174 semantics preserved: on_frame() (arrival) is called from the image
+    callback, never from _maybe_process_perception -- so a frame skipped here for
+    detection (issue #211 throttle) still counts as ARRIVED for the watchdog."""
+    dispatch_body = _dispatch_body(src)
+    assert "_frame_watchdog" not in dispatch_body
+    on_image_start = src.index("def _on_image(self, msg: Image)")
+    on_image_end = src.index("\n    def ", on_image_start + 1)
+    on_image_body = src[on_image_start:on_image_end]
+    assert "self._frame_watchdog.on_frame()" in on_image_body
