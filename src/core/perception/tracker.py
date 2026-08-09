@@ -726,6 +726,16 @@ class PerceptionPipeline:
         )
 
         if dump_raw:
+            # Issue #211 counter note: this call writes ONE JSONL ROW PER RAW PER-TILE
+            # DETECTION CANDIDATE this single process() call produced (raw_records, built
+            # above -- one entry per Detection before/after the lidar-cluster gate), while
+            # `self._keyframe_idx` below increments ONCE per process() call that reaches
+            # this point (i.e. once per keyframe-gated FRAME). A frame with several boxes
+            # across its tiles writes several raw_detections rows for that ONE keyframe
+            # increment, so raw_detections having more records than keyframes_processed
+            # has increments is the expected shape of two counters at different
+            # granularities (frame vs per-detection), not a queue drop -- see
+            # AsyncPerceptionWorker's module docstring for the full #211 accounting.
             # Back-fill the instance id each accepted detection landed in: associate()
             # returns `touched` in fused_dets order, and raw_records' GATE_ACCEPTED
             # entries were appended in that exact same order above.

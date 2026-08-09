@@ -156,6 +156,15 @@ ENV_CAMERA_COMPRESSED = "VLA_CAMERA_COMPRESSED"
 # (core.runner.single) never imports this module, so it is unaffected either way.
 ENV_PERCEPTION_SYNC = "VLA_PERCEPTION_SYNC"
 
+# Issue #211: the async worker (AsyncPerceptionWorker) never blocks the tick thread, so a
+# slow/backlogged detector cannot stall waypoint publication or occupancy-grid ingestion
+# (both live in the qtype heads and never touch this worker) — but a detector stuck this
+# long on one forward is still worth a loud, rate-limited log line, the same observability
+# contract as FrameWatchdog above, so a live run's own backlog is diagnosable instead of
+# only inferable after the fact from keyframes_processed.
+PERCEPTION_BACKLOG_WARN_S = 20.0
+PERCEPTION_BACKLOG_REPEAT_S = 30.0
+
 
 def make_detector(logger=None):
     """Build the perception detector from ``VLA_DETECTOR`` (default: stub / None).
@@ -557,6 +566,9 @@ class AdapterNode(Node):
         self._waypoint_count = 0
         self._waypoint_count_last_log = time.monotonic()
         self._done_events_logged = False
+        # issue #211: rate-limit state for the perception-backlog warning (see
+        # _check_perception_backlog); None == no warning fired yet this quiet spell.
+        self._perception_backlog_last_warn_t: float | None = None
 
         # SUBMISSION-BLOCKER shout: the node came up with the empty BasicSceneIndex([]) stub —
         # perception is NOT wired into this node (VLA_DETECTOR=none), so every question is
@@ -758,6 +770,36 @@ class AdapterNode(Node):
         except Exception as exc:  # a watchdog glitch must never disturb the drive loop
             self.get_logger().error("frame watchdog error: %s" % exc)
 
+    # ------------------------------------------------------------------ observability (issue #211)
+    def _check_perception_backlog(self) -> None:
+        """Log a loud, rate-limited warning when the async perception worker has been
+        stuck on one forward for a long time. Pure observability — the worker never
+        blocks the tick thread (map ingestion and waypoint publication proceed
+        regardless), so this cannot itself be the cause of a stalled drive loop; it
+        exists so a live run's own detector backlog is visible in the node log instead
+        of only reconstructable after the fact from keyframes_processed. Never raises.
+        """
+        worker = self._perception_worker
+        if worker is None:
+            return
+        try:
+            age = worker.in_flight_age_s
+            if age is None or age < PERCEPTION_BACKLOG_WARN_S:
+                return
+            now = time.monotonic()
+            last_warn = self._perception_backlog_last_warn_t
+            if last_warn is not None and (now - last_warn) < PERCEPTION_BACKLOG_REPEAT_S:
+                return
+            self._perception_backlog_last_warn_t = now
+            self.get_logger().warning(
+                "perception backlog: the detector has been mid-forward for %.1fs "
+                "(dropped=%d, submitted=%d, processed=%d); map ingestion and driving "
+                "are unaffected (issue #211) but detections are stale."
+                % (age, worker.dropped_count, worker.submitted_count, worker.processed_count)
+            )
+        except Exception as exc:  # a diagnostics glitch must never disturb the drive loop
+            self.get_logger().error("perception backlog check error: %s" % exc)
+
     # ------------------------------------------------------------------ observability (issue #60)
     def _controller_logger(self, level: str, msg: str) -> None:
         """QuestionController's injected logger callback: transitions INFO, swallowed WARN."""
@@ -793,6 +835,7 @@ class AdapterNode(Node):
             # already populated by the time the controller starts resolving.
             self._maybe_process_perception()
             self._check_frame_watchdog()
+            self._check_perception_backlog()
             if self._controller is None:
                 if self.question() is None:
                     return  # no question yet — nothing to drive

@@ -17,8 +17,11 @@ import numpy as np
 import pytest
 
 from core.interfaces import InstanceRecord, LidarScan, OdomState, PanoFrame
+from core.perception import tiling as T
 from core.perception.async_pipeline import AsyncPerceptionWorker
+from core.perception.detector import Detection, FakeDetector
 from core.perception.scene_index import BasicSceneIndex
+from core.perception.tracker import KeyframeConfig, PerceptionPipeline
 
 TICK_HZ = 5.0
 TICK_PERIOD_S = 1.0 / TICK_HZ
@@ -338,6 +341,195 @@ def test_worker_crash_triggers_bounded_restart_and_counter_stays_readable(monkey
         "restarted worker did not resume processing frames: %r" % pipeline.calls
     )
     assert worker.restart_count == 1
+
+
+# --------------------------------------------------------------------- issue #211 counters
+
+
+def test_dropped_count_tracks_overwritten_pending_frames():
+    """dropped_count counts frames overwritten in the pending slot before the worker
+    ever started them -- the keep-latest policy's cost, made countable."""
+    pipeline = _SlowFakePipeline(forward_s=0.3)
+    worker = AsyncPerceptionWorker(pipeline)
+    try:
+        worker.submit(_pano(0.0), _scan(0.0))
+        time.sleep(0.02)  # worker picks frame 0 up and is mid-forward
+        assert worker.dropped_count == 0
+        worker.submit(_pano(1.0), _scan(1.0))  # overwrites nothing pending yet -> queued
+        worker.submit(_pano(2.0), _scan(2.0))  # overwrites frame 1 -> dropped
+        worker.submit(_pano(3.0), _scan(3.0))  # overwrites frame 2 -> dropped
+        time.sleep(0.5)
+    finally:
+        worker.stop()
+    assert pipeline.calls == [0.0, 3.0]
+    assert worker.dropped_count == 2
+    # Every submitted frame is accounted for: processed, dropped, or (none, here,
+    # since the worker drained to idle) still pending/in flight.
+    assert worker.submitted_count == worker.processed_count + worker.dropped_count
+
+
+class _BlockingPipeline:
+    """process() blocks on an Event instead of sleeping — lets a test hold a forward
+    open indefinitely without actually burning wall time."""
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self.started = threading.Event()
+
+    def process(self, pano: PanoFrame, scan: LidarScan) -> list[int]:
+        self.started.set()
+        self.release.wait()
+        return []
+
+
+def test_in_flight_age_s_grows_during_a_slow_forward_and_clears_when_idle():
+    """in_flight_age_s is the direct backlog signal: it must be None while idle, grow
+    monotonically while the worker is mid-forward (NOT reset by fresh submissions —
+    those only touch the pending slot), and clear back to None once the forward
+    completes."""
+    clock = {"t": 0.0}
+    pipeline = _BlockingPipeline()
+    worker = AsyncPerceptionWorker(pipeline, clock=lambda: clock["t"])
+    try:
+        assert worker.in_flight_age_s is None  # idle: nothing submitted yet
+        worker.submit(_pano(0.0), _scan(0.0))
+        assert pipeline.started.wait(timeout=2.0), "worker never entered in-flight state"
+        assert worker.in_flight_age_s is not None
+
+        clock["t"] = 5.0
+        assert worker.in_flight_age_s == pytest.approx(5.0)
+        # A fresh submission (a new tick's frame arriving) must NOT reset the in-flight
+        # clock -- the worker is still busy with the OLD forward; the new frame just
+        # waits in the pending slot.
+        worker.submit(_pano(1.0), _scan(1.0))
+        clock["t"] = 9.0
+        assert worker.in_flight_age_s == pytest.approx(9.0)
+    finally:
+        pipeline.release.set()
+        worker.stop(timeout=2.0)
+
+
+def test_in_flight_age_s_clears_once_the_forward_completes():
+    pipeline = _SlowFakePipeline(forward_s=0.1)
+    worker = AsyncPerceptionWorker(pipeline)
+    try:
+        worker.submit(_pano(0.0), _scan(0.0))
+        time.sleep(0.02)
+        assert worker.in_flight_age_s is not None
+        time.sleep(0.3)  # forward_s=0.1 has long since completed
+        assert worker.in_flight_age_s is None
+    finally:
+        worker.stop()
+
+
+# --------------------------------------------------------------------- issue #211 non-blocking
+
+
+def test_submit_stays_fast_even_under_a_deep_multi_frame_backlog():
+    """Issue #211: whatever ELSE the caller's tick does after submit() (occupancy-grid
+    ingestion, waypoint publication — neither of which lives in this module, both live
+    in the qtype heads reading io.latest_terrain()/latest_scan() directly) must never
+    wait on the detector. Proven here at the seam this module owns: submit() itself
+    stays fast across many consecutive calls even while a single forward takes far
+    longer than a realistic 780 s question budget could ever wait for one keyframe."""
+    pipeline = _BlockingPipeline()  # never returns until released — models a stuck detector
+    worker = AsyncPerceptionWorker(pipeline)
+    try:
+        worker.submit(_pano(0.0), _scan(0.0))
+        assert pipeline.started.wait(timeout=2.0)
+        for i in range(1, 51):  # 51 ticks at 5 Hz worth of submissions (~10s of tick time)
+            t0 = time.monotonic()
+            worker.submit(_pano(float(i)), _scan(float(i)))
+            elapsed = time.monotonic() - t0
+            assert elapsed < 0.05, (
+                "submit() #%d blocked for %.3fs behind a stuck detector" % (i, elapsed)
+            )
+        assert worker.dropped_count == 49  # frames 1..49 overwritten; 50 still pending
+    finally:
+        pipeline.release.set()
+        worker.stop(timeout=2.0)
+
+
+def test_fast_detector_keeps_up_with_no_material_drop():
+    """Issue #211 validation (d): with a FAST detector (faster than tick period),
+    end-to-end behaviour is unchanged from today — the worker keeps pace, dropped_count
+    stays at (or very near) zero, and processed_count tracks submitted_count closely."""
+    pipeline = _SlowFakePipeline(forward_s=0.02)  # far faster than the 0.2s tick period
+    worker = AsyncPerceptionWorker(pipeline)
+    try:
+        for i in range(20):
+            worker.submit(_pano(float(i)), _scan(float(i)))
+            time.sleep(TICK_PERIOD_S)
+        time.sleep(0.2)  # drain the last frame
+    finally:
+        worker.stop(timeout=2.0)
+    assert worker.submitted_count == 20
+    assert worker.processed_count >= 18  # keeps up; at most a frame or two in flight/queued
+    assert worker.dropped_count <= 1
+
+
+class _DelayedDetectorFn:
+    """Wraps a real ``FakeDetector`` with a configurable per-call ``time.sleep`` —
+    stands in for a slow GDINO forward while still exercising the REAL
+    ``PerceptionPipeline`` (tiling -> detect -> fuse -> associate -> index), unlike
+    ``_SlowFakePipeline`` above (which fakes the whole pipeline)."""
+
+    def __init__(self, detector: FakeDetector, delay_s: float) -> None:
+        self._detector = detector
+        self.delay_s = delay_s
+
+    def __call__(self, tiles):
+        time.sleep(self.delay_s)
+        return self._detector(tiles)
+
+
+def _pano_with_cluster(t: float) -> tuple[PanoFrame, LidarScan]:
+    rng = np.random.default_rng(0)
+    cloud = np.column_stack(
+        [
+            3.0 + rng.uniform(-0.2, 0.2, 40),
+            0.0 + rng.uniform(-0.2, 0.2, 40),
+            0.5 + rng.uniform(-0.2, 0.2, 40),
+        ]
+    ).astype(np.float32)
+    pano = PanoFrame(
+        t=t, image=np.zeros((T.PANO_HEIGHT, T.PANO_WIDTH, 3), dtype=np.uint8),
+        odom=OdomState(t=t, x=0.0, y=0.0, z=0.0, yaw=0.0),
+    )
+    return pano, LidarScan(t=t, points=cloud)
+
+
+def test_detections_still_integrate_once_a_backlogged_detector_catches_up():
+    """Issue #211 validation (b): a lagging detector must not lose its work forever —
+    once it finally catches up on a (dropped-down-to) latest frame, that frame's
+    detections land in the SAME live scene index the heads already read from."""
+    spec = T.tile_specs()[0]
+    det = Detection(
+        tile_id=0,
+        bbox_xyxy=(spec.cx - 60, spec.cy - 120, spec.cx + 60, spec.cy + 60),
+        label="sofa", score=0.9,
+    )
+    fake = FakeDetector([det])
+    delayed = _DelayedDetectorFn(fake, delay_s=0.3)
+    sc = BasicSceneIndex([])
+    pipeline = PerceptionPipeline(delayed, index=sc, keyframe_cfg=KeyframeConfig(every_k=1))
+    worker = AsyncPerceptionWorker(pipeline)
+    try:
+        # Flood the worker with frames far faster than it can process (simulates the
+        # tick thread submitting every 200ms against a 300ms+ forward) -- most get
+        # dropped (keep-latest), but the worker is never blocked doing this.
+        for i in range(10):
+            pano, scan = _pano_with_cluster(float(i))
+            worker.submit(pano, scan)
+            time.sleep(0.05)
+        # Let the worker actually finish the (few) frames it managed to start.
+        time.sleep(1.0)
+    finally:
+        worker.stop(timeout=2.0)
+    assert sc.all_instances(), "the detector's completed work never reached the index"
+    assert any(inst.label == "sofa" for inst in sc.all_instances())
+    assert worker.dropped_count > 0  # the backlog was real, not incidental
+    assert worker.processed_count >= 1
 
 
 def test_worker_restart_is_bounded():
