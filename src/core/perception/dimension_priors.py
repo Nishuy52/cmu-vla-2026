@@ -10,24 +10,11 @@ selected is correct.
 This module supplies the missing clamp: per-class minimum and typical extents, and
 :func:`clamp_extents` / :func:`clamp_record_marker`, which
   * clamp every axis up to at least the class minimum (so a paper-thin front-shell
-    box can never fall below a plausible object size),
+    box can never fall below a plausible object size), and
   * inflate the single least-observed axis toward the class-typical value, but ONLY
     when the instance signals under-observation (few observations AND a thin
-    least-axis relative to the prior), and
-  * (issue #201) cap every axis at :data:`CLAMP_EXTENT_CAP_FACTOR` x the class
-    typical value, so an over-fused/oversized box is also corrected, not just an
-    under-boxed one.
-A well-observed, near-typical, in-bound box is left exactly as measured, so a
-GT-perfect box passes through UNCHANGED.
-
-Issue #201: the original ``clamp_extents`` used ``np.maximum`` only -- it could
-grow a box but never shrink one. That one-sidedness matched the docstring's stated
-assumption (single-viewpoint boxes are always under-approximations), but the live
-#118 measurement found the opposite is the dominant live failure: 11 of 14 scored
-live boxes were LARGER than their GT box, median volume ~4x GT. A max-only clamp
-cannot correct that -- it can only make an already-too-large box larger still.
-The cap below is the two-sided fix; see :func:`clamp_extents` for the exact rule
-and its justification.
+    least-axis relative to the prior). A well-observed, near-typical box is left
+    exactly as measured, so a GT-perfect box passes through UNCHANGED.
 
 Extents are stored orientation-invariantly as the sorted (thin, mid, long) axis
 lengths, so a class prior applies regardless of how the instance's AABB happens to
@@ -133,34 +120,6 @@ _DATA_PRIORS: dict[str, tuple[tuple[float, float, float], tuple[float, float, fl
     "window": ((0.040, 0.642, 0.882), (0.060, 0.821, 1.653)),  # n=43, scenes=14
 }
 
-# DATA-DERIVED, added for issue #201 -- the five challenge-vocabulary classes the
-# #118 live measurement found with NO prior at all: bedside table, fossil
-# decoration, potted plant, paper cup, beer bottle. Root cause: _generate_data_priors
-# folds each GT row through core.parsing.vocab's SINGLE_NOUNS/PHRASES vocabulary, and
-# the multi-word phrase classes never entered that fold (an import-name bug --
-# `core.parsing.vocab.PHRASE_NOUNS` does not exist, the module exports `PHRASES`, so
-# the regenerator's phrase branch silently no-ops and every phrase class fell back to
-# its bridge/head-noun synonym, e.g. "potted plant" -> "plant", "beer bottle" ->
-# "bottle" -- see core.perception.vocab.VOCAB_BRIDGE). Fixing that fold and
-# regenerating the WHOLE table is a larger, separate change (it would also reflow
-# already-published entries like "nightstand"/"plant"/"bottle"/"cup"); out of scope
-# here. These five rows are instead computed directly and narrowly, by the same
-# recipe as _generate_data_priors (per-sorted-axis 10th-percentile / median of
-# object_bbox_{x,y,z}length, sorted (thin, mid, long)) but filtered to GT rows whose
-# raw_label is an EXACT literal match for the phrase (case-folded) -- computed
-# 2026-08-10 against data/vla3d/Unity/*/*_object_result.csv. "bedside table" and
-# "fossil decoration" have only n=2 (single scene) -- thin support, flagged here
-# rather than hidden; still real measured GT geometry, not a guess, and consistent
-# with other single/low-n rows already in this table (e.g. "counter" n=1, "guitar"
-# n=1, "figurine" n=3).
-_PHRASE_DATA_PRIORS: dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]] = {
-    "bedside table": ((0.651, 0.795, 0.872), (0.651, 0.795, 0.872)),  # n=2, scenes=1
-    "beer bottle": ((0.087, 0.088, 0.323), (0.088, 0.089, 0.324)),  # n=4, scenes=2
-    "fossil decoration": ((0.104, 0.285, 0.315), (0.113, 0.298, 0.337)),  # n=2, scenes=1
-    "paper cup": ((0.087, 0.088, 0.106), (0.088, 0.088, 0.106)),  # n=3, scenes=1
-    "potted plant": ((0.171, 0.199, 0.210), (0.642, 0.730, 1.008)),  # n=57, scenes=13
-}
-
 # HAND-CURATED fallback for challenge-vocabulary classes absent from the VLA-3D data
 # (all small decorative / figurine-scale items). Conservative order-of-magnitude
 # estimates; sorted (thin, mid, long) as (min, typical). No provenance beyond common
@@ -192,16 +151,13 @@ _PRIOR_CACHE: dict[str, ClassPrior] = {}
 def prior_for(label: str) -> ClassPrior | None:
     """Return the :class:`ClassPrior` for a label, or None if no prior exists.
 
-    The label is canonicalised through :func:`normalize_label`; ``_DATA_PRIORS`` wins
-    over ``_PHRASE_DATA_PRIORS`` wins over ``_HAND_PRIORS`` on the (currently empty)
-    intersections -- all three are keyed by the same normalised-label surface, so a
-    class present in more than one table would take the more-general/older one first
-    only because dict lookup order below is fixed; today no class appears twice.
+    The label is canonicalised through :func:`normalize_label`; data priors win over
+    hand priors on the (currently empty) intersection.
     """
     key = normalize_label(label)
     if key in _PRIOR_CACHE:
         return _PRIOR_CACHE[key]
-    row = _DATA_PRIORS.get(key) or _PHRASE_DATA_PRIORS.get(key) or _HAND_PRIORS.get(key)
+    row = _DATA_PRIORS.get(key) or _HAND_PRIORS.get(key)
     if row is None:
         return None
     cp = ClassPrior(row[0], row[1])
@@ -261,10 +217,9 @@ def floor_degenerate_aabb(
     has no prior. An axis already at/above the threshold is returned unchanged.
 
     Deliberately NOT :func:`clamp_extents`: that function clamps every axis to the
-    class-min (and, since issue #201, caps every axis at the class-typical cap)
-    unconditionally (the marker-rendering path) — a general resize of already-valid
-    boxes, which #123 measured as a net-negative change when applied more broadly.
-    This is narrower on purpose: a healthy box is a true no-op here.
+    class-min unconditionally (the marker-rendering path) — a general resize of
+    already-valid boxes, which #123 measured as a net-negative change when applied
+    more broadly. This is narrower on purpose: a healthy box is a true no-op here.
     """
     lo = np.asarray(aabb_min, dtype=float).copy()
     hi = np.asarray(aabb_max, dtype=float).copy()
@@ -358,38 +313,11 @@ def clamp_extents(
       2. clamp each ranked extent up to the class-min;
       3. if the instance is under-observed (:func:`_underobserved`), inflate the
          thinnest (least-observed) ranked axis up to the class-typical value;
-      4. (issue #201) cap each ranked extent DOWN at :data:`FUSE_EXTENT_CAP_FACTOR`
-         x the class-typical value;
-      5. distribute the per-rank deltas back onto the original axes.
+      4. distribute the per-rank deltas back onto the original axes.
 
     Returns ``extents`` unchanged (a copy) when no prior exists for the class. A box
-    already at/above class-min, at/below the step-4 cap, and (if under-observed)
-    already at/above class-typical on its thinnest axis is returned identical to the
-    input — the named GT-passthrough invariant.
-
-    Issue #201: step 4 is new. The original clamp only ever grew a box (``np.maximum``
-    against the class-min, step 2, plus the conditional inflate, step 3) -- its
-    docstring assumed the dominant live error was an UNDER-box. The #118 live
-    measurement found the opposite: 11 of 14 scored live boxes were LARGER than GT,
-    median volume ~4x GT (a ~1.59x per-axis error if isotropic, cube-root of 4). A
-    max-only clamp cannot correct that; it can only make it worse. Step 4 caps each
-    ranked axis at the SAME multiple, :data:`FUSE_EXTENT_CAP_FACTOR` (1.5x typical),
-    that :func:`cap_fused_extent` (issue #104) already uses to backstop a fuse's
-    RESULT -- reused rather than a new constant so the same InstanceRecord is judged
-    by one consistent size rule everywhere the two-sided cap applies, not two
-    slightly-different ones layered on top of each other. That factor is itself
-    justified against the underlying VLA-3D distribution: measured across every
-    data-backed class with n>=5 instances, the per-axis ratio of the class's 90th-
-    percentile extent to its median (typical) extent has a median of ~1.4-1.6 across
-    classes (and a median max/median ratio of ~1.7-1.9) -- so 1.5x typical sits close
-    to the P90 of genuine same-class size variation: loose enough that a real,
-    legitimately-larger-than-median instance of a class is rarely clipped, tight
-    enough to decisively correct a ~4x-volume (~1.59x-per-axis) oversize fuse, the
-    exact failure #118 measured. Applied AFTER the min-clamp/inflate (steps 2-3) so
-    the two directions cannot fight (the cap is always >= the min for every class in
-    this table, since typical >= min-10th-pct by construction); a class with no prior
-    is unaffected (falls through the ``prior is None`` guard above, matching
-    :func:`cap_fused_extent`'s fail-open convention).
+    already at/above class-min on every axis with enough observations is returned
+    identical to the input — the named GT-passthrough invariant.
     """
     ext = np.asarray(extents, dtype=float).copy()
     prior = prior_for(label)
@@ -403,11 +331,8 @@ def clamp_extents(
     if _underobserved(sorted_ext, prior, n_obs):
         # step 3: pull the thinnest (least-observed) axis toward typical.
         adjusted[0] = max(adjusted[0], prior.typ_ext[0])
-    # step 4: cap every ranked axis down at FUSE_EXTENT_CAP_FACTOR x typical -- the
-    # two-sided half of the clamp (issue #201).
-    adjusted = np.minimum(adjusted, FUSE_EXTENT_CAP_FACTOR * prior.typ_ext)
 
-    # step 5: map ranked deltas back onto original axes.
+    # step 4: map ranked deltas back onto original axes.
     out = ext.copy()
     for rank, axis in enumerate(order):
         out[axis] = adjusted[rank]
@@ -419,9 +344,8 @@ def clamp_record_marker(record: InstanceRecord) -> MarkerBox:
 
     The seam that other agents' marker path should call instead of
     ``record.to_marker()`` when a per-class dimension prior should apply. The box
-    centre (== nav goal) is preserved; only extents are clamped/inflated/capped
-    (issue #201: two-sided since the class prior is trustworthy), symmetrically
-    about the existing centre so the correct instance is never moved.
+    centre (== nav goal) is preserved; only extents are clamped/inflated, grown
+    symmetrically about the existing centre so the correct instance is never moved.
     """
     centre = (record.aabb_min + record.aabb_max) / 2.0
     ext = clamp_extents(record.extents, record.label, record.n_obs)
