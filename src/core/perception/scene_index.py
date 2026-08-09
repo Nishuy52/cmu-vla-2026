@@ -712,13 +712,15 @@ class BasicSceneIndex:
     def marker_for(self, record: InstanceRecord) -> MarkerBox:
         """Prior-clamped marker for a record — the H12 marker seam.
 
-        The trimmed AABB an instance carries is a single-viewpoint *under*-box; the
-        raw ``record.to_marker()`` would publish it verbatim and shed IoU against the
-        GT over-hull (red-team OR-F6). This routes the record through the per-class
-        dimension prior (:mod:`core.perception.dimension_priors`): clamp every axis to
-        the class-min, inflate the least-observed axis toward class-typical only when
-        the instance signals under-observation, centre preserved. A GT-perfect / well-
-        observed box is returned identical to ``record.to_marker()``.
+        The trimmed AABB an instance carries can be a single-viewpoint *under*-box
+        (red-team OR-F6) or, per issue #201's live measurement, an over-fused
+        *over*-box; the raw ``record.to_marker()`` would publish either verbatim and
+        shed IoU against the GT hull either way. This routes the record through the
+        per-class dimension prior (:mod:`core.perception.dimension_priors`): clamp
+        every axis up to the class-min, inflate the least-observed axis toward
+        class-typical only when the instance signals under-observation, AND (#201)
+        cap every axis down at the class-typical cap, centre preserved. A GT-perfect /
+        well-observed / in-bound box is returned identical to ``record.to_marker()``.
 
         Marker-path owners (``heads/object_ref.py``, ``fsm/floors.py``) should publish
         ``index.marker_for(rec)`` in place of ``rec.to_marker()`` — the seam lives here
