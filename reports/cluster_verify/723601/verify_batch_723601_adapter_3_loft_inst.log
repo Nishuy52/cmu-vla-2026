@@ -1,0 +1,68 @@
+[WARN] [1786333941.033873086] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1786333941.057538090] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1786333941.064151081] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786333954.275004932] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1786333954.276854908] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+[INFO] [1786333969.798831643] [vla_ai_module]: question latched: 'Go near the fireplace, pass by the stairs, then stop at the sphere decoration on the cabinet.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786333969.997751848] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1786333969.999021013] [vla_ai_module]: idle->parsing question received
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1786333976.737668450] [vla_ai_module]: parsing->orient parse attempted
+[WARN] [1786333976.746450912] [vla_ai_module]: camera frame feed quiet for 21.9s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[WARN] [1786333976.751676992] [vla_ai_module]: perception backlog: the detector has been mid-forward for 21.8s (dropped=0, submitted=1, processed=0); map ingestion and driving are unaffected (issue #211) but detections are stale.
+build_gdino_prompt: dropping 14/112 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/112 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786333984.283989286] [vla_ai_module]: published 22 waypoints since latch
+[WARN] [1786334007.105080469] [vla_ai_module]: camera frame feed quiet for 52.2s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334016.299995829] [vla_ai_module]: published 90 waypoints since latch
+[INFO] [1786334029.804623993] [vla_ai_module]: orient->explore_execute orientation window closed
+[WARN] [1786334038.461015944] [vla_ai_module]: camera frame feed quiet for 83.6s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334049.784626361] [vla_ai_module]: published 102 waypoints since latch
+[WARN] [1786334069.011896977] [vla_ai_module]: camera frame feed quiet for 114.1s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334082.988209647] [vla_ai_module]: published 114 waypoints since latch
+[WARN] [1786334099.262718787] [vla_ai_module]: camera frame feed quiet for 144.4s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334113.003515945] [vla_ai_module]: published 125 waypoints since latch
+[WARN] [1786334130.725091798] [vla_ai_module]: camera frame feed quiet for 175.8s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334144.411586179] [vla_ai_module]: published 136 waypoints since latch
+[WARN] [1786334161.630970725] [vla_ai_module]: camera frame feed quiet for 206.7s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334175.090049228] [vla_ai_module]: published 147 waypoints since latch
+[WARN] [1786334192.138548528] [vla_ai_module]: camera frame feed quiet for 237.2s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334205.490032670] [vla_ai_module]: published 158 waypoints since latch
+[WARN] [1786334225.048964905] [vla_ai_module]: camera frame feed quiet for 270.2s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334238.421321021] [vla_ai_module]: published 170 waypoints since latch
+[INFO] [1786334240.834048491] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1786334243.217397654] [vla_ai_module]: verify->answer verify complete
+[INFO] [1786334243.224545621] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[WARN] [1786334257.136824525] [vla_ai_module]: camera frame feed quiet for 302.2s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334270.678073390] [vla_ai_module]: published 183 waypoints since latch
+[WARN] [1786334290.257097884] [vla_ai_module]: camera frame feed quiet for 335.4s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334303.755961157] [vla_ai_module]: published 195 waypoints since latch
+[WARN] [1786334323.464547045] [vla_ai_module]: camera frame feed quiet for 368.6s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334336.908458407] [vla_ai_module]: published 207 waypoints since latch
+[WARN] [1786334356.759529848] [vla_ai_module]: camera frame feed quiet for 401.9s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334370.204965769] [vla_ai_module]: published 219 waypoints since latch
+[WARN] [1786334389.581653308] [vla_ai_module]: camera frame feed quiet for 434.7s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334403.538859327] [vla_ai_module]: published 231 waypoints since latch
+[WARN] [1786334419.631448585] [vla_ai_module]: camera frame feed quiet for 464.7s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334436.753941400] [vla_ai_module]: published 243 waypoints since latch
+[WARN] [1786334450.389940659] [vla_ai_module]: camera frame feed quiet for 495.5s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334466.872803839] [vla_ai_module]: published 254 waypoints since latch
+[WARN] [1786334482.056464858] [vla_ai_module]: camera frame feed quiet for 527.2s (no /camera/image received) — worker alive, source below Python has stalled (issue #174)
+[INFO] [1786334498.409468827] [vla_ai_module]: published 265 waypoints since latch
+[INFO] [1786334510.016846313] [vla_ai_module]: drive_out->done watchdog_floor>=540s
+[INFO] [1786334510.018191151] [vla_ai_module]: controller DONE; last 10 events: 6.7:parsing:parsed:tier=api | 6.7:parsing:transition:parsing->orient parse attempted | 60.0:orient:transition:orient->explore_execute orientation window closed | 271.0:explore_execute:transition:explore_execute->verify explore budget spent | 273.4:verify:transition:verify->answer verify complete | 273.4:answer:answer_from_floor:verify yielded nothing | 273.4:answer:published:WaypointCmd via answer_state | 273.4:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 540.2:drive_out:publish_suppressed:already published; watchdog_floor>=540s | 540.2:drive_out:transition:drive_out->done watchdog_floor>=540s

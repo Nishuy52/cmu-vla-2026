@@ -1,0 +1,4 @@
+{"completion_tokens": null, "error": "Error code: 503 - {'error': 'policy enforcement unavailable'}", "latency_ms": 5749.2, "model": "qwen3.6:35b", "ok": false, "prompt_tokens": null, "tier": "api", "total_tokens": null, "ts": "2026-08-10T05:09:21.095974+00:00"}
+{"completion_tokens": null, "error": "Error code: 503 - {'error': 'policy enforcement unavailable'}", "latency_ms": 1477.9, "model": "qwen3.6:35b", "ok": false, "prompt_tokens": null, "tier": "api", "total_tokens": null, "ts": "2026-08-10T05:09:22.579088+00:00"}
+{"completion_tokens": null, "error": "Request timed out.", "latency_ms": 61359.9, "model": "qwen2.5vl:3b", "ok": false, "prompt_tokens": null, "tier": "local", "total_tokens": null, "ts": "2026-08-10T05:10:23.943975+00:00"}
+{"completion_tokens": null, "error": "Request timed out.", "latency_ms": 61478.1, "model": "qwen2.5vl:3b", "ok": false, "prompt_tokens": null, "tier": "local", "total_tokens": null, "ts": "2026-08-10T05:10:44.064777+00:00"}

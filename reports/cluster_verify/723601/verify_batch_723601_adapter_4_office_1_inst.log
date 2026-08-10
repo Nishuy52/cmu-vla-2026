@@ -1,0 +1,60 @@
+[WARN] [1786334859.035454660] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1786334859.055905392] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1786334859.062595724] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786334872.191012246] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1786334872.193850844] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+[INFO] [1786334887.829232672] [vla_ai_module]: question latched: 'Go to the potted plant furthest from the projector screen then stop at the water cooler near the window.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786334888.194934640] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1786334888.197936458] [vla_ai_module]: idle->parsing question received
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1786334894.437789956] [vla_ai_module]: parsing->orient parse attempted
+[WARN] [1786334894.460790103] [vla_ai_module]: perception backlog: the detector has been mid-forward for 21.6s (dropped=0, submitted=1, processed=0); map ingestion and driving are unaffected (issue #211) but detections are stale.
+build_gdino_prompt: dropping 14/112 vocab noun(s) to stay within the 256-token budget: ['table', 'tea table', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'whiteboard']
+build_gdino_prompt: dropping 14/112 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'table', 'tea table', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'whiteboard']
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1786334902.265807512] [vla_ai_module]: published 28 waypoints since latch
+[INFO] [1786334932.337857571] [vla_ai_module]: published 88 waypoints since latch
+[INFO] [1786334947.978619907] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1786334948.828437421] [vla_ai_module]: explore_execute->verify early-answer gate open
+[INFO] [1786334949.191123745] [vla_ai_module]: verify->answer verify complete
+[INFO] [1786334949.275713911] [vla_ai_module]: answer->drive_out answered; continue driving the route (IF-F4)
+[INFO] [1786334962.502179428] [vla_ai_module]: published 149 waypoints since latch
+[INFO] [1786334992.665200465] [vla_ai_module]: published 222 waypoints since latch
+[INFO] [1786335022.915890972] [vla_ai_module]: published 298 waypoints since latch
+[INFO] [1786335053.263565975] [vla_ai_module]: published 372 waypoints since latch
+[INFO] [1786335083.306155476] [vla_ai_module]: published 446 waypoints since latch
+[INFO] [1786335113.990706623] [vla_ai_module]: published 520 waypoints since latch
+[INFO] [1786335144.161442409] [vla_ai_module]: published 593 waypoints since latch
+[INFO] [1786335174.400293315] [vla_ai_module]: published 665 waypoints since latch
+[INFO] [1786335204.531333761] [vla_ai_module]: published 739 waypoints since latch
+[INFO] [1786335234.701855478] [vla_ai_module]: published 812 waypoints since latch
+[INFO] [1786335265.007650075] [vla_ai_module]: published 884 waypoints since latch
+[INFO] [1786335295.260966094] [vla_ai_module]: published 956 waypoints since latch
+[INFO] [1786335325.570684029] [vla_ai_module]: published 1028 waypoints since latch
+[INFO] [1786335355.813606280] [vla_ai_module]: published 1098 waypoints since latch
+[INFO] [1786335386.162797178] [vla_ai_module]: published 1171 waypoints since latch
+[INFO] [1786335416.315603117] [vla_ai_module]: published 1244 waypoints since latch
+[INFO] [1786335428.292654316] [vla_ai_module]: drive_out->done watchdog_floor>=540s
+[INFO] [1786335428.293707679] [vla_ai_module]: controller DONE; last 10 events: 0.4:idle:transition:idle->parsing question received | 6.6:parsing:parsed:tier=api | 6.6:parsing:transition:parsing->orient parse attempted | 60.1:orient:transition:orient->explore_execute orientation window closed | 61.0:explore_execute:transition:explore_execute->verify early-answer gate open | 61.4:verify:transition:verify->answer verify complete | 61.4:answer:published:WaypointCmd via answer_state | 61.4:answer:transition:answer->drive_out answered; continue driving the route (IF-F4) | 540.5:drive_out:publish_suppressed:already published; watchdog_floor>=540s | 540.5:drive_out:transition:drive_out->done watchdog_floor>=540s
