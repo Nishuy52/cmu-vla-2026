@@ -2733,3 +2733,41 @@ f1a36a4). Full gate: `pytest tests/perception/ tests/test_calibration.py`
 close it against the wrong-mechanism finding and open a new issue for
 the #94 thin-class extent-veto miscalibration, or redirect #216 itself
 at that mechanism.
+
+---
+
+## 12 Aug 2026 — #217 fix: per-class per-axis slack on the #94 extent veto
+
+Implemented the fix for the real flicker mechanism #216's replay found
+(issue #217): `core.perception.tracker._extent_veto_bound` widens the
+#94 absolute-ceiling check per axis (never tightens it) by the larger
+of an absolute allowance (`extent_veto_abs_slack_m`) and the class's
+own recorded per-axis `cap_factor` (issue #201 metadata, unused until
+now) where a rank carries real evidence above the recorded floor
+(`dimension_priors.CAP_FACTOR_FLOOR`).
+
+0.15 m (the brief's starting value) only admitted 2 of the #216
+replay's 9 flagged rejections. Applying the coordinator's literal
+per-axis cap_factor formula also flipped the #161 two-TVs decisive-
+band guard and a #176 distinct-chairs guard. Binary search against
+the full perception suite found 0.45 m is the largest slack that
+admits 8 of 9 without flipping any existing #94/#153/#161/#176 guard;
+the 9th (a "door" pair implying a 0.71 m door thickness) needs 0.547 m,
+which does flip a guard past ~0.48 m, and its own reconstructed box is
+itself suspect — left rejected. Two PRE_FIX historical-pin tests
+(test_tracker_issue_153.py, test_tracker_issue_176.py) were updated to
+explicitly disable both #217 widenings, matching their own convention
+of reconstructing exact pre-fix ceilings.
+
+New: `tests/perception/test_tracker_issue_217.py` — bound-formula unit
+tests, a sofa-vs-cup order-of-magnitude guard (both arithmetic and an
+end-to-end `associate()` check), the full #216 before/after table as
+assertions, and a downstream consolidation proof (two flickering
+window pairs replayed with a few extra re-observations: old ceiling
+still shows the mint-then-prune wave signature, new ceiling
+consolidates to one id with n_obs climbing past 1 and surviving H15(a)
+decay entirely). Full gate: `pytest tests/perception/
+tests/test_calibration.py` → 623 passed, 2 deselected. Committed on
+fix/216-track-flicker (706c74e), not pushed. Next: re-brief on whether
+to merge/push, and whether the 1 residual door-class rejection or the
+door-pair-is-a-false-positive finding needs its own issue.
