@@ -48,6 +48,7 @@ from core.interfaces import (
 )
 from core.geometry.toolbox import DEFAULT_THRESHOLDS, Thresholds
 from core.llm.timeout import DEFAULT_CALL_TIMEOUT_S, wrap_call_timeout
+from core.parsing.ladder import DEFAULT_TIME_CAP_S as _LADDER_TIME_CAP_S
 from core.parsing.vocab import PHRASES, SINGLE_NOUNS
 from core.perception.detector import DetectorFn, refresh_prompt
 from core.perception.scene_index import dump_instance_index
@@ -75,6 +76,21 @@ from core.heads.object_ref import LlmVerifyFn, ObjectRefHead, VerifierFn
 #: exact nouns this one question mentioned (read-only reuse: core/parsing/vocab.py is
 #: out of scope for this fix; nothing here mutates it).
 _STANDING_VOCAB_NOUNS: tuple[str, ...] = tuple(sorted(set(SINGLE_NOUNS) | set(PHRASES.values())))
+
+#: #213 — outer wall-clock backstop for the WHOLE parse ladder call, distinct from
+#: ``call_timeout_s`` (the per-*single*-provider-call bound used for the other seams
+#: below). ``parse`` (core.parsing.ladder.parse) is not one provider call: it internally
+#: retries a timed-out/failed tier once and can fall through several configured tiers
+#: before landing on the deterministic regex floor, bounded by its own
+#: ``DEFAULT_TIME_CAP_S``. Wrapping it with the single-call ``call_timeout_s`` (20 s)
+#: guillotined the ladder before it could even finish retrying its FIRST tier, let alone
+#: reach the regex floor — the live evidence (job 723601, slots 5/7/8/9): a 20 s API
+#: timeout inside the ladder raced the identical 20 s outer wrapper, the outer wrapper won,
+#: and the whole call was abandoned with no plan bound (no ``parsed`` event, floor answer,
+#: score 0). The ladder's own ``_expired()`` check only gates BETWEEN attempts (not
+#: preemptively mid-call), so its worst-case overrun past its own time cap is up to one
+#: more full retried tier — hence + 2 * DEFAULT_CALL_TIMEOUT_S, plus a small margin.
+DEFAULT_PARSE_TIMEOUT_S: float = _LADDER_TIME_CAP_S + 2.0 * DEFAULT_CALL_TIMEOUT_S + 5.0
 
 
 def _numerical_explore_progress(
@@ -231,6 +247,7 @@ def build_callables(
     detector: DetectorFn | None = None,
     thresholds: Thresholds = DEFAULT_THRESHOLDS,
     call_timeout_s: float = DEFAULT_CALL_TIMEOUT_S,
+    parse_timeout_s: float = DEFAULT_PARSE_TIMEOUT_S,
 ) -> dict:
     """Build the {parse, explore, verify, probe} callables for a QuestionController.
 
@@ -257,22 +274,28 @@ def build_callables(
     T-90 forced-assembly gate is reached; feeds the IF head's single-observation
     route-prefix commit gate), ``tiles_fn`` (CP2 tile supplier), ``fuse_hint`` (CP2 fusion).
 
-    Off-tick-thread safety (SYS-F8): every seam that can trigger a *provider call* (``parse``,
-    ``llm_verify``, ``anchor_confirm``/``anchor_confirmer``, ``verifier``, ``miss_recoverer``,
-    ``frontier_selector``) is wrapped with a hard per-call timeout (``call_timeout_s``, default
-    20 s) HERE, at the injection boundary — so a hung network can never stall the 5 Hz tick
-    past that bound regardless of whether the individual call site remembered to wrap its
-    ChatFn. The fast local support hooks (``budget_frac``, ``forced_assembly``, ``remaining_s``,
-    ``tiles_fn``, ``fuse_hint``, ``affinity_fn``) are NOT wrapped: they are synchronous
-    map/clock reads, not provider calls, and wrapping them would only add thread-handoff
-    overhead. Unconfigured (``None``) seams pass through untouched so the offline path
-    stays deterministic.
+    Off-tick-thread safety (SYS-F8): every seam that can trigger a *provider call*
+    (``llm_verify``, ``anchor_confirm``/``anchor_confirmer``, ``verifier``,
+    ``miss_recoverer``, ``frontier_selector``) is wrapped with a hard per-call timeout
+    (``call_timeout_s``, default 20 s) HERE, at the injection boundary — so a hung network
+    can never stall the 5 Hz tick past that bound regardless of whether the individual call
+    site remembered to wrap its ChatFn. ``parse`` gets its OWN, larger outer bound
+    (``parse_timeout_s``, see #213 and ``DEFAULT_PARSE_TIMEOUT_S`` above): it is a
+    multi-tier ladder call, not a single provider call, and wrapping it with
+    ``call_timeout_s`` used to abandon it before its own internal retry/fallback machinery
+    could run. The fast local support hooks (``budget_frac``, ``forced_assembly``,
+    ``remaining_s``, ``tiles_fn``, ``fuse_hint``, ``affinity_fn``) are NOT wrapped: they are
+    synchronous map/clock reads, not provider calls, and wrapping them would only add
+    thread-handoff overhead. Unconfigured (``None``) seams pass through untouched so the
+    offline path stays deterministic.
     """
     # Wrap only the provider-triggering seams (None -> None; see wrap_call_timeout).
     def _tw(fn):
         return wrap_call_timeout(fn, call_timeout_s)
 
-    parse = _tw(parse)
+    # #213: parse is the multi-tier ladder, not a single call — it gets its own, larger
+    # outer bound instead of sharing call_timeout_s with the single-call seams below.
+    parse = wrap_call_timeout(parse, parse_timeout_s)
     llm_verify = _tw(llm_verify)
     anchor_confirm = _tw(anchor_confirm)
     anchor_confirmer = _tw(anchor_confirmer)
