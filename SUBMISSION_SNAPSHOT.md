@@ -3,6 +3,12 @@
 This file records the state of the branch used to build the competition
 submission image, and the exact commands to build, smoke-test, and submit it.
 
+**WARNING (11 Aug 2026): do not build the pinned commit below.** It
+predates the #211 fix and carries a measured exploration regression.
+Build from `main` at `5786dd4` or later. The current procedure is
+`docs/submission_docker_guide.md`; the packaging audit below remains
+valid for file coverage, dependencies, weights, and env vars.
+
 ## Pinned tree
 
 - Commit: `253cf3c785b66f2ecc063acfd17c6e3eec8a266a`
