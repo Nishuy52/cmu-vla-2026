@@ -693,7 +693,11 @@ class InstructionHead:
             # relaxed terminal looks clean.
             clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
         )
-        res = TB.resolve(spec, scene, self.thresholds)
+        # #215: route-leg superlative anchors revert to the pre-#186 index-order
+        # pick -- the 11 Aug #202 replay isolated the evidence-based pick as the
+        # hunk that re-anchors the next leg's route-continuity reference and
+        # flips a downstream corridor gate.
+        res = TB.resolve(spec, scene, self.thresholds, superlative_anchor_evidence=False)
         ranked = [c for c in res.candidates_ranked if c.instance_id not in self._demoted]
         provisional = any(r.step in _PROVISIONAL_STEPS for r in res.audit)
         # Issue #98: diagnostic-only audit trail, never read by any scoring/geometry

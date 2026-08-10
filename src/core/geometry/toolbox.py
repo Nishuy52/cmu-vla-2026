@@ -1286,6 +1286,8 @@ def resolve(
     target: TargetSpec,
     index: SceneIndex,
     th: Thresholds = DEFAULT_THRESHOLDS,
+    *,
+    superlative_anchor_evidence: bool = True,
 ) -> ResolveResult:
     """Resolve a TargetSpec to ranked candidates with a per-clause pass matrix.
 
@@ -1294,6 +1296,17 @@ def resolve(
     filtering. Empty result triggers the exact architecture fallback ladder:
     relax attributes -> drop weakest relation -> category-only. Every relaxation
     is recorded in the audit trail.
+
+    ``superlative_anchor_evidence`` (#215): selects the pick rule for a target's
+    OWN superlative anchor (e.g. the "window" in "the table farthest from the
+    window") when its noun resolves to more than one instance. Default ``True``
+    keeps #186's evidence-grounded pick (:func:`_select_sub_anchor`) — this is
+    the path :mod:`core.heads.object_ref` measured a real win on (the bedside-
+    table case) and it stays on for every caller unless told otherwise.
+    Instruction-following route resolution passes ``False``: the 11 Aug #202
+    chained replay proved that on a route, this same pick also re-anchors the
+    NEXT leg's route-continuity reference and can flip a downstream corridor
+    gate, a cascade #186's own single-leg tests never exercised. See #215.
     """
     audit: list[Relaxation] = []
     base = _match_noun(index, target.noun)
@@ -1347,14 +1360,23 @@ def resolve(
     if sup is not None and survivors:
         anchor_recs = _resolve_anchor(sup.anchors[0], index, th, audit)
         if anchor_recs:
-            # #186: `anchor_recs[0]` was a raw index-order pick (annotation/detection
-            # order carries no physical meaning -- the same #151 lesson
-            # `_select_sub_anchor` already encodes for disambiguator sub-anchors).
-            # A superlative's own anchor pool has the identical shape (several
-            # same-noun candidates, at most one of them the real object the
-            # question means), so it is resolved the same evidence-grounded way:
-            # nearest to the pool actually being ranked > score > n_obs > id.
-            anchor = _select_sub_anchor(anchor_recs, survivors)
+            # #186 picked the target's own superlative anchor with
+            # `_select_sub_anchor` (nearest to the pool actually being ranked >
+            # score > n_obs > id) instead of the raw index-order `anchor_recs[0]`.
+            # #215 (11 Aug #202 chained replay, route-continuity chaining across
+            # legs): on an instruction-following route this pick also re-anchors
+            # the NEXT leg's route-continuity reference, and the replay isolated
+            # it as the single hunk that flips a downstream corridor-gate pick --
+            # a cascade #186's own single-leg tests never exercised. Instruction
+            # route resolution reverts to the pre-#186 `anchor_recs[0]` pick;
+            # object_reference measured a real win from the evidence-based pick
+            # (the bedside-table case) and keeps it, via
+            # ``superlative_anchor_evidence`` staying ``True`` on that path.
+            anchor = (
+                _select_sub_anchor(anchor_recs, survivors)
+                if superlative_anchor_evidence
+                else anchor_recs[0]
+            )
             ranked = (
                 closest_to(survivors, anchor, th)
                 if sup.pred is Pred.CLOSEST_TO
