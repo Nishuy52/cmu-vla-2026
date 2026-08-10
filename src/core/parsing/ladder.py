@@ -42,7 +42,17 @@ from core.plan_schema import Plan
 DEFAULT_TIER_NAMES: tuple[str, ...] = ("api", "api2", "local")
 
 #: Default total wall-clock budget for the whole ladder, seconds.
-DEFAULT_TIME_CAP_S: float = 45.0
+#:
+#: #213: raised from 45.0 -> 85.0 (+40 s). The ladder's own repair round already retries a
+#: failed/timed-out tier once (same fn, a repair prompt) before falling through — but the
+#: old 45 s cap gave a single tier only ~5 s of slack past its own worst-case retry cost
+#: (2 x core.llm.timeout.DEFAULT_CALL_TIMEOUT_S = 40 s), so a live-cluster job (723601,
+#: slots 5/7/8/9) that hit one slow-but-real 20 s API timeout had the retry itself skipped
+#: by _expired() and fell straight to the floor with no plan bound — a whole 6-point
+#: instruction_following question lost to one transient. 85 s comfortably covers one full
+#: retried tier (40 s) plus a second configured tier's own retried attempt (40 s) before
+#: the deterministic regex floor. 40 s of the 780 s live per-question budget is ~5%.
+DEFAULT_TIME_CAP_S: float = 85.0
 
 
 def parse(
@@ -53,31 +63,73 @@ def parse(
     *,
     time_cap_s: float = DEFAULT_TIME_CAP_S,
     tier_names: Sequence[str] = DEFAULT_TIER_NAMES,
+    log_fn: Any = None,
 ) -> Plan:
-    """Parse a question (str or interfaces.Question) into a valid Plan; never raises."""
+    """Parse a question (str or interfaces.Question) into a valid Plan; never raises.
+
+    log_fn (#213): optional ``(level, message) -> None`` callback (same shape as
+    core.fsm.controller's injected LogFn), called once per tier attempt/failure and once
+    if every configured tier failed and the regex floor was used, so a live timeout/error
+    that used to leave only a bare traceback (#213's original evidence: one grep-found
+    line, no visibility into which tier fell through or why) is now loud in the adapter
+    log. Best-effort: any exception from log_fn is swallowed, exactly like the ledger seam
+    below — observability must never break parsing.
+    """
     qtext: str = getattr(question, "text", question)
     t0 = clock.now()
 
     def _expired() -> bool:
         return clock.now() - t0 >= time_cap_s
 
+    def _log(level: str, msg: str) -> None:
+        if log_fn is None:
+            return
+        try:
+            log_fn(level, msg)
+        except Exception:  # noqa: BLE001 — logging must never break parsing
+            pass
+
     # Defensive gate: if the ledger reserves the floor window (allow("parse") is False),
     # skip every API tier and go straight to the deterministic regex floor.
+    attempted_any_tier = False
     if _ledger_allows(ledger):
         for i, fn in enumerate(chat_fns):
             name = tier_names[i] if i < len(tier_names) else f"llm{i}"
             if _expired():
+                _log(
+                    "warn",
+                    f"parse ladder: time cap ({time_cap_s:g}s) reached before tier "
+                    f"{name!r} could be attempted; skipping remaining tiers",
+                )
                 break
+            attempted_any_tier = True
             tier_t0 = clock.now()
             plan, errors, raw = _attempt(fn, build_parse_messages(qtext))
             if plan is not None and not errors:
                 _record_tier(ledger, clock, tier_t0, name)
+                _log("info", f"parse ladder: tier {name!r} succeeded on first attempt")
                 return _stamp(normalize_llm_plan(plan, qtext), qtext, name)
+            _log(
+                "warn",
+                f"parse ladder: tier {name!r} first attempt failed ({errors!r}); retrying",
+            )
             if not _expired():
                 plan, errors, _ = _attempt(fn, build_repair_messages(qtext, raw, errors))
                 if plan is not None and not errors:
                     _record_tier(ledger, clock, tier_t0, name)
+                    _log("info", f"parse ladder: tier {name!r} succeeded on retry")
                     return _stamp(normalize_llm_plan(plan, qtext), qtext, name)
+                _log(
+                    "warn",
+                    f"parse ladder: tier {name!r} retry also failed ({errors!r}); "
+                    "falling through to the next tier",
+                )
+            else:
+                _log(
+                    "warn",
+                    f"parse ladder: tier {name!r} exhausted; time cap reached before "
+                    "the retry could run",
+                )
             # tier exhausted (invalid + failed/skipped repair): log the attempt and fall on
             _record_tier(ledger, clock, tier_t0, name)
 
@@ -85,6 +137,12 @@ def parse(
     plan = parse_regex(qtext)
     plan.parse_tier = "regex"
     _record_tier(ledger, clock, regex_t0, "regex")
+    if attempted_any_tier:
+        _log(
+            "warn",
+            "parse ladder: every configured API tier failed or timed out; "
+            "question answered via the deterministic regex floor",
+        )
     return plan
 
 

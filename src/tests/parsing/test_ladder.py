@@ -265,6 +265,106 @@ def test_question_object_accepted():
     assert plan.question_raw == QUESTION
 
 
+# ------------------------------------------------------------------ #213 timeout retry/floor
+
+
+class TimeoutOnceThenSucceedChat:
+    """Simulates a live API tier: TimeoutError on the first call, then a valid reply."""
+
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+        self.calls: list[list[dict[str, str]]] = []
+
+    def __call__(self, messages: list[dict[str, str]]) -> str:
+        self.calls.append(messages)
+        if len(self.calls) == 1:
+            raise TimeoutError("chat call exceeded 20s timeout")
+        return self.reply
+
+
+class AlwaysTimeoutChat:
+    """Simulates a wedged provider: every call raises TimeoutError."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[dict[str, str]]] = []
+
+    def __call__(self, messages: list[dict[str, str]]) -> str:
+        self.calls.append(messages)
+        raise TimeoutError("chat call exceeded 20s timeout")
+
+
+def test_timeout_once_then_succeeds_via_retry():
+    """(a) A tier that times out once and then succeeds must produce a plan through the
+    ladder's own retry (repair-round) mechanism -- NOT fall through to the next tier or
+    the regex floor -- and the tier it succeeded on must be recorded."""
+    fn = TimeoutOnceThenSucceedChat(VALID_PLAN_JSON)
+    ledger = LedgerStub()
+    plan = parse(QUESTION, [fn], FakeClock(), ledger)
+    assert plan is not None
+    assert plan.parse_tier == "api"
+    assert plan.validate() == []
+    assert len(fn.calls) == 2  # first attempt (timed out) + retry (succeeded)
+    tiers = [tier for (_cp, _dur, tier) in ledger.events]
+    assert tiers == ["api"]  # the api tier is what's recorded as the winner
+
+
+def test_timeout_always_falls_through_to_regex_floor():
+    """(b) A tier that times out on every attempt must still yield a non-None, valid plan
+    via the deterministic regex floor -- the FSM must always receive a plan, never None."""
+    fn = AlwaysTimeoutChat()
+    ledger = LedgerStub()
+    plan = parse(QUESTION, [fn], FakeClock(), ledger)
+    assert plan is not None
+    assert plan.parse_tier == "regex"
+    assert plan.validate() == []
+    assert len(fn.calls) == 2  # first attempt + one retry, both timed out
+    tiers = [tier for (_cp, _dur, tier) in ledger.events]
+    assert tiers == ["api", "regex"]  # the exhausted api tier AND the regex floor recorded
+
+
+def test_fast_path_unchanged_by_213():
+    """(c) A tier that succeeds on the first call is untouched: one call, tier "api", no
+    retry machinery invoked."""
+    fn = StubChat([VALID_PLAN_JSON])
+    plan = parse(QUESTION, [fn], FakeClock())
+    assert plan.parse_tier == "api"
+    assert plan.validate() == []
+    assert len(fn.calls) == 1
+
+
+def test_log_fn_called_on_retry_and_success():
+    """#213 item 3: each tier attempt/failure is logged loudly via the injected log_fn."""
+    events: list[tuple[str, str]] = []
+
+    def log_fn(level: str, msg: str) -> None:
+        events.append((level, msg))
+
+    fn = TimeoutOnceThenSucceedChat(VALID_PLAN_JSON)
+    parse(QUESTION, [fn], FakeClock(), log_fn=log_fn)
+    assert any(lvl == "warn" and "retrying" in msg for lvl, msg in events)
+    assert any(lvl == "info" and "succeeded on retry" in msg for lvl, msg in events)
+
+
+def test_log_fn_called_on_regex_fallback():
+    events: list[tuple[str, str]] = []
+
+    def log_fn(level: str, msg: str) -> None:
+        events.append((level, msg))
+
+    fn = AlwaysTimeoutChat()
+    parse(QUESTION, [fn], FakeClock(), log_fn=log_fn)
+    assert any("regex floor" in msg for _lvl, msg in events)
+
+
+def test_log_fn_exception_never_breaks_parse():
+    def broken_log(level: str, msg: str) -> None:
+        raise RuntimeError("logging is down")
+
+    fn = AlwaysTimeoutChat()
+    plan = parse(QUESTION, [fn], FakeClock(), log_fn=broken_log)
+    assert plan is not None and plan.parse_tier == "regex"
+
+
 def test_result_always_roundtrips():
     plan = parse(QUESTION, [StubChat([VALID_PLAN_JSON])], FakeClock())
     again = Plan.from_json(plan.to_json())
