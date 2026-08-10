@@ -221,7 +221,7 @@ def test_field_counts_per_subsystem():
                        # depth_plausible_frac, outlier_k, outlier_min_mad,
                        # outlier_min_n_for_trim (issue #199; depth_plausible_frac and
                        # outlier_min_n_for_trim added in the two post-review fixes)
-        "tracker": 8,  # +3 size-aware association knobs (issues #94/#89), +1 extent-veto min-sep floor (#153), +1 extent-growth tolerance (#176), +1 cumulative extent-growth cap (#180)
+        "tracker": 10,  # +3 size-aware association knobs (issues #94/#89), +1 extent-veto min-sep floor (#153), +1 extent-growth tolerance (#176), +1 cumulative extent-growth cap (#180), +2 per-axis extent-veto widening knobs (#217)
         "keyframe": 3,
         "nav": 21,
         "budget": 15,

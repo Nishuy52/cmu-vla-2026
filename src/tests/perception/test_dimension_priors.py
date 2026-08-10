@@ -289,10 +289,15 @@ def test_gt_record_marker_equals_raw_marker():
 # core.perception.dimension_priors, "Issue #201" section, for the full history.
 #
 # The per-class, per-axis cap-factor RESEARCH (:data:`_CAP_FACTOR`,
-# :attr:`ClassPrior.cap_factor`) is kept as recorded diagnosis metadata for any
-# FUTURE fusion-side use -- it still loads correctly (verified below) -- but
-# :func:`clamp_extents` must never read it, which the source-inspection test below
-# pins directly against the function body, not just its observed behaviour.
+# :attr:`ClassPrior.cap_factor`) is kept as recorded diagnosis metadata -- it
+# still loads correctly (verified below) -- but :func:`clamp_extents` (the
+# marker/answer-time clamp) must never read it, which the source-inspection
+# test below pins directly against the function body, not just its observed
+# behaviour. Issue #217 gave this metadata its first sanctioned consumer
+# outside this module: core.perception.tracker._extent_veto_bound, which
+# widens the tracker's own association-time #94 extent veto from it (see
+# tests/perception/test_tracker_issue_217.py) -- a DIFFERENT seam from the one
+# this file's tests guard, so the guard below is unchanged, not weakened.
 
 def test_cap_factor_metadata_still_loads_as_a_per_axis_triple():
     # Recorded diagnosis data, NOT a live parameter (see section note above): every

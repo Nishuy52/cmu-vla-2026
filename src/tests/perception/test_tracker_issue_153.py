@@ -120,10 +120,20 @@ def test_repeat_sighting_PRE_FIX_mints_duplicate():
     in ``_match_plausible``) that would otherwise still save this exact scenario --
     the union barely grows past either TV's own extent -- so ``extent_growth_tol``
     is ALSO disabled here (0.0) to keep pinning the original, fully-unconditional
-    pre-#153 veto this test documents."""
+    pre-#153 veto this test documents. Issue #217 later widened the absolute
+    ceiling itself (TV's own recorded depth cap_factor is 5.117, real measured
+    variance well above the floor -- see dimension_priors._CAP_FACTOR), so
+    both #217 widenings are ALSO disabled here (``extent_veto_abs_slack_m=0.0``,
+    ``extent_veto_use_cap_factor=False``) to keep reconstructing the exact
+    pre-#153/#176/#217 ceiling (``extent_veto_factor`` alone) this test names."""
     idx = BasicSceneIndex()
     od = _odom()
-    pre_fix_cfg = TrackerConfig(extent_veto_min_sep=0.0, extent_growth_tol=0.0)
+    pre_fix_cfg = TrackerConfig(
+        extent_veto_min_sep=0.0,
+        extent_growth_tol=0.0,
+        extent_veto_abs_slack_m=0.0,
+        extent_veto_use_cap_factor=False,
+    )
 
     det1 = _tv_det()
     f1 = _fuse(det1, _tv_cloud(2.60, seed=1), od)

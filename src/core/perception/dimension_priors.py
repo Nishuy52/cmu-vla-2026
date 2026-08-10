@@ -52,11 +52,14 @@ marker/answer path may read a per-class upper cap.
 
 The per-class, per-axis cap-factor RESEARCH (:data:`_CAP_FACTOR`,
 :attr:`ClassPrior.cap_factor`) is kept as recorded diagnosis data -- real,
-measured, useful evidence for any FUTURE fusion-side use (e.g. informing #199's
-own size gates) -- but it is metadata only. No function in this module, and no
-caller anywhere in ``src/core/``, may multiply by it;
-``tests/perception/test_dimension_priors.py`` pins this with a source-inspection
-test on :func:`clamp_extents`.
+measured evidence, exactly the "any FUTURE fusion-side use" this section once
+called out. Issue #217 is that first sanctioned use:
+:func:`core.perception.tracker._extent_veto_bound` reads it to widen the
+tracker's own #94 association-time extent veto per class, per axis (never the
+marker/answer-time clamp below). That boundary stays exactly as strict as
+before: no function in THIS module, and no marker/answer-path caller anywhere,
+may read it -- ``tests/perception/test_dimension_priors.py`` still pins that
+with a source-inspection test scoped to :func:`clamp_extents` specifically.
 
 Extents are stored orientation-invariantly as the sorted (thin, mid, long) axis
 lengths, so a class prior applies regardless of how the instance's AABB happens to
@@ -239,6 +242,17 @@ _HAND_PRIORS: dict[str, tuple[tuple[float, float, float], tuple[float, float, fl
 #     it stops meaning anything.
 # A class with n<2 GT rows falls back to the floor (1.5, 1.5, 1.5) -- not enough
 # data to estimate a percentile from a single point.
+#
+# Issue #217: a rank sitting AT this floor carries no real per-axis evidence --
+# it is the "not enough/not unusual variance" default, not a measurement -- so
+# the tracker's first sanctioned consumer of this table
+# (:func:`core.perception.tracker._extent_veto_bound`) only widens a class's
+# extent-veto ceiling past the default ``extent_veto_factor`` on ranks whose
+# recorded ``cap_factor`` sits STRICTLY ABOVE :data:`CAP_FACTOR_FLOOR` -- a rank
+# still at the floor is read as "no signal", not "use 1.5", and keeps the
+# tracker's own default ratio.
+CAP_FACTOR_FLOOR: float = 1.5
+CAP_FACTOR_CEIL: float = 6.0
 _CAP_FACTOR: dict[str, tuple[float, float, float]] = {
     "ball": (2.597, 2.572, 2.554), "bed": (1.500, 1.500, 1.500),
     "bedside table": (1.500, 1.500, 1.500), "beer bottle": (1.500, 1.500, 1.500),
@@ -282,12 +296,14 @@ _CAP_FACTOR: dict[str, tuple[float, float, float]] = {
 
 class ClassPrior:
     """Sorted-axis (thin, mid, long) minimum and typical extents for a class, plus
-    (issue #201) a RECORDED, UNUSED per-class per-axis upper-cap-factor triple.
+    (issue #201) a RECORDED per-class per-axis upper-cap-factor triple.
 
-    ``cap_factor`` is diagnosis metadata, not a live parameter: a marker-time
-    upper cap built from it was measured against real GT data and rejected (see
-    the module docstring). No function in this module reads it to adjust a box;
-    it is carried on the object purely so the measurement is not thrown away.
+    ``cap_factor`` is diagnosis metadata, not a marker-time parameter: a
+    marker-time upper cap built from it was measured against real GT data and
+    rejected (see the module docstring) -- no function in THIS module reads it
+    to adjust a box. Issue #217 is its first sanctioned consumer:
+    :func:`core.perception.tracker._extent_veto_bound` reads it to widen the
+    tracker's own association-time extent veto, per class, per axis.
     """
 
     __slots__ = ("min_ext", "typ_ext", "cap_factor")

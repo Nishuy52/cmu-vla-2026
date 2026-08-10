@@ -186,8 +186,17 @@ def test_PRE_FIX_every_archived_ghost_fails_to_rejoin_its_own_track():
     the tracker as it stood on tree 1fe2167), replaying the decisive
     re-observation step for EVERY one of the 25 archived duplicate-chain AABBs
     mints a fresh ghost instance every time -- reproducing the live sweep's
-    46-chair-for-6-GT overcount mechanism."""
-    pre_fix_cfg = TrackerConfig(extent_growth_tol=-1.0)
+    46-chair-for-6-GT overcount mechanism. Issue #217 later widened the
+    absolute ceiling itself (chair's own recorded long-axis cap_factor is
+    2.794, real measured variance above the floor -- see
+    dimension_priors._CAP_FACTOR), so both #217 widenings are ALSO disabled
+    here (``extent_veto_abs_slack_m=0.0``, ``extent_veto_use_cap_factor=False``)
+    to keep reconstructing the exact pre-#176/#217 ceiling this test names."""
+    pre_fix_cfg = TrackerConfig(
+        extent_growth_tol=-1.0,
+        extent_veto_abs_slack_m=0.0,
+        extent_veto_use_cap_factor=False,
+    )
     results = [
         _replay_reobservation(aabb, pre_fix_cfg, offset_sign=1 if i % 2 == 0 else -1, seed=i)
         for i, aabb in enumerate(_DUPLICATE_CHAIN_AABBS)
