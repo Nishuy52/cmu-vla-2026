@@ -2687,3 +2687,20 @@ the old range, and the vehicle moving again. A null result there
 means GIL contention is not the (whole) mechanism either, and the
 next step is a live profiling pass (sample the tick thread's actual
 Hz during a boot-primed run) rather than another blind mitigation.
+
+---
+
+## 11 Aug 2026 — Wave shipped; paused for a Windows boot
+
+#213 parse resilience is merged and pushed (21c2d15): the ladder's
+retry and regex floor were unreachable because an outer 20 s wrapper
+raced the API tier's own 20 s timeout; the outer bound is now 130 s
+and the floor is proven FSM-valid. The full gate still ran at push
+time; the user accepted the risk. The old-to-mid deficit is
+attributed (#202): 35 percent resolver (#215 — revert the #186
+superlative pick; the 8 Aug replay missed the route-continuity
+cascade), 53 percent perception track flicker (#216 — the #180 check
+order is the suspect), 12 percent variance. The OR sweep 724287 and
+724288 runs on the cluster through the pause. Next session: check
+the #213 gate result, execute #215, prove #216, harvest the OR sweep
+per the memory runbook.
