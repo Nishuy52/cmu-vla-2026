@@ -2771,3 +2771,42 @@ tests/test_calibration.py` → 623 passed, 2 deselected. Committed on
 fix/216-track-flicker (706c74e), not pushed. Next: re-brief on whether
 to merge/push, and whether the 1 residual door-class rejection or the
 door-pair-is-a-false-positive finding needs its own issue.
+
+---
+
+## 12 Aug 2026 — #217 dropped: both extent-veto widenings refuted on real GT
+
+A fresh verifier refuted the per-class per-axis widening (706c74e)
+with a real-GT probe: every same-class pair from
+`data/vla3d/Unity/*/*_object_result.csv`, both configs, through the
+real `_match_plausible`. 19 of 139 genuinely distinct in-gate real
+pairs flipped from correctly rejected to wrongly admitted, 10 of
+them pillow pairs, plus window, painting, picture, mirror, door,
+chair. The cap_factor widening also loosened large axes with no
+link to the flicker mechanism (sofa's long-axis ceiling +36.8%).
+
+Redesigned to widen only the thin sorted rank, at a physical floor
+(sensor ranging noise on a flat surface), mid and long ranks left at
+the exact pre-#217 ratio. Re-ran the real-GT probe against this
+design: the largest floor with zero flips is 0.10 m (bound: a real
+pair of vertically-stacked office_2 windows unions to 0.104 m thin
+extent). At that floor, design 2 admits none of the #216 replay's 9
+flagged rejections — 7 of the 9 fail on a mid or long rank the
+design never touches; the other 2 need 0.50 m, which reopens flips
+on pillow and door pairs by that point.
+
+No per-class-agnostic AABB-extent threshold separates two views of
+one thin object from two distinct same-class objects at typical
+spacing on this data. Per the coordinator's own decision rule,
+recommended and executed: drop #217. `core/perception/tracker.py`
+and `core/perception/dimension_priors.py` reverted to the pre-#217
+state (byte-identical to 0e9e8e3). `test_tracker_issue_217.py`
+replaced with the refutation evidence record (the real-GT probe as
+a permanent regression check, the design-1 mid/long-widening pin,
+the design-2 floor-versus-flip trade-off) so a future session does
+not retry the same family of fixes blind. Full gate: `pytest
+tests/perception/ tests/test_calibration.py` → 621 passed, 2
+deselected. Committed on fix/216-track-flicker (68f8a91), not
+pushed. The #216 flicker signature stands as a known, unfixed
+defect; a geometry-aware redesign not reliant on AABB extent alone
+is the recommended follow-up, tracked as its own issue.
