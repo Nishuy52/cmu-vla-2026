@@ -191,48 +191,6 @@ class TrackerConfig:
     # still completes; tight enough that no chain of "individually plausible"
     # merges can walk a box arbitrarily far.
     extent_cumulative_growth_cap: float = 1.5
-    # Issue #217: #94's absolute ceiling (extent_veto_factor x typ_ext) is a SINGLE
-    # ratio for every class on every axis. The #216 event-level replay (13 archived
-    # flicker-wave pairs) found this is the actual, dominant rejector behind the
-    # #216 track-flicker signature -- 9 of 10 rejections, not the #180 growth-cap
-    # ordering #216 first suspected -- concentrated on THIN classes: a window's
-    # typical depth is 0.06 m, so 1.3x typical (~0.08 m) is an impossible bound
-    # against any real lidar-fused thickness. Two per-axis widenings, taken as the
-    # MAX (never tighter than the un-widened #94 ceiling on any axis):
-    #  1. an absolute allowance -- an axis may grow to typ_ext[axis] + this many
-    #     metres even where the ratio bound would clip a class whose typical
-    #     extent is itself tiny (a thin axis's own ratio bound is always small in
-    #     absolute terms, however large the ratio). NOT the 0.15 m first proposed:
-    #     that admitted only 2 of the #216 replay's 9 flagged rejections (the
-    #     rest needed 0.36-0.55 m more headroom than their own cap_factor-widened
-    #     ratio bound gave them). 0.45 m is the largest value measured, by binary
-    #     search against the FULL perception test suite, that still admits 8 of
-    #     those 9 WITHOUT flipping any existing #94/#153/#161/#176 guard (the
-    #     tightest of which, issue #161's two-TVs-at-0.65m decisive-band split,
-    #     starts failing between 0.46 and 0.48 m of slack) -- see
-    #     tests/perception/test_tracker_issue_217.py's before/after table. The
-    #     9th (the door pair) needs 0.547 m, which DOES flip a guard
-    #     (test_distinct_archived_chairs_stay_separate_post_fix, 7 real chairs ->
-    #     6) at any slack past ~0.48 m; it is left rejected rather than trade a
-    #     live false-negative guard for one flicker pair whose own reconstructed
-    #     box (0.71 m "thick" for a door) is itself suspect (see that test's own
-    #     note in test_tracker_issue_217.py).
-    #  2. the class's own recorded per-axis cap_factor (issue #201's P95/median
-    #     triple, until now unused metadata -- see dimension_priors.py) where a
-    #     data-backed prior exists, taken as max(cap_factor[axis],
-    #     extent_veto_factor) so a class's DATA-MEASURED real size variance never
-    #     tightens the ceiling, only ever loosens or matches it. Classes with no
-    #     data-backed distribution (cap_factor is None) fall back to widening 1
-    #     alone -- no measured variance to consult.
-    extent_veto_abs_slack_m: float = 0.45
-    # Issue #217: widening 2's own on/off switch, default on. Exists ONLY so a
-    # test that needs to reconstruct the exact pre-#217 ceiling (a "PRE_FIX"
-    # historical-numbers pin, matching the existing convention other issues'
-    # PRE_FIX tests already use for their own superseded checks) can disable it
-    # explicitly rather than depending on every class's recorded cap_factor
-    # happening to sit at the floor. No non-test caller has a reason to set this
-    # False.
-    extent_veto_use_cap_factor: bool = True
     # H15(a) track decay: an instance still at n_obs==1 that has not been re-observed
     # within this many keyframes of first sighting is a one-frame ghost and is pruned.
     # Confirmed tracks (n_obs>=2) are NEVER decayed. 0 disables decay.
@@ -367,21 +325,6 @@ def _match_plausible(
     full stop. This is the one check in this function that a match cannot
     talk its way around by landing close (#153) or growing little (#176) --
     those only ever describe ONE step, never the running total.
-
-    Issue #217: the LAST resort below (the absolute-ceiling ratio,
-    ``cfg.extent_veto_factor x typ_ext``) used ONE flat ratio for every class,
-    every axis. The #216 event-level replay found this is what actually starves
-    real re-detections: on a thin class (window typ. depth 0.06 m), 1.3x typical
-    is an impossible ~0.08 m bound against any real lidar-fused thickness, so a
-    genuinely-close re-detection is vetoed here 9 times out of 10 rejections --
-    not by the #180 growth cap #216 first suspected. The bound
-    (:func:`_extent_veto_bound`) widens per axis (never tightens) by the larger
-    of an absolute allowance and the class's own recorded per-axis size-variance
-    (:attr:`~core.perception.dimension_priors.ClassPrior.cap_factor`, issue
-    #201's P95/median triple -- until now unused metadata). A genuinely
-    wrong-size match (issue #161's guard: two TVs at typical spacing, a sofa
-    box matched to a cup track) is unaffected: those fail by ratios/absolute
-    margins the widened bound does not reach either.
     """
     new_min = fused.points.min(axis=0)
     new_max = fused.points.max(axis=0)
@@ -409,46 +352,8 @@ def _match_plausible(
     if prior is None:
         return True
     ext = np.sort(combined_ext)
-    return bool(np.all(ext <= _extent_veto_bound(prior, cfg)))
-
-
-def _extent_veto_bound(prior, cfg: TrackerConfig) -> np.ndarray:
-    """Issue #217: the per-axis (thin, mid, long) ceiling :func:`_match_plausible`'s
-    last resort compares a combined box against -- widened past the old flat
-    ``cfg.extent_veto_factor x typ_ext`` on every axis (never tightened), by the
-    larger of two per-axis widenings:
-
-      1. an absolute allowance (``cfg.extent_veto_abs_slack_m``): a ratio bound
-         computed off a tiny typ_ext (a thin axis) is tiny in absolute terms
-         however generous the ratio, so every class gets at least this many
-         metres of headroom past its typical extent on every axis.
-      2. the class's own recorded per-axis cap_factor (issue #201's P95/median
-         triple) where a data-backed prior exists AND that rank carries real
-         evidence -- i.e. sits strictly above
-         :data:`~core.perception.dimension_priors.CAP_FACTOR_FLOOR`. A rank AT
-         the floor is #201's own "not enough data / not unusually variable"
-         default, not a measurement, so it does not widen anything: the #94
-         default (``cfg.extent_veto_factor``) applies unchanged on that rank.
-         This is what keeps issue #161's decisive-band guard (two televisions,
-         whose long/mid ranks sit exactly at the recorded floor) rejecting
-         genuinely distinct objects exactly as before -- only a class's ranks
-         with REAL measured variance (window's thin/mid, chair's long, book,
-         bookcase, ...) get widened. ``prior.cap_factor`` is ``None`` for every
-         hand-curated class (no GT distribution to measure one from) -- those
-         fall back to widening 1 alone.
-    """
-    from core.perception.dimension_priors import CAP_FACTOR_FLOOR
-
-    typ = prior.typ_ext  # already sorted (thin, mid, long)
-    factor = np.full(3, cfg.extent_veto_factor)
-    if cfg.extent_veto_use_cap_factor and prior.cap_factor is not None:
-        has_signal = prior.cap_factor > CAP_FACTOR_FLOOR
-        factor = np.where(
-            has_signal, np.maximum(prior.cap_factor, cfg.extent_veto_factor), factor
-        )
-    ratio_bound = factor * typ
-    abs_bound = typ + cfg.extent_veto_abs_slack_m
-    return np.maximum(ratio_bound, abs_bound)
+    typ = np.sort(prior.typ_ext)
+    return bool(np.all(ext <= cfg.extent_veto_factor * typ))
 
 
 def associate(
