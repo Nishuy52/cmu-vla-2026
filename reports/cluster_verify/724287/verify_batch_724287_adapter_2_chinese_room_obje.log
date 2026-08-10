@@ -1,0 +1,44 @@
+[WARN] [1786349609.206375302] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1786349609.228324313] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1786349609.233462184] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786349624.473397438] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1786349624.475699709] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+[INFO] [1786349638.156222880] [vla_ai_module]: question latched: 'Find the bowl on the table closest to the folding screen.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786349638.354866931] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1786349638.358473393] [vla_ai_module]: idle->parsing question received
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1786349645.072736565] [vla_ai_module]: parsing->orient parse attempted
+build_gdino_prompt: dropping 14/113 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/113 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[WARN] [1786349647.079194445] [vla_ai_module]: perception backlog: the detector has been mid-forward for 21.8s (dropped=0, submitted=2, processed=0); map ingestion and driving are unaffected (issue #211) but detections are stale.
+[INFO] [1786349654.533531721] [vla_ai_module]: published 38 waypoints since latch
+[INFO] [1786349687.836534437] [vla_ai_module]: published 64 waypoints since latch
+[INFO] [1786349698.719437228] [vla_ai_module]: orient->explore_execute orientation window closed
+[WARN] [1786349712.557020220] [vla_ai_module]: perception backlog: the detector has been mid-forward for 20.4s (dropped=50, submitted=58, processed=6); map ingestion and driving are unaffected (issue #211) but detections are stale.
+[INFO] [1786349719.805705149] [vla_ai_module]: published 92 waypoints since latch
+[INFO] [1786349749.922954948] [vla_ai_module]: published 128 waypoints since latch
+[WARN] [1786349761.592096390] [vla_ai_module]: perception backlog: the detector has been mid-forward for 20.1s (dropped=96, submitted=107, processed=9); map ingestion and driving are unaffected (issue #211) but detections are stale.
+[INFO] [1786349780.762081445] [vla_ai_module]: published 161 waypoints since latch
+[INFO] [1786349811.451901660] [vla_ai_module]: published 206 waypoints since latch
+[INFO] [1786349841.688837183] [vla_ai_module]: published 250 waypoints since latch
+[INFO] [1786349872.146586725] [vla_ai_module]: published 293 waypoints since latch
+[INFO] [1786349878.350037664] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1786349879.921209939] [vla_ai_module]: verify->answer verify complete
+[INFO] [1786349880.030623868] [vla_ai_module]: published marker answer: label='bowl' centroid=(-2.12, -1.28, 0.58)
+[INFO] [1786349880.031996982] [vla_ai_module]: answer->done answered
+[INFO] [1786349880.033597186] [vla_ai_module]: controller DONE; last 9 events: 0.2:idle:question_latched:object_reference: 'Find the bowl on the table closest to the folding screen.' | 0.2:idle:transition:idle->parsing question received | 6.9:parsing:parsed:tier=api | 6.9:parsing:transition:parsing->orient parse attempted | 60.3:orient:transition:orient->explore_execute orientation window closed | 240.1:explore_execute:transition:explore_execute->verify explore budget spent | 241.8:verify:transition:verify->answer verify complete | 241.9:answer:published:MarkerBox via answer_state | 241.9:answer:transition:answer->done answered

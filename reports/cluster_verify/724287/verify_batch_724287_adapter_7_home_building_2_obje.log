@@ -1,0 +1,76 @@
+[WARN] [1786351625.318959580] [vla_ai_module]: VLA_CAMERA_COMPRESSED=1: dev-only compressed camera feed (/camera/image/compressed -> in-process decode). Not the submission path.
+[INFO] [1786351625.346619326] [vla_ai_module]: LLM ladder configured: 2 provider tier(s): api, local (regex floor always last).
+[INFO] [1786351625.355143749] [vla_ai_module]: VLA_DETECTOR=grounding_dino: constructing the GroundingDINO detector seam (torch import is lazy; real inference lands in Phase 2).
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786351640.973761178] [vla_ai_module]: perception dispatch: threaded (AsyncPerceptionWorker) — set VLA_PERCEPTION_SYNC=1 to force synchronous (debug only).
+[INFO] [1786351640.976068725] [vla_ai_module]: vla_ai_module up: subscribed 6 topics, ticking QuestionController at 5.0 Hz
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/TensorShape.cpp:4215.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+[INFO] [1786351653.704961208] [vla_ai_module]: question latched: 'Find the speaker on the TV cabinet closest to the potted plant on the TV cabinet.'
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/116 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'trash can', 'tray', 'tv', 'tv cabinet', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786351653.974255613] [vla_ai_module]: QuestionController constructed; driving (llm=True, perception=True)
+[INFO] [1786351653.975350240] [vla_ai_module]: idle->parsing question received
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/transformers/modeling_utils.py:1621: FutureWarning: The `device` argument is deprecated and will be removed in v5 of Transformers.
+  warnings.warn(
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1446: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/torch/utils/checkpoint.py:238: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+/home/c/cyuhsin/venv-gpu/lib/python3.12/site-packages/groundingdino/models/GroundingDINO/transformer.py:862: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[INFO] [1786351662.070632946] [vla_ai_module]: parsing->orient parse attempted
+[WARN] [1786351662.072463656] [vla_ai_module]: perception backlog: the detector has been mid-forward for 20.4s (dropped=0, submitted=1, processed=0); map ingestion and driving are unaffected (issue #211) but detections are stale.
+build_gdino_prompt: dropping 14/113 vocab noun(s) to stay within the 256-token budget: ['tea table', 'trash can', 'tray', 'tv', 'tv remote', 'vase', 'wall', 'wall decal', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+build_gdino_prompt: dropping 14/113 vocab noun(s) to stay within the 256-token budget: ['wall decal', 'tea table', 'trash can', 'tray', 'tv', 'tv remote', 'vase', 'wall', 'wall lamp', 'wardrobe', 'wardrobe door', 'water cooler', 'whiteboard', 'window']
+[INFO] [1786351671.032383668] [vla_ai_module]: published 33 waypoints since latch
+[INFO] [1786351701.285292463] [vla_ai_module]: published 104 waypoints since latch
+[INFO] [1786351714.077306828] [vla_ai_module]: orient->explore_execute orientation window closed
+[INFO] [1786351734.096755166] [vla_ai_module]: published 125 waypoints since latch
+[WARN] [1786351749.163549016] [vla_ai_module]: perception backlog: the detector has been mid-forward for 23.4s (dropped=88, submitted=99, processed=9); map ingestion and driving are unaffected (issue #211) but detections are stale.
+[INFO] [1786351770.869971519] [vla_ai_module]: published 133 waypoints since latch
+[INFO] [1786351805.005691299] [vla_ai_module]: published 138 waypoints since latch
+[WARN] [1786351829.151565790] [vla_ai_module]: perception backlog: the detector has been mid-forward for 28.2s (dropped=97, submitted=111, processed=12); map ingestion and driving are unaffected (issue #211) but detections are stale.
+[INFO] [1786351835.853568875] [vla_ai_module]: published 142 waypoints since latch
+[INFO] [1786351870.870673324] [vla_ai_module]: published 145 waypoints since latch
+[INFO] [1786351895.531900295] [vla_ai_module]: explore_execute->verify explore budget spent
+[INFO] [1786351904.836050864] [vla_ai_module]: published 148 waypoints since latch
+[INFO] [1786351909.759583329] [vla_ai_module]: verify->answer verify complete
+[INFO] [1786351909.858098102] [vla_ai_module]: published marker answer: label='speaker' centroid=(-3.00, 0.22, 1.41)
+[INFO] [1786351909.859953442] [vla_ai_module]: answer->done answered
+[INFO] [1786351909.861889823] [vla_ai_module]: controller DONE; last 9 events: 0.3:idle:question_latched:object_reference: 'Find the speaker on the TV cabinet closest to the potted plant on the TV cabinet.' | 0.3:idle:transition:idle->parsing question received | 8.4:parsing:parsed:tier=api | 8.4:parsing:transition:parsing->orient parse attempted | 60.4:orient:transition:orient->explore_execute orientation window closed | 241.8:explore_execute:transition:explore_execute->verify explore budget spent | 256.1:verify:transition:verify->answer verify complete | 256.2:answer:published:MarkerBox via answer_state | 256.2:answer:transition:answer->done answered
+[WARN] [1786351915.578849789] [vla_ai_module]: perception backlog: the detector has been mid-forward for 20.1s (dropped=114, submitted=131, processed=15); map ingestion and driving are unaffected (issue #211) but detections are stale.
+Traceback (most recent call last):
+  File "/home/c/cyuhsin/vla/src/ros_adapter/adapter_node.py", line 1304, in main
+    rclpy.spin(node)
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 839, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 823, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 793, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 701, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/c/cyuhsin/vla/src/ros_adapter/adapter_node.py", line 1309, in main
+    rclpy.shutdown()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 134, in shutdown
+    _shutdown(context=context)
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/utilities.py", line 82, in shutdown
+    context.shutdown()
+  File "/home/c/cyuhsin/.udocker/containers/64af1b4a-7bad-3be3-984b-bdccca76ee40/ROOT/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/context.py", line 129, in shutdown
+    self.__context.shutdown()
+rclpy._rclpy_pybind11.RCLError: failed to shutdown: rcl_shutdown already called on the given context, at ./src/rcl/init.c:333
+final text_encoder_type: bert-base-uncased
