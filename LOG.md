@@ -2704,3 +2704,109 @@ order is the suspect), 12 percent variance. The OR sweep 724287 and
 724288 runs on the cluster through the pause. Next session: check
 the #213 gate result, execute #215, prove #216, harvest the OR sweep
 per the memory runbook.
+
+---
+
+## 12 Aug 2026 — #216 proof refutes the #180-before-#153 hypothesis
+
+Built an event-logged replay of the archived flicker signature
+(livingroom_1 leg0, office_1 leg0, generations 719195/719515/
+723600/723601 — the same runs #202 cites) in
+`src/tests/perception/test_tracker_issue_216.py`. Real 3D box
+geometry recovered from `instance_index.jsonl` periodic dumps drives
+the actual, unmodified `_match_plausible`/`_assoc_gate` through 13
+strict flicker-wave pairs (same-label, second id born within
+`decay_k` keyframes of the first, both within the real per-class
+assoc gate).
+
+Result: the #180 growth-cap veto fires in exactly one of 13 pairs,
+and even there the #153 close-centroid floor it supposedly outranks
+sits well outside its own 0.2 m radius, so reordering the two checks
+changes zero outcomes. The dominant, order-independent rejector (9
+of 10 rejected pairs) is issue #94's absolute class-size ceiling
+(`extent_veto_factor`) — most consistently on thin classes (window,
+typical depth 0.06 m) whose real lidar-fused thickness runs many
+times that. Per the task's own stop condition, no fix is implemented
+for #216's stated mechanism; committed as proof-only (`Refs #216`,
+f1a36a4). Full gate: `pytest tests/perception/ tests/test_calibration.py`
+→ 613 passed, 2 deselected. Next step: #216 needs a re-brief — either
+close it against the wrong-mechanism finding and open a new issue for
+the #94 thin-class extent-veto miscalibration, or redirect #216 itself
+at that mechanism.
+
+---
+
+## 12 Aug 2026 — #217 fix: per-class per-axis slack on the #94 extent veto
+
+Implemented the fix for the real flicker mechanism #216's replay found
+(issue #217): `core.perception.tracker._extent_veto_bound` widens the
+#94 absolute-ceiling check per axis (never tightens it) by the larger
+of an absolute allowance (`extent_veto_abs_slack_m`) and the class's
+own recorded per-axis `cap_factor` (issue #201 metadata, unused until
+now) where a rank carries real evidence above the recorded floor
+(`dimension_priors.CAP_FACTOR_FLOOR`).
+
+0.15 m (the brief's starting value) only admitted 2 of the #216
+replay's 9 flagged rejections. Applying the coordinator's literal
+per-axis cap_factor formula also flipped the #161 two-TVs decisive-
+band guard and a #176 distinct-chairs guard. Binary search against
+the full perception suite found 0.45 m is the largest slack that
+admits 8 of 9 without flipping any existing #94/#153/#161/#176 guard;
+the 9th (a "door" pair implying a 0.71 m door thickness) needs 0.547 m,
+which does flip a guard past ~0.48 m, and its own reconstructed box is
+itself suspect — left rejected. Two PRE_FIX historical-pin tests
+(test_tracker_issue_153.py, test_tracker_issue_176.py) were updated to
+explicitly disable both #217 widenings, matching their own convention
+of reconstructing exact pre-fix ceilings.
+
+New: `tests/perception/test_tracker_issue_217.py` — bound-formula unit
+tests, a sofa-vs-cup order-of-magnitude guard (both arithmetic and an
+end-to-end `associate()` check), the full #216 before/after table as
+assertions, and a downstream consolidation proof (two flickering
+window pairs replayed with a few extra re-observations: old ceiling
+still shows the mint-then-prune wave signature, new ceiling
+consolidates to one id with n_obs climbing past 1 and surviving H15(a)
+decay entirely). Full gate: `pytest tests/perception/
+tests/test_calibration.py` → 623 passed, 2 deselected. Committed on
+fix/216-track-flicker (706c74e), not pushed. Next: re-brief on whether
+to merge/push, and whether the 1 residual door-class rejection or the
+door-pair-is-a-false-positive finding needs its own issue.
+
+---
+
+## 12 Aug 2026 — #217 dropped: both extent-veto widenings refuted on real GT
+
+A fresh verifier refuted the per-class per-axis widening (706c74e)
+with a real-GT probe: every same-class pair from
+`data/vla3d/Unity/*/*_object_result.csv`, both configs, through the
+real `_match_plausible`. 19 of 139 genuinely distinct in-gate real
+pairs flipped from correctly rejected to wrongly admitted, 10 of
+them pillow pairs, plus window, painting, picture, mirror, door,
+chair. The cap_factor widening also loosened large axes with no
+link to the flicker mechanism (sofa's long-axis ceiling +36.8%).
+
+Redesigned to widen only the thin sorted rank, at a physical floor
+(sensor ranging noise on a flat surface), mid and long ranks left at
+the exact pre-#217 ratio. Re-ran the real-GT probe against this
+design: the largest floor with zero flips is 0.10 m (bound: a real
+pair of vertically-stacked office_2 windows unions to 0.104 m thin
+extent). At that floor, design 2 admits none of the #216 replay's 9
+flagged rejections — 7 of the 9 fail on a mid or long rank the
+design never touches; the other 2 need 0.50 m, which reopens flips
+on pillow and door pairs by that point.
+
+No per-class-agnostic AABB-extent threshold separates two views of
+one thin object from two distinct same-class objects at typical
+spacing on this data. Per the coordinator's own decision rule,
+recommended and executed: drop #217. `core/perception/tracker.py`
+and `core/perception/dimension_priors.py` reverted to the pre-#217
+state (byte-identical to 0e9e8e3). `test_tracker_issue_217.py`
+replaced with the refutation evidence record (the real-GT probe as
+a permanent regression check, the design-1 mid/long-widening pin,
+the design-2 floor-versus-flip trade-off) so a future session does
+not retry the same family of fixes blind. Full gate: `pytest
+tests/perception/ tests/test_calibration.py` → 621 passed, 2
+deselected. Committed on fix/216-track-flicker (68f8a91), not
+pushed. The #216 flicker signature stands as a known, unfixed
+defect; a geometry-aware redesign not reliant on AABB extent alone
+is the recommended follow-up, tracked as its own issue.
