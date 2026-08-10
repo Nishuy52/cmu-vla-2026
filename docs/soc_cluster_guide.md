@@ -122,3 +122,33 @@ The dev detector/LLM offload workflow (servers + SSH tunnels) lives in `tools/cl
 - ❌ Running the Unity simulator (GPU rendering + GUI; not a cluster workload)
 - ❌ Docker/Apptainer/Podman for users — AppArmor blocks user namespaces (verified 25 Jul 2026); use bare venvs
 - ❌ The final eval environment — that's your future Ubuntu machine + Docker
+
+## SSH configuration (recorded 11 Aug 2026 from the working setup)
+
+Put this in `~/.ssh/config`. The key is `~/.ssh/id_ed25519`, registered
+with SoC. The ControlMaster lives on the JUMP host stanza, so one
+interactive `ssh xlogin true` per boot authenticates the shared
+connection; every later `ssh xlogin` reuses it for up to 4 hours of
+idle time.
+
+```
+Host socjump
+    HostName stujump.comp.nus.edu.sg
+    User cyuhsin
+    IdentityFile ~/.ssh/id_ed25519
+    ServerAliveInterval 60
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 4h
+
+Host xlogin
+    HostName xlogin.comp.nus.edu.sg
+    User cyuhsin
+    ProxyJump socjump
+    IdentityFile ~/.ssh/id_ed25519
+    ServerAliveInterval 60
+```
+
+When `ssh xlogin` falls back to password prompts, the ControlMaster
+died. Run `ssh xlogin true` once, interactively. Background sessions
+must never queue password prompts.
