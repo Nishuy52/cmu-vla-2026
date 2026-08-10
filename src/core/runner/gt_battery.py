@@ -1514,7 +1514,9 @@ def _if_rubric_geometry(
             noun=anchor.noun, raw=anchor.raw, attributes=list(anchor.attributes),
             clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
         )
-        res = resolve(spec, idx)
+        # #215: mirrors core.heads.instruction's route-leg anchor resolution, so
+        # this GT goal construction reverts to the pre-#186 pick the same way.
+        res = resolve(spec, idx, superlative_anchor_evidence=False)
         ranked = list(res.candidates_ranked)
         disamb = anchor.disambiguator
         has_superlative = disamb is not None and disamb.pred in _SUPERLATIVE_PREDS
@@ -1808,7 +1810,9 @@ def _terminal_goal_candidates(
         attributes=list(anchor.attributes),
         clauses=[anchor.disambiguator] if anchor.disambiguator is not None else [],
     )
-    res = resolve(spec, idx)
+    # #215: "exactly as the instruction head would" -- the instruction head
+    # resolves route-leg anchors with the pre-#186 pick, so this mirror does too.
+    res = resolve(spec, idx, superlative_anchor_evidence=False)
     return [
         np.asarray(c.centroid, dtype=float).reshape(-1)[:2]
         for c in res.candidates_ranked[: max(1, k)]
