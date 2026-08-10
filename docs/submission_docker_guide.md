@@ -64,6 +64,15 @@ docker compose -f compose_gpu.yml build ai_module
 
 Notes:
 
+- **Add `--network=host` if the build cannot resolve host names.** On
+  this machine the build container gets no working DNS: `apt-get
+  update` fails with "Temporary failure resolving archive.ubuntu.com"
+  after about 12 minutes, and the build stops with exit code 100. The
+  host network namespace has working DNS, so
+  `docker build --network=host -f docker/Dockerfile -t <tag> .`
+  proceeds normally. This needs no daemon change and no restart.
+  Measured 11 Aug 2026. An earlier session read the same symptom as a
+  slow network; it is a name-resolution failure.
 - In a shell session that predates the docker group membership, prefix
   with `sg docker -c '...'` (`docs/ubuntu_setup.md` section 2).
 - A cold-cache build downloads about 7 GB: the GroundingDINO
