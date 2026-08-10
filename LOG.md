@@ -2704,3 +2704,32 @@ order is the suspect), 12 percent variance. The OR sweep 724287 and
 724288 runs on the cluster through the pause. Next session: check
 the #213 gate result, execute #215, prove #216, harvest the OR sweep
 per the memory runbook.
+
+---
+
+## 12 Aug 2026 — #216 proof refutes the #180-before-#153 hypothesis
+
+Built an event-logged replay of the archived flicker signature
+(livingroom_1 leg0, office_1 leg0, generations 719195/719515/
+723600/723601 — the same runs #202 cites) in
+`src/tests/perception/test_tracker_issue_216.py`. Real 3D box
+geometry recovered from `instance_index.jsonl` periodic dumps drives
+the actual, unmodified `_match_plausible`/`_assoc_gate` through 13
+strict flicker-wave pairs (same-label, second id born within
+`decay_k` keyframes of the first, both within the real per-class
+assoc gate).
+
+Result: the #180 growth-cap veto fires in exactly one of 13 pairs,
+and even there the #153 close-centroid floor it supposedly outranks
+sits well outside its own 0.2 m radius, so reordering the two checks
+changes zero outcomes. The dominant, order-independent rejector (9
+of 10 rejected pairs) is issue #94's absolute class-size ceiling
+(`extent_veto_factor`) — most consistently on thin classes (window,
+typical depth 0.06 m) whose real lidar-fused thickness runs many
+times that. Per the task's own stop condition, no fix is implemented
+for #216's stated mechanism; committed as proof-only (`Refs #216`,
+f1a36a4). Full gate: `pytest tests/perception/ tests/test_calibration.py`
+→ 613 passed, 2 deselected. Next step: #216 needs a re-brief — either
+close it against the wrong-mechanism finding and open a new issue for
+the #94 thin-class extent-veto miscalibration, or redirect #216 itself
+at that mechanism.
