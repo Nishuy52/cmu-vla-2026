@@ -28,13 +28,18 @@ def _idx(*records):
 
 
 def test_parse_seam_times_out():
-    """A parse fn that sleeps past the timeout raises TimeoutError through the wrapper."""
+    """A parse fn that sleeps past ITS OWN outer bound raises TimeoutError through the
+    wrapper. #213: parse uses parse_timeout_s, NOT the single-call call_timeout_s (see
+    test_parse_seam_not_bounded_by_call_timeout_s below) — set both here so the bound
+    under test is unambiguous."""
 
     def slow_parse(_q):
         time.sleep(0.5)
         return None
 
-    cbs = build_callables(_idx(inst(1, "chair")), parse=slow_parse, call_timeout_s=0.05)
+    cbs = build_callables(
+        _idx(inst(1, "chair")), parse=slow_parse, call_timeout_s=0.05, parse_timeout_s=0.05
+    )
     with pytest.raises(TimeoutError):
         cbs["parse"](Question(text="x", t_received=0.0))
 
@@ -43,9 +48,31 @@ def test_parse_seam_returns_within_timeout():
     """A fast parse fn returns its value unchanged through the wrapper."""
     sentinel = object()
     cbs = build_callables(
-        _idx(inst(1, "chair")), parse=lambda q: sentinel, call_timeout_s=1.0
+        _idx(inst(1, "chair")), parse=lambda q: sentinel, parse_timeout_s=1.0
     )
     assert cbs["parse"](Question(text="x", t_received=0.0)) is sentinel
+
+
+def test_parse_seam_not_bounded_by_call_timeout_s():
+    """#213 regression: parse is a multi-tier ladder call, not a single provider call, so a
+    tiny call_timeout_s (sized for one API round-trip) must NOT guillotine a parse fn that
+    legitimately needs more wall time to retry/fall through its own tiers. Before the fix,
+    build_callables wrapped `parse` with the same call_timeout_s used for llm_verify/
+    anchor_confirm/etc, so a parse fn taking longer than one call's timeout (but well
+    within its own internal budget) was aborted before it could even finish retrying its
+    first tier — the exact swallow point behind the four dead live slots in job 723601."""
+
+    def slower_than_one_call_but_fine(_q):
+        time.sleep(0.2)
+        return "plan-ish"
+
+    cbs = build_callables(
+        _idx(inst(1, "chair")),
+        parse=slower_than_one_call_but_fine,
+        call_timeout_s=0.05,  # far too small for parse's 0.2s if parse shared this bound
+        parse_timeout_s=1.0,  # parse's OWN bound, generous enough
+    )
+    assert cbs["parse"](Question(text="x", t_received=0.0)) == "plan-ish"
 
 
 def test_llm_verify_seam_is_timeout_wrapped():

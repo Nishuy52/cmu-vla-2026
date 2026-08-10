@@ -979,7 +979,16 @@ class AdapterNode(Node):
             clock = ctrl.budget._clock if (ctrl is not None and ctrl.budget is not None) else self._robotio_clock
             ledger = ctrl.ledger if ctrl is not None else None
             return parse_ladder.parse(
-                question, self._chat_fns, clock, ledger, tier_names=self._chat_tier_names
+                question,
+                self._chat_fns,
+                clock,
+                ledger,
+                tier_names=self._chat_tier_names,
+                # #213: loud per-tier attempt/failure logging via the same controller
+                # logger the FSM's own transitions/swallows use — a live timeout/error used
+                # to leave only a bare traceback line, no visibility into which tier fell
+                # through or why.
+                log_fn=self._controller_logger,
             )
 
         # Checkpoint seams bound to the configured chat_fns; their ledger/clock resolve lazily
